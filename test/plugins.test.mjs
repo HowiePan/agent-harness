@@ -1,9 +1,17 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { access, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { createInMemoryRuntime, createLocalArtifactProvider, createProcessGateExecutor, createWorkspaceToolBroker, DEFAULT_PROCESS_OUTPUTS, GateCache, loadPlugin, loadPluginFromManifest, PluginHost } from '../src/index.mjs';
 import { command, feature, makeFixture, startRun } from './test-support.mjs';
+
+test('Gate cache metrics is read-only when the cache directory is absent', async t => {
+  const fixture = await makeFixture(); t.after(() => fixture.cleanup());
+  const directory = resolve(fixture.dataRoot, 'cache', 'gates');
+  await assert.rejects(() => access(directory), error => error.code === 'ENOENT');
+  assert.deepEqual(await new GateCache({ root: fixture.dataRoot }).metrics(), { entries: 0 });
+  await assert.rejects(() => access(directory), error => error.code === 'ENOENT');
+});
 
 test('external plugin modules load through the versioned Host contract', async t => {
   const fixture = await makeFixture(); t.after(() => fixture.cleanup());

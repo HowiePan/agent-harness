@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-harness.local/schemas/issue-triage-state.schema.json",
+  "title": "Agent Harness Issue Triage State",
+  "type": "object",
+  "required": ["protocolVersion", "issueId", "revision", "disposition", "commands", "updatedAt", "triageDigest"],
+  "properties": {
+    "protocolVersion": { "const": "1.0" },
+    "issueId": { "type": "string", "pattern": "^AH-[0-9]{8}-[A-F0-9]{12}$" },
+    "revision": { "type": "integer", "minimum": 1 },
+    "disposition": { "$ref": "issue-triage-input.schema.json" },
+    "commands": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "required": ["commandId", "payloadDigest", "revision", "committedAt", "authorityDecision"],
+        "properties": {
+          "commandId": { "type": "string", "minLength": 1 },
+          "payloadDigest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+          "revision": { "type": "integer", "minimum": 1 },
+          "committedAt": { "type": "string", "format": "date-time" },
+          "authorityDecision": {
+            "type": "object",
+            "required": ["actor", "decision"],
+            "properties": {
+              "actor": { "type": "string", "minLength": 1 },
+              "decision": { "const": "approved" }
+            },
+            "additionalProperties": true
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "updatedAt": { "type": "string", "format": "date-time" },
+    "triageDigest": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+  },
+  "additionalProperties": false
+}

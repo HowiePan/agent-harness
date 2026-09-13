@@ -1,0 +1,50 @@
+{
+  "protocolVersion": "1.0",
+  "projectAlias": "engine",
+  "project": {
+    "projectId": "cardworld-engine",
+    "profileId": "engine-delivery",
+    "extensionId": "cardworld-engine-profile"
+  },
+  "observedAt": "2026-09-13T14:08:04.2009899Z",
+  "summary": "Engine quality command was blocked because the bound Harness registries and Authority are not initialized",
+  "severity": "unclassified",
+  "environment": {
+    "platform": "Windows",
+    "workspaceMatch": "bound-root"
+  },
+  "expected": "The bound engine quality command should pass preflight and proceed according to its registered quality manifest",
+  "actual": "Preflight found the Harness installation available but the Extension Registry, Project Registry, and Authority absent, so no quality run could start",
+  "reproduction": {
+    "steps": [
+      "Submit h:engine quality V3.8.4 from the bound CardWorld workspace",
+      "Resolve the engine binding and run read-only Harness preflight",
+      "Observe that the three required Harness state stores are absent and lifecycle execution stops"
+    ]
+  },
+  "conversation": {
+    "source": "current-thread",
+    "excerpts": [
+      {
+        "role": "user",
+        "text": "h:engine quality V3.8.4"
+      },
+      {
+        "role": "assistant",
+        "text": "The engine quality command resolved to its bound project but stopped because the Harness registries and Authority were not initialized. No Run or Gate was created."
+      }
+    ]
+  },
+  "missingEvidence": [
+    "Approved Harness initialization or registration procedure",
+    "A successful quality-run manifest and Gate result"
+  ],
+  "sanitization": {
+    "confirmed": true,
+    "removed": [
+      "Local filesystem paths",
+      "Tool-specific command identifiers and internal digests"
+    ]
+  },
+  "intakeDigest": "6747bdda11db3dfa8610510fbde8442c8da0ce69541d88b11fb3e69d03a3a079"
+}

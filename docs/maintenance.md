@@ -14,6 +14,8 @@ Harness Core、官方 Profile、插件、工具适配 Skill 和 Legacy Compatibi
 
 Issue Intake 允许明确记录“Descriptor/Authority/Registry 当前不可用”，用于处理初始化和安装类故障；缺失字段进入 `missingEvidence`，不得伪造摘要。它只是进入上游维护队列的版本化输入，不是 Authority 或完整 Defect Bundle。写入后必须向用户返回准确路径和 Git 未提交状态；是否 commit/push 仍由用户决定，未推送记录不能声称已跨设备留档。
 
+同一故障的多次观察应携带结构化 `correlation`，由 Recorder 生成稳定 `incidentFingerprint`。Intake 本身保持不可变；分级、`duplicate-of`、`successor-of`、`fixed-by`、接受、解决和关闭都进入独立 `triage.json`，通过 expected revision、唯一 command ID 和批准 Decision 更新。`resolved`/`closed` 必须绑定 resolution Evidence。部署初始化失败使用 `deployment-incident`，只有具备完整 Harness/Extension/Descriptor/Authority 身份的实现缺陷才升级为 Defect Bundle。
+
 ## 修复流程
 
 1. 按 Kernel、Profile、Plugin、Integration Skill 或 Legacy Compatibility 确定唯一 owner。

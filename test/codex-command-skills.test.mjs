@@ -11,6 +11,11 @@ import { cardWorldCommandManifest, tabletopCollectionCommandManifest } from '../
 const pluginRoot = resolve('integrations', 'codex', 'agent-harness-codex');
 const skillsRoot = resolve(pluginRoot, 'skills');
 
+const createTemporaryFixture = async prefix => {
+  await mkdir(tmpdir(), { recursive: true });
+  return mkdtemp(resolve(tmpdir(), prefix));
+};
+
 test('Codex plugin exposes one explicit-project pseudo-command router', async () => {
   const actual = (await readdir(skillsRoot, { withFileTypes: true })).filter(entry => entry.isDirectory()).map(entry => entry.name).sort();
   assert.deepEqual(actual, ['agent-harness-command', 'agent-harness-extension-author', 'agent-harness-operator']);
@@ -50,7 +55,7 @@ test('pseudo-command parser requires a project alias and supports h:where and h:
 });
 
 test('binding configuration makes project selection and Harness location deterministic', async () => {
-  const fixture = await mkdtemp(resolve(tmpdir(), 'agent-harness-codex-'));
+  const fixture = await createTemporaryFixture('agent-harness-codex-');
   try {
     const installedPlugin = resolve(fixture, 'plugin');
     const controlRoot = resolve(fixture, 'harness');
@@ -108,7 +113,7 @@ test('binding configuration makes project selection and Harness location determi
 });
 
 test('binding accepts only linked worktrees with the configured Git common directory', async t => {
-  const fixture = await mkdtemp(resolve(tmpdir(), 'agent-harness-worktree-binding-'));
+  const fixture = await createTemporaryFixture('agent-harness-worktree-binding-');
   t.after(() => rm(fixture, { recursive: true, force: true }));
   const localPluginRoot = resolve(fixture, 'plugin');
   const controlRoot = resolve(fixture, 'control');
@@ -143,6 +148,35 @@ test('binding accepts only linked worktrees with the configured Git common direc
   assert.match(linked.hookSpecificOutput.additionalContext, /"executionWorkspaceRoot"/);
   const unrelated = await hookResponse({ prompt: 'h:engine quality V3.8.4', cwd: unrelatedWorkspace }, { pluginRoot: localPluginRoot });
   assert.match(unrelated.hookSpecificOutput.additionalContext, /不是该仓库经验证的 linked worktree/);
+});
+
+test('each project alias can bind and validate an independent workspace', async t => {
+  const fixture = await createTemporaryFixture('agent-harness-multi-workspace-binding-');
+  t.after(() => rm(fixture, { recursive: true, force: true }));
+  const pluginRoot = resolve(fixture, 'plugin');
+  const controlRoot = resolve(fixture, 'control');
+  const engineRoot = resolve(fixture, 'CardWorld');
+  const collectionRoot = resolve(fixture, 'tabletop-collection');
+  await Promise.all([mkdir(pluginRoot, { recursive: true }), mkdir(controlRoot, { recursive: true }), mkdir(engineRoot, { recursive: true }), mkdir(collectionRoot, { recursive: true })]);
+  await writeFile(resolve(controlRoot, 'agent-harness.mjs'), '', 'utf8');
+  const configured = await configureBindings({
+    pluginRoot,
+    controlRoot,
+    entrypoint: 'agent-harness.mjs',
+    dataRoot: 'data',
+    projectSpecs: [
+      `engine|cardworld-engine|engine-delivery|cardworld-engine-profile|${engineRoot}`,
+      `collection|tabletop-collection|collection-batch|tabletop-collection-profile|${collectionRoot}`,
+    ],
+  });
+  assert.equal(configured.projects.engine.workspaceRoot, engineRoot);
+  assert.equal(configured.projects.collection.workspaceRoot, collectionRoot);
+  const engine = await hookResponse({ prompt: 'h:engine quality V3.8.4', cwd: engineRoot }, { pluginRoot });
+  assert.match(engine.hookSpecificOutput.additionalContext, /"projectAlias":"engine"/);
+  const collection = await hookResponse({ prompt: 'h:collection quality B1 all', cwd: collectionRoot }, { pluginRoot });
+  assert.match(collection.hookSpecificOutput.additionalContext, /"projectAlias":"collection"/);
+  const denied = await hookResponse({ prompt: 'h:collection quality B1 all', cwd: engineRoot }, { pluginRoot });
+  assert.match(denied.hookSpecificOutput.additionalContext, /不是该仓库经验证的 linked worktree/);
 });
 
 test('the same pseudo actions resolve through the explicitly selected Extension command manifest', () => {

@@ -7,7 +7,7 @@
 The adapter only parses the envelope. It never starts a Run. Resolution is performed in this order:
 
 1. Codex supplies `PLUGIN_ROOT` and writable `PLUGIN_DATA` to the plugin Hook;
-2. the Hook reads the exact Harness and project bindings from `PLUGIN_DATA/bindings.json` (the install source may seed `.plugin-data/bindings.json`) and validates the current directory either as the configured root or as a linked worktree with the same Git common-directory identity;
+2. the Hook reads the exact Harness and per-project bindings from `PLUGIN_DATA/bindings.json` (the install source may seed `.plugin-data/bindings.json`), selects the explicit alias, and validates the current directory either as that project's configured root or as a linked worktree with the same Git common-directory identity;
 3. the command's explicit project alias selects one project ID, Profile ID, and Extension ID;
 4. the bound standalone Project Registry provides that exact Project Descriptor;
 5. the Descriptor and installed Extension artifact identities must match the binding;
@@ -18,6 +18,8 @@ The resulting intent binds `controlRoot`, `entrypoint`, `dataRoot`, configured `
 Unknown projects and actions, missing bindings, workspace mismatch, and ambiguous inputs fail closed. The adapter must not scan disks or map inputs through natural-language similarity. The optional preset is one token; a manifest may declare a parameterized prefix such as `item:` and receives the suffix as a selector. Arguments are data, never executable shell fragments.
 
 The external Harness control root remains outside the business repository. If Codex sandboxing denies the exact bound CLI access to that root, the adapter requests a narrowly scoped approval for the bound Node entrypoint; it never relocates Authority into the current worktree or asks for generic shell access.
+
+Project-scoped readiness is mandatory. `lifecycleReady` is true only when the exact bound Project, Profile, Extension set, release artifact and execution workspace match; the presence of an unrelated registered Project or Extension is insufficient. Missing readiness is resolved through a reviewed `bootstrap plan` and an approved, idempotent `bootstrap apply`, never by a read-only command.
 
 After resolution, use the packaged Operator Contract. Feature remains the lease unit, Steps stay serial inside a Feature, all current-cycle P0-P3 findings block formal quality closure, and every Dispatch, Gate, Decision, Evidence item, and Receipt stays bound to versioned identities and content digests.
 

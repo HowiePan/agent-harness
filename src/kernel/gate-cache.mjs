@@ -27,7 +27,7 @@ export class GateCache {
     return value;
   }
   async metrics() {
-    await mkdir(this.directory, { recursive: true });
-    return { entries: (await readdir(this.directory)).filter(name => name.endsWith('.json')).length };
+    try { return { entries: (await readdir(this.directory)).filter(name => name.endsWith('.json')).length }; }
+    catch (error) { if (error.code === 'ENOENT') return { entries: 0 }; throw error; }
   }
 }

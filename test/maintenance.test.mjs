@@ -3,7 +3,7 @@ import { spawn } from 'node:child_process';
 import test from 'node:test';
 import { readFile, rm, rmdir } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
-import { createDefectBundle, createIssueIntake, recordIssueIntake, verifyDefectBundle, verifyIssueIntake } from '../src/index.mjs';
+import { createDefectBundle, createIssueIntake, readIssueTriage, recordIssueIntake, recordIssueTriage, verifyDefectBundle, verifyIssueIntake } from '../src/index.mjs';
 
 const digest = 'a'.repeat(64);
 const input = {
@@ -53,6 +53,9 @@ test('Issue Intake is digest-bound and rejects recognizable credentials', () => 
   assert.match(intake.intakeDigest, /^[a-f0-9]{64}$/);
   assert.deepEqual(verifyIssueIntake(intake), intake);
   assert.throws(() => createIssueIntake({ ...issueInput, conversation: { source: 'current-thread', excerpts: [{ role: 'user', text: 'Authorization: Bearer abcdefghijklmnop' }] } }), error => error.code === 'ISSUE_INTAKE_SENSITIVE_CONTENT_REJECTED');
+  const correlated = createIssueIntake({ ...issueInput, correlation: { category: 'deployment', failureCode: 'LIFECYCLE_NOT_READY', scope: 'cardworld-engine' } });
+  assert.match(correlated.incidentFingerprint, /^[a-f0-9]{64}$/);
+  assert.equal(createIssueIntake({ ...issueInput, observedAt: '2026-09-14T12:00:00.000Z', correlation: correlated.correlation }).incidentFingerprint, correlated.incidentFingerprint);
 });
 
 test('Issue recording stays under controlRoot/issues and is command-idempotent', async t => {
@@ -96,6 +99,25 @@ test('issue record CLI accepts stdin before Registry and Authority initializatio
   });
   assert.equal(output.ok, true);
   assert.equal(output.receipt.issueFile.startsWith(resolve(controlRoot, 'issues')), true);
+});
+
+test('Issue Triage preserves immutable Intake while supporting revisioned relations and closure Evidence', async t => {
+  const controlRoot = resolve('.');
+  const recorded = await recordIssueIntake({ ...issueInput, observedAt: '2026-09-14T12:00:00.000Z' }, { controlRoot, commandId: `triage_intake_${process.pid}_${Date.now()}`, now: () => '2026-09-14T12:01:00.000Z' });
+  t.after(async () => {
+    await rm(dirname(recorded.issueFile), { recursive: true, force: true });
+    await rm(recorded.receiptFile, { force: true });
+  });
+  const decision = { actor: 'project-owner', decision: 'approved' };
+  const acceptedInput = { status: 'accepted', classification: 'deployment-incident', severity: 'P1', summary: 'Project lifecycle is not ready.', relations: [{ type: 'successor-of', target: 'AH-20260913-DA8CA73021DB' }], resolutionEvidence: [] };
+  const accepted = await recordIssueTriage(recorded.issueId, acceptedInput, { controlRoot, expectedRevision: 0, commandId: 'triage-accept', authorityDecision: decision, now: () => '2026-09-14T12:02:00.000Z' });
+  assert.equal(accepted.state.revision, 1);
+  assert.deepEqual(await readIssueTriage(recorded.issueId, { controlRoot }), accepted.state);
+  const reused = await recordIssueTriage(recorded.issueId, acceptedInput, { controlRoot, expectedRevision: 0, commandId: 'triage-accept', authorityDecision: decision });
+  assert.equal(reused.reused, true);
+  await assert.rejects(() => recordIssueTriage(recorded.issueId, { ...acceptedInput, status: 'closed' }, { controlRoot, expectedRevision: 1, commandId: 'triage-close-missing-evidence', authorityDecision: decision }), error => error.code === 'ISSUE_RESOLUTION_EVIDENCE_REQUIRED');
+  const closed = await recordIssueTriage(recorded.issueId, { ...acceptedInput, status: 'closed', resolutionEvidence: ['receipt:bootstrap:abc'] }, { controlRoot, expectedRevision: 1, commandId: 'triage-close', authorityDecision: decision, now: () => '2026-09-14T12:03:00.000Z' });
+  assert.equal(closed.state.disposition.status, 'closed');
 });
 
 test('PUB-008 sanitized consumer defect fixture remains independently reproducible', async () => {

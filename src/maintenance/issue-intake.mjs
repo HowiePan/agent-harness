@@ -57,13 +57,15 @@ export const createIssueIntake = input => {
   assert(input.conversation.excerpts.length <= 50, 'ISSUE_INTAKE_CONTEXT_LIMIT_EXCEEDED', 'Issue Intake accepts at most 50 relevant conversation excerpts.');
   const sensitive = collectSensitiveContent(input);
   assert(sensitive.length === 0, 'ISSUE_INTAKE_SENSITIVE_CONTENT_REJECTED', 'Issue Intake contains sensitive field names or recognizable credential material.', { sensitive });
-  const body = structuredClone(withoutKeys(input, ['intakeDigest']));
+  const body = structuredClone(withoutKeys(input, ['intakeDigest', 'incidentFingerprint']));
+  if (body.correlation) body.incidentFingerprint = digestJson({ project: body.project, correlation: body.correlation });
   assert(Buffer.byteLength(JSON.stringify(body)) <= 512 * 1024, 'ISSUE_INTAKE_SIZE_LIMIT_EXCEEDED', 'Issue Intake exceeds the 512 KiB limit.');
   return { ...body, intakeDigest: digestJson(body) };
 };
 
 export const verifyIssueIntake = input => {
   const intake = createIssueIntake(input);
+  if (intake.incidentFingerprint) assert(input.incidentFingerprint === intake.incidentFingerprint, 'ISSUE_INCIDENT_FINGERPRINT_MISMATCH', 'Issue incident fingerprint mismatch.');
   assert(input.intakeDigest === intake.intakeDigest, 'ISSUE_INTAKE_DIGEST_MISMATCH', 'Issue Intake digest mismatch.');
   return intake;
 };

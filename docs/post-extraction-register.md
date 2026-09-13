@@ -56,7 +56,19 @@ RCV 修复已重新生成 `release-manifest.json` 与 `sbom.spdx.json`；正式 
 | CUT-008 | G8 | Not Retroactively Verifiable | 经过观察期后只判断旧 Harness 是否具备删除资格 | 目标已先行不存在，无法补做删除前 Capsule/rollback 资格判断；不得事后标记 Approved |
 | CUT-009 | G8 | User Only | 删除、移动、归档或清理旧 Harness | 用户已报告 CardWorld 旧 Harness 由其自行移除；这不自动覆盖 Collection 或其他目标，也不替代 CUT-006～008 的运行验证 |
 
-## 五、状态词汇
+## 五、运行入口与维护闭环修复
+
+| ID | 级别 | 状态 | 问题 | 关闭条件 |
+|:---|:---|:---|:---|:---|
+| OPS-001 | P1 | Complete | 全局 Registry 数量被误当作绑定项目 readiness | `doctor` 对准确 Project/Profile/Extension/workspace 做纯读取校验，其他项目不能造成假阳性 |
+| OPS-002 | P1 | Complete | 绑定成功但活动数据根未受控投产 | 零写入 Bootstrap Plan、approved/idempotent/recoverable Apply 和最终项目级 readiness Receipt |
+| OPS-003 | P1 | Complete | 多项目别名共享单一 workspaceRoot | 每个别名独立保存并验证 workspace/common-directory identity，兼容旧四段绑定 |
+| OPS-004 | P2 | Complete | `project list`/`run status` 可能加载 Extension；Gate cache metrics 隐式建目录 | Core 读路径不导入 Extension，missing cache 返回 0 且零写入，负向 Extension 记录回归通过 |
+| OPS-005 | P2 | Complete | Issue Intake 无关联、分诊和关单协议 | 稳定 incident fingerprint；独立 revisioned Triage 状态支持 duplicate/successor/fixed-by 与 resolution Evidence |
+
+`AH-20260913-AB2DBEDCE37B` 与 `AH-20260913-DA8CA73021DB` 属于同一首次观察，前者已标记为 duplicate；`68a9e4c` 关闭了只读命令隐式初始化的代码根因。`AH-20260913-6747BDDA11DB` 作为后继部署 Incident，在活动数据根完成受批准 Bootstrap、精确项目级 readiness 通过且确认未创建 Run 后关闭。全量 108/108、clean-room、pack 和 residue 均已通过；真实业务 Run 仍须单独启动并通过对应 Gate。
+
+## 六、状态词汇
 
 - **Repository Extraction Ready**：允许把 `agent-harness` 提交到独立仓库；当前已达到。
 - **Local Release Candidate Ready**：RCV、PUB-004～008 的本地部分与提交绑定候选 Receipt 已关闭；当前已达到。

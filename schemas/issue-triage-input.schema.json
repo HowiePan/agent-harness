@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-harness.local/schemas/issue-triage-input.schema.json",
+  "title": "Agent Harness Issue Triage Input",
+  "type": "object",
+  "$defs": {
+    "relation": {
+      "type": "object",
+      "required": ["type", "target"],
+      "properties": {
+        "type": { "enum": ["duplicate-of", "successor-of", "related-to", "fixed-by"] },
+        "target": { "type": "string", "minLength": 1, "maxLength": 256 }
+      },
+      "additionalProperties": false
+    }
+  },
+  "required": ["status", "classification", "severity", "summary", "relations", "resolutionEvidence"],
+  "properties": {
+    "status": { "enum": ["pending", "accepted", "resolved", "closed", "duplicate"] },
+    "classification": { "enum": ["defect", "deployment-incident", "configuration", "process", "documentation", "unknown"] },
+    "severity": { "enum": ["P0", "P1", "P2", "P3", "unclassified"] },
+    "summary": { "type": "string", "minLength": 1, "maxLength": 2048 },
+    "relations": { "type": "array", "uniqueItems": true, "items": { "$ref": "#/$defs/relation" } },
+    "resolutionEvidence": { "type": "array", "uniqueItems": true, "items": { "type": "string", "minLength": 1, "maxLength": 2048 } }
+  },
+  "additionalProperties": false
+}

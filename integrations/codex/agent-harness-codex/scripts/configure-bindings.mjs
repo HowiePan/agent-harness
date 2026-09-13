@@ -23,10 +23,18 @@ const parseArguments = input => {
       args.splice(index, 2);
     }
   };
+  const takeOptional = flag => {
+    const index = args.indexOf(flag);
+    if (index < 0) return undefined;
+    if (index + 1 >= args.length) throw new Error(`Missing ${flag}`);
+    const value = args[index + 1];
+    args.splice(index, 2);
+    return value;
+  };
   const parsed = {
     pluginRoot: take('--plugin-root'),
     controlRoot: take('--control-root'),
-    workspaceRoot: take('--workspace-root'),
+    workspaceRoot: takeOptional('--workspace-root'),
     entrypoint: take('--entrypoint'),
     dataRoot: take('--data-root'),
     projectSpecs: takeAll('--project'),
@@ -43,18 +51,21 @@ const inside = (parent, child) => {
 export const configureBindings = async input => {
   const pluginRoot = resolve(input.pluginRoot);
   const controlRoot = resolve(input.controlRoot);
-  const workspaceRoot = resolve(input.workspaceRoot);
+  const workspaceRoot = input.workspaceRoot ? resolve(input.workspaceRoot) : null;
   const entrypoint = resolve(controlRoot, input.entrypoint);
   const dataRoot = resolve(controlRoot, input.dataRoot);
   const projectSpecs = input.projectSpecs ?? [];
   if (!inside(controlRoot, entrypoint) || !inside(controlRoot, dataRoot)) throw new Error('entrypoint and dataRoot must stay inside controlRoot.');
-  await Promise.all([access(controlRoot), access(workspaceRoot), access(entrypoint)]);
+  await Promise.all([access(controlRoot), access(entrypoint)]);
 
   const projects = {};
   for (const spec of projectSpecs) {
-    const [alias, projectId, profileId, extensionId, extra] = spec.split('|');
-    if (extra !== undefined || !/^[a-z][a-z0-9-]{0,31}$/.test(alias ?? '') || !projectId || !profileId || !extensionId || projects[alias]) throw new Error(`Invalid --project value: ${spec}`);
-    projects[alias] = { projectId, profileId, extensionId };
+    const [alias, projectId, profileId, extensionId, projectWorkspaceInput, extra] = spec.split('|');
+    const projectWorkspaceRoot = projectWorkspaceInput ? resolve(projectWorkspaceInput) : workspaceRoot;
+    if (extra !== undefined || !/^[a-z][a-z0-9-]{0,31}$/.test(alias ?? '') || !projectId || !profileId || !extensionId || !projectWorkspaceRoot || projects[alias]) throw new Error(`Invalid --project value: ${spec}`);
+    await access(projectWorkspaceRoot);
+    const workspaceIdentity = await resolveGitWorkspaceIdentity(projectWorkspaceRoot);
+    projects[alias] = { projectId, profileId, extensionId, workspaceRoot: projectWorkspaceRoot, ...(workspaceIdentity ? { workspaceIdentity } : {}) };
   }
   if (!Object.keys(projects).length) throw new Error('At least one --project alias is required.');
 
@@ -62,8 +73,8 @@ export const configureBindings = async input => {
   const target = resolve(directory, 'bindings.json');
   const temporary = resolve(directory, `bindings.${process.pid}.tmp`);
   await mkdir(directory, { recursive: true });
-  const workspaceIdentity = await resolveGitWorkspaceIdentity(workspaceRoot);
-  const document = { protocolVersion: '1.0', harness: { controlRoot, entrypoint, dataRoot }, workspaceRoot, ...(workspaceIdentity ? { workspaceIdentity } : {}), projects };
+  const workspaceIdentity = workspaceRoot ? await resolveGitWorkspaceIdentity(workspaceRoot) : null;
+  const document = { protocolVersion: '1.0', harness: { controlRoot, entrypoint, dataRoot }, ...(workspaceRoot ? { workspaceRoot } : {}), ...(workspaceIdentity ? { workspaceIdentity } : {}), projects };
   await writeFile(temporary, `${JSON.stringify(document, null, 2)}\n`, { encoding: 'utf8', flag: 'wx' });
   try {
     await rename(temporary, target);

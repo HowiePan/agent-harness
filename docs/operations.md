@@ -13,7 +13,7 @@ node bin/agent-harness.mjs doctor --data-root .agent-harness-data/doctor
 node scripts/check-residue.mjs
 ```
 
-`doctor` 是零写入检查：只解析并验证目标路径，不初始化状态目录。输出分别标明控制根模式、安装就绪、数据根/Extension Registry/Project Registry/Authority 是否存在、已登记制品以及 `lifecycleReady`；`writeCapability=not-probed` 表示零写入检查不能证明当前调用方具有写权限。
+`doctor` 是零写入检查：只解析并验证目标路径，不初始化状态目录，也不导入 Extension 代码。输出分别标明控制根模式、安装就绪、数据根/Extension Registry/Project Registry/Authority 是否存在，以及 `storageReady`、逐项目 `projectReady` 和最终 `lifecycleReady`；`writeCapability=not-probed` 表示零写入检查不能证明当前调用方具有写权限。生产预检必须同时传入绑定的 `--project`、`--profile`、`--extension-id` 和可选 `--execution-workspace`，不得用“任意项目存在”代替目标项目就绪。
 
 先用 `project register` 登记 Project Descriptor，再用 `run start` 创建 Run。所有写命令携带唯一 `--command-id`；更新已有 Authority 时同时携带最新 revision。使用 `node bin/agent-harness.mjs --help` 查看完整参数。
 
@@ -28,6 +28,16 @@ node bin/agent-harness.mjs project descriptor --extension agent-harness/consumer
 
 生产 Project Descriptor 必须同时记录 Harness 版本/制品摘要与每个 Extension 的 ID/版本/制品摘要，Run 创建前精确校验已安装集合。选择非 Codex Runtime 时，Consumer Descriptor 不再声明 `codex-runtime`；调用方显式提供所选 Runtime Extension 身份即可。业务仓无需保存生成器、配置、Skill 或 Harness 代码。
 
+首次投产推荐使用两阶段 Bootstrap。`bootstrap plan` 只读取发布清单、Registry 和 Project 状态，不导入 Extension、也不创建数据根；`bootstrap apply` 必须携带审核后的原计划、批准 Decision 和唯一 command ID。Apply 使用可恢复 journal，逐项幂等登记 Extension，初始化受管 Store，生成并登记 Project Descriptor，最后强制通过项目级 readiness：
+
+```powershell
+node bin/agent-harness.mjs bootstrap plan --input <bootstrap-request.json> > <reviewed-bootstrap-plan.json>
+node bin/agent-harness.mjs bootstrap apply --plan <reviewed-bootstrap-plan.json> --command-id <bootstrap-id> --decision <approved-decision.json>
+node bin/agent-harness.mjs doctor --project cardworld-engine --profile engine-delivery --extension-id cardworld-engine-profile --execution-workspace <CardWorld-worktree>
+```
+
+Bootstrap 只建立新 Harness Authority 基础设施，不导入旧状态、不创建业务 Run，也不构成 cutover、发布或旧 Harness 删除授权。
+
 `project-descriptor-input.schema.json` 约束可提交的配置输入；`project-descriptor.schema.json` 约束 Registry 增加 revision、commands、时间和摘要后的持久记录。更新时不得把整个 Registry 记录重新作为输入，Programmatic API 使用 `projectDescriptorInput(record)` 提取配置面。CLI 生成器会把当前 Harness 和已安装 Extension 的精确摘要封入输入。静态示例是 Consumer 生成器输入，不伪造会随发布制品变化的摘要。
 
 Codex 工具集成位于 `integrations/codex/agent-harness-codex/`，是带 `.codex-plugin/plugin.json` 的独立可安装插件。其他 Agent 工具按同一 Operator Contract 提供自己的集成插件，不进入 Harness Core。实际安装插件属于部署步骤，不会把 Skill 复制到业务仓。
@@ -35,7 +45,7 @@ Codex 工具集成位于 `integrations/codex/agent-harness-codex/`，是带 `.co
 仓库自带 `.agents/plugins/marketplace.json`。首次安装或本机绑定变化后，在 Standalone Control Root 执行：
 
 ```powershell
-node integrations/codex/agent-harness-codex/scripts/configure-bindings.mjs --plugin-root integrations/codex/agent-harness-codex --control-root . --workspace-root <业务工作区绝对路径> --entrypoint bin/agent-harness.mjs --data-root .agent-harness-data --project "engine|cardworld-engine|engine-delivery|cardworld-engine-profile" --project "collection|tabletop-collection|collection-batch|tabletop-collection-profile"
+node integrations/codex/agent-harness-codex/scripts/configure-bindings.mjs --plugin-root integrations/codex/agent-harness-codex --control-root . --entrypoint bin/agent-harness.mjs --data-root .agent-harness-data --project "engine|cardworld-engine|engine-delivery|cardworld-engine-profile|<CardWorld绝对路径>" --project "collection|tabletop-collection|collection-batch|tabletop-collection-profile|<Collection绝对路径>"
 codex plugin marketplace add .
 codex plugin add agent-harness-codex@agent-harness-local
 ```
@@ -48,11 +58,11 @@ codex plugin add agent-harness-codex@agent-harness-local
 
 安装 `agent-harness-codex` 插件并配置绑定后，直接发送 `h:<项目别名> <动作> <目标> [预设]`。这不是 Codex 自定义斜杠命令，而是由插件 `UserPromptSubmit` Hook 识别的稳定伪命令；`$agent-harness-command` 可作为 Hook 未信任或被管理员禁用时的显式回退入口。
 
-项目别名属于插件安装数据，不属于 Kernel 命令表。`PLUGIN_DATA/bindings.json`（本地安装回退为 `<pluginRoot>/.plugin-data/bindings.json`）显式固定 `controlRoot`、`entrypoint`、`dataRoot`、`workspaceRoot` 及可选 Git common-directory identity，并把每个别名绑定到准确的 Project、Profile 和 Extension。Router 接受绑定根的后代路径，也接受 common-directory identity 相同的 linked worktree；它不根据目标格式猜项目，也不扫描磁盘。状态变更 Run 会把 Hook 验证过的实际 worktree 固定进 Authority，后续 Runtime 和 Gate 不得回退到另一个 checkout。可用以下只读命令检查配置：`h:where` 或 `h:where <项目别名>`。
+项目别名属于插件安装数据，不属于 Kernel 命令表。`PLUGIN_DATA/bindings.json`（本地安装回退为 `<pluginRoot>/.plugin-data/bindings.json`）显式固定 `controlRoot`、`entrypoint`、`dataRoot`，并为每个别名分别绑定 Project、Profile、Extension、`workspaceRoot` 和可选 Git common-directory identity。Router 先选择别名，再验证该项目的绑定根或 linked worktree；不同别名可以属于不同仓库。状态变更 Run 会把 Hook 验证过的实际 worktree 固定进 Authority。可用 `h:where` 或 `h:where <项目别名>` 只读检查每个项目的独立匹配结果。
 
 使用 `h:report <项目别名>` 上报当前对话中的 Harness 问题。该保留命令只依赖绑定文件，因此即使 data root、Extension Registry、Project Descriptor 或 Authority 不可用也能登记问题。它从当前对话提取相关摘录、执行脱敏并列出缺失 Evidence，通过绑定的精确入口调用 `issue record`；不创建新对话，不启动 Run/Gate，也不修复实现。输出目录固定为 `<controlRoot>/issues`，不接受任意路径参数，不写业务仓、Codex worktree、用户目录或历史迁移目录。记录只有在用户另行决定提交并推送后才具备跨设备持久性。
 
-绑定由插件随附的 `scripts/configure-bindings.mjs` 写入，例如传入 `--plugin-root`、`--control-root`、`--workspace-root`、`--entrypoint bin/agent-harness.mjs`、`--data-root .agent-harness-data`，并为每个项目重复传入 `--project "<别名>|<projectId>|<profileId>|<extensionId>"`。配置器在 Git workspace 上固化 common-directory identity。绑定文件位于业务仓之外，业务仓保持零 Harness 驻留。若业务任务沙箱拒绝写外部控制根，只能为绑定的 Node 入口申请精确执行授权；不得把 `dataRoot` 改到业务仓或申请通用 shell 豁免。
+绑定由插件随附的 `scripts/configure-bindings.mjs` 写入。为每个项目重复传入 `--project "<别名>|<projectId>|<profileId>|<extensionId>|<workspaceRoot>"`；旧的四段格式仍可通过顶层 `--workspace-root` 兼容。配置器逐项目固化 Git common-directory identity。绑定文件位于业务仓之外，业务仓保持零 Harness 驻留。
 
 当前 Engine Extension 声明：
 
@@ -75,7 +85,7 @@ codex plugin add agent-harness-codex@agent-harness-local
 
 Hook 只解析单行、最长 512 字符、至多一个预设参数的信封，不启动流程，也不把参数交给 shell。未知项目、动作或预设、绑定与 Registry 不一致、Extension 摘要不匹配、前置证据不足都会 fail closed。用户明确说“只评估”“不要启动”或 `dry-run` 时，只返回解析结果和前置条件，不写 Authority；要做 Engine 只读源码质量审查则显式使用 `h:engine quality V3.8.4 review-only`。
 
-CLI 的底层问题登记入口为 `issue record --input <json|-> --command-id <id>`。其输入必须符合 `schemas/issue-intake.schema.json`；使用 `-` 时从 stdin 读取，避免创建中间文件。重复 command ID 只接受完全相同的 Intake，写入使用内容摘要、原子文件和命令 Receipt。Issue Intake 是维护输入而不是 Authority；信息齐全后仍须单独形成并验证 Defect Bundle。
+CLI 的底层问题登记入口为 `issue record --input <json|-> --command-id <id>`。稳定故障码可通过 `correlation` 生成与观察时间无关的 incident fingerprint。不可变 Intake 写入后，使用 `issue triage` 另行记录带 revision、批准 Decision、关系和 resolution Evidence 的分诊状态；`issue list`/`issue status` 都是零写入查询。初始化类故障归类为 `deployment-incident`，不伪造 Defect Bundle 所需的 Descriptor 或 Authority 身份。
 
 1. `run status` 读取 revision、epoch、generation、Feature、Lease 和 finding。
 2. `run execute` 让 Coordinator 调度、绑定、等待并提交；`run schedule` 用于需要外部 Runtime 接管的高级场景。

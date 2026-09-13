@@ -1,4 +1,6 @@
 export { createHarness, defaultDataRoot } from './app/harness.mjs';
+export { applyBootstrapPlan, createBootstrapPlan, validateBootstrapRequest, verifyBootstrapPlan } from './bootstrap.mjs';
+export { inspectLifecycleReadiness, readRunStatus } from './readiness.mjs';
 export { initializeHarnessInstallation } from './installation.mjs';
 export { loadReleaseIdentity, verifyReleaseManifest } from './release-identity.mjs';
 export * from './canonical.mjs';

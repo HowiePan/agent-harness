@@ -78,4 +78,4 @@ npm run build:release-candidate
 node bin/agent-harness.mjs doctor --data-root .tmp/doctor
 ```
 
-`build:release-candidate` 只接受干净提交，生成真实 tarball、隔离安装探针与内容寻址 Release Candidate Receipt。`doctor` 只验证路径、发布摘要、数据根组成和扩展安装回执，不执行 Extension，也不创建目录或文件；零写入检查明确把写能力报告为 `not-probed`。CLI 的所有改变状态命令都要求 `--command-id`；`dataRoot` 默认是 Standalone Control Root 下的 `.agent-harness-data/`。完整命令见 [运维手册](docs/operations.md)。
+`build:release-candidate` 只接受干净提交，生成真实 tarball、隔离安装探针与内容寻址 Release Candidate Receipt。`doctor` 按准确 Project/Profile/Extension 检查 readiness，不执行 Extension，也不创建目录或文件；`project list` 与 `run status` 同样不加载 Extension 代码。首次投产使用零写入 `bootstrap plan` 和经批准、可恢复的 `bootstrap apply`。CLI 的所有改变状态命令都要求 `--command-id`；完整命令见 [运维手册](docs/operations.md)。

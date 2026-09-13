@@ -127,7 +127,7 @@ const verifyArtifactManifest = async (artifact, entryPath, controlRoot) => {
   return { digest: expectedDigest, manifest };
 };
 
-export const loadExtensionPack = async (moduleSpecifier, { cwd = process.cwd(), controlRoot, expectedDigest, requireArtifactManifest = false } = {}) => {
+export const inspectExtensionArtifact = async (moduleSpecifier, { cwd = process.cwd(), controlRoot, expectedDigest, requireArtifactManifest = false } = {}) => {
   const resolvedPath = resolveExtensionModule(moduleSpecifier, { cwd });
   if (controlRoot) assertNoLinkPath(controlRoot, resolvedPath, 'Extension entrypoint');
   const artifact = requireArtifactManifest ? await findArtifactManifest(resolvedPath, controlRoot) : null;
@@ -135,11 +135,17 @@ export const loadExtensionPack = async (moduleSpecifier, { cwd = process.cwd(), 
   const verified = artifact ? await verifyArtifactManifest(artifact, resolvedPath, controlRoot) : null;
   const digest = verified?.digest ?? await digestExtensionModuleGraph(resolvedPath, { controlRoot });
   if (expectedDigest) assert(digest === expectedDigest, 'EXTENSION_ARTIFACT_DIGEST_MISMATCH', 'Extension artifact does not match its installation receipt.', { expectedDigest, actualDigest: digest, resolvedPath });
+  return Object.freeze({ resolvedPath, digest, manifest: verified?.manifest ?? null });
+};
+
+export const loadExtensionPack = async (moduleSpecifier, { cwd = process.cwd(), controlRoot, expectedDigest, requireArtifactManifest = false } = {}) => {
+  const inspected = await inspectExtensionArtifact(moduleSpecifier, { cwd, controlRoot, expectedDigest, requireArtifactManifest });
+  const { resolvedPath, digest, manifest } = inspected;
   const loaded = await import(`${pathToFileURL(resolvedPath).href}?sha256=${digest}`);
   const pack = loaded.extensionPack ?? loaded.default;
   assert(pack, 'EXTENSION_MODULE_CONTRACT_INVALID', 'Extension module must export extensionPack or a default Extension Pack.');
   const defined = defineExtensionPack({ ...pack, digest });
-  if (verified?.manifest.id) assert(verified.manifest.id === defined.id && verified.manifest.version === defined.version, 'EXTENSION_ARTIFACT_IDENTITY_MISMATCH', 'Extension artifact manifest identity does not match its exported Extension Pack.', { manifestId: verified.manifest.id, extensionId: defined.id });
-  if (verified) verifiedArtifactPacks.add(defined);
+  if (manifest?.id) assert(manifest.id === defined.id && manifest.version === defined.version, 'EXTENSION_ARTIFACT_IDENTITY_MISMATCH', 'Extension artifact manifest identity does not match its exported Extension Pack.', { manifestId: manifest.id, extensionId: defined.id });
+  if (manifest) verifiedArtifactPacks.add(defined);
   return defined;
 };

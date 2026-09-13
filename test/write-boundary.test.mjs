@@ -4,7 +4,7 @@ import { execFile } from 'node:child_process';
 import { access, mkdir, rm, symlink, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { promisify } from 'node:util';
-import { assertHarnessWritePath, AuthorityStore, createHarness, defaultDataRoot, digestJson, EvidenceStore, GateCache, harnessControlRoot, harnessProjectRoot, harnessTemporaryRoot, loadReleaseIdentity, ProjectRegistry, sha256, temporaryEnvironment, verifyReleaseManifest } from '../src/index.mjs';
+import { assertHarnessWritePath, AuthorityStore, computeAuthorityDigest, createHarness, defaultDataRoot, digestJson, EvidenceStore, GateCache, harnessControlRoot, harnessProjectRoot, harnessTemporaryRoot, loadReleaseIdentity, ProjectRegistry, sha256, temporaryEnvironment, verifyReleaseManifest } from '../src/index.mjs';
 import { createCodexCliRuntime } from '../src/plugins/runtime/codex-cli-runtime.mjs';
 
 const executeFile = promisify(execFile);
@@ -104,6 +104,27 @@ test('run status fails without initializing a missing data root', async () => {
   await assert.rejects(() => access(target), error => error.code === 'ENOENT');
 });
 
+test('project list and run status do not import registered Extension code', async t => {
+  const projectRoot = harnessProjectRoot();
+  const target = resolve(projectRoot, '.tmp', `read-only-no-extension-import-${process.pid}`);
+  t.after(() => rm(target, { recursive: true, force: true }));
+  const registryDirectory = resolve(target, 'registry');
+  await mkdir(resolve(registryDirectory, 'projects'), { recursive: true });
+  const extension = { id: 'side-effect-probe', version: '1.0.0', digest: 'a'.repeat(64), entry: 'missing-side-effect-probe.mjs', registeredAt: '2026-09-13T00:00:00.000Z' };
+  const registryBody = { protocolVersion: '1.0', revision: 1, extensions: [extension], commands: {} };
+  await writeFile(resolve(registryDirectory, 'extensions.json'), `${JSON.stringify({ ...registryBody, registryDigest: digestJson(registryBody) })}\n`, 'utf8');
+  const listed = await executeFile(process.execPath, [resolve(projectRoot, 'src', 'cli.mjs'), 'project', 'list', '--data-root', target], { cwd: projectRoot, windowsHide: true });
+  assert.deepEqual(JSON.parse(listed.stdout), { ok: true, projects: [] });
+  const stateBody = { projectId: 'project', runId: 'run', profile: { id: 'side-effect-profile' }, revision: 1, commands: {} };
+  const state = { ...stateBody, authorityDigest: computeAuthorityDigest(stateBody) };
+  const authorityFile = resolve(target, 'authority', 'project', 'run', 'run.json');
+  await mkdir(resolve(authorityFile, '..'), { recursive: true });
+  await writeFile(authorityFile, `${JSON.stringify(state)}\n`, 'utf8');
+  const status = JSON.parse((await executeFile(process.execPath, [resolve(projectRoot, 'src', 'cli.mjs'), 'run', 'status', '--project', 'project', '--run', 'run', '--data-root', target], { cwd: projectRoot, windowsHide: true })).stdout);
+  assert.equal(status.authority.authorityDigest, state.authorityDigest);
+  assert.equal(status.projection, null);
+});
+
 test('doctor reports lifecycle readiness only when all persisted roots and registries exist', async t => {
   const projectRoot = harnessProjectRoot();
   const target = resolve(projectRoot, '.tmp', `doctor-ready-${process.pid}`);
@@ -111,9 +132,8 @@ test('doctor reports lifecycle readiness only when all persisted roots and regis
   const registryDirectory = resolve(target, 'registry');
   const projectDirectory = resolve(registryDirectory, 'projects');
   await Promise.all([mkdir(projectDirectory, { recursive: true }), mkdir(resolve(target, 'authority'), { recursive: true })]);
-  const exactDigest = 'a'.repeat(64);
-  const extension = { id: 'fixture-extension', version: '1.0.0', digest: exactDigest, entry: 'fixture.mjs', registeredAt: '2026-09-13T00:00:00.000Z' };
-  const extensionBody = { protocolVersion: '1.0', revision: 1, extensions: [extension], commands: {} };
+  const exactDigest = (await loadReleaseIdentity()).artifactDigest;
+  const extensionBody = { protocolVersion: '1.0', revision: 0, extensions: [], commands: {} };
   await writeFile(resolve(registryDirectory, 'extensions.json'), `${JSON.stringify({ ...extensionBody, registryDigest: digestJson(extensionBody) })}\n`, 'utf8');
   const descriptorInput = { id: 'fixture-project', harness: { version: '1.0.0', artifactDigest: exactDigest }, workspace: { root: resolve(projectRoot, 'test') }, profiles: ['feature-delivery'], extensions: [], policy: {}, gateRecipes: [], artifactProviders: [] };
   const commandReceipt = { commandId: 'fixture-register', payloadDigest: digestJson(descriptorInput), revision: 1, committedAt: '2026-09-13T00:00:00.000Z', authorityDecision: null };

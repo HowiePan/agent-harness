@@ -53,6 +53,17 @@
       "additionalProperties": false
     },
     "missingEvidence": { "type": "array", "items": { "type": "string", "minLength": 1, "maxLength": 256 } },
+    "correlation": {
+      "type": "object",
+      "required": ["category", "failureCode", "scope"],
+      "properties": {
+        "category": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "failureCode": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "scope": { "type": "string", "minLength": 1, "maxLength": 256 }
+      },
+      "additionalProperties": false
+    },
+    "incidentFingerprint": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
     "sanitization": {
       "type": "object",
       "required": ["confirmed", "removed"],

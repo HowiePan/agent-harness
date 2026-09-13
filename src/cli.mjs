@@ -1,8 +1,8 @@
 #!/usr/bin/env node
-import { existsSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { createHarness, defaultDataRoot } from './app/harness.mjs';
+import { applyBootstrapPlan, createBootstrapPlan } from './bootstrap.mjs';
 import { newId } from './canonical.mjs';
 import { RunCoordinator } from './coordinator/run-coordinator.mjs';
 import { ProjectGateRunner } from './gates/project-gate-runner.mjs';
@@ -11,9 +11,11 @@ import { ExtensionRegistry } from './extensions/registry.mjs';
 import { initializeHarnessInstallation } from './installation.mjs';
 import { loadReleaseIdentity } from './release-identity.mjs';
 import { ProjectRegistry } from './registry/project-registry.mjs';
+import { inspectLifecycleReadiness, readRunStatus } from './readiness.mjs';
 import { assertHarnessWritePath, harnessControlRoot, harnessProjectRoot } from './write-boundary.mjs';
 import { verifyDefectBundle } from './maintenance/defect-bundle.mjs';
 import { recordIssueIntake } from './maintenance/issue-intake.mjs';
+import { listIssueRecords, readIssueTriage, recordIssueTriage } from './maintenance/issue-triage.mjs';
 
 const argv = process.argv.slice(2);
 const take = name => {
@@ -73,6 +75,11 @@ agent-harness recovery capsule-verify --capsule-root <path> --project <id> --run
 agent-harness recovery source-unavailable --extension <module> --importer <id> --legacy-root <path> --project <id> --decision <json> --expected-revision 0 --command-id <id>
 agent-harness defect validate --input <json>
 agent-harness issue record --input <json|-> --command-id <id>
+agent-harness issue status --issue <id>
+agent-harness issue list
+agent-harness issue triage --issue <id> --input <json|-> --expected-revision <n> --command-id <id> --decision <json>
+agent-harness bootstrap plan --input <json|-> [--control-root <path>] [--data-root <path>]
+agent-harness bootstrap apply --plan <json> --command-id <id> --decision <json> [--control-root <path>] [--data-root <path>]
 
 All Authority and Evidence paths are under --data-root, never under the business repository.`);
 
@@ -94,9 +101,44 @@ if (command === 'issue' && subject === 'record') {
   console.log(JSON.stringify({ ok: true, receipt }, null, 2));
   process.exit(0);
 }
+if (command === 'issue' && subject === 'status') {
+  console.log(JSON.stringify({ ok: true, issueId: take('--issue'), triage: await readIssueTriage(take('--issue'), { controlRoot }) }, null, 2));
+  process.exit(0);
+}
+if (command === 'issue' && subject === 'list') {
+  console.log(JSON.stringify({ ok: true, issues: await listIssueRecords({ controlRoot }) }, null, 2));
+  process.exit(0);
+}
+if (command === 'issue' && subject === 'triage') {
+  const output = await recordIssueTriage(take('--issue'), await jsonInput('--input'), {
+    controlRoot,
+    expectedRevision: Number(take('--expected-revision')),
+    commandId: take('--command-id'),
+    authorityDecision: take('--decision') ? await jsonFile(take('--decision')) : null,
+  });
+  console.log(JSON.stringify({ ok: true, ...output }, null, 2));
+  process.exit(0);
+}
 const dataRoot = resolve(take('--data-root') ?? defaultDataRoot(controlRoot));
 const releaseIdentity = await loadReleaseIdentity({ artifactDigest: take('--harness-digest') });
 const extensionRegistry = new ExtensionRegistry({ dataRoot, controlRoot });
+
+if (command === 'bootstrap' && subject === 'plan') {
+  const plan = await createBootstrapPlan(await jsonInput('--input'), { controlRoot, dataRoot, releaseIdentity });
+  console.log(JSON.stringify({ ok: true, plan }, null, 2));
+  process.exit(0);
+}
+if (command === 'bootstrap' && subject === 'apply') {
+  const output = await applyBootstrapPlan(await jsonInput('--plan'), {
+    controlRoot,
+    dataRoot,
+    releaseIdentity,
+    commandId: take('--command-id'),
+    authorityDecision: take('--decision') ? await jsonFile(take('--decision')) : null,
+  });
+  console.log(JSON.stringify({ ok: true, ...output }, null, 2));
+  process.exit(0);
+}
 
 if (command === 'extension' && subject === 'register') {
   const receipt = await extensionRegistry.register(take('--module'), { cwd: process.cwd(), expectedRevision: Number(take('--expected-revision')), commandId: take('--command-id'), authorityDecision: take('--decision') ? await jsonFile(take('--decision')) : null });
@@ -114,40 +156,41 @@ if (command === 'extension' && subject === 'remove') {
 }
 
 if (command === 'doctor') {
-  const controlledDataRoot = assertHarnessWritePath(dataRoot, 'Harness dataRoot', controlRoot);
-  const extensionState = await extensionRegistry.list();
-  const projects = await new ProjectRegistry({ root: controlledDataRoot, controlRoot }).list();
-  const paths = {
-    dataRoot: existsSync(controlledDataRoot),
-    extensionRegistry: existsSync(resolve(controlledDataRoot, 'registry', 'extensions.json')),
-    projectRegistry: existsSync(resolve(controlledDataRoot, 'registry', 'projects')),
-    authority: existsSync(resolve(controlledDataRoot, 'authority')),
-  };
-  const initialized = Object.values(paths).every(Boolean);
+  const readiness = await inspectLifecycleReadiness({
+    controlRoot,
+    dataRoot,
+    releaseIdentity,
+    projectId: take('--project'),
+    profileId: take('--profile'),
+    extensionId: take('--extension-id'),
+    executionWorkspaceRoot: take('--execution-workspace') ? resolve(take('--execution-workspace')) : undefined,
+  });
   console.log(JSON.stringify({
     ok: true,
     version: releaseIdentity.version,
     artifactDigest: releaseIdentity.artifactDigest,
-    releaseVerified: releaseIdentity.verified,
     node: process.version,
     projectRoot: harnessProjectRoot(),
-    controlRoot,
-    controlRootMode: controlRoot === harnessProjectRoot() ? 'source-checkout' : 'installed',
-    installationReady: true,
-    dataRoot: controlledDataRoot,
     writeBoundary: 'standalone-control-root-only',
-    writeCapability: 'not-probed',
-    paths,
-    registeredExtensions: extensionState.extensions,
-    registeredProjects: projects.map(project => ({ id: project.id, revision: project.revision, descriptorDigest: project.descriptorDigest })),
-    initialized,
-    lifecycleReady: releaseIdentity.verified && initialized && extensionState.extensions.length > 0 && projects.length > 0,
+    ...readiness,
+    initialized: readiness.storageReady,
   }, null, 2));
   process.exit(0);
 }
 
 if (command === 'defect' && subject === 'validate') {
   console.log(JSON.stringify({ ok: true, bundle: verifyDefectBundle(await jsonFile(take('--input'))) }, null, 2));
+  process.exit(0);
+}
+
+if (command === 'project' && subject === 'list') {
+  const projects = await new ProjectRegistry({ root: dataRoot, controlRoot }).list();
+  console.log(JSON.stringify({ ok: true, projects }, null, 2));
+  process.exit(0);
+}
+
+if (command === 'run' && subject === 'status') {
+  console.log(JSON.stringify({ ok: true, ...(await readRunStatus({ controlRoot, dataRoot, projectId: take('--project'), runId: take('--run') })) }, null, 2));
   process.exit(0);
 }
 
@@ -184,13 +227,7 @@ if (command === 'features' && subject === 'compile') {
   process.exit(0);
 }
 
-  if (command === 'project' && subject === 'list') {
-    const projects = await new ProjectRegistry({ root: dataRoot, controlRoot }).list();
-    console.log(JSON.stringify({ ok: true, projects }, null, 2));
-    process.exit(0);
-  }
-
-  const readOnlyHarness = (command === 'run' && subject === 'status') || (command === 'recovery' && ['assess', 'plan'].includes(subject));
+  const readOnlyHarness = command === 'recovery' && ['assess', 'plan'].includes(subject);
   const harness = await createHarness({ controlRoot, dataRoot, extensions, releaseIdentity, initializeStorage: !readOnlyHarness });
   if (command === 'project' && subject === 'register') {
     const rawInput = take('--descriptor') ? await jsonFile(take('--descriptor')) : { id: take('--id'), workspace: { root: resolve(take('--workspace')) }, profiles: String(take('--profiles') ?? '').split(',').filter(Boolean), policy: {} };
@@ -208,8 +245,7 @@ if (command === 'features' && subject === 'compile') {
     const input = { projectId: take('--project'), runId: take('--run'), profileId: take('--profile'), features: await jsonFile(take('--features')), profileConfig: take('--config') ? await jsonFile(take('--config')) : {}, artifactDigest: take('--artifact-digest') ?? null, ...(take('--execution-workspace') ? { executionWorkspaceRoot: resolve(take('--execution-workspace')) } : {}) };
     const output = await harness.startRun(input, { commandId: take('--command-id') ?? newId('command') });
     console.log(JSON.stringify({ ok: true, state: output.state, reused: output.reused }, null, 2));
-  } else if (command === 'run' && subject === 'status') console.log(JSON.stringify({ ok: true, ...(await harness.status(take('--project'), take('--run'))) }, null, 2));
-  else if (command === 'run' && subject === 'schedule') {
+  } else if (command === 'run' && subject === 'schedule') {
     const state = await harness.authorityStore.read(take('--project'), take('--run'));
     const output = await harness.dispatch(state.projectId, state.runId, { maxConcurrency: Number(take('--max') ?? 1), runtimePluginId: take('--runtime') ?? null }, { expectedRevision: state.revision, commandId: take('--command-id') ?? newId('command') });
     console.log(JSON.stringify({ ok: true, ...output.result, revision: output.state.revision }, null, 2));
