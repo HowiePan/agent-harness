@@ -11,6 +11,8 @@ An Extension Pack may register:
 
 Default Harness creation installs no provider-specific, consumer-specific, or legacy Extension Pack. Installations require an approved Authority Decision, register Extension entrypoints under the standalone control root, reject symlink/junction traversal, and bind a complete artifact-manifest digest in an installation receipt. Bundle every runtime dependency inside that artifact root and list every file. Projects bind the exact Harness and required Extension identities in their central Project Descriptor; run start fails when an ID, version, or digest is missing or mismatched.
 
+A legacy importer is read-only and deterministic. Its assessment must satisfy the strict migration-manifest schema, identify the exact importer version, and bind every fact to an inventoried source-file digest. It must not follow or omit symbolic links or junctions, add undeclared fields, retain private mutable state, or treat a legacy completion string as current Authority. Capsule creation normalizes the staged logical root to `payload` and rejects any mismatch between the staged inventory and importer assessment.
+
 ## Testing
 
 Test manifest validation, denied permissions, immutable plugin envelopes, extension duplication, missing and mismatched identities, output budgets, cleanup receipts, fail-closed sandbox behavior, and packaged resolution of every declared entry. Consumer Profile tests use synthetic fixtures and must not read legacy Harness source.

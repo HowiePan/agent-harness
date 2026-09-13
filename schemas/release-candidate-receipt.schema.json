@@ -1,0 +1,69 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-harness.local/schemas/release-candidate-receipt.schema.json",
+  "title": "Agent Harness Release Candidate Receipt",
+  "type": "object",
+  "required": ["protocolVersion", "kind", "version", "source", "releaseManifest", "sbom", "archive", "probes", "createdAt", "receiptDigest"],
+  "properties": {
+    "protocolVersion": { "const": "1.0" },
+    "kind": { "const": "release-candidate-receipt" },
+    "version": { "type": "string", "pattern": "^\\d+\\.\\d+\\.\\d+$" },
+    "source": {
+      "type": "object",
+      "required": ["commit", "clean"],
+      "properties": {
+        "commit": { "type": "string", "pattern": "^[a-f0-9]{40,64}$" },
+        "clean": { "const": true }
+      },
+      "additionalProperties": false
+    },
+    "releaseManifest": {
+      "type": "object",
+      "required": ["packageDigest", "sha256", "fileCount"],
+      "properties": {
+        "packageDigest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "fileCount": { "type": "integer", "minimum": 1 }
+      },
+      "additionalProperties": false
+    },
+    "sbom": {
+      "type": "object",
+      "required": ["sha256", "spdxVersion"],
+      "properties": {
+        "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "spdxVersion": { "const": "SPDX-2.3" }
+      },
+      "additionalProperties": false
+    },
+    "archive": {
+      "type": "object",
+      "required": ["fileName", "sha256", "size", "npmIntegrity", "npmShasum"],
+      "properties": {
+        "fileName": { "type": "string", "minLength": 1 },
+        "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "size": { "type": "integer", "minimum": 1 },
+        "npmIntegrity": { "type": "string", "minLength": 1 },
+        "npmShasum": { "type": "string", "pattern": "^[a-f0-9]{40}$" }
+      },
+      "additionalProperties": false
+    },
+    "probes": {
+      "type": "object",
+      "required": ["manifestVerified", "sbomVerified", "packageInstalled", "codexPluginVerified", "skillEntrypointsVerified", "relativeReferencesVerified", "pathBoundaryVerified"],
+      "properties": {
+        "manifestVerified": { "const": true },
+        "sbomVerified": { "const": true },
+        "packageInstalled": { "const": true },
+        "codexPluginVerified": { "const": true },
+        "skillEntrypointsVerified": { "const": true },
+        "relativeReferencesVerified": { "const": true },
+        "pathBoundaryVerified": { "const": true }
+      },
+      "additionalProperties": false
+    },
+    "createdAt": { "type": "string", "format": "date-time" },
+    "receiptDigest": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+  },
+  "additionalProperties": false
+}

@@ -2,8 +2,11 @@ import { resolve } from 'node:path';
 import { digestJson, newId } from '../canonical.mjs';
 import { assert, fail } from '../errors.mjs';
 import { safeSegment } from '../paths.mjs';
+import { assertHardRecoveryDecision, hardRecoveryCapability } from '../recovery/authorization.mjs';
+import { readRecoveryVerification } from '../recovery/verification.mjs';
 import { atomicWriteJson } from './atomic-io.mjs';
 import { qualityCanClose, validateFinding } from './quality.mjs';
+import { assertArtifactRebaseDecision } from '../maintenance/upgrade-authorization.mjs';
 import { buildRunReceipt, writeRunReceipt } from './receipts.mjs';
 import { scheduleFeatures, validateWorkGraph } from './work-graph.mjs';
 
@@ -250,13 +253,16 @@ export class HarnessKernel {
     });
   }
 
-  async recover(projectId, runId, input, command) {
+  async recover(projectId, runId, input, command, capability = null) {
     const verifiedEvidence = new Map();
+    let recoveryVerification = null;
     if (input.rollbackSnapshotRef) {
       const rollback = await this.evidenceStore.read(input.rollbackSnapshotRef);
       assert(rollback.metadata.projectId === projectId && rollback.metadata.runId === runId, 'RECOVERY_ROLLBACK_CONTEXT_MISMATCH', 'Recovery rollback snapshot belongs to another run.');
     }
     if (input.mode === 'hard-recovery') {
+      assert(capability === hardRecoveryCapability, 'RECOVERY_COORDINATOR_REQUIRED', 'Live hard recovery must use the verified Recovery Coordinator path.');
+      recoveryVerification = await readRecoveryVerification(this.evidenceStore, input.recoveryVerificationRef, { projectId, runId, now: this.now });
       for (const [featureId, refs] of Object.entries(input.verifiedEvidenceRefs ?? {})) {
         const values = [];
         for (const ref of refs) values.push(await this.evidenceStore.read(ref));
@@ -265,7 +271,16 @@ export class HarnessKernel {
     }
     return this.authorityStore.transact(projectId, runId, { expectedRevision: command.expectedRevision, commandId: command.commandId, payload: input }, state => {
       assert(['ordinary-resume', 'hard-recovery'].includes(input.mode), 'RECOVERY_MODE_INVALID', 'Recovery mode must be ordinary-resume or hard-recovery.');
-      const archive = { epoch: state.epoch, generation: state.generation, authorityDigest: state.authorityDigest, status: state.status, archivedAt: this.now(), mode: input.mode, rollbackSnapshotRef: input.rollbackSnapshotRef ?? null };
+      if (input.mode === 'hard-recovery') {
+        assert(recoveryVerification.authorityEpoch === state.epoch && recoveryVerification.authorityGeneration === state.generation && recoveryVerification.targetEpoch === state.epoch + 1, 'RECOVERY_VERIFICATION_CONTEXT_MISMATCH', 'Recovery verification Receipt does not match the current Authority epoch and generation.');
+        assert(recoveryVerification.assessmentDigest === input.assessmentDigest && recoveryVerification.sourceDigest === input.sourceDigest, 'RECOVERY_VERIFICATION_CONTEXT_MISMATCH', 'Hard recovery inputs do not match the verified Capsule.');
+        assertHardRecoveryDecision(state, input.authorityDecisionId, recoveryVerification, this.now);
+      }
+      const archive = {
+        epoch: state.epoch, generation: state.generation, authorityDigest: state.authorityDigest, status: state.status,
+        archivedAt: this.now(), mode: input.mode, rollbackSnapshotRef: input.rollbackSnapshotRef ?? null,
+        ...(input.mode === 'hard-recovery' ? { commandId: command.commandId, recoveryRequestDigest: input.recoveryRequestDigest, recoveryVerificationRef: input.recoveryVerificationRef, authorityDecisionId: input.authorityDecisionId } : {}),
+      };
       state.recoveryArchives.push(archive);
       state.generation += 1;
       for (const lease of state.leases.filter(activeLease)) { lease.status = 'superseded'; lease.supersededAt = this.now(); }
@@ -291,6 +306,9 @@ export class HarnessKernel {
         state.findings = [];
         state.evidenceRefs = [...new Set([...verifiedEvidence.values()].flatMap(records => records.map(record => record.metadata.ref)))];
         state.metadata.lastRecoveryAssessmentDigest = input.assessmentDigest;
+        state.metadata.lastRecoverySourceDigest = input.sourceDigest;
+        state.metadata.lastRecoveryVerificationRef = input.recoveryVerificationRef;
+        state.metadata.lastRecoveryDecisionId = input.authorityDecisionId;
       }
       event(state, 'run.recovered', { mode: input.mode, previous: archive, epoch: state.epoch, generation: state.generation }, this.now);
       state.status = deriveStatus(state, this.profile(state.profile.id));
@@ -354,6 +372,7 @@ export class HarnessKernel {
       assert(input.artifactDigest && input.artifactDigest !== state.artifactDigest, 'ARTIFACT_REBASE_INVALID', 'Artifact rebase requires a new artifact digest.');
       const impacted = new Set(input.impactedFeatureIds ?? []);
       assert(impacted.size > 0 && [...impacted].every(id => state.features.some(feature => feature.id === id)), 'ARTIFACT_IMPACT_SET_INVALID', 'Artifact rebase requires a valid non-empty Feature impact set.');
+      const decision = assertArtifactRebaseDecision(state, input.decisionId, input, this.now);
       const previous = state.artifactDigest;
       state.artifactDigest = input.artifactDigest;
       state.generation += 1;
@@ -368,9 +387,9 @@ export class HarnessKernel {
       for (const submission of state.submissions.filter(item => impacted.has(item.featureId))) { submission.supersededAt = this.now(); submission.supersededReason = 'artifact-rebase'; }
       state.gates = state.gates.filter(gate => gate.featureId && !impacted.has(gate.featureId));
       state.evidenceRefs = state.submissions.filter(item => !item.supersededAt).flatMap(item => item.evidenceRefs).filter((ref, index, values) => values.indexOf(ref) === index);
-      event(state, 'artifact.rebased', { previousArtifactDigest: previous, artifactDigest: input.artifactDigest, impactedFeatureIds: [...impacted] }, this.now);
+      event(state, 'artifact.rebased', { previousArtifactDigest: previous, artifactDigest: input.artifactDigest, impactedFeatureIds: [...impacted], authorityDecisionId: decision.id }, this.now);
       state.status = deriveStatus(state, this.profile(state.profile.id));
-      return { previousArtifactDigest: previous, artifactDigest: input.artifactDigest, impactedFeatureIds: [...impacted], generation: state.generation };
+      return { previousArtifactDigest: previous, artifactDigest: input.artifactDigest, impactedFeatureIds: [...impacted], authorityDecisionId: decision.id, generation: state.generation };
     });
   }
 

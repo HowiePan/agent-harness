@@ -1,6 +1,6 @@
 # Agent Harness
 
-**状态**：Repository Extraction Ready；抽离后 Recovery 修复、正式发布、现场恢复与切换尚未完成  
+**状态**：Repository Extraction Ready；Recovery、本地 G6 候选工具链、MIT 与 clean-start 决定已完成，远端 CI/发布和正式制品 Run Canary 尚未完成
 **定位**：与业务项目、Agent 工具和模型供应商解耦的持久化 Agent 工作流控制面
 
 Agent Harness 负责把需求、工作图、Agent 执行、确定性 Gate、审核、人工决定和恢复组织成可持久化、可审计、可替换执行工具的流程。业务仓默认不保存 Harness 实现、运行状态、Prompt 或 Harness 技术文档。
@@ -66,7 +66,8 @@ V1.0.0 不迁移旧源码，也不让业务仓保存 Harness 运行状态。旧 
 ```powershell
 npm test
 npm run check
+npm run build:release-candidate
 node bin/agent-harness.mjs doctor --data-root .tmp/doctor
 ```
 
-`doctor` 只验证路径、发布摘要和扩展安装回执，不执行 Extension，也不创建目录或文件。CLI 的所有改变状态命令都要求 `--command-id`；`dataRoot` 默认是 Standalone Control Root 下的 `.agent-harness-data/`。完整命令见 [运维手册](docs/operations.md)。
+`build:release-candidate` 只接受干净提交，生成真实 tarball、隔离安装探针与内容寻址 Release Candidate Receipt。`doctor` 只验证路径、发布摘要和扩展安装回执，不执行 Extension，也不创建目录或文件。CLI 的所有改变状态命令都要求 `--command-id`；`dataRoot` 默认是 Standalone Control Root 下的 `.agent-harness-data/`。完整命令见 [运维手册](docs/operations.md)。

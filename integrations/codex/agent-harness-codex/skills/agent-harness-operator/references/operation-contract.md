@@ -21,7 +21,7 @@ Stop and report the exact Authority state when a user decision is required, a re
 
 ## Recovery
 
-Ordinary resume invalidates obsolete Transport and continues the same Epoch under a new Generation. Hard recovery requires a verified assessment or Recovery Capsule, archives a rollback snapshot, creates a new Epoch, invalidates every legacy Lease, and marks prior completion for current-evidence revalidation. Never execute code stored in a Recovery Capsule.
+Ordinary resume invalidates obsolete Transport and continues the same Epoch under a new Generation. Hard recovery requires a fully verified Recovery Capsule: reject links and source drift, recompute the strict manifest/assessment/payload inventory, and create a time-bounded content-addressed verification Receipt bound to the exact Importer, project, run, current generation, and target Epoch. Record a separate approved `live-hard-recovery` Decision that binds the verification reference, expected revision, and target Epoch; then execute through the Recovery Coordinator with that Decision ID and a stable command ID. The Coordinator re-verifies the Capsule, archives a rollback snapshot, creates the new Epoch, invalidates every legacy Lease, and marks prior completion for current-evidence revalidation. Never accept a standalone assessment JSON or execute code stored in a Recovery Capsule.
 
 ## Output control
 

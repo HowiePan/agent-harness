@@ -49,7 +49,28 @@ Codex 工具集成位于 `integrations/codex/agent-harness-codex/`，是带 `.co
 
 完整路径分类、生命周期和业务 Feature 输出的唯一例外见 [写入路径与清理策略](path-policy.md)。
 
-进程异常时重新启动会处理 journal。revision 冲突应重新读取后重放同一个 command ID；不要手工编辑 Authority JSON。普通断线使用 `run recover` 废止 Transport；格式变化或旧系统迁移使用 Legacy Recovery，不能伪装成 resume。先使用显式 `agent-harness/extensions/legacy-compat` Extension 创建带摘要和容量限制的 Recovery Capsule；Capsule 只保留状态与 Evidence，拒绝源码、脚本、EXE、DLL 与 PDB。协调式 hard recovery 会先写入内容寻址的 Authority 回滚快照；必要时使用 `run recovery-rollback --snapshot-ref <ref>` 建立另一个安全 Epoch，旧完成态仍须重验。
+进程异常时重新启动会处理 journal。revision 冲突应重新读取后重放同一个 command ID；不要手工编辑 Authority JSON。普通断线使用 `run recover` 废止 Transport；格式变化或旧系统迁移使用 Legacy Recovery，不能伪装成 resume。先使用显式 `agent-harness/extensions/legacy-compat` Extension 创建带摘要和容量限制的 Recovery Capsule，再用 `recovery capsule-verify --project <id> --run <id>` 生成绑定 Capsule、Importer、Run 和目标 Epoch 的内容寻址 verification Evidence。把该 Evidence ref 写入有有效期的 `live-hard-recovery` approved Decision 后，使用显式 `--capsule-verification`、`--decision-id`、`--expected-revision` 和 `--command-id` 执行 hard recovery。Capsule 只保留状态与 Evidence，拒绝源码、脚本、EXE、DLL 与 PDB；协调式 hard recovery 会先写入 Authority 回滚快照，必要时使用 `run recovery-rollback --snapshot-ref <ref>` 建立另一个安全 Epoch，旧完成态仍须重验。
+
+如果文档冻结的旧状态根已经不存在，禁止创建空 Capsule 或把 dry-run Fixture 当成现场事实。只有项目所有者提交 `legacy-source-unavailable-clean-start` acknowledgement 后，才可使用 `recovery source-unavailable` 生成内容寻址迁移 Receipt；该 Receipt 固定声明 Capsule、legacy Authority import 与 live hard recovery 均不可用，唯一允许的后续路径是创建全新 Run。
+
+hard recovery Decision 的最小输入如下；`context.expectedRevision` 是记录该 Decision 后、执行 recovery 命令时预期的 Authority revision：
+
+```json
+{
+  "id": "approve-recovery-001",
+  "actor": "project-owner",
+  "decision": "approved",
+  "action": "live-hard-recovery",
+  "expiresAt": "2026-09-13T12:00:00.000Z",
+  "context": {
+    "projectId": "project-id",
+    "runId": "run-id",
+    "verificationRef": "evidence:<content-digest>:<metadata-digest>",
+    "targetEpoch": 2,
+    "expectedRevision": 7
+  }
+}
+```
 
 ## 故障响应
 
@@ -61,4 +82,4 @@ Codex 工具集成位于 `integrations/codex/agent-harness-codex/`，是带 `.co
 
 ## 发布与升级
 
-发布候选包含源码、Schema、Profile、Extension、Codex Skills、插件 manifest、checksum 清单和 SPDX SBOM。升级前验证 Extension/Plugin/Profile 版本和存储迁移说明；先封存状态快照并在复制的数据根执行 canary。密码学签名、发布、真实切换与旧内容删除由项目所有者批准和执行。缺陷上报、不可变修复和紧急 commit 绑定见 [缺陷、升级与回滚](maintenance.md)。
+发布候选包含源码、Schema、Profile、Extension、Codex Skills、插件 manifest、checksum 清单和 SPDX SBOM。`npm run build:release-candidate` 拒绝脏工作树，构建真实 tarball，核对 manifest/SBOM/包内容，在隔离控制根安装并验证插件与两个 Skill，最终写入 `.agent-harness-data/release-candidates/<version>/<archive-sha256>/`。升级前验证 Extension/Plugin/Profile 版本和存储迁移说明；先封存状态快照并在复制的数据根执行 canary。运行中 `artifact-rebase` 必须先记录有有效期的 `artifact-rebase` Decision，绑定当前 revision、旧/新制品摘要与影响 Feature 集合。密码学签名、发布、真实切换与旧内容删除由项目所有者批准和执行。缺陷上报、不可变修复和紧急 commit 绑定见 [缺陷、升级与回滚](maintenance.md)。

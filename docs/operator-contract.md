@@ -21,3 +21,5 @@ Harness 数据、临时目录、调试输出、构建制品和缓存只能写入
 ## 权限边界
 
 真实 cutover、live hard recovery、发布、不可逆存储迁移、Legacy Capsule 销毁以及旧 Harness 删除都要求用户在动作前单独批准。迁移计划、验收通过或旧内容已不再使用，都不构成删除授权。
+
+live hard recovery 只允许走 Recovery Coordinator：先对 Capsule 执行严格完整验证并生成有有效期的内容寻址 verification Evidence，再记录 `live-hard-recovery` approved Decision。Decision 上下文必须绑定 project、run、verification ref、命令使用的 expected revision 和目标 epoch；执行命令必须提供稳定 command ID。普通 assessment JSON、缺失或过期 Decision、上下文错配和绕过 Coordinator 的 Kernel 调用一律拒绝。

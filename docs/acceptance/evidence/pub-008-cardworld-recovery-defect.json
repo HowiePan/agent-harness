@@ -1,0 +1,25 @@
+{
+  "protocolVersion": "1.0",
+  "harness": {
+    "version": "1.0.0",
+    "artifactDigest": "25ddddf3ccd4f08175317f3b742ace32f73b327caf02d7723a33098bcda5b5f1",
+    "commit": "39801cdff9f7d0b3c3f3298e8b3f9c3ea1c91a24"
+  },
+  "extensions": [],
+  "descriptorDigest": "2bb402b9eecc3683037bba3cdf4d6a602fded0cec5059233cdd61c191ca2e824",
+  "command": { "operation": "recovery.capsule-create" },
+  "authorityRevision": 0,
+  "dispatchIds": [],
+  "evidenceRefs": [],
+  "expected": { "assessmentSource": "immutable-staging", "sourceStableAcrossCopy": true },
+  "actual": { "assessmentSource": "mutable-legacy-root", "sourceStabilityUnverified": true },
+  "reproduction": {
+    "fixture": "synthetic-changing-source",
+    "steps": ["inventory source", "copy source", "mutate source", "run assessment"]
+  },
+  "sanitization": {
+    "confirmed": true,
+    "removed": ["workspace path", "legacy payload", "runtime output", "credentials"]
+  },
+  "bundleDigest": "a87a80505d71a2db0b4d59d65819f67171417be061a44cb977a52d6185af95aa"
+}

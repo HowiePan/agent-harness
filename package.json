@@ -3,9 +3,12 @@
   "version": "1.0.0",
   "description": "Portable authority-first orchestration harness for agent workflows",
   "type": "module",
-  "license": "UNLICENSED",
+  "license": "MIT",
   "engines": {
     "node": ">=22"
+  },
+  "releaseMetadata": {
+    "createdAt": "2026-09-13T00:00:00.000Z"
   },
   "bin": {
     "agent-harness": "bin/agent-harness.mjs"
@@ -52,6 +55,7 @@
     "check:clean-room": "node scripts/check-clean-room.mjs",
     "check:residue": "node scripts/check-residue.mjs",
     "build:release-metadata": "node scripts/build-release-metadata.mjs",
+    "build:release-candidate": "node scripts/build-release-candidate.mjs",
     "pack:dry-run": "node scripts/pack-dry-run.mjs"
   }
 }

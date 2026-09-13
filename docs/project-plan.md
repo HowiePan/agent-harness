@@ -1,7 +1,7 @@
 # Agent Harness V1.0.0 完整版本方案
 
 **版本**：V1.0.0  
-**状态**：Repository Extraction Ready；抽离后 RCV 修复、发布、真实 Recovery Capsule、切换和删除资格待完成  
+**状态**：Repository Extraction Ready；抽离后 RCV 修复完成，发布、真实 Recovery Capsule 和切换待完成
 **发布策略**：不发布中间小版本；内部 Wave 只作为实施和验证检查点  
 **迁移策略**：旧实现不复制、不再作为参考；现场只读状态封装、真实迁移与切换仍关闭，旧 Harness 删除只由用户决定
 
@@ -446,7 +446,7 @@ read-only discovery
 | W7 | ✅ 候选 | Collection Profile、10 游戏逻辑/隔离物理并发、Importer 与现场只读 dry-run |
 | W8 | ✅ | 非 Codex process Runtime、1000 Feature 压测、三类零驻留 Canary |
 | W9 制品 | ✅ | checksum manifest、SPDX SBOM、运维/恢复文档、npm dry-run |
-| 抽离后 RCV | 🔧 待修复 | 一致性快照、完整验证、Capsule/Decision 绑定、链接拒绝与负向测试；见 `docs/post-extraction-register.md` |
+| 抽离后 RCV | ✅ | 一致性 staging、完整验证、verification Evidence、Authority Decision、链接拒绝与负向测试完成 |
 | 抽离后 PUB-008 | 🧪 待演练 | Card World 发起脱敏缺陷、独立上游修复、制品/Descriptor 升级、原 Run 续跑与 rollback；Collection 回归 Canary |
 | W9 真实 cutover | ⏸ 待审批 | 必须指定真实 Run、新 `dataRoot`、回滚点和切换时间 |
 

@@ -1,0 +1,27 @@
+{
+  "protocolVersion": "1.0",
+  "recordedAt": "2026-09-13T07:31:16.028Z",
+  "ownerDecision": {
+    "license": "MIT",
+    "repositoryPublishAuthorized": true,
+    "legacyAuthorityDisposition": "new-run-clean-start"
+  },
+  "projects": [
+    {
+      "projectId": "cardworld-engine",
+      "legacyRoot": "F:\\CardWorld\\.harness\\engine",
+      "observation": "absent",
+      "receiptRef": "migration-receipt:3a032d8b08c7b7a37a622d87ba5f9e015b59dedb9559d3f7d4338ac24747b59f",
+      "commandId": "cutover-cardworld-source-unavailable-20260913",
+      "allowedNextStep": "new-run-clean-start"
+    },
+    {
+      "projectId": "tabletop-collection",
+      "legacyRoot": "F:\\CardWorld\\tabletop-collection\\runs",
+      "observation": "absent",
+      "receiptRef": "migration-receipt:bdd1c962398fce69b183f68c361742bbf6e40a3c9871ac5ef60302e1663d384d",
+      "commandId": "cutover-collection-source-unavailable-20260913",
+      "allowedNextStep": "new-run-clean-start"
+    }
+  ]
+}

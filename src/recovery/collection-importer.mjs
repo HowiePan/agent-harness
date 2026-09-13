@@ -19,7 +19,7 @@ export class CollectionLegacyImporter {
       if (completed.length) facts.push({ id: `${file.path}#completed`, disposition: 'stale-revalidate', reason: 'path-evidence-is-not-current-evidence', count: completed.length, sourceSha256: file.sha256 });
       if (blocked.length) facts.push({ id: `${file.path}#blocked`, disposition: 'log-only', reason: 'blockers-require-current-artifact-assessment', count: blocked.length, sourceSha256: file.sha256 });
     }
-    const report = { protocolVersion: '1.0', importer: { id: this.id, version: this.version }, kind: 'collection-m2-b1', legacyRoot: inventory.root, sourceDigest: inventory.sourceDigest, fileCount: inventory.files.length, facts, allowedDispositions: ['verified-current', 'stale-revalidate', 'log-only', 'invalid', 'superseded'] };
+    const report = { protocolVersion: '1.0', importer: { id: this.id, version: this.version }, kind: 'collection-m2-b1', legacyRoot: inventory.root, sourceDigest: inventory.sourceDigest, fileCount: inventory.files.length, facts, allowedDispositions: ['verified-current', 'stale-revalidate', 'log-only', 'invalid', 'superseded', 'legacy-only'] };
     return { ...report, assessmentDigest: digestJson(report) };
   }
 }

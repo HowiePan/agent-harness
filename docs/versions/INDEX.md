@@ -1,7 +1,7 @@
 # Agent Harness 版本索引
 
 **目标版本**：V1.0.0  
-**状态**：Repository Extraction Ready；RCV 修复、独立远端/许可证与真实 Recovery Capsule Gate 待完成  
+**状态**：Repository Extraction Ready；RCV 修复与 MIT 授权完成，远端发布证据和 clean-start Cutover Gate 待完成
 **中间发布**：无
 
 | 版本 | 状态 | 主题 |

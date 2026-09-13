@@ -1,0 +1,61 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-harness.local/schemas/legacy-source-disposition.schema.json",
+  "title": "Agent Harness Legacy Source Disposition Receipt",
+  "type": "object",
+  "required": ["protocolVersion", "kind", "commandId", "expectedRevision", "requestDigest", "projectId", "legacyRoot", "importer", "observation", "decision", "consequences", "observedAt", "receiptDigest"],
+  "properties": {
+    "protocolVersion": { "const": "1.0" },
+    "kind": { "const": "legacy-source-unavailable" },
+    "commandId": { "type": "string", "minLength": 1 },
+    "expectedRevision": { "const": 0 },
+    "requestDigest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "projectId": { "type": "string", "minLength": 1 },
+    "legacyRoot": { "type": "string", "minLength": 1 },
+    "importer": {
+      "type": "object",
+      "required": ["id", "version"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "version": { "type": "string", "pattern": "^\\d+\\.\\d+\\.\\d+$" }
+      },
+      "additionalProperties": false
+    },
+    "observation": { "const": "absent" },
+    "decision": {
+      "type": "object",
+      "required": ["id", "actor", "decision", "action", "context"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "actor": { "type": "string", "minLength": 1 },
+        "decision": { "const": "acknowledged" },
+        "action": { "const": "legacy-source-unavailable-clean-start" },
+        "context": {
+          "type": "object",
+          "required": ["projectId", "legacyRoot", "importerId"],
+          "properties": {
+            "projectId": { "type": "string", "minLength": 1 },
+            "legacyRoot": { "type": "string", "minLength": 1 },
+            "importerId": { "type": "string", "minLength": 1 }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "consequences": {
+      "type": "object",
+      "required": ["recoveryCapsule", "liveHardRecovery", "legacyAuthorityImport", "allowedNextStep"],
+      "properties": {
+        "recoveryCapsule": { "const": "unavailable" },
+        "liveHardRecovery": { "const": "forbidden" },
+        "legacyAuthorityImport": { "const": "forbidden" },
+        "allowedNextStep": { "const": "new-run-clean-start" }
+      },
+      "additionalProperties": false
+    },
+    "observedAt": { "type": "string", "format": "date-time" },
+    "receiptDigest": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+  },
+  "additionalProperties": false
+}

@@ -17,8 +17,19 @@ jobs:
         with:
           node-version: 22
       - run: npm ci --ignore-scripts
+      - run: npm run build:release-metadata
+      - run: git diff --exit-code -- release-manifest.json sbom.spdx.json
       - run: npm run check
       - run: npm test
+      - run: npm run test:conformance
+      - run: npm run test:canary
       - run: npm run check:clean-room
       - run: npm run pack:dry-run
+      - run: npm run build:release-candidate
       - run: node scripts/check-residue.mjs
+      - run: node bin/agent-harness.mjs doctor --data-root .tmp/doctor
+      - uses: actions/upload-artifact@v4
+        with:
+          name: agent-harness-v1.0.0-${{ matrix.os }}
+          path: .agent-harness-data/release-candidates/**
+          if-no-files-found: error

@@ -7,7 +7,7 @@ import { extensionPack as collectionBatchExtension } from '../src/consumers/tabl
 let sequence = 0;
 export const command = state => ({ commandId: `test-command-${++sequence}`, ...(state ? { expectedRevision: state.revision } : {}) });
 
-export const makeFixture = async ({ projectId = 'project', profiles = ['feature-delivery'], policy = {}, gateRecipes = [], artifactProviders = [], extensions = [] } = {}) => {
+export const makeFixture = async ({ projectId = 'project', profiles = ['feature-delivery'], policy = {}, gateRecipes = [], artifactProviders = [], extensions = [], releaseIdentity = { version: '1.0.0', artifactDigest: null } } = {}) => {
   const parent = resolve(harnessTemporaryRoot(), 'tests');
   await mkdir(parent, { recursive: true });
   const root = await mkdtemp(resolve(parent, 'case-'));
@@ -25,7 +25,7 @@ export const makeFixture = async ({ projectId = 'project', profiles = ['feature-
     await rmdir(harnessTemporaryRoot()).catch(error => { if (!['ENOENT', 'ENOTEMPTY'].includes(error.code)) throw error; });
   };
   try {
-    const harness = await createHarness({ dataRoot, releaseIdentity: { version: '1.0.0', artifactDigest: null }, strictProjectIdentity: false, extensions: [...profileExtensions, ...extensions] });
+    const harness = await createHarness({ dataRoot, releaseIdentity, strictProjectIdentity: false, extensions: [...profileExtensions, ...extensions] });
     const testRuntimeManifest = { id: 'test-runtime', kind: 'agent-runtime', version: '1.0.0', capabilities: ['spawn', 'wait', 'send', 'heartbeat', 'interrupt'], permissions: [] };
     harness.registerPlugin(testRuntimeManifest, createInMemoryRuntime({ manifest: testRuntimeManifest, handler: async () => ({ status: 'completed', summary: 'test runtime completed' }) }));
     await harness.projectRegistry.register({ id: projectId, workspace: { root: workspace }, profiles, policy, gateRecipes, artifactProviders }, { commandId: `register-${projectId}` });

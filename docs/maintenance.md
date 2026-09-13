@@ -51,6 +51,8 @@ Card World 发现 Harness 行为异常
 
 Card World 完成完整演练后，Collection 必须使用同一协议做一次 Consumer 回归 Canary，至少验证其 Profile、Extension 身份、10 Feature 并发、批间 Barrier 和升级/回滚兼容性。若 Collection 暴露通用缺陷，仍回到同一上游；若只是 Collection 业务差异，则修改对应 Profile/Extension，不向 Kernel 添加项目分支。
 
+本次抽离后审计识别出的 Capsule 可变源竞态作为 PUB-008 输入，见[脱敏缺陷包](acceptance/evidence/pub-008-cardworld-recovery-defect.json)。本地测试覆盖独立复现、制品重绑、原 Authority 与 Attempt Budget 续用、影响集 rebase，以及失败升级恢复旧绑定。正式关闭仍要求干净修复提交、该提交的 Release Candidate Receipt 和远端 CI。
+
 ## 升级与回滚
 
 升级前封存 Authority、Evidence 索引、Project Registry 和存储 Schema 快照。迁移必须幂等并记录 Receipt。可逆迁移可执行 down migration；不可逆迁移只能恢复升级前快照，并重新建立更高 Epoch/Generation，禁止手工回写 Authority。

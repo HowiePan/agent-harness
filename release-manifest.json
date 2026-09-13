@@ -3,7 +3,7 @@
   "name": "agent-harness",
   "version": "1.0.0",
   "node": ">=22",
-  "license": "UNLICENSED",
+  "license": "MIT",
   "files": [
     {
       "path": "bin/agent-harness.mjs",
@@ -16,9 +16,19 @@
       "size": 1126
     },
     {
+      "path": "docs/acceptance/evidence/cutover-source-dispositions.json",
+      "sha256": "cdb83f5e47d6ff91fcbcdcff9922432a004b1148790ecf475383f145f2daa687",
+      "size": 971
+    },
+    {
+      "path": "docs/acceptance/evidence/pub-008-cardworld-recovery-defect.json",
+      "sha256": "83dd27ebf4ae656e6d1255406c10ecf5a7deae00f17a97a25f1c29c94704f7f9",
+      "size": 1015
+    },
+    {
       "path": "docs/acceptance/v1.0.0.md",
-      "sha256": "8d892fa4149a5368d0e4918dbf28b19122aff6be9ff16b78cbcd4ac3db8021da",
-      "size": 5959
+      "sha256": "a6fd60859200f2c02a42e195a60b3afd4bd7e5a71b88c1fbd97541f18ca2f33d",
+      "size": 7045
     },
     {
       "path": "docs/architecture.md",
@@ -82,8 +92,8 @@
     },
     {
       "path": "docs/decisions/0002-independent-project-boundary.md",
-      "sha256": "fb337e8ed4a190d078d9ad01e83080ee560b5ba86be77efbe19b1f475bbe42d7",
-      "size": 980
+      "sha256": "6ca99442a8c937f59e1d17fbe60dd7ce20069f9fc80c239e01f876cc02ac1fe8",
+      "size": 1024
     },
     {
       "path": "docs/execution-control.md",
@@ -97,23 +107,23 @@
     },
     {
       "path": "docs/maintenance.md",
-      "sha256": "b77fff411fb2b8a45958c3495bee449ebaca075d6456a400f59586815cf2dccb",
-      "size": 4081
+      "sha256": "913fbd7bd455d36ba98cac20b2524cd985f2f97a3a53dfc868c169b164f5525b",
+      "size": 4488
     },
     {
       "path": "docs/migration-gates.md",
-      "sha256": "ac5e5f12c24fe3a3a6b1b322176e80b2b55e650a875fb4eda20eae5730aad106",
-      "size": 2422
+      "sha256": "6e1b3c0fb0c428617e6943e41bb0048176f37e50eb5eb6067dd75695132ba574",
+      "size": 3099
     },
     {
       "path": "docs/operations.md",
-      "sha256": "e14cd9760424255913343bb6826d19dea7a25677f53abed1de687fb119beb22a",
-      "size": 6560
+      "sha256": "8146217f72bb73c806438e4040d541809dbc85d0cb8a80ca586253838f6465f8",
+      "size": 8283
     },
     {
       "path": "docs/operator-contract.md",
-      "sha256": "8554eb061f923802ecf804ae2041b781b4bae17316b282278521bc0b206be743",
-      "size": 1879
+      "sha256": "363044260e3f184fd34cc00f1a327980cb4ebf2797b9d195b342b1a7bb97fc32",
+      "size": 2370
     },
     {
       "path": "docs/path-policy.md",
@@ -122,13 +132,13 @@
     },
     {
       "path": "docs/plugin-sdk.md",
-      "sha256": "7693db7b5a24eabd1ae201c9cc2ab77b11f4736e61f218c043b4d15e7f881e2b",
-      "size": 5201
+      "sha256": "abfc9fde47a8485d41a1d495a6bcd8187a0c529f3652342dac7363dff30050c1",
+      "size": 5668
     },
     {
       "path": "docs/post-extraction-register.md",
-      "sha256": "04e33a4b4f85f0b34aec23c057461b91291bf14e2e1507b8bd2c398094eba65c",
-      "size": 7919
+      "sha256": "4fdc11a759f543b8b05375a4929b25d37bb7338a8c46e6e094dc1e09a1c3f316",
+      "size": 8560
     },
     {
       "path": "docs/profiles.md",
@@ -137,8 +147,8 @@
     },
     {
       "path": "docs/project-plan.md",
-      "sha256": "bbed342e2d9302afc1a97a3c1b403170762054911fb15d3417b5f6e4ac1d5da5",
-      "size": 18380
+      "sha256": "0ae43f270ba674fb7dcf264ca934b229b1b9d2fe48c4776fe7c9dfad5a514f48",
+      "size": 18345
     },
     {
       "path": "docs/protocol.md",
@@ -147,8 +157,8 @@
     },
     {
       "path": "docs/recovery.md",
-      "sha256": "70026395d25380f947bc97e8b130e8c3216b24de4306da44923bddfcd4227802",
-      "size": 2705
+      "sha256": "9f73c033ea5bcfa95c5992b9a03291a4568ba3b4a1266c570521f8c6aa179e84",
+      "size": 3169
     },
     {
       "path": "docs/recovery/cardworld-t1-t2-dry-run.md",
@@ -162,13 +172,13 @@
     },
     {
       "path": "docs/versions/INDEX.md",
-      "sha256": "d07c2ee9d4bf5b90f1790d46772a819c87ba690e4a489d42733abe35ce53da7f",
-      "size": 1074
+      "sha256": "8d3a7d93999f6297712aa63b9e0f6f61e24775df7f2bc9d7fc1b88a603984ef5",
+      "size": 1085
     },
     {
       "path": "docs/versions/v1.0.0.md",
-      "sha256": "370ef87958b06c1c7ce9b003403d0b8207f5b72e4818f79e935981c363d6a371",
-      "size": 4695
+      "sha256": "397402ed4f0b7ed046aea2a57f744b9a3584521cba7eff014895a27a2a845bd8",
+      "size": 5005
     },
     {
       "path": "examples/collection-project-input.json",
@@ -192,8 +202,8 @@
     },
     {
       "path": "integrations/codex/agent-harness-codex/skills/agent-harness-extension-author/references/extension-contract.md",
-      "sha256": "fc0905d464210b2ef773d6f1a55691b01ded21af4f7ac0d25768b995f6e06739",
-      "size": 1725
+      "sha256": "62edc555233556373d10118fa4489b9b1d432f57263747eb41e9079fac839ced",
+      "size": 2248
     },
     {
       "path": "integrations/codex/agent-harness-codex/skills/agent-harness-extension-author/SKILL.md",
@@ -202,23 +212,23 @@
     },
     {
       "path": "integrations/codex/agent-harness-codex/skills/agent-harness-operator/references/operation-contract.md",
-      "sha256": "6fd35c4308d8bb0b8bb293752ccd8cabfb533456a0db34df5c9d392fd12bec12",
-      "size": 2164
+      "sha256": "c9932b16ac7fc182a69d8be0a71111fa57f075bce732096d5d63ef26f9881597",
+      "size": 2701
     },
     {
       "path": "integrations/codex/agent-harness-codex/skills/agent-harness-operator/SKILL.md",
-      "sha256": "e975694c4aa3148a951f7028dfa36e5365049ff8d584bf8cd642714c9f933244",
-      "size": 1975
+      "sha256": "21ca79385bae354ac45168a3dc28e72b0ea0af13d7644f2e5600674c513812fc",
+      "size": 2207
     },
     {
       "path": "LICENSE",
-      "sha256": "37576030beae44a5a1c26505fb99506ffb14f7c7c13e1c2f8c97cd65e478c468",
-      "size": 257
+      "sha256": "b90a276ee766d2cc454189e959abe4e68565a0ba2fcb65ab424d599a6876131d",
+      "size": 1083
     },
     {
       "path": "package.json",
-      "sha256": "5b3a6e3f7960f38d9c659c1b439de2c85e3e1393f1bd5fb47b024917540e2580",
-      "size": 1948
+      "sha256": "83d91838594a1da480bdd42c823a9b9012a00aee6115db518937f489383c95f8",
+      "size": 2088
     },
     {
       "path": "plugins/codex-cli-runtime.plugin.json",
@@ -257,8 +267,8 @@
     },
     {
       "path": "README.md",
-      "sha256": "3de1a1a6521278921d2b0d29293def3c3b6e9e0cfdb8a3ce6c9481f4b640363e",
-      "size": 5487
+      "sha256": "3770f0a41daa43e913e304ccdee5beccc6714a702543c4e8230e210e8dcabc2f",
+      "size": 5708
     },
     {
       "path": "schemas/authority.schema.json",
@@ -301,9 +311,14 @@
       "size": 620
     },
     {
+      "path": "schemas/legacy-source-disposition.schema.json",
+      "sha256": "e722e05b5e4efc60c3cd682f41afb53fcadae97c3e9f79f4f9c18b178997bdd0",
+      "size": 2583
+    },
+    {
       "path": "schemas/migration-manifest.schema.json",
-      "sha256": "dd18ef8de687f6b254e0d42ffe7db0f8ab159b2a759361d5201b8ee6f09ce273",
-      "size": 1245
+      "sha256": "026bdb9198c2965f49a9549e89cd35ef2193ca1d6edda869eb030e0dc7c65bf8",
+      "size": 2091
     },
     {
       "path": "schemas/plugin-manifest.schema.json",
@@ -322,8 +337,18 @@
     },
     {
       "path": "schemas/recovery-capsule.schema.json",
-      "sha256": "d2773d55b750f75c46c37a8118ca537571987ca5e8d65924e8a0771e44314704",
-      "size": 1355
+      "sha256": "7e67a3a85137635e795cb7919041ce0d2895a94d384e05662790d2838378209c",
+      "size": 1715
+    },
+    {
+      "path": "schemas/recovery-verification.schema.json",
+      "sha256": "7d8984fc7a66af6ff6c0c042b11191567ee6086d90cd185bf21950a6c29cb016",
+      "size": 1841
+    },
+    {
+      "path": "schemas/release-candidate-receipt.schema.json",
+      "sha256": "1fcafa33040f157ff2ba67de3c4aea04ef83e8079d9ecc1bf17a526f918c69c2",
+      "size": 2793
     },
     {
       "path": "schemas/result.schema.json",
@@ -352,8 +377,8 @@
     },
     {
       "path": "src/cli.mjs",
-      "sha256": "7a51c212c3e99171f821ac14ba57e80c51781bafe12690c305f54bee9315aff8",
-      "size": 21180
+      "sha256": "2ff61942b0dfa36f8373acc6fd38ae09aeaf99f92b10582e9f229c5270744325",
+      "size": 22131
     },
     {
       "path": "src/consumers/cardworld-engine.mjs",
@@ -452,8 +477,8 @@
     },
     {
       "path": "src/kernel/kernel.mjs",
-      "sha256": "b69c5b7691b8152d7d3ebe0239c707826e8b3ef685a6c5cbb48181c83c63ba07",
-      "size": 30508
+      "sha256": "04775f26ba079c97e3a8b37c09b39a997de5f76fd35e01ec301754ef72a8d6fb",
+      "size": 32509
     },
     {
       "path": "src/kernel/quality.mjs",
@@ -477,8 +502,18 @@
     },
     {
       "path": "src/maintenance/index.mjs",
-      "sha256": "8c9231aa513d73a00d324c9d90eb529a384b206c656f704aeb9473a337c71b53",
-      "size": 79
+      "sha256": "e4629b2262a9c37a2c5db50b7f6b15e23784a3e26bd7a4386ddc2309d088b2eb",
+      "size": 254
+    },
+    {
+      "path": "src/maintenance/release-receipt.mjs",
+      "sha256": "07c43832549222ca29de056d3e7e7b337d03fa4afc0febacbc42ef0320542804",
+      "size": 1028
+    },
+    {
+      "path": "src/maintenance/upgrade-authorization.mjs",
+      "sha256": "92ef7033e0efd2c41b337331fc22e6387bf54ac29cd29de6919576659ffa19a8",
+      "size": 1681
     },
     {
       "path": "src/paths.mjs",
@@ -621,9 +656,14 @@
       "size": 895
     },
     {
+      "path": "src/recovery/authorization.mjs",
+      "sha256": "9e96fa12ce11696e9068a25167140335a58f8f42a64d2f1a815fc6f0ad18b5be",
+      "size": 1488
+    },
+    {
       "path": "src/recovery/capsule.mjs",
-      "sha256": "f170481eacc8f95dc409ca2336d1128f4ebafb9c6956d662c39d41728cd0cbd1",
-      "size": 5940
+      "sha256": "fc8ae2c906a42ba92ff7579d21d1ec598c9b524a02fd9e07b4ce7754a717ac4a",
+      "size": 10141
     },
     {
       "path": "src/recovery/cardworld-importer.mjs",
@@ -632,23 +672,33 @@
     },
     {
       "path": "src/recovery/collection-importer.mjs",
-      "sha256": "560fa690e95ee63b2556c2a98a8c522441aed2c5190caeabe4efd77f31c0f152",
-      "size": 2227
+      "sha256": "fc127cca5a7bdb8ee5c7887c250b94ed3c18b638e02f5fb0c7c0d7505d6bd864",
+      "size": 2242
     },
     {
       "path": "src/recovery/coordinator.mjs",
-      "sha256": "93208db527ce3a280e0b244f13ef7775842ddb9bd7947a4ad1b3583f185130d0",
-      "size": 3398
+      "sha256": "f60b87fa8f397e053e8ec9c88b890a3a6110fe1582a30d78fbbb6cd3128efcef",
+      "size": 8204
     },
     {
       "path": "src/recovery/index.mjs",
-      "sha256": "b8c65434e2f3e66b26f5bdba29a96414729d81dc5e08c9a223f51bd10641dfe8",
-      "size": 184
+      "sha256": "7d96e0fc7781385cc334c97e643eba47cedeef22eeeb0d737038c2d30febc6fe",
+      "size": 289
     },
     {
       "path": "src/recovery/inventory.mjs",
-      "sha256": "b4c52ec29fe1d189862881cbadb0ec02b9c934c778c8bf7c296d98dd2fa37b9d",
-      "size": 1145
+      "sha256": "d2918c231f1d8e21ebb65d9b7972b9c2cf7d61d350765ecd33d20746a9578cb6",
+      "size": 1716
+    },
+    {
+      "path": "src/recovery/source-disposition.mjs",
+      "sha256": "6cb50cf196f3b8abb8e9fe59963dc29bc20cb4ad5ad8e6041e2f91d2b1af8e8f",
+      "size": 4522
+    },
+    {
+      "path": "src/recovery/verification.mjs",
+      "sha256": "abfca21167b25224fe18f9697cc2117754c76a922941870a131daa0d39c20096",
+      "size": 2999
     },
     {
       "path": "src/registry/project-contract.mjs",
@@ -686,10 +736,10 @@
       "size": 3735
     }
   ],
-  "packageDigest": "25ddddf3ccd4f08175317f3b742ace32f73b327caf02d7723a33098bcda5b5f1",
+  "packageDigest": "614521bc91ea49d65098c9469973f80e7ab1fa4b6c8beb6940ee82996a71d6cf",
   "metadataFiles": [
     "release-manifest.json",
     "sbom.spdx.json"
   ],
-  "generatedAt": "2026-09-13T03:53:03.218Z"
+  "generatedAt": "2026-09-13T00:00:00.000Z"
 }

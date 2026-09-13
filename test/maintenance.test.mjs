@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { readFile } from 'node:fs/promises';
 import { createDefectBundle, verifyDefectBundle } from '../src/index.mjs';
 
 const digest = 'a'.repeat(64);
@@ -29,3 +30,9 @@ test('Defect Bundle rejects common secret and prompt fields', () => {
   assert.throws(() => createDefectBundle({ ...input, reproduction: { fixture: 'synthetic', accessToken: 'redacted' } }), error => error.code === 'DEFECT_SENSITIVE_FIELD_REJECTED');
 });
 
+test('PUB-008 sanitized consumer defect fixture remains independently reproducible', async () => {
+  const bundle = JSON.parse(await readFile(new URL('../docs/acceptance/evidence/pub-008-cardworld-recovery-defect.json', import.meta.url), 'utf8'));
+  assert.deepEqual(verifyDefectBundle(bundle), bundle);
+  assert.equal(bundle.reproduction.fixture, 'synthetic-changing-source');
+  assert.equal(bundle.sanitization.removed.includes('credentials'), true);
+});

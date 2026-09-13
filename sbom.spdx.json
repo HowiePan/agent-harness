@@ -3,9 +3,9 @@
   "dataLicense": "CC0-1.0",
   "SPDXID": "SPDXRef-DOCUMENT",
   "name": "agent-harness-1.0.0",
-  "documentNamespace": "https://agent-harness.local/spdx/25ddddf3ccd4f08175317f3b742ace32f73b327caf02d7723a33098bcda5b5f1",
+  "documentNamespace": "https://agent-harness.local/spdx/614521bc91ea49d65098c9469973f80e7ab1fa4b6c8beb6940ee82996a71d6cf",
   "creationInfo": {
-    "created": "2026-09-13T03:53:03.218Z",
+    "created": "2026-09-13T00:00:00.000Z",
     "creators": [
       "Tool: agent-harness-build-release-metadata-1.0.0"
     ]
@@ -18,11 +18,11 @@
       "downloadLocation": "NOASSERTION",
       "filesAnalyzed": true,
       "licenseConcluded": "NOASSERTION",
-      "licenseDeclared": "UNLICENSED",
+      "licenseDeclared": "MIT",
       "checksums": [
         {
           "algorithm": "SHA256",
-          "checksumValue": "25ddddf3ccd4f08175317f3b742ace32f73b327caf02d7723a33098bcda5b5f1"
+          "checksumValue": "614521bc91ea49d65098c9469973f80e7ab1fa4b6c8beb6940ee82996a71d6cf"
         }
       ]
     }

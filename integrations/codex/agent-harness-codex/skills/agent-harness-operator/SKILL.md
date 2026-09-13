@@ -18,6 +18,6 @@ After `start`, `resume`, or any scheduling action, keep coordinating while the r
 
 Never edit Authority files directly, reuse a command ID with different input, promote legacy completion without current-epoch Evidence, or bypass required P0-P3 findings and final Gates. A Runtime, model, tool, or sandbox is selected through the Project Descriptor and installed Extension Packs; do not assume a provider.
 
-Obtain explicit user approval immediately before a real cutover, hard recovery of a live run, publication, destructive cleanup, or deletion of any legacy Harness. The existence of a migration plan is not deletion approval.
+Obtain explicit user approval immediately before a real cutover, hard recovery of a live run, publication, destructive cleanup, or deletion of any legacy Harness. A live hard recovery must use a fresh content-addressed Capsule verification reference plus a recorded `live-hard-recovery` approval whose context binds the project, run, expected revision, verification reference, and target Epoch. The existence of a migration plan is not deletion approval.
 
 For detailed event handling, recovery, and stopping conditions, read [references/operation-contract.md](references/operation-contract.md).
