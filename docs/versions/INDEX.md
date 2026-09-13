@@ -1,7 +1,7 @@
 # Agent Harness 版本索引
 
 **目标版本**：V1.0.0  
-**状态**：Repository Extraction Ready；RCV 修复与 UNLICENSED 决定完成，远端发布证据和 clean-start Cutover Gate 待完成
+**状态**：Local Clean-start Cutover Ready；RCV、UNLICENSED、本地候选制品和制品绑定 Cutover Canary 完成；远端 CI/发布延期
 **中间发布**：无
 
 | 版本 | 状态 | 主题 |

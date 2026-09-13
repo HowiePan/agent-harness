@@ -17,4 +17,4 @@ V1.0.0 将“仓库抽离就绪”“发布候选就绪”和“生产切换就�
 
 G0-G5 全部通过只能标记为 **Repository Extraction Ready**，即允许把源码提交到独立仓库。RCV 与 G6 完成后才是 **Release Candidate Ready**；G7 完成并获得用户批准后才是 **Production Cutover Ready**。G8 只验证删除资格，不自动删除。旧 Harness 的删除、移动、归档或清理始终属于用户决定。
 
-当前 RCV Recovery 完整性 Gate 已通过本地测试关闭；许可证决定已修正为 `UNLICENSED / all rights reserved`。G6 的正式候选构建、实际安装探针、路径/残留验证和 PUB-008 升级回滚协议已在本地实现，仍受许可证修正提交、远端 Node 22 双平台 CI 与该提交生成的不可变制品证据阻断；当前没有继续推送、打标签或发布的授权。两个冻结的旧状态根均不存在，原 G7 hard recovery 路径不可补做；两份 source-unavailable Receipt 与所有者 clean-start 决定已固化，后续在正式制品上创建全新 Run。
+当前 RCV Recovery 完整性 Gate 已通过本地测试关闭；许可证为 `UNLICENSED / all rights reserved`。提交 `1961e578...` 已生成并隔离安装本地候选制品，CardWorld 与 Collection 已在外部控制根建立全新 Authority，并分别以 `engine-delivery`、`collection-batch` 完成零业务写入 Canary。当前达到 Local Clean-start Cutover Ready。远端 Node 22 双平台 CI、签名、tag、Release 和 Registry 发布按项目所有者决定延期，不计为本地阻断，但不得标记正式 Release Candidate Ready。两个冻结的旧状态根均不存在，原 G7 hard recovery 与现场 rollback 不可补做；两份 source-unavailable Receipt 继续强制只允许 clean-start。

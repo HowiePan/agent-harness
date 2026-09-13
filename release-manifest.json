@@ -27,8 +27,8 @@
     },
     {
       "path": "docs/acceptance/v1.0.0.md",
-      "sha256": "bbac57779f8537243cca44ab0f021d70239047cea5e9903b484e1d9a04d8bb3f",
-      "size": 7115
+      "sha256": "95a20b271beb679a03856e9af69e251910772155b6fc476b3e3159ca42d3ce33",
+      "size": 7375
     },
     {
       "path": "docs/architecture.md",
@@ -112,13 +112,13 @@
     },
     {
       "path": "docs/migration-gates.md",
-      "sha256": "a87e368f9434e73c365c098d6af8317c6e3a6f9c01cc9f508c5739add5fa7c40",
-      "size": 3190
+      "sha256": "fe3a7d8daa7a74731179ec9a398b873b711d74d5bce0c2b34a4cb47833206f53",
+      "size": 3298
     },
     {
       "path": "docs/operations.md",
-      "sha256": "8146217f72bb73c806438e4040d541809dbc85d0cb8a80ca586253838f6465f8",
-      "size": 8283
+      "sha256": "38f028aef4e6087986a7cf38a0032961300a16832b77c246f2a6911219b0049c",
+      "size": 9227
     },
     {
       "path": "docs/operator-contract.md",
@@ -137,8 +137,8 @@
     },
     {
       "path": "docs/post-extraction-register.md",
-      "sha256": "1bd5401c647007ac6b0a6fe8377292b7ebb5c76804a572bb150a7474cb5d4494",
-      "size": 8722
+      "sha256": "a5726fa554daba1b7131febbe70272f1131a568fb3358d95ba7b02f2961aace1",
+      "size": 9192
     },
     {
       "path": "docs/profiles.md",
@@ -172,13 +172,13 @@
     },
     {
       "path": "docs/versions/INDEX.md",
-      "sha256": "26ce9fbc484c8fcd627ce09eb7fbd0d047b44003e86778979150462803da6128",
-      "size": 1092
+      "sha256": "dbde9497a602e79b06cbc96c3160ceb06d4de01cbe3e7b947f97625bc657cc48",
+      "size": 1099
     },
     {
       "path": "docs/versions/v1.0.0.md",
-      "sha256": "3e5b9df84a17885c42465297bbb9e9c42f886a7933aab1c32aed780c5cecb48b",
-      "size": 5063
+      "sha256": "d1248ac88b1ca1257f26f959e3c4b85b34423353a279a4d9568c24f7d031ae06",
+      "size": 4957
     },
     {
       "path": "examples/collection-project-input.json",
@@ -267,8 +267,8 @@
     },
     {
       "path": "README.md",
-      "sha256": "7560341cc786eec6f3ac1ce461d0c6bc165ecdc1b39c2f8a92c2a58b84338ad3",
-      "size": 5715
+      "sha256": "7d321870ce9f60c7ff67c247882448e167a9b22eeff5c4cc35264a7ebdce2e52",
+      "size": 5722
     },
     {
       "path": "schemas/authority.schema.json",
@@ -736,7 +736,7 @@
       "size": 3735
     }
   ],
-  "packageDigest": "79c5f911ab7f20a5e9a100b44bcf26d85f0164b1fdbbc615bbfe77d506751366",
+  "packageDigest": "30c009fbc65ded706e896ae5eb3deb445afbc7bbe9b257d8b09aac630df4a615",
   "metadataFiles": [
     "release-manifest.json",
     "sbom.spdx.json"

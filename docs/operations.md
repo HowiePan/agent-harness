@@ -83,3 +83,15 @@ hard recovery Decision 的最小输入如下；`context.expectedRevision` 是记
 ## 发布与升级
 
 发布候选包含源码、Schema、Profile、Extension、Codex Skills、插件 manifest、checksum 清单和 SPDX SBOM。`npm run build:release-candidate` 拒绝脏工作树，构建真实 tarball，核对 manifest/SBOM/包内容，在隔离控制根安装并验证插件与两个 Skill，最终写入 `.agent-harness-data/release-candidates/<version>/<archive-sha256>/`。升级前验证 Extension/Plugin/Profile 版本和存储迁移说明；先封存状态快照并在复制的数据根执行 canary。运行中 `artifact-rebase` 必须先记录有有效期的 `artifact-rebase` Decision，绑定当前 revision、旧/新制品摘要与影响 Feature 集合。密码学签名、发布、真实切换与旧内容删除由项目所有者批准和执行。缺陷上报、不可变修复和紧急 commit 绑定见 [缺陷、升级与回滚](maintenance.md)。
+
+当旧 Authority 的 source-unavailable clean-start disposition 已获所有者确认后，可使用提交绑定候选执行现场无写入 Canary：
+
+```powershell
+node scripts/run-clean-start-canary.mjs `
+  --candidate-receipt <absolute-release-candidate-receipt.json> `
+  --cardworld-root <absolute-cardworld-root> `
+  --collection-root <absolute-collection-root> `
+  --output-root <absolute-agent-harness-control-subdirectory>
+```
+
+该命令拒绝覆盖已有控制根；它从候选 tarball 安装独立 Runtime，登记两个完整制品 Extension，建立外部 Project Registry 与全新 Authority，分别运行 `engine-delivery` 和 `collection-batch` Canary，并以运行前后全文件摘要证明业务仓零修改。输出 Receipt 同时绑定 source-unavailable Receipt、候选提交/制品摘要、Extension Registry、Project Descriptor 与两份关闭 Run Receipt。它不能替代已不可补做的真实 hard recovery。

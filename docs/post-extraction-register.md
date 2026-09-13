@@ -1,7 +1,7 @@
 # 仓库抽离后修复与验证台账
 
 **建立日期**：2026-09-13  
-**当前判定**：Repository Extraction Ready；RCV 与本地 G6 实现完成；远端发布和 Production Cutover Not Ready
+**当前判定**：Local Clean-start Cutover Ready；RCV、本地候选制品和两类制品绑定 Canary 完成；远端发布延期，Production hard recovery 不可补做
 **适用边界**：本台账中的“迁移后”指 `agent-harness` 源码进入独立上游仓库之后、任何业务入口切换和旧 Harness 删除之前。
 
 ## 一、已经满足的仓库抽离条件
@@ -35,12 +35,12 @@ RCV 修复已重新生成 `release-manifest.json` 与 `sbom.spdx.json`；正式 
 |:---|:---|:---|:---|:---|
 | PUB-001 | G6 | Complete | 在独立仓库形成首个提交并配置 `https://github.com/HowiePan/agent-harness.git` | 首次 Repository Extraction 基线提交推送至 `origin/main`；提交摘要由远端分支记录 |
 | PUB-002 | G6 | Complete | 项目所有者于 2026-09-13 选择 `UNLICENSED / all rights reserved` | `LICENSE`、`package.json`、release manifest 与 SBOM 一致；公开可见性或包分发不授予公共许可证 |
-| PUB-003 | G6 | Pending | GitHub Actions 在 Windows 与 Ubuntu、Node 22 上通过 check、全量测试、clean-room、pack 和 residue | 远端 CI run 链接/摘要 |
-| PUB-004 | G6 | Code Ready | 干净提交上的 `build:release-candidate` 构建真实 tarball，校验 release manifest、SBOM、包内容与完整性摘要 | Schema 与构建器已完成；待修复提交后生成最终不可变制品与 Receipt |
-| PUB-005 | G6 | Code Ready | 从实际发布制品安装 Codex 插件和两个 Skills，并验证引用只落在制品内 | 隔离安装及相对引用探针已进入候选构建器；待干净提交制品执行 |
+| PUB-003 | G6 | Deferred by Owner | GitHub Actions 在 Windows 与 Ubuntu、Node 22 上通过 check、全量测试、clean-room、pack 和 residue | 最新远端 run 仍失败；项目所有者决定暂不处理远端 CI/发布，不得标记 Complete |
+| PUB-004 | G6 | Local Complete | 干净提交上的 `build:release-candidate` 构建真实 tarball，校验 release manifest、SBOM、包内容与完整性摘要 | 提交 `1961e578...` 的 archive SHA-256 为 `85c3e39a...`，Release Candidate Receipt 为 `f3fe8233...` |
+| PUB-005 | G6 | Local Complete | 从实际候选制品安装 Codex 插件和两个 Skills，并验证引用只落在制品内 | 候选构建器的隔离安装、插件结构、两个 Skill 入口及相对引用探针全部通过 |
 | PUB-006 | G6 | Local Complete | 在独立控制根复验路径政策：不写 `%TEMP%`、`tmpdir()`、C 盘绝对输出，不遗留 `.tmp`、缓存、EXE 或 PDB | clean-room、path/residue 测试本地通过；远端双平台证据并入 PUB-003 |
 | PUB-007 | G6 | Local Complete | 复验受管输出容量、失败清理 Receipt、required OS Sandbox fail-closed 和 Collection 10 Feature 物理并发 | Harness Conformance/Canary 已通过；CardWorld engine-verify 与 Collection check:ci/cleanroom 通过且业务树保持干净 |
-| PUB-008 | G6 | Local Rehearsal Complete | 以 Recovery Capsule 可变源缺陷完成脱敏 Defect Bundle、独立复现、上游修复、Descriptor/Run 制品升级、原 Run 续跑及失败回滚；Collection 复用协议执行回归 Canary | 固定 Bundle 与升级/回滚测试已通过；待修复 commit、该 commit 的 Release Candidate Receipt 与远端 CI 才可正式关闭 |
+| PUB-008 | G6 | Local Candidate Complete | 以 Recovery Capsule 可变源缺陷完成脱敏 Defect Bundle、独立复现、上游修复、Descriptor/Run 制品升级、原 Run 续跑及失败回滚；Collection 复用协议执行回归 Canary | 固定 Bundle、升级/回滚测试、提交绑定候选 Receipt 与两类制品 Canary 已通过；仅远端 CI/发布部分延期 |
 
 ## 四、真实业务切换前后的现场验证
 
@@ -48,20 +48,22 @@ RCV 修复已重新生成 `release-manifest.json` 与 `sbom.spdx.json`；正式 
 |:---|:---|:---|:---|:---|
 | CUT-001 | G7 | Disposition Complete | 对 CardWorld 和 Collection 的指定旧状态根执行最后一次只读 assessment | 两个根均确认不存在；项目所有者已承认旧事实不可恢复，历史 dry-run 不作为新现场 Evidence |
 | CUT-002 | G7 | Hard Recovery Unavailable | 分别创建真实 Recovery Capsule | 源缺失后不可补造 Capsule；两份内容寻址 `legacy-source-unavailable` Receipt 已固化并强制 clean-start |
-| CUT-003 | G7 | Authorized Clean Start | 在隔离 Data Root 建立新 Authority | 项目所有者于 2026-09-13 确认放弃两类旧 Authority；待正式发布制品绑定后创建全新 Run |
-| CUT-004 | G7 | Consumer Baseline Complete | CardWorld 与 Collection 分别执行目标 Profile Canary；Collection 验证批间 Barrier、Feature 并发和安全合并 | 业务仓原生 engine-verify 与 Collection check:ci/cleanroom 已通过；仍需独立发布制品绑定后的 clean-start Canary |
+| CUT-003 | G7 | Complete | 在隔离 Data Root 建立新 Authority | 项目所有者确认放弃两类旧 Authority；提交绑定候选制品已在独立控制根建立 Project Registry 与两套全新 Authority |
+| CUT-004 | G7 | Complete | CardWorld 与 Collection 分别执行目标 Profile Canary；Collection 验证批间 Barrier、Feature 并发和安全合并 | 原生检查已通过；候选制品上的 `engine-delivery` 与 `collection-batch` clean-start Run 均关闭，业务摘要前后一致 |
 | CUT-005 | G7 | Protocol Complete / Site N/A | 使用封存快照演练 rollback，再回到可继续验证的新 epoch/generation | 合成 hard-recovery rollback 与 PUB-008 artifact rollback 已通过；现场无 Capsule，不能生成真实 rollback Receipt |
-| CUT-006 | G8 | Pending Release Artifact | 业务入口改为调用独立发布制品和外部 Project Registry，业务仓不保存 Harness 实现、状态、Prompt、Skill 或技术文档 | 旧目录零驻留与业务仓原生验证已确认；仍缺已发布制品的实际入口调用 Evidence |
-| CUT-007 | G8 | Partial | 旧目录不可访问后继续运行和维护 | CardWorld engine-verify 与 Collection check:ci/cleanroom 在旧根缺失时通过；仍缺独立发布制品绑定后的 Harness Run Canary |
+| CUT-006 | G8 | Local Candidate Complete / Publish Deferred | 业务入口改为调用独立制品和外部 Project Registry，业务仓不保存 Harness 实现、状态、Prompt、Skill 或技术文档 | 候选 tarball 已在外部控制根实际安装并调用，状态零驻留；已发布 Registry 制品入口按所有者决定延期 |
+| CUT-007 | G8 | Local Complete | 旧目录不可访问后继续运行和维护 | 两个旧根缺失时原生检查通过，且独立候选制品已完成两类 Harness Run Canary；Receipt `0bdd46c2...` |
 | CUT-008 | G8 | Not Retroactively Verifiable | 经过观察期后只判断旧 Harness 是否具备删除资格 | 目标已先行不存在，无法补做删除前 Capsule/rollback 资格判断；不得事后标记 Approved |
 | CUT-009 | G8 | User Only | 删除、移动、归档或清理旧 Harness | 用户已报告 CardWorld 旧 Harness 由其自行移除；这不自动覆盖 Collection 或其他目标，也不替代 CUT-006～008 的运行验证 |
 
 ## 五、状态词汇
 
 - **Repository Extraction Ready**：允许把 `agent-harness` 提交到独立仓库；当前已达到。
-- **Release Candidate Ready**：RCV 与 PUB 项（包括 PUB-008 跨仓维护演练）全部关闭，能够生成正式 V1.0.0 候选；`UNLICENSED / all rights reserved` 已确定，本地代码和验证已具备，仍等待许可证修正提交、远端 CI 与提交绑定制品，且当前没有继续远端操作的授权。
+- **Local Release Candidate Ready**：RCV、PUB-004～008 的本地部分与提交绑定候选 Receipt 已关闭；当前已达到。
+- **Release Candidate Ready**：还要求 PUB-003 远端双平台 CI 通过；项目所有者已明确延期，当前未达到。
 - **Production Cutover Ready**：真实 Capsule、隔离恢复、Canary 和 rollback 均通过且获得用户切换批准；现场源已不存在，因此该 hard-recovery 状态无法达到。
-- **Clean-start Cutover Ready**：源不可用 Receipt、所有者状态损失确认、发布制品绑定、全新 Run Canary 和入口 Evidence 全部完成；前两项已完成，当前等待正式制品、Run Canary 与入口 Evidence。
+- **Local Clean-start Cutover Ready**：源不可用 Receipt、所有者状态损失确认、本地候选制品绑定、全新 Run Canary 和外部入口 Evidence 全部完成；当前已达到，内容寻址 Receipt 为 `0bdd46c261dfb939daccf9fa7bde404a79882a58ea3a21a4ebe4e9894581bc51`，完整证据只保存在外部 `.agent-harness-data`，避免把制品摘要回灌制品本身。
+- **Clean-start Cutover Ready**：若以 Registry/Release 作为正式分发入口，仍须恢复 PUB-003 并完成签名、tag、Release/Registry 发布；当前按所有者决定延期。
 - **Legacy Deletion Approved**：用户对准确目标另行明确授权；当前未达到，也不能由 Harness 自动推导。
 
 本台账是仓库抽离后的继续工作 Authority。若新增问题，必须追加稳定 ID、级别、关闭条件和证据，不得用“迁移后再看”替代可验证条目。
