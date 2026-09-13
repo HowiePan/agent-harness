@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-harness.local/schemas/issue-intake-receipt.schema.json",
+  "title": "Agent Harness Issue Intake Receipt",
+  "type": "object",
+  "required": ["protocolVersion", "commandId", "operation", "requestDigest", "issueId", "intakeDigest", "issueFile", "intakeFile", "recordedAt"],
+  "properties": {
+    "protocolVersion": { "const": "1.0" },
+    "commandId": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$" },
+    "operation": { "const": "issue.record" },
+    "requestDigest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "issueId": { "type": "string", "pattern": "^AH-[0-9]{8}-[A-F0-9]{12}$" },
+    "intakeDigest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "issueFile": { "type": "string", "pattern": "^issues/AH-[0-9]{8}-[A-F0-9]{12}/issue\\.md$" },
+    "intakeFile": { "type": "string", "pattern": "^issues/AH-[0-9]{8}-[A-F0-9]{12}/intake\\.json$" },
+    "recordedAt": { "type": "string", "format": "date-time" }
+  },
+  "additionalProperties": false
+}

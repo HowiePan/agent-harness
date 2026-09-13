@@ -25,21 +25,26 @@ test('Codex plugin exposes one explicit-project pseudo-command router', async ()
   assert.match(skill, /^---\nname: agent-harness-command\n/);
   assert.match(skill, /h:<project-alias> <action> <target> \[preset\]/);
   assert.match(skill, /h:where/);
+  assert.match(skill, /h:report/);
   assert.match(skill, /commandManifest/);
   assert.match(metadata, /allow_implicit_invocation: true/);
+  assert.match(metadata, /h:report/);
   assert.match(hooks, /UserPromptSubmit/);
   const reference = skill.match(/\]\(([^)]+pseudo-command-contract\.md)\)/)?.[1];
   assert(reference);
   await access(resolve(dirname(skillPath), reference));
 });
 
-test('pseudo-command parser requires a project alias and supports read-only h:where', () => {
+test('pseudo-command parser requires a project alias and supports h:where and h:report', () => {
   assert.equal(parsePseudoCommand('普通对话'), null);
   assert.deepEqual(parsePseudoCommand('h:engine quality V3.8.4 review-only'), {
     protocolVersion: '1.0', kind: 'command', projectAlias: 'engine', action: 'quality', target: 'V3.8.4', arguments: ['review-only'],
   });
   assert.deepEqual(parsePseudoCommand('h:where'), { protocolVersion: '1.0', kind: 'where' });
   assert.deepEqual(parsePseudoCommand('h:where engine'), { protocolVersion: '1.0', kind: 'where', projectAlias: 'engine' });
+  assert.deepEqual(parsePseudoCommand('h:report engine'), { protocolVersion: '1.0', kind: 'report', projectAlias: 'engine' });
+  assert.equal(parsePseudoCommand('h:report').kind, 'invalid');
+  assert.equal(parsePseudoCommand('h:report engine extra').kind, 'invalid');
   assert.equal(parsePseudoCommand('h:quality V3.8.4 review-only').kind, 'invalid');
   assert.equal(parsePseudoCommand('h:engine quality V3.8.4 review-only extra').kind, 'invalid');
 });
@@ -87,6 +92,15 @@ test('binding configuration makes project selection and Harness location determi
     const unknown = await hookResponse({ prompt: 'h:unknown quality V3.8.4', cwd: workspaceRoot }, options);
     assert.match(unknown.hookSpecificOutput.additionalContext, /项目别名不存在/);
     assert.match(unknown.hookSpecificOutput.additionalContext, /不得猜测项目/);
+
+    const report = await hookResponse({ prompt: 'h:report engine', cwd: workspaceRoot }, options);
+    const reportContext = report.hookSpecificOutput.additionalContext;
+    assert.match(reportContext, /不得新建任务/);
+    assert.match(reportContext, /issue record/);
+    assert.match(reportContext, /controlRoot\/issues/);
+    assert.match(reportContext, /"commandId":"report_/);
+    assert.match(reportContext, /"projectId":"cardworld-engine"/);
+    assert.equal(reportContext.length <= 1200, true);
   } finally {
     await rm(fixture, { recursive: true, force: true });
   }

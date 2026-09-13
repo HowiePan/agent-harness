@@ -6,5 +6,6 @@ dist/
 .DS_Store
 .agent-harness-data/
 .agent-harness-cache/
+integrations/codex/agent-harness-codex/.plugin-data/
 test/.tmp/
 .tmp/

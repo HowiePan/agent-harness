@@ -11,6 +11,7 @@ import { initializeHarnessInstallation } from './installation.mjs';
 import { loadReleaseIdentity } from './release-identity.mjs';
 import { assertHarnessWritePath, harnessControlRoot, harnessProjectRoot } from './write-boundary.mjs';
 import { verifyDefectBundle } from './maintenance/defect-bundle.mjs';
+import { recordIssueIntake } from './maintenance/issue-intake.mjs';
 
 const argv = process.argv.slice(2);
 const take = name => {
@@ -20,6 +21,14 @@ const take = name => {
 const has = name => argv.includes(name);
 const takeAll = name => argv.flatMap((value, index) => value === name && argv[index + 1] ? String(argv[index + 1]).split(',') : []).filter(Boolean);
 const jsonFile = async name => JSON.parse(await readFile(resolve(name), 'utf8'));
+const jsonInput = async name => {
+  const source = take(name);
+  if (!source) throw Object.assign(new Error(`Missing ${name}`), { code: 'INPUT_REQUIRED' });
+  if (source !== '-') return jsonFile(source);
+  let raw = '';
+  for await (const chunk of process.stdin) raw += chunk;
+  return JSON.parse(raw);
+};
 const command = argv[0] ?? 'help';
 const subject = argv[1];
 
@@ -61,6 +70,7 @@ agent-harness recovery capsule-create --extension <module> --importer <id> --leg
 agent-harness recovery capsule-verify --capsule-root <path> --project <id> --run <id> [--verification-ttl-ms <n>]
 agent-harness recovery source-unavailable --extension <module> --importer <id> --legacy-root <path> --project <id> --decision <json> --expected-revision 0 --command-id <id>
 agent-harness defect validate --input <json>
+agent-harness issue record --input <json|-> --command-id <id>
 
 All Authority and Evidence paths are under --data-root, never under the business repository.`);
 
@@ -77,6 +87,11 @@ if (command === 'installation' && subject === 'init') {
 }
 
 const controlRoot = harnessControlRoot(take('--control-root'));
+if (command === 'issue' && subject === 'record') {
+  const receipt = await recordIssueIntake(await jsonInput('--input'), { controlRoot, commandId: take('--command-id') });
+  console.log(JSON.stringify({ ok: true, receipt }, null, 2));
+  process.exit(0);
+}
 const dataRoot = resolve(take('--data-root') ?? defaultDataRoot(controlRoot));
 const releaseIdentity = await loadReleaseIdentity({ artifactDigest: take('--harness-digest') });
 const extensionRegistry = new ExtensionRegistry({ dataRoot, controlRoot });

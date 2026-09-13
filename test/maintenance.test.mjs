@@ -1,7 +1,9 @@
 import assert from 'node:assert/strict';
+import { spawn } from 'node:child_process';
 import test from 'node:test';
-import { readFile } from 'node:fs/promises';
-import { createDefectBundle, verifyDefectBundle } from '../src/index.mjs';
+import { readFile, rm, rmdir } from 'node:fs/promises';
+import { dirname, resolve } from 'node:path';
+import { createDefectBundle, createIssueIntake, recordIssueIntake, verifyDefectBundle, verifyIssueIntake } from '../src/index.mjs';
 
 const digest = 'a'.repeat(64);
 const input = {
@@ -28,6 +30,72 @@ test('Defect Bundle is digest-bound and requires explicit sanitization', () => {
 
 test('Defect Bundle rejects common secret and prompt fields', () => {
   assert.throws(() => createDefectBundle({ ...input, reproduction: { fixture: 'synthetic', accessToken: 'redacted' } }), error => error.code === 'DEFECT_SENSITIVE_FIELD_REJECTED');
+});
+
+const issueInput = {
+  protocolVersion: '1.0',
+  projectAlias: 'engine',
+  project: { projectId: 'cardworld-engine', profileId: 'engine-delivery', extensionId: 'cardworld-engine-profile' },
+  observedAt: '2026-09-13T12:00:00.000Z',
+  summary: 'Bound data root cannot initialize Authority directories',
+  severity: 'P1',
+  environment: { controlRoot: 'F:\\agent-harness', dataRoot: 'F:\\agent-harness\\.agent-harness-data' },
+  expected: { projectList: 'readable' },
+  actual: { code: 'EPERM', path: 'F:\\agent-harness\\.agent-harness-data\\authority' },
+  reproduction: { steps: ['Run doctor against the bound control and data roots.', 'Run project list against the same roots.'] },
+  conversation: { source: 'current-thread', excerpts: [{ role: 'user', text: 'The release verifies, but project list fails while creating Authority.' }] },
+  missingEvidence: ['Project Descriptor digest', 'Authority revision'],
+  sanitization: { confirmed: true, removed: ['unrelated conversation'] },
+};
+
+test('Issue Intake is digest-bound and rejects recognizable credentials', () => {
+  const intake = createIssueIntake(issueInput);
+  assert.match(intake.intakeDigest, /^[a-f0-9]{64}$/);
+  assert.deepEqual(verifyIssueIntake(intake), intake);
+  assert.throws(() => createIssueIntake({ ...issueInput, conversation: { source: 'current-thread', excerpts: [{ role: 'user', text: 'Authorization: Bearer abcdefghijklmnop' }] } }), error => error.code === 'ISSUE_INTAKE_SENSITIVE_CONTENT_REJECTED');
+});
+
+test('Issue recording stays under controlRoot/issues and is command-idempotent', async t => {
+  const controlRoot = resolve('.');
+  const commandId = `test_issue_${process.pid}_${Date.now()}`;
+  const first = await recordIssueIntake(issueInput, { controlRoot, commandId, now: () => '2026-09-13T12:05:00.000Z' });
+  t.after(async () => {
+    await rm(dirname(first.issueFile), { recursive: true, force: true });
+    await rm(first.receiptFile, { force: true });
+    await rmdir(dirname(first.receiptFile)).catch(error => { if (!['ENOENT', 'ENOTEMPTY'].includes(error.code)) throw error; });
+  });
+  assert.equal(first.reused, false);
+  assert.equal(first.issueFile.startsWith(resolve(controlRoot, 'issues')), true);
+  assert.match(await readFile(first.issueFile, 'utf8'), /对话只作为问题输入，不是 Harness Authority/);
+  const repeated = await recordIssueIntake(issueInput, { controlRoot, commandId });
+  assert.equal(repeated.reused, true);
+  await assert.rejects(() => recordIssueIntake({ ...issueInput, summary: 'Different input' }, { controlRoot, commandId }), error => error.code === 'COMMAND_ID_REUSED');
+});
+
+test('issue record CLI accepts stdin before Registry and Authority initialization', async t => {
+  const controlRoot = resolve('.');
+  const commandId = `test_issue_cli_${process.pid}_${Date.now()}`;
+  const result = await new Promise((resolveRun, reject) => {
+    const child = spawn(process.execPath, [resolve('bin', 'agent-harness.mjs'), 'issue', 'record', '--control-root', controlRoot, '--input', '-', '--command-id', commandId], { cwd: controlRoot, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] });
+    let stdout = '';
+    let stderr = '';
+    child.stdout.setEncoding('utf8');
+    child.stderr.setEncoding('utf8');
+    child.stdout.on('data', chunk => { stdout += chunk; });
+    child.stderr.on('data', chunk => { stderr += chunk; });
+    child.on('error', reject);
+    child.on('close', exitCode => resolveRun({ exitCode, stdout, stderr }));
+    child.stdin.end(JSON.stringify(issueInput));
+  });
+  assert.equal(result.exitCode, 0, result.stderr);
+  const output = JSON.parse(result.stdout);
+  t.after(async () => {
+    await rm(dirname(output.receipt.issueFile), { recursive: true, force: true });
+    await rm(output.receipt.receiptFile, { force: true });
+    await rmdir(dirname(output.receipt.receiptFile)).catch(error => { if (!['ENOENT', 'ENOTEMPTY'].includes(error.code)) throw error; });
+  });
+  assert.equal(output.ok, true);
+  assert.equal(output.receipt.issueFile.startsWith(resolve(controlRoot, 'issues')), true);
 });
 
 test('PUB-008 sanitized consumer defect fixture remains independently reproducible', async () => {

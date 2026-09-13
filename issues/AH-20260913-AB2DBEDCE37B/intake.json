@@ -1,0 +1,66 @@
+{
+  "protocolVersion": "1.0",
+  "projectAlias": "engine",
+  "project": {
+    "projectId": "cardworld-engine",
+    "profileId": "engine-delivery",
+    "extensionId": "cardworld-engine-profile"
+  },
+  "observedAt": "2026-09-13T13:00:00.000Z",
+  "summary": "绑定的数据根未初始化或不可写，导致 h:engine quality V3.8.4 无法启动",
+  "severity": "P1",
+  "environment": {
+    "controlRoot": "F:\\agent-harness",
+    "entrypoint": "F:\\agent-harness\\bin\\agent-harness.mjs",
+    "dataRoot": "F:\\agent-harness\\.agent-harness-data",
+    "workspaceRoot": "F:\\CardWorld",
+    "doctor": {
+      "ok": true,
+      "releaseVerified": true,
+      "initialized": false,
+      "extensions": []
+    }
+  },
+  "expected": {
+    "result": "绑定安装完成只读预检后，可解析 Project Descriptor、Extension Pack 与 Authority，再决定是否启动 quality Gate"
+  },
+  "actual": {
+    "result": "project list 在创建 dataRoot 下 authority 目录时返回 EPERM；未读取 Registry、未核对 Authority、未执行 quality Gate"
+  },
+  "reproduction": {
+    "steps": [
+      "对绑定的 controlRoot 与 dataRoot 执行 doctor，观察 ok=true、releaseVerified=true、initialized=false、extensions=[]。",
+      "对同一绑定执行 project list。",
+      "观察 F:\\agent-harness\\.agent-harness-data\\authority 创建失败并返回 EPERM。"
+    ]
+  },
+  "conversation": {
+    "source": "current-thread",
+    "excerpts": [
+      {
+        "role": "user",
+        "text": "Harness 发布制品 doctor 验证通过，但绑定 data root 未初始化、Extension Registry 为空，project list 创建 authority 时返回 EPERM，因此 h:engine quality V3.8.4 无法启动。"
+      },
+      {
+        "role": "user",
+        "text": "问题记录必须留在 agent-harness 受控目录；上报应由明确指令采集当前对话上下文，不得另建对话或写入未管控目录。"
+      }
+    ]
+  },
+  "missingEvidence": [
+    "Harness artifact digest",
+    "Extension installation receipt",
+    "Project Descriptor digest",
+    "Authority revision",
+    "data root ACL 与有效写权限检查结果"
+  ],
+  "sanitization": {
+    "confirmed": true,
+    "removed": [
+      "无关对话",
+      "完整工具输出",
+      "账户与凭据信息"
+    ]
+  },
+  "intakeDigest": "ab2dbedce37b90e58da771eb5e3a93224dec0923bf4c397caf30ba2f434141a1"
+}

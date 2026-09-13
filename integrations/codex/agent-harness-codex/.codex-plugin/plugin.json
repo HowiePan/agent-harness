@@ -9,10 +9,16 @@
   "interface": {
     "displayName": "Agent Harness Codex",
     "shortDescription": "Route project-bound Harness commands without disk search.",
-    "longDescription": "Recognizes h:<project-alias> <action> <target> [preset], reads exact Harness and project bindings from plugin data, supports the read-only h:where query, and resolves lifecycle semantics through registered Extension Packs.",
+    "longDescription": "Recognizes h:<project-alias> <action> <target> [preset], reads exact Harness and project bindings from plugin data, supports h:where and h:report, and resolves lifecycle semantics through registered Extension Packs.",
     "developerName": "Agent Harness contributors",
     "category": "Productivity",
-    "capabilities": ["explicit-project-routing", "persistent-bindings", "workflow-orchestration", "extension-authoring"],
-    "defaultPrompt": "Use h:<project-alias> <action> <target> [preset], or h:where to inspect the current binding."
+    "capabilities": [
+      "explicit-project-routing",
+      "persistent-bindings",
+      "conversation-issue-intake",
+      "workflow-orchestration",
+      "extension-authoring"
+    ],
+    "defaultPrompt": "Use h:<project-alias> <action> <target> [preset], h:where to inspect bindings, or h:report <project-alias> to record the current issue."
   }
 }

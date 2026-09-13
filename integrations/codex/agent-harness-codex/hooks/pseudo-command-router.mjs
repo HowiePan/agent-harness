@@ -1,4 +1,5 @@
 import { readFile } from 'node:fs/promises';
+import { randomUUID } from 'node:crypto';
 import { isAbsolute, relative, resolve } from 'node:path';
 import process from 'node:process';
 import { fileURLToPath } from 'node:url';
@@ -15,11 +16,15 @@ export const parsePseudoCommand = prompt => {
   if (typeof prompt !== 'string' || !prompt.startsWith('h:')) return null;
   if (prompt.length > 512 || /[\r\n\u0000-\u0008\u000b\u000c\u000e-\u001f]/.test(prompt)) return { kind: 'invalid', error: '伪命令必须是最长 512 字符的单行文本。' };
   const match = prompt.trim().match(commandPattern);
-  if (!match || !tokenPattern.test(match[1])) return { kind: 'invalid', error: '语法应为 h:<项目别名> <动作> <目标> [预设]，或 h:where。' };
+  if (!match || !tokenPattern.test(match[1])) return { kind: 'invalid', error: '语法应为 h:<项目别名> <动作> <目标> [预设]、h:where，或 h:report <项目别名>。' };
   const tokens = (match[2] ?? '').trim().split(/\s+/).filter(Boolean);
   if (match[1] === 'where') {
     if (tokens.length > 1 || (tokens[0] && !tokenPattern.test(tokens[0]))) return { kind: 'invalid', error: 'h:where 只接受一个可选项目别名。' };
     return { protocolVersion: '1.0', kind: 'where', ...(tokens[0] ? { projectAlias: tokens[0] } : {}) };
+  }
+  if (match[1] === 'report') {
+    if (tokens.length !== 1 || !tokenPattern.test(tokens[0])) return { kind: 'invalid', error: 'h:report 只接受一个项目别名。' };
+    return { protocolVersion: '1.0', kind: 'report', projectAlias: tokens[0] };
   }
   if (tokens.length < 2 || tokens.length > 3 || !tokenPattern.test(tokens[0])) return { kind: 'invalid', error: '语法应为 h:<项目别名> <动作> <目标> [预设]；项目和动作必须显式给出。' };
   return {
@@ -85,6 +90,13 @@ export const hookResponse = async (input, options = {}) => {
     if (parsed.projectAlias && !projects[parsed.projectAlias]) return contextResponse(`Agent Harness 项目别名不存在：${parsed.projectAlias}。可用别名：${Object.keys(bindings.projects).join(', ')}。这是只读查询，不得启动 Harness。`);
     const view = { harness: bindings.harness, workspaceRoot: bindings.workspaceRoot, projects, bindingSource: bindings.source };
     return contextResponse(`这是 h:where 的只读结果。向用户清晰展示以下已配置绑定，不得扫描磁盘、创建 Run、运行 Gate 或写入 Authority：${JSON.stringify(view)}`);
+  }
+
+  if (parsed.kind === 'report') {
+    const project = bindings.projects[parsed.projectAlias];
+    if (!project) return contextResponse(`Agent Harness 项目别名不存在：${parsed.projectAlias}。可用别名：${Object.keys(bindings.projects).join(', ')}。不得猜测项目或搜索磁盘。`);
+    const report = { ...parsed, project, harness: bindings.harness, workspaceRoot: bindings.workspaceRoot, cwd, commandId: `report_${randomUUID()}` };
+    return contextResponse(`检测到 h:report。使用 $agent-harness-command 在当前任务采集并脱敏相关对话；缺失证据列入 missingEvidence，不得伪造。通过绑定 entrypoint 以 stdin 调用 issue record；只写 controlRoot/issues。不得新建任务、运行 Harness、接受其他输出目录或提交 Git。返回 issue ID、路径和未提交状态。解析结果：${JSON.stringify(report)}`);
   }
 
   const project = bindings.projects[parsed.projectAlias];

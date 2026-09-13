@@ -1,6 +1,6 @@
 interface:
   display_name: "Agent Harness Command"
-  short_description: "Resolve project-bound Harness commands and show bindings"
-  default_prompt: "Use $agent-harness-command to resolve h:engine quality TARGET or report h:where."
+  short_description: "Resolve Harness commands, bindings, and issue intake"
+  default_prompt: "Use $agent-harness-command to resolve h:engine quality TARGET, show h:where, or record h:report PROJECT."
 policy:
   allow_implicit_invocation: true

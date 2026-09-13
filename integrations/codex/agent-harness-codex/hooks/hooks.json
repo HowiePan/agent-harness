@@ -1,5 +1,5 @@
 {
-  "description": "Resolve explicit project aliases and fixed Agent Harness locations for short pseudo-commands, including read-only h:where.",
+  "description": "Resolve explicit project aliases and fixed Agent Harness locations for short pseudo-commands, including h:where and conversation-backed h:report intake.",
   "hooks": {
     "UserPromptSubmit": [
       {

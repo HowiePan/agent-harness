@@ -57,7 +57,7 @@ V1.0.0 不迁移旧源码，也不让业务仓保存 Harness 运行状态。旧 
 
 ## 对话式流程命令
 
-Codex 插件只提供一个通用伪命令 Router：`h:<项目别名> <动作> <目标> [预设]`。安装数据把项目别名显式绑定到 Project、Profile、Extension，并固定 Harness `controlRoot`、入口和数据根；Router 不根据版本号、批次号或目录名猜项目，也不扫描磁盘寻找 Harness。选定项目后，再从其 Extension Pack 的 `commandManifest` 取得动作、默认预设、阶段范围和停止条件。其他 Agent 工具可以实现同一解析契约，无需采用 Codex Skill。
+Codex 插件提供通用伪命令 Router：`h:<项目别名> <动作> <目标> [预设]`。安装数据把项目别名显式绑定到 Project、Profile、Extension，并固定 Harness `controlRoot`、入口和数据根；Router 不根据版本号、批次号或目录名猜项目，也不扫描磁盘寻找 Harness。选定项目后，再从其 Extension Pack 的 `commandManifest` 取得动作、默认预设、阶段范围和停止条件。保留命令 `h:where [项目别名]` 用于查询绑定，`h:report <项目别名>` 用于从当前对话采集脱敏问题并写入固定的 `<controlRoot>/issues` 上游目录；问题上报不创建新对话，也不依赖 Registry 或 Authority 可用。其他 Agent 工具可以实现同一解析契约，无需采用 Codex Skill。
 
 例如：`h:engine full V3.8.4`、`h:engine req V3.8.4 expand-to-plan`、`h:engine quality V3.8.4 review-only`，以及 `h:collection quality B1 all`。`engine` 和 `collection` 只是该安装选择的别名，不进入 Kernel；`h:where` 可只读显示 Harness 路径和全部项目绑定。
 

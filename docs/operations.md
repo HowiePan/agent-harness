@@ -32,6 +32,16 @@ node bin/agent-harness.mjs project descriptor --extension agent-harness/consumer
 
 Codex 工具集成位于 `integrations/codex/agent-harness-codex/`，是带 `.codex-plugin/plugin.json` 的独立可安装插件。其他 Agent 工具按同一 Operator Contract 提供自己的集成插件，不进入 Harness Core。实际安装插件属于部署步骤，不会把 Skill 复制到业务仓。
 
+仓库自带 `.agents/plugins/marketplace.json`。首次安装或本机绑定变化后，在 Standalone Control Root 执行：
+
+```powershell
+node integrations/codex/agent-harness-codex/scripts/configure-bindings.mjs --plugin-root integrations/codex/agent-harness-codex --control-root . --workspace-root <业务工作区绝对路径> --entrypoint bin/agent-harness.mjs --data-root .agent-harness-data --project "engine|cardworld-engine|engine-delivery|cardworld-engine-profile" --project "collection|tabletop-collection|collection-batch|tabletop-collection-profile"
+codex plugin marketplace add .
+codex plugin add agent-harness-codex@agent-harness-local
+```
+
+本机绑定固定写入仓库内、被 Git 忽略的 `integrations/codex/agent-harness-codex/.plugin-data/bindings.json`，安装时复制到 Codex 的受管 `PLUGIN_DATA`；不维护用户目录下的第二份插件源码。重新安装同一开发版本时，先执行 `codex plugin remove agent-harness-codex@agent-harness-local`，再执行上面的 `plugin add`。安装或重装后应新建任务，使 Codex 在任务启动边界重新加载 Skill 与 Hook；旧任务历史仍可读取，但不保证热加载新插件能力。
+
 ## 日常运行
 
 ### 对话式命令面
@@ -39,6 +49,8 @@ Codex 工具集成位于 `integrations/codex/agent-harness-codex/`，是带 `.co
 安装 `agent-harness-codex` 插件并配置绑定后，直接发送 `h:<项目别名> <动作> <目标> [预设]`。这不是 Codex 自定义斜杠命令，而是由插件 `UserPromptSubmit` Hook 识别的稳定伪命令；`$agent-harness-command` 可作为 Hook 未信任或被管理员禁用时的显式回退入口。
 
 项目别名属于插件安装数据，不属于 Kernel 命令表。`PLUGIN_DATA/bindings.json`（本地安装回退为 `<pluginRoot>/.plugin-data/bindings.json`）显式固定 `controlRoot`、`entrypoint`、`dataRoot`、`workspaceRoot`，并把每个别名绑定到准确的 Project、Profile 和 Extension。Router 只接受当前目录位于已绑定 workspace 的命令，不根据目标格式猜项目，也不扫描磁盘。可用以下只读命令检查配置：`h:where` 或 `h:where <项目别名>`。
+
+使用 `h:report <项目别名>` 上报当前对话中的 Harness 问题。该保留命令只依赖绑定文件，因此即使 data root、Extension Registry、Project Descriptor 或 Authority 不可用也能登记问题。它从当前对话提取相关摘录、执行脱敏并列出缺失 Evidence，通过绑定的精确入口调用 `issue record`；不创建新对话，不启动 Run/Gate，也不修复实现。输出目录固定为 `<controlRoot>/issues`，不接受任意路径参数，不写业务仓、Codex worktree、用户目录或历史迁移目录。记录只有在用户另行决定提交并推送后才具备跨设备持久性。
 
 绑定由插件随附的 `scripts/configure-bindings.mjs` 写入，例如传入 `--plugin-root`、`--control-root`、`--workspace-root`、`--entrypoint bin/agent-harness.mjs`、`--data-root .agent-harness-data`，并为每个项目重复传入 `--project "<别名>|<projectId>|<profileId>|<extensionId>"`。绑定文件位于业务仓之外，业务仓保持零 Harness 驻留。
 
@@ -62,6 +74,8 @@ Codex 工具集成位于 `integrations/codex/agent-harness-codex/`，是带 `.co
 当前 Batch Production Extension 声明 `full`、`rules`、`launch`、`produce`、`quality`、`review`、`accept`、`close`、`status`、`resume`、`recover`。若安装时选择别名 `collection`，示例为 `h:collection quality B1 all` 和 `h:collection quality B1 game:chess`。
 
 Hook 只解析单行、最长 512 字符、至多一个预设参数的信封，不启动流程，也不把参数交给 shell。未知项目、动作或预设、绑定与 Registry 不一致、Extension 摘要不匹配、前置证据不足都会 fail closed。用户明确说“只评估”“不要启动”或 `dry-run` 时，只返回解析结果和前置条件，不写 Authority；要做 Engine 只读源码质量审查则显式使用 `h:engine quality V3.8.4 review-only`。
+
+CLI 的底层问题登记入口为 `issue record --input <json|-> --command-id <id>`。其输入必须符合 `schemas/issue-intake.schema.json`；使用 `-` 时从 stdin 读取，避免创建中间文件。重复 command ID 只接受完全相同的 Intake，写入使用内容摘要、原子文件和命令 Receipt。Issue Intake 是维护输入而不是 Authority；信息齐全后仍须单独形成并验证 Defect Bundle。
 
 1. `run status` 读取 revision、epoch、generation、Feature、Lease 和 finding。
 2. `run execute` 让 Coordinator 调度、绑定、等待并提交；`run schedule` 用于需要外部 Runtime 接管的高级场景。

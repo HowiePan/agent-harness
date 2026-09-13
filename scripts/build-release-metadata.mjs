@@ -4,11 +4,15 @@ import { fileURLToPath } from 'node:url';
 import { digestJson, sha256 } from '../src/canonical.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const included = ['bin', 'src', 'schemas', 'profiles', 'plugins', 'integrations', 'docs', 'examples', 'scripts/check-context-budget.mjs', 'package.json', 'README.md', 'CONTRIBUTING.md', 'SECURITY.md', 'LICENSE'];
+const included = ['bin', 'src', 'schemas', 'profiles', 'plugins', '.agents', 'integrations', 'docs', 'examples', 'scripts/check-context-budget.mjs', 'package.json', 'README.md', 'CONTRIBUTING.md', 'SECURITY.md', 'LICENSE'];
+const excludedDirectoryNames = new Set(['.plugin-data']);
 const files = [];
 const visit = async file => {
   const info = await stat(file);
-  if (info.isDirectory()) for (const name of await readdir(file)) await visit(resolve(file, name));
+  if (info.isDirectory()) {
+    if (excludedDirectoryNames.has(file.split(/[\\/]/).at(-1))) return;
+    for (const name of await readdir(file)) await visit(resolve(file, name));
+  }
   else {
     const bytes = await readFile(file);
     files.push({ path: relative(root, file).replaceAll('\\', '/'), sha256: sha256(bytes), size: bytes.length });

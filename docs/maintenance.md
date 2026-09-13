@@ -8,6 +8,12 @@ Harness Core、官方 Profile、插件、工具适配 Skill 和 Legacy Compatibi
 
 缺陷报告使用 `schemas/defect-bundle.schema.json`，至少绑定 Harness 版本与制品摘要、Extension/Plugin 版本、脱敏 Descriptor 摘要、失败命令、Authority 修订、相关 Dispatch/Evidence、期望与实际结果，以及最小合成复现。不得附带凭据、原始 Prompt、未脱敏业务数据或系统临时目录内容。
 
+## 对话问题受理
+
+操作员在出现问题的原对话中发送 `h:report <项目别名>`。Codex 适配器只使用已配置绑定，采集与问题有关的对话摘录并生成 `issue-intake.schema.json` 输入，再由绑定的 Harness 入口将记录原子写入固定的 `<controlRoot>/issues/<issue-id>/`。不得为上报另建对话、扫描磁盘、接受任意输出路径，或把记录写入 Consumer 仓库和 Codex 临时 worktree。
+
+Issue Intake 允许明确记录“Descriptor/Authority/Registry 当前不可用”，用于处理初始化和安装类故障；缺失字段进入 `missingEvidence`，不得伪造摘要。它只是进入上游维护队列的版本化输入，不是 Authority 或完整 Defect Bundle。写入后必须向用户返回准确路径和 Git 未提交状态；是否 commit/push 仍由用户决定，未推送记录不能声称已跨设备留档。
+
 ## 修复流程
 
 1. 按 Kernel、Profile、Plugin、Integration Skill 或 Legacy Compatibility 确定唯一 owner。

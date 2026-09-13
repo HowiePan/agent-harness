@@ -13,8 +13,11 @@ V1.0.0 的硬不变量是：Harness 自有状态和中间产物只能写入已�
 | 测试与 clean-room | `.tmp/` | 每轮结束时清除，成功和失败都执行 |
 | npm 缓存 | `.agent-harness-cache/` | 仅开发/打包验证使用；受管验证入口结束时清除空壳或缓存 |
 | 发布包 | 项目根下的显式 `.tgz` | 只有执行真实 `npm pack` 才生成，属于用户请求的交付物，不视为临时文件 |
+| 上游问题登记 | `issues/` | 用户通过 `h:report` 明确授权创建的版本化维护制品；需单独 commit/push 才能跨设备保留 |
 
 `doctor` 是零写入命令，只验证路径。原子写失败会删除尚未 rename 的临时文件。Runtime 和 Gate 子进程的 `TEMP`、`TMP`、`TMPDIR` 最后覆盖为本轮受管目录，Project/Plugin 配置不能覆盖。
+
+`issues/` 是唯一额外的版本化维护写入边界：根路径固定为已绑定 `controlRoot` 的直接子目录，命令不得覆盖或配置其他位置。每次写入必须有稳定 command ID、内容摘要、原子提交和 Receipt；对话内容先脱敏，并明确不具备 Authority 效力。
 
 ## 业务输出例外
 

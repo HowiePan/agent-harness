@@ -1,6 +1,8 @@
 # Pseudo-command adapter contract
 
-`h:<project-alias> <action> <target> [preset]` is the portable conversational command envelope. The alias explicitly selects a Project Registry identity; it is installation data rather than a hard-coded project type. The envelope contains no model, provider, Runtime, language, or build-system identity. `h:where [project-alias]` is the read-only binding query.
+`h:<project-alias> <action> <target> [preset]` is the portable conversational command envelope. The alias explicitly selects a Project Registry identity; it is installation data rather than a hard-coded project type. The envelope contains no model, provider, Runtime, language, or build-system identity. `h:where [project-alias]` is the read-only binding query. `h:report <project-alias>` is the reserved maintenance intake command.
+
+`h:report` is resolved from installation bindings before Registry or Authority access so it remains available when initialization, permissions, Registry, Descriptor, or Authority is the reported failure. It captures only relevant, sanitized excerpts from the current conversation and calls the bound Harness entrypoint to atomically record an Issue Intake under `<controlRoot>/issues`. The command never creates another conversation and accepts no output path. Conversation text is problem input, not Authority; unavailable evidence is recorded as missing rather than fabricated.
 
 The adapter only parses the envelope. It never starts a Run. Resolution is performed in this order:
 

@@ -1,6 +1,6 @@
 ---
 name: agent-harness-command
-description: "Resolve explicit-project Agent Harness pseudo-commands such as h:engine quality V3.8.4, and report installed bindings with h:where. Use whenever a prompt starts with h: or asks how to invoke a repeatable Harness lifecycle action without composing a prompt."
+description: "Resolve explicit-project Agent Harness pseudo-commands such as h:engine quality V3.8.4, report installed bindings with h:where, and record conversation-backed issues with h:report. Use whenever a prompt starts with h: or asks how to invoke a repeatable Harness lifecycle action without composing a prompt."
 ---
 
 # Agent Harness Command
@@ -9,7 +9,17 @@ Treat a prompt matching `h:<project-alias> <action> <target> [preset]` as a dete
 
 Treat `h:where [project-alias]` as read-only. Display the Hook-provided `controlRoot`, `entrypoint`, `dataRoot`, `workspaceRoot`, binding source, and selected/all project bindings. Do not inspect Authority, run a Gate, or create/resume a Run.
 
-Before any mutation:
+Treat `h:report <project-alias>` as an explicit request to record the current problem in the bound upstream Harness repository. It is an Integration maintenance command, not an Extension lifecycle action, and must remain usable when the data root, Extension Registry, Project Descriptor, or Authority is unavailable. Do not create or delegate to another task.
+
+For `h:report`:
+
+1. Use only the Hook-provided project and Harness binding. Never scan for another repository or accept a user-supplied output path.
+2. Extract only conversation excerpts relevant to the reported problem. Build an Issue Intake conforming to `issue-intake.schema.json`, set `conversation.source` to `current-thread`, explicitly confirm sanitization, and list unavailable evidence in `missingEvidence`; never invent identities or digests.
+3. Invoke the exact bound entrypoint with `issue record --control-root <bound-control-root> --input - --command-id <hook-command-id>`, sending JSON through stdin so no intermediate file is created.
+4. The recorder must write only beneath `<controlRoot>/issues`. Return the resulting issue ID and exact paths. State that the record remains device-local until the user separately chooses to commit and push it.
+5. Do not start or recover a Run, execute a Gate, modify Authority, change an implementation, commit, or push as part of reporting.
+
+For lifecycle commands other than `h:report`, before any mutation:
 
 1. Require the Hook-provided binding resolved from `PLUGIN_DATA/bindings.json`. Use only its exact Harness entrypoint/data root and project ID; never scan the disk for Agent Harness or infer a project from the workspace.
 2. Verify the bound Harness installation, Project Descriptor, and Extension artifact identities against the standalone registries.
