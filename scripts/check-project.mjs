@@ -12,7 +12,7 @@ const packageJson = JSON.parse(await readFile(resolve(root, 'package.json'), 'ut
 const errors = [];
 const schemas = new Map();
 if (packageJson.version !== '1.0.0') errors.push('package version must be 1.0.0');
-if (packageJson.license !== 'MIT') errors.push('package license must match the owner-approved MIT release policy');
+if (packageJson.license !== 'UNLICENSED') errors.push('package license must match the owner-approved all-rights-reserved policy');
 if (!packageJson.releaseMetadata?.createdAt || Number.isNaN(Date.parse(packageJson.releaseMetadata.createdAt))) errors.push('package release metadata requires a deterministic createdAt timestamp');
 if (Object.keys(packageJson.dependencies ?? {}).length) errors.push('runtime dependencies are not allowed in the reference package');
 for (const target of Object.values(packageJson.exports)) {
@@ -115,7 +115,7 @@ await auditWriteRoots(resolve(root, 'src'));
 const npmConfig = await readFile(resolve(root, '.npmrc'), 'utf8');
 if (!npmConfig.includes('cache=.agent-harness-cache/npm') || !npmConfig.includes('logs-dir=.tmp/npm-logs') || !npmConfig.includes('logs-max=0')) errors.push('npm cache/log paths must stay project-local with transient logs disabled');
 const license = await readFile(resolve(root, 'LICENSE'), 'utf8');
-if (!license.startsWith('MIT License\n') || !license.includes('Copyright (c) 2026 Agent Harness contributors')) errors.push('LICENSE does not match the owner-approved MIT grant');
+if (!license.startsWith('Copyright (c) 2026 Agent Harness contributors. All rights reserved.\n') || !license.includes('No license is\ngranted')) errors.push('LICENSE does not match the owner-approved all-rights-reserved notice');
 const codexPluginRoot = resolve(root, 'integrations', 'codex', 'agent-harness-codex');
 const codexPlugin = JSON.parse(await readFile(resolve(codexPluginRoot, '.codex-plugin', 'plugin.json'), 'utf8'));
 if (codexPlugin.name !== 'agent-harness-codex' || codexPlugin.version !== packageJson.version || codexPlugin.skills !== './skills/') errors.push('Codex integration plugin manifest is not bound to this Harness release');

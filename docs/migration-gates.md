@@ -17,4 +17,4 @@ V1.0.0 将“仓库抽离就绪”“发布候选就绪”和“生产切换就�
 
 G0-G5 全部通过只能标记为 **Repository Extraction Ready**，即允许把源码提交到独立仓库。RCV 与 G6 完成后才是 **Release Candidate Ready**；G7 完成并获得用户批准后才是 **Production Cutover Ready**。G8 只验证删除资格，不自动删除。旧 Harness 的删除、移动、归档或清理始终属于用户决定。
 
-当前 RCV Recovery 完整性 Gate 已通过本地测试关闭；MIT 与发布授权已经确认。G6 的正式候选构建、实际安装探针、路径/残留验证和 PUB-008 升级回滚协议已在本地实现，仍受干净修复提交、远端 Node 22 双平台 CI 与该提交生成的不可变制品证据阻断。两个冻结的旧状态根均不存在，原 G7 hard recovery 路径不可补做；两份 source-unavailable Receipt 与所有者 clean-start 决定已固化，后续在正式制品上创建全新 Run。
+当前 RCV Recovery 完整性 Gate 已通过本地测试关闭；许可证决定已修正为 `UNLICENSED / all rights reserved`。G6 的正式候选构建、实际安装探针、路径/残留验证和 PUB-008 升级回滚协议已在本地实现，仍受许可证修正提交、远端 Node 22 双平台 CI 与该提交生成的不可变制品证据阻断；当前没有继续推送、打标签或发布的授权。两个冻结的旧状态根均不存在，原 G7 hard recovery 路径不可补做；两份 source-unavailable Receipt 与所有者 clean-start 决定已固化，后续在正式制品上创建全新 Run。

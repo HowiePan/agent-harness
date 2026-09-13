@@ -1,6 +1,6 @@
 # Agent Harness
 
-**状态**：Repository Extraction Ready；Recovery、本地 G6 候选工具链、MIT 与 clean-start 决定已完成，远端 CI/发布和正式制品 Run Canary 尚未完成
+**状态**：Repository Extraction Ready；Recovery、本地 G6 候选工具链、UNLICENSED 与 clean-start 决定已完成，远端 CI/发布和正式制品 Run Canary 尚未完成
 **定位**：与业务项目、Agent 工具和模型供应商解耦的持久化 Agent 工作流控制面
 
 Agent Harness 负责把需求、工作图、Agent 执行、确定性 Gate、审核、人工决定和恢复组织成可持久化、可审计、可替换执行工具的流程。业务仓默认不保存 Harness 实现、运行状态、Prompt 或 Harness 技术文档。

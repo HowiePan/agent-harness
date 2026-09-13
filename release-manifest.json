@@ -3,7 +3,7 @@
   "name": "agent-harness",
   "version": "1.0.0",
   "node": ">=22",
-  "license": "MIT",
+  "license": "UNLICENSED",
   "files": [
     {
       "path": "bin/agent-harness.mjs",
@@ -17,8 +17,8 @@
     },
     {
       "path": "docs/acceptance/evidence/cutover-source-dispositions.json",
-      "sha256": "cdb83f5e47d6ff91fcbcdcff9922432a004b1148790ecf475383f145f2daa687",
-      "size": 971
+      "sha256": "5c8359839c7d8ae1832dabf8dc5268a9b5f73a8b6e24e1d6956d6a98afde5713",
+      "size": 979
     },
     {
       "path": "docs/acceptance/evidence/pub-008-cardworld-recovery-defect.json",
@@ -27,8 +27,8 @@
     },
     {
       "path": "docs/acceptance/v1.0.0.md",
-      "sha256": "a6fd60859200f2c02a42e195a60b3afd4bd7e5a71b88c1fbd97541f18ca2f33d",
-      "size": 7045
+      "sha256": "bbac57779f8537243cca44ab0f021d70239047cea5e9903b484e1d9a04d8bb3f",
+      "size": 7115
     },
     {
       "path": "docs/architecture.md",
@@ -92,8 +92,8 @@
     },
     {
       "path": "docs/decisions/0002-independent-project-boundary.md",
-      "sha256": "6ca99442a8c937f59e1d17fbe60dd7ce20069f9fc80c239e01f876cc02ac1fe8",
-      "size": 1024
+      "sha256": "be67fd1c468b2d6576e5d273acc60f7525d578d299a90b7fd3a408bbef9049de",
+      "size": 1143
     },
     {
       "path": "docs/execution-control.md",
@@ -112,8 +112,8 @@
     },
     {
       "path": "docs/migration-gates.md",
-      "sha256": "6e1b3c0fb0c428617e6943e41bb0048176f37e50eb5eb6067dd75695132ba574",
-      "size": 3099
+      "sha256": "a87e368f9434e73c365c098d6af8317c6e3a6f9c01cc9f508c5739add5fa7c40",
+      "size": 3190
     },
     {
       "path": "docs/operations.md",
@@ -137,8 +137,8 @@
     },
     {
       "path": "docs/post-extraction-register.md",
-      "sha256": "4fdc11a759f543b8b05375a4929b25d37bb7338a8c46e6e094dc1e09a1c3f316",
-      "size": 8560
+      "sha256": "1bd5401c647007ac6b0a6fe8377292b7ebb5c76804a572bb150a7474cb5d4494",
+      "size": 8722
     },
     {
       "path": "docs/profiles.md",
@@ -172,13 +172,13 @@
     },
     {
       "path": "docs/versions/INDEX.md",
-      "sha256": "8d3a7d93999f6297712aa63b9e0f6f61e24775df7f2bc9d7fc1b88a603984ef5",
-      "size": 1085
+      "sha256": "26ce9fbc484c8fcd627ce09eb7fbd0d047b44003e86778979150462803da6128",
+      "size": 1092
     },
     {
       "path": "docs/versions/v1.0.0.md",
-      "sha256": "397402ed4f0b7ed046aea2a57f744b9a3584521cba7eff014895a27a2a845bd8",
-      "size": 5005
+      "sha256": "3e5b9df84a17885c42465297bbb9e9c42f886a7933aab1c32aed780c5cecb48b",
+      "size": 5063
     },
     {
       "path": "examples/collection-project-input.json",
@@ -222,13 +222,13 @@
     },
     {
       "path": "LICENSE",
-      "sha256": "b90a276ee766d2cc454189e959abe4e68565a0ba2fcb65ab424d599a6876131d",
-      "size": 1083
+      "sha256": "d7439e28ee06545306d9d70973969728d4691fa63786a6a0b5aeb7bf1c071269",
+      "size": 769
     },
     {
       "path": "package.json",
-      "sha256": "83d91838594a1da480bdd42c823a9b9012a00aee6115db518937f489383c95f8",
-      "size": 2088
+      "sha256": "324bff3c9beb42ec800cec681aaf6a3b5812f92f4580fa2870a798788d3ae513",
+      "size": 2095
     },
     {
       "path": "plugins/codex-cli-runtime.plugin.json",
@@ -267,8 +267,8 @@
     },
     {
       "path": "README.md",
-      "sha256": "3770f0a41daa43e913e304ccdee5beccc6714a702543c4e8230e210e8dcabc2f",
-      "size": 5708
+      "sha256": "7560341cc786eec6f3ac1ce461d0c6bc165ecdc1b39c2f8a92c2a58b84338ad3",
+      "size": 5715
     },
     {
       "path": "schemas/authority.schema.json",
@@ -736,7 +736,7 @@
       "size": 3735
     }
   ],
-  "packageDigest": "614521bc91ea49d65098c9469973f80e7ab1fa4b6c8beb6940ee82996a71d6cf",
+  "packageDigest": "79c5f911ab7f20a5e9a100b44bcf26d85f0164b1fdbbc615bbfe77d506751366",
   "metadataFiles": [
     "release-manifest.json",
     "sbom.spdx.json"

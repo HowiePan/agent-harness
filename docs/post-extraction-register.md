@@ -34,7 +34,7 @@ RCV 修复已重新生成 `release-manifest.json` 与 `sbom.spdx.json`；正式 
 | ID | Gate | 状态 | 验证项 | 证据 |
 |:---|:---|:---|:---|:---|
 | PUB-001 | G6 | Complete | 在独立仓库形成首个提交并配置 `https://github.com/HowiePan/agent-harness.git` | 首次 Repository Extraction 基线提交推送至 `origin/main`；提交摘要由远端分支记录 |
-| PUB-002 | G6 | Complete | 项目所有者于 2026-09-13 选择 MIT License | `LICENSE`、`package.json`、release manifest 与 SBOM 一致 |
+| PUB-002 | G6 | Complete | 项目所有者于 2026-09-13 选择 `UNLICENSED / all rights reserved` | `LICENSE`、`package.json`、release manifest 与 SBOM 一致；公开可见性或包分发不授予公共许可证 |
 | PUB-003 | G6 | Pending | GitHub Actions 在 Windows 与 Ubuntu、Node 22 上通过 check、全量测试、clean-room、pack 和 residue | 远端 CI run 链接/摘要 |
 | PUB-004 | G6 | Code Ready | 干净提交上的 `build:release-candidate` 构建真实 tarball，校验 release manifest、SBOM、包内容与完整性摘要 | Schema 与构建器已完成；待修复提交后生成最终不可变制品与 Receipt |
 | PUB-005 | G6 | Code Ready | 从实际发布制品安装 Codex 插件和两个 Skills，并验证引用只落在制品内 | 隔离安装及相对引用探针已进入候选构建器；待干净提交制品执行 |
@@ -59,7 +59,7 @@ RCV 修复已重新生成 `release-manifest.json` 与 `sbom.spdx.json`；正式 
 ## 五、状态词汇
 
 - **Repository Extraction Ready**：允许把 `agent-harness` 提交到独立仓库；当前已达到。
-- **Release Candidate Ready**：RCV 与 PUB 项（包括 PUB-008 跨仓维护演练）全部关闭，能够生成正式 V1.0.0 候选；MIT 已确定，本地代码和验证已具备，仍等待干净提交、远端 CI 与提交绑定制品。
+- **Release Candidate Ready**：RCV 与 PUB 项（包括 PUB-008 跨仓维护演练）全部关闭，能够生成正式 V1.0.0 候选；`UNLICENSED / all rights reserved` 已确定，本地代码和验证已具备，仍等待许可证修正提交、远端 CI 与提交绑定制品，且当前没有继续远端操作的授权。
 - **Production Cutover Ready**：真实 Capsule、隔离恢复、Canary 和 rollback 均通过且获得用户切换批准；现场源已不存在，因此该 hard-recovery 状态无法达到。
 - **Clean-start Cutover Ready**：源不可用 Receipt、所有者状态损失确认、发布制品绑定、全新 Run Canary 和入口 Evidence 全部完成；前两项已完成，当前等待正式制品、Run Canary 与入口 Evidence。
 - **Legacy Deletion Approved**：用户对准确目标另行明确授权；当前未达到，也不能由 Harness 自动推导。

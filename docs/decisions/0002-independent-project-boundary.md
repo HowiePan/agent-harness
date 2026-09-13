@@ -15,4 +15,4 @@ CardWorld 与 Collection 不保存 Harness 实现和技术文档。项目差异�
 - 工具和模型通过插件替换，不改变 Kernel；
 - 业务仓路径变化只需重新附着 Registry；
 - 真实旧 Harness 切换、只读归档和删除是高影响操作，必须由用户单独批准；
-- 项目所有者于 2026-09-13 选择 MIT License；`LICENSE`、`package.json`、release manifest 与 SBOM 必须保持一致。
+- 项目所有者于 2026-09-13 选择 `UNLICENSED / all rights reserved`；公开可见性与包分发不构成公共使用授权，获准用户必须另有书面授权；`LICENSE`、`package.json`、release manifest 与 SBOM 必须保持一致。
