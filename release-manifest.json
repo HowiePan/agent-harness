@@ -117,8 +117,8 @@
     },
     {
       "path": "docs/operations.md",
-      "sha256": "cbee4b6413ea8c16d13dd2fbc85d9498e44b8e888d688ba03fda4df8468921db",
-      "size": 11703
+      "sha256": "89c666b43fc0255e479c0071b446569b877bb88e9f8c0357ce2a2493ac5e48ec",
+      "size": 12354
     },
     {
       "path": "docs/operator-contract.md",
@@ -132,8 +132,8 @@
     },
     {
       "path": "docs/plugin-sdk.md",
-      "sha256": "e916b8b76e144d78fcae463d61a0b932346888a27a63928b51c41c3130f28563",
-      "size": 6024
+      "sha256": "1acd317b613030f0c31b9bc609c7713b78d43f089024bac7fd5a3b8e474a0814",
+      "size": 6115
     },
     {
       "path": "docs/post-extraction-register.md",
@@ -197,38 +197,43 @@
     },
     {
       "path": "integrations/codex/agent-harness-codex/.codex-plugin/plugin.json",
-      "sha256": "130eb6195fd016126a42fe63b6e2da010096051ff7a241b40aadbeb576b39d0a",
-      "size": 980
+      "sha256": "f8a7ebd7a5ffc312fd6d71d2b3d3cf929d24a6060211c2ba65975eec7be6f4ed",
+      "size": 1000
     },
     {
       "path": "integrations/codex/agent-harness-codex/hooks/hooks.json",
-      "sha256": "2da3f106cb5425de64f3962148713c22c48af8afce4124587020b5d09ffe023b",
-      "size": 529
+      "sha256": "625abcb88bea596430bee7a5985bef1f9cf84ff9ef9884cb42dadbafc45745ba",
+      "size": 535
     },
     {
       "path": "integrations/codex/agent-harness-codex/hooks/pseudo-command-router.mjs",
-      "sha256": "ad5859e3d5f71795273d62f42ea7c2e93827d6dfc857336f91e2667cf4e689b5",
-      "size": 2439
+      "sha256": "ce601f9c67568ae74d80657e1bdfd7066cd053a48a7643321eebaf1ffebd52a4",
+      "size": 7045
     },
     {
       "path": "integrations/codex/agent-harness-codex/references/pseudo-command-contract.md",
-      "sha256": "a92bc34b4e854f603da0323541c292ba6d9fe4cb702997db1c389599ea301280",
-      "size": 2044
+      "sha256": "5f8235b88b0147c82e8345edc8dd4a8859961d2125fcbe99d3394a99c926226a",
+      "size": 2582
+    },
+    {
+      "path": "integrations/codex/agent-harness-codex/scripts/configure-bindings.mjs",
+      "sha256": "82dee75087c5a29b31833083ada477fde1686b4432348fcd71797c8d97bbd5a0",
+      "size": 3543
     },
     {
       "path": "integrations/codex/agent-harness-codex/skills/agent-harness-command/agents/openai.yaml",
-      "sha256": "84833312945e49b4d2424cebc41ed1e69c27c32af044f2470731dc915ece050d",
-      "size": 285
+      "sha256": "e29b9986ee53bc13b1ab18854862fa8627a372fbc8ad1c39f85586dd93074b64",
+      "size": 274
     },
     {
       "path": "integrations/codex/agent-harness-codex/skills/agent-harness-command/SKILL.md",
-      "sha256": "476332d83c22c7b993bdfba2f407292fe9157d1fa430d749706a804b8cf3d5af",
-      "size": 2175
+      "sha256": "16466cc6530403fe39db551cb4d47f81034a560cd0bc0dd3ec85da66430c6548",
+      "size": 2591
     },
     {
       "path": "integrations/codex/agent-harness-codex/skills/agent-harness-extension-author/references/extension-contract.md",
-      "sha256": "bdebf6c7746f453521f28d260b71c208bf35e5d4dbef7400ebdf89c7727d8fd3",
-      "size": 2847
+      "sha256": "1e20b93015b9cf1548581efdd4a8ea292b81110db1057ff8ae5053702c1c6369",
+      "size": 2950
     },
     {
       "path": "integrations/codex/agent-harness-codex/skills/agent-harness-extension-author/SKILL.md",
@@ -297,8 +302,8 @@
     },
     {
       "path": "README.md",
-      "sha256": "94a74e73b23f50818b9ab9b9d2c0afd374ff3c30c5bd1187d51bdd6ae6caa47d",
-      "size": 6901
+      "sha256": "a7a109766de4738c0239028a103fbd4b8bd4d8017eba67278fcd78b150efbf36",
+      "size": 6943
     },
     {
       "path": "schemas/authority.schema.json",
@@ -771,7 +776,7 @@
       "size": 3735
     }
   ],
-  "packageDigest": "bdc0a802dd9f28f99120d7366e40fe7db01e6134dba8a3672f78b852d1ce07a6",
+  "packageDigest": "dc0444f2254693edfddd9614a398f3dd298c07bfeceb85c41dd9a735ec3a2dfd",
   "metadataFiles": [
     "release-manifest.json",
     "sbom.spdx.json"

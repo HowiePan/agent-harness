@@ -36,30 +36,32 @@ Codex 工具集成位于 `integrations/codex/agent-harness-codex/`，是带 `.co
 
 ### 对话式命令面
 
-安装 `agent-harness-codex` 插件后，直接发送 `h:<动作> <目标> [预设]`。这不是 Codex 自定义斜杠命令，而是由插件 `UserPromptSubmit` Hook 识别的稳定伪命令；`$agent-harness-command` 可作为 Hook 未信任或被管理员禁用时的显式回退入口。
+安装 `agent-harness-codex` 插件并配置绑定后，直接发送 `h:<项目别名> <动作> <目标> [预设]`。这不是 Codex 自定义斜杠命令，而是由插件 `UserPromptSubmit` Hook 识别的稳定伪命令；`$agent-harness-command` 可作为 Hook 未信任或被管理员禁用时的显式回退入口。
 
-全局 Router 不登记 Engine、Collection、模型或工具专名。它先按当前工作目录从 Project Registry 唯一定位 Project Descriptor，再从 Descriptor 绑定的已安装 Extension Pack 读取 `commandManifest`。因此同一个 `h:quality` 在不同项目中可以解析到不同 Profile 范围，换 Runtime、模型或 Agent 工具不改变用户命令。
+项目别名属于插件安装数据，不属于 Kernel 命令表。`PLUGIN_DATA/bindings.json`（本地安装回退为 `<pluginRoot>/.plugin-data/bindings.json`）显式固定 `controlRoot`、`entrypoint`、`dataRoot`、`workspaceRoot`，并把每个别名绑定到准确的 Project、Profile 和 Extension。Router 只接受当前目录位于已绑定 workspace 的命令，不根据目标格式猜项目，也不扫描磁盘。可用以下只读命令检查配置：`h:where` 或 `h:where <项目别名>`。
+
+绑定由插件随附的 `scripts/configure-bindings.mjs` 写入，例如传入 `--plugin-root`、`--control-root`、`--workspace-root`、`--entrypoint bin/agent-harness.mjs`、`--data-root .agent-harness-data`，并为每个项目重复传入 `--project "<别名>|<projectId>|<profileId>|<extensionId>"`。绑定文件位于业务仓之外，业务仓保持零 Harness 驻留。
 
 当前 Engine Extension 声明：
 
 | 伪命令 | 声明范围 |
 |:---|:---|
-| `h:full <version>` | 需求到 Delivery Receipt 的全流程 |
-| `h:req <version> [full\|expand-to-plan\|plan-only]` | 全量需求审查、从扩展到方案、或只出方案 |
-| `h:plan <version>` | 只生成版本方案与 Feature Work Graph |
-| `h:implement <version>` | 按批准方案执行实现 Waves；`impl` 是别名 |
-| `h:scope <version>` | 独立处置 scope drift |
-| `h:quality <version> [full\|review-only\|recheck]` | 全量质量闭环、只审查、或 finding 复验；`qa` 是别名 |
-| `h:docs <version>` | Docs Closeout |
-| `h:review <version>` | 只读用户代码审核，不代替用户批准 |
-| `h:deliver <version>` | 最终 Gate、Run 关闭与 Delivery Receipt |
-| `h:status <version-or-run-id>` | 只读 Authority 状态 |
-| `h:resume <version-or-run-id>` | ordinary resume，同 Epoch 新 Generation |
-| `h:recover <run-id> [assess\|hard]` | 只读恢复评估或带独立批准的 hard recovery |
+| `h:engine full <version>` | 需求到 Delivery Receipt 的全流程 |
+| `h:engine req <version> [full\|expand-to-plan\|plan-only]` | 全量需求审查、从扩展到方案、或只出方案 |
+| `h:engine plan <version>` | 只生成版本方案与 Feature Work Graph |
+| `h:engine implement <version>` | 按批准方案执行实现 Waves；`impl` 是别名 |
+| `h:engine scope <version>` | 独立处置 scope drift |
+| `h:engine quality <version> [full\|review-only\|recheck]` | 全量质量闭环、只审查、或 finding 复验；`qa` 是别名 |
+| `h:engine docs <version>` | Docs Closeout |
+| `h:engine review <version>` | 只读用户代码审核，不代替用户批准 |
+| `h:engine deliver <version>` | 最终 Gate、Run 关闭与 Delivery Receipt |
+| `h:engine status <version-or-run-id>` | 只读 Authority 状态 |
+| `h:engine resume <version-or-run-id>` | ordinary resume，同 Epoch 新 Generation |
+| `h:engine recover <run-id> [assess\|hard]` | 只读恢复评估或带独立批准的 hard recovery |
 
-当前 Batch Production Extension 在自己的项目中声明 `full`、`rules`、`launch`、`produce`、`quality`、`review`、`accept`、`close`、`status`、`resume`、`recover`。例如 `h:quality B1 all` 和 `h:quality B1 game:chess`；命令名本身不再携带 `collection` 性质。
+当前 Batch Production Extension 声明 `full`、`rules`、`launch`、`produce`、`quality`、`review`、`accept`、`close`、`status`、`resume`、`recover`。若安装时选择别名 `collection`，示例为 `h:collection quality B1 all` 和 `h:collection quality B1 game:chess`。
 
-Hook 只解析单行、最长 512 字符、至多一个预设参数的信封，不启动流程，也不把参数交给 shell。未知动作或预设、多个 Descriptor 命中、Extension 摘要不匹配、前置证据不足都会 fail closed。用户明确说“只评估”“不要启动”或 `dry-run` 时，只返回解析结果和前置条件，不写 Authority；要做只读源码质量审查则显式使用 `h:quality V3.8.4 review-only`。
+Hook 只解析单行、最长 512 字符、至多一个预设参数的信封，不启动流程，也不把参数交给 shell。未知项目、动作或预设、绑定与 Registry 不一致、Extension 摘要不匹配、前置证据不足都会 fail closed。用户明确说“只评估”“不要启动”或 `dry-run` 时，只返回解析结果和前置条件，不写 Authority；要做 Engine 只读源码质量审查则显式使用 `h:engine quality V3.8.4 review-only`。
 
 1. `run status` 读取 revision、epoch、generation、Feature、Lease 和 finding。
 2. `run execute` 让 Coordinator 调度、绑定、等待并提交；`run schedule` 用于需要外部 Runtime 接管的高级场景。

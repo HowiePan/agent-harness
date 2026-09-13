@@ -57,9 +57,9 @@ V1.0.0 不迁移旧源码，也不让业务仓保存 Harness 运行状态。旧 
 
 ## 对话式流程命令
 
-Codex 插件只提供一个通用伪命令 Router：`h:<动作> <目标> [预设]`。命令不包含项目、Profile、工具或模型名称；Router 按当前工作目录从 Project Registry 找到 Project Descriptor，再从已安装 Extension Pack 的 `commandManifest` 取得动作、默认预设、阶段范围和停止条件。其他 Agent 工具可以实现同一解析契约，无需采用 Codex Skill。
+Codex 插件只提供一个通用伪命令 Router：`h:<项目别名> <动作> <目标> [预设]`。安装数据把项目别名显式绑定到 Project、Profile、Extension，并固定 Harness `controlRoot`、入口和数据根；Router 不根据版本号、批次号或目录名猜项目，也不扫描磁盘寻找 Harness。选定项目后，再从其 Extension Pack 的 `commandManifest` 取得动作、默认预设、阶段范围和停止条件。其他 Agent 工具可以实现同一解析契约，无需采用 Codex Skill。
 
-例如在 Engine 项目对话中：`h:full V3.8.4`、`h:req V3.8.4 full`、`h:req V3.8.4 expand-to-plan`、`h:plan V3.8.4`、`h:quality V3.8.4 review-only`。在另一个 Profile 的项目对话中仍使用 `h:full`、`h:quality` 等通用动作；该 Profile 可以声明 `rules`、`produce`、`accept` 等自己的动作，而不把这些性质写进全局命令名。
+例如：`h:engine full V3.8.4`、`h:engine req V3.8.4 expand-to-plan`、`h:engine quality V3.8.4 review-only`，以及 `h:collection quality B1 all`。`engine` 和 `collection` 只是该安装选择的别名，不进入 Kernel；`h:where` 可只读显示 Harness 路径和全部项目绑定。
 
 Hook 只把符合语法的输入转换成 Command Intent，不直接启动流程。`$agent-harness-command` 是显式回退入口。需求审查的多个预设和两条 Harness 的完整流程都由各自 Extension 声明，Authority/Evidence、P0-P3 阻断与批准边界仍由统一 Operator Contract 保证。完整参数见 [运维手册](docs/operations.md)。
 

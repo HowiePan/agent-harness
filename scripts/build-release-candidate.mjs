@@ -64,6 +64,7 @@ const validateSkills = async packageRoot => {
   const hooks = JSON.parse(await readFile(resolve(pluginRoot, 'hooks', 'hooks.json'), 'utf8'));
   assert(hooks.hooks?.UserPromptSubmit?.length === 1, 'RELEASE_CODEX_HOOK_INVALID', 'Packaged Codex plugin requires one UserPromptSubmit pseudo-command hook.');
   await stat(resolve(pluginRoot, 'hooks', 'pseudo-command-router.mjs'));
+  await stat(resolve(pluginRoot, 'scripts', 'configure-bindings.mjs'));
   return true;
 };
 

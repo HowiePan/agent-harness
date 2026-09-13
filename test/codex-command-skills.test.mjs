@@ -1,7 +1,9 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { access, readFile, readdir } from 'node:fs/promises';
+import { access, mkdtemp, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import { dirname, resolve } from 'node:path';
+import { configureBindings } from '../integrations/codex/agent-harness-codex/scripts/configure-bindings.mjs';
 import { hookResponse, parsePseudoCommand } from '../integrations/codex/agent-harness-codex/hooks/pseudo-command-router.mjs';
 import { resolveCommandIntent } from '../src/extensions/command-contract.mjs';
 import { cardWorldCommandManifest, tabletopCollectionCommandManifest } from '../src/consumers/index.mjs';
@@ -9,7 +11,7 @@ import { cardWorldCommandManifest, tabletopCollectionCommandManifest } from '../
 const pluginRoot = resolve('integrations', 'codex', 'agent-harness-codex');
 const skillsRoot = resolve(pluginRoot, 'skills');
 
-test('Codex plugin exposes one generic pseudo-command router instead of project-prefixed command skills', async () => {
+test('Codex plugin exposes one explicit-project pseudo-command router', async () => {
   const actual = (await readdir(skillsRoot, { withFileTypes: true })).filter(entry => entry.isDirectory()).map(entry => entry.name).sort();
   assert.deepEqual(actual, ['agent-harness-command', 'agent-harness-extension-author', 'agent-harness-operator']);
   assert(!actual.some(name => name.startsWith('collection-') || name.startsWith('harness-')));
@@ -21,7 +23,8 @@ test('Codex plugin exposes one generic pseudo-command router instead of project-
     readFile(resolve(pluginRoot, 'hooks', 'hooks.json'), 'utf8'),
   ]);
   assert.match(skill, /^---\nname: agent-harness-command\n/);
-  assert.match(skill, /h:<action> <target> \[preset\]/);
+  assert.match(skill, /h:<project-alias> <action> <target> \[preset\]/);
+  assert.match(skill, /h:where/);
   assert.match(skill, /commandManifest/);
   assert.match(metadata, /allow_implicit_invocation: true/);
   assert.match(hooks, /UserPromptSubmit/);
@@ -30,20 +33,66 @@ test('Codex plugin exposes one generic pseudo-command router instead of project-
   await access(resolve(dirname(skillPath), reference));
 });
 
-test('pseudo-command hook parses only the generic single-line envelope and never embeds project semantics', () => {
+test('pseudo-command parser requires a project alias and supports read-only h:where', () => {
   assert.equal(parsePseudoCommand('普通对话'), null);
-  assert.deepEqual(parsePseudoCommand('h:quality V3.8.4 review-only'), {
-    protocolVersion: '1.0', action: 'quality', target: 'V3.8.4', arguments: ['review-only'],
+  assert.deepEqual(parsePseudoCommand('h:engine quality V3.8.4 review-only'), {
+    protocolVersion: '1.0', kind: 'command', projectAlias: 'engine', action: 'quality', target: 'V3.8.4', arguments: ['review-only'],
   });
-  assert(parsePseudoCommand('h:quality V3.8.4 review-only extra').error);
-  const output = hookResponse({ prompt: 'h:req V3.8.4 expand-to-plan', cwd: 'F:\\consumer' });
-  const context = output.hookSpecificOutput.additionalContext;
-  assert.match(context, /commandManifest/);
-  assert.match(context, /"action":"req"/);
-  assert.doesNotMatch(context, /collection|cardworld/i);
+  assert.deepEqual(parsePseudoCommand('h:where'), { protocolVersion: '1.0', kind: 'where' });
+  assert.deepEqual(parsePseudoCommand('h:where engine'), { protocolVersion: '1.0', kind: 'where', projectAlias: 'engine' });
+  assert.equal(parsePseudoCommand('h:quality V3.8.4 review-only').kind, 'invalid');
+  assert.equal(parsePseudoCommand('h:engine quality V3.8.4 review-only extra').kind, 'invalid');
 });
 
-test('the same pseudo actions resolve through the selected Extension command manifest', () => {
+test('binding configuration makes project selection and Harness location deterministic', async () => {
+  const fixture = await mkdtemp(resolve(tmpdir(), 'agent-harness-codex-'));
+  try {
+    const installedPlugin = resolve(fixture, 'plugin');
+    const controlRoot = resolve(fixture, 'harness');
+    const workspaceRoot = resolve(fixture, 'CardWorld');
+    const entrypoint = resolve(controlRoot, 'bin', 'agent-harness.mjs');
+    await Promise.all([
+      mkdir(resolve(controlRoot, 'bin'), { recursive: true }),
+      mkdir(workspaceRoot, { recursive: true }),
+      mkdir(installedPlugin, { recursive: true }),
+    ]);
+    await writeFile(entrypoint, '', 'utf8');
+    const configured = await configureBindings({
+      pluginRoot: installedPlugin,
+      controlRoot,
+      workspaceRoot,
+      entrypoint: 'bin/agent-harness.mjs',
+      dataRoot: '.agent-harness-data',
+      projectSpecs: [
+        'engine|cardworld-engine|engine-delivery|cardworld-engine-profile',
+        'collection|tabletop-collection|collection-batch|tabletop-collection-profile',
+      ],
+    });
+    assert.equal(configured.harness.entrypoint, entrypoint);
+
+    const options = { pluginRoot: installedPlugin };
+    const output = await hookResponse({ prompt: 'h:engine req V3.8.4 expand-to-plan', cwd: workspaceRoot }, options);
+    const context = output.hookSpecificOutput.additionalContext;
+    assert.match(context, /commandManifest/);
+    assert.match(context, /"projectAlias":"engine"/);
+    assert.match(context, /"projectId":"cardworld-engine"/);
+    assert.match(context, /"entrypoint":/);
+    assert.match(context, /不得搜索磁盘/);
+
+    const where = await hookResponse({ prompt: 'h:where', cwd: workspaceRoot }, options);
+    assert.match(where.hookSpecificOutput.additionalContext, /只读结果/);
+    assert.match(where.hookSpecificOutput.additionalContext, /cardworld-engine/);
+    assert.match(where.hookSpecificOutput.additionalContext, /tabletop-collection/);
+
+    const unknown = await hookResponse({ prompt: 'h:unknown quality V3.8.4', cwd: workspaceRoot }, options);
+    assert.match(unknown.hookSpecificOutput.additionalContext, /项目别名不存在/);
+    assert.match(unknown.hookSpecificOutput.additionalContext, /不得猜测项目/);
+  } finally {
+    await rm(fixture, { recursive: true, force: true });
+  }
+});
+
+test('the same pseudo actions resolve through the explicitly selected Extension command manifest', () => {
   const engineQuality = resolveCommandIntent(cardWorldCommandManifest, { action: 'quality', target: 'V3.8.4', arguments: ['review-only'] });
   assert.equal(engineQuality.profileId, 'engine-delivery');
   assert.equal(engineQuality.sourcePolicy, 'read-only');

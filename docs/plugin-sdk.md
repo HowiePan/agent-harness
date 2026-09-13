@@ -2,7 +2,7 @@
 
 插件通过 manifest 声明 `kind`、API version、capabilities、permissions 和入口。Plugin Host 在加载时冻结版本与权限；Kernel 不按供应商或模型名分支。
 
-Profile、一个或多个插件工厂、声明式 `commandManifest`、Legacy Importer 与构建期 operation 通过 Extension Pack 组合。`commandManifest` 把通用 `h:<动作> <目标> [预设]` 解析到该 Profile 的阶段范围和变更属性，Core 与工具适配器不保存项目命令表。`createHarness()` 默认只加载中立 Feature Profile 和参考插件；任何消费者、Runtime 供应商或 Legacy 能力都必须通过 Extension Registry 安装或由 API 显式传入。Project Descriptor 的 Extension ID、版本或摘要不满足时，Run 在写入 Authority 前失败。
+Profile、一个或多个插件工厂、声明式 `commandManifest`、Legacy Importer 与构建期 operation 通过 Extension Pack 组合。工具适配器先从外部安装数据解析 `h:<项目别名> <动作> <目标> [预设]` 的项目别名，随后由 `commandManifest` 把通用动作解析到该 Profile 的阶段范围和变更属性；Core 不保存项目别名或项目命令表。`createHarness()` 默认只加载中立 Feature Profile 和参考插件；任何消费者、Runtime 供应商或 Legacy 能力都必须通过 Extension Registry 安装或由 API 显式传入。Project Descriptor 的 Extension ID、版本或摘要不满足时，Run 在写入 Authority 前失败。
 
 ## 插件类型
 

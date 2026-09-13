@@ -1,18 +1,18 @@
 {
   "name": "agent-harness-codex",
   "version": "1.0.0",
-  "description": "Portable pseudo-command routing and extension integration for a standalone Agent Harness installation",
+  "description": "Explicit-project pseudo-command routing and persistent installation bindings for a standalone Agent Harness",
   "author": {
     "name": "Agent Harness contributors"
   },
   "skills": "./skills/",
   "interface": {
     "displayName": "Agent Harness Codex",
-    "shortDescription": "Route short Harness intents through project extensions.",
-    "longDescription": "Recognizes the generic h:<action> <target> [preset] envelope, resolves project-specific lifecycle semantics from registered Extension Packs, and preserves provider-neutral operation, recovery, and extension boundaries.",
+    "shortDescription": "Route project-bound Harness commands without disk search.",
+    "longDescription": "Recognizes h:<project-alias> <action> <target> [preset], reads exact Harness and project bindings from plugin data, supports the read-only h:where query, and resolves lifecycle semantics through registered Extension Packs.",
     "developerName": "Agent Harness contributors",
     "category": "Productivity",
-    "capabilities": ["pseudo-command-routing", "workflow-orchestration", "extension-authoring"],
-    "defaultPrompt": "Use h:<action> <target> [preset] and resolve its meaning from the current project's installed Extension Pack."
+    "capabilities": ["explicit-project-routing", "persistent-bindings", "workflow-orchestration", "extension-authoring"],
+    "defaultPrompt": "Use h:<project-alias> <action> <target> [preset], or h:where to inspect the current binding."
   }
 }

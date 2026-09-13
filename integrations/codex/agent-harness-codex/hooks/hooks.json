@@ -1,5 +1,5 @@
 {
-  "description": "Recognize short Agent Harness pseudo-commands without embedding project, tool, or model names in the command syntax.",
+  "description": "Resolve explicit project aliases and fixed Agent Harness locations for short pseudo-commands, including read-only h:where.",
   "hooks": {
     "UserPromptSubmit": [
       {
