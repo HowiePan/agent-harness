@@ -1,0 +1,7 @@
+interface:
+  display_name: "Agent Harness Advanced Operator"
+  short_description: "Advanced low-level Agent Harness operation and recovery."
+  default_prompt: "Use $agent-harness-operator to inspect or operate an existing Harness run with explicit low-level control."
+
+policy:
+  allow_implicit_invocation: false

@@ -12,6 +12,14 @@ import {
 test('CardWorld consumer compiles one canonical requirement and project-owned delivery Features', () => {
   const descriptor = createCardWorldProjectDescriptor({ workspaceRoot: process.cwd(), remote: 'https://github.com/HowiePan/CardWorld.git' });
   assert.deepEqual(descriptor.gateRecipes.map(gate => gate.id), CARDWORLD_FINAL_GATE_IDS);
+  assert(descriptor.workspace.excluded.includes('.cardworld-local'));
+  assert.deepEqual(descriptor.gateRecipes.slice(1).map(gate => gate.command.slice(3, 6)), [
+    ['scripts/cardworld.ps1', '-Task', 'engine-fmt'],
+    ['scripts/cardworld.ps1', '-Task', 'engine-test'],
+    ['scripts/cardworld.ps1', '-Task', 'engine-clippy'],
+    ['scripts/cardworld.ps1', '-Task', 'engine-wasm-release-check'],
+  ]);
+  assert.equal(descriptor.gateRecipes.find(gate => gate.id === 'rust-tests-all-targets').command.at(-1), '--all-targets');
   assert.deepEqual(descriptor.extensions.map(extension => extension.id), ['cardworld-engine-profile', 'codex-runtime']);
   assert.equal(descriptor.policy.defaultRuntimePlugin, 'codex-cli-runtime');
   const graph = compileCardWorldFeatureGraph({

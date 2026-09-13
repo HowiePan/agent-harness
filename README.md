@@ -55,6 +55,14 @@ V1.0.0 不迁移旧源码，也不让业务仓保存 Harness 运行状态。旧 
 - [V1.0.0 验收记录](docs/acceptance/v1.0.0.md)
 - [版本索引](docs/versions/INDEX.md)
 
+## 对话式流程命令
+
+Codex 插件只提供一个通用伪命令 Router：`h:<动作> <目标> [预设]`。命令不包含项目、Profile、工具或模型名称；Router 按当前工作目录从 Project Registry 找到 Project Descriptor，再从已安装 Extension Pack 的 `commandManifest` 取得动作、默认预设、阶段范围和停止条件。其他 Agent 工具可以实现同一解析契约，无需采用 Codex Skill。
+
+例如在 Engine 项目对话中：`h:full V3.8.4`、`h:req V3.8.4 full`、`h:req V3.8.4 expand-to-plan`、`h:plan V3.8.4`、`h:quality V3.8.4 review-only`。在另一个 Profile 的项目对话中仍使用 `h:full`、`h:quality` 等通用动作；该 Profile 可以声明 `rules`、`produce`、`accept` 等自己的动作，而不把这些性质写进全局命令名。
+
+Hook 只把符合语法的输入转换成 Command Intent，不直接启动流程。`$agent-harness-command` 是显式回退入口。需求审查的多个预设和两条 Harness 的完整流程都由各自 Extension 声明，Authority/Evidence、P0-P3 阻断与批准边界仍由统一 Operator Contract 保证。完整参数见 [运维手册](docs/operations.md)。
+
 ## 项目边界
 
 本目录拥有独立 `.git`、包边界和发布清单；它当前物理上位于 CardWorld 工作区中，仅用于首次开发和合成测试，代码、测试和运行时不引用父目录。正式部署使用位于所有受管业务 workspace 之外的 Standalone Control Root。源码 checkout 可直接作为控制根；npm 制品必须位于控制根内部并先生成安装标记，禁止默认把 `node_modules/agent-harness` 当作数据根。业务项目通过外部 Project Descriptor 注册；Authority、Evidence、扩展注册表、缓存和临时目录只能写在该控制根内部。

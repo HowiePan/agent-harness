@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
+import { buildDispatchPacket } from '../src/kernel/kernel.mjs';
 import { command, dispatchAndBind, feature, makeFixture, recordResult, startRun } from './test-support.mjs';
 
 test('engine profile keeps canonical requirement single-line before implementation fan-out', async t => {
@@ -53,4 +54,27 @@ test('Application derives changed files from snapshots and rejects an omitted un
   await mkdir(resolve(fixture.workspace, 'outside'));
   await writeFile(resolve(fixture.workspace, 'outside', 'unclaimed.txt'), 'unauthorized', 'utf8');
   await assert.rejects(() => fixture.harness.recordResult(fixture.projectId, 'run', bound.dispatch.dispatchId, { status: 'completed', summary: 'omitted changed files' }, { commandId: command().commandId }), error => error.code === 'FEATURE_PATH_NOT_ALLOWED');
+});
+
+test('review findings returned by a Runtime are atomically opened with submission evidence', async t => {
+  const fixture = await makeFixture({ profiles: ['engine-delivery'] }); t.after(() => fixture.cleanup());
+  await startRun(fixture, {
+    profileId: 'engine-delivery',
+    profileConfig: { requireCanonicalDecision: false, requireUserCodeReview: false },
+    features: [feature('quality/full-sweep', { stage: 'quality' }, { ownerRole: 'reviewer', allowedPaths: [] })],
+  });
+  const bound = await dispatchAndBind(fixture, 'run');
+  const output = await recordResult(fixture, 'run', bound.dispatch, { status: 'completed', summary: 'review completed', changedFiles: [], findings: [{ id: 'Q-001', severity: 'P2', summary: 'current defect', evidence: ['src/example.rs:10'] }] });
+  assert.equal(output.state.findings.length, 1);
+  assert.equal(output.state.findings[0].featureId, 'quality/full-sweep');
+  assert.deepEqual(output.state.findings[0].evidence, ['src/example.rs:10']);
+  assert.deepEqual(output.state.findings[0].evidenceRefs, output.result.submission.evidenceRefs);
+  assert.equal(output.state.status, 'closure-blocked');
+});
+
+test('Dispatch packet keeps the Gate snapshot captured at scheduling time', () => {
+  const state = { projectId: 'project', runId: 'run', profile: { id: 'engine-delivery' }, epoch: 1, generation: 1, sourceDigest: 'a'.repeat(64), policyDigest: 'b'.repeat(64), pluginSetDigest: 'c'.repeat(64), artifactDigest: null, gates: [{ id: 'new', status: 'failed' }] };
+  const dispatch = { dispatchId: 'dispatch-1', outputRef: 'output.json', sourceDigest: state.sourceDigest, sourceSnapshotRef: 'evidence:snapshot', gateSnapshot: [{ id: 'captured', status: 'passed' }] };
+  const packet = buildDispatchPacket(state, dispatch, feature('quality/full-sweep', { stage: 'quality' }));
+  assert.deepEqual(packet.gates, [{ id: 'captured', status: 'passed' }]);
 });

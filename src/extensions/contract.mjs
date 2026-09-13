@@ -5,6 +5,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { digestJson, sha256 } from '../canonical.mjs';
 import { assert } from '../errors.mjs';
 import { assertInside, assertNoLinkPath } from '../paths.mjs';
+import { defineCommandManifest } from './command-contract.mjs';
 
 const semanticVersion = /^\d+\.\d+\.\d+$/;
 const verifiedArtifactPacks = new WeakSet();
@@ -20,6 +21,7 @@ export const defineExtensionPack = input => {
     plugins: [...(input.plugins ?? [])],
     recoveryImporters: [...(input.recoveryImporters ?? [])],
     operations: { ...(input.operations ?? {}) },
+    ...(input.commandManifest ? { commandManifest: defineCommandManifest(input.commandManifest) } : {}),
   };
   assert(!pack.digest || /^[a-f0-9]{64}$/.test(pack.digest), 'EXTENSION_DIGEST_INVALID', `Extension Pack ${pack.id} digest must be SHA-256.`);
   for (const plugin of pack.plugins) {

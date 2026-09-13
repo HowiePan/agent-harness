@@ -1,18 +1,18 @@
 {
   "name": "agent-harness-codex",
   "version": "1.0.0",
-  "description": "Tool integration for operating and extending a standalone Agent Harness installation",
+  "description": "Portable pseudo-command routing and extension integration for a standalone Agent Harness installation",
   "author": {
     "name": "Agent Harness contributors"
   },
   "skills": "./skills/",
   "interface": {
     "displayName": "Agent Harness Codex",
-    "shortDescription": "Operate and extend standalone Agent Harness workflows.",
-    "longDescription": "Adds provider-aware Codex Skills for operating, recovering, and extending Agent Harness without copying Harness files into consumer repositories.",
+    "shortDescription": "Route short Harness intents through project extensions.",
+    "longDescription": "Recognizes the generic h:<action> <target> [preset] envelope, resolves project-specific lifecycle semantics from registered Extension Packs, and preserves provider-neutral operation, recovery, and extension boundaries.",
     "developerName": "Agent Harness contributors",
     "category": "Productivity",
-    "capabilities": ["workflow-orchestration", "extension-authoring"],
-    "defaultPrompt": "Use the installed standalone Agent Harness and preserve its Authority, path, extension, and user-approval boundaries."
+    "capabilities": ["pseudo-command-routing", "workflow-orchestration", "extension-authoring"],
+    "defaultPrompt": "Use h:<action> <target> [preset] and resolve its meaning from the current project's installed Extension Pack."
   }
 }

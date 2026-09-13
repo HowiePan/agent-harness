@@ -12,6 +12,20 @@
     "notMade": { "type": "array", "items": { "type": "string" } },
     "changedFiles": { "type": "array", "uniqueItems": true, "items": { "type": "string" } },
     "observations": { "type": "array", "items": { "type": "string" } },
+    "findings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "severity", "summary"],
+        "properties": {
+          "id": { "type": "string", "minLength": 1 },
+          "severity": { "enum": ["P0", "P1", "P2", "P3"] },
+          "summary": { "type": "string", "minLength": 1 },
+          "evidence": { "type": "array", "uniqueItems": true, "items": { "type": "string", "minLength": 1 } }
+        },
+        "additionalProperties": false
+      }
+    },
     "failureClass": { "type": "string" },
     "blocker": { "type": "object", "required": ["kind", "summary"], "properties": { "kind": { "type": "string" }, "summary": { "type": "string" }, "resumeWhen": { "type": "string" } }, "additionalProperties": true }
   },

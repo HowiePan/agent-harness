@@ -46,9 +46,9 @@ const validateSkills = async packageRoot => {
   const manifest = JSON.parse(await readFile(resolve(pluginRoot, '.codex-plugin', 'plugin.json'), 'utf8'));
   assert(manifest.name === 'agent-harness-codex' && manifest.version === '1.0.0' && manifest.skills === './skills/', 'RELEASE_CODEX_PLUGIN_INVALID', 'Packaged Codex plugin manifest is invalid.');
   const skillsRoot = resolve(pluginRoot, 'skills');
-  const expected = ['agent-harness-extension-author', 'agent-harness-operator'];
+  const expected = ['agent-harness-command', 'agent-harness-extension-author', 'agent-harness-operator'];
   const actual = (await readdir(skillsRoot, { withFileTypes: true })).filter(entry => entry.isDirectory()).map(entry => entry.name).sort();
-  assert(JSON.stringify(actual) === JSON.stringify(expected), 'RELEASE_SKILL_SET_INVALID', 'Packaged Codex plugin must contain exactly the two V1.0.0 Skills.', { expected, actual });
+  assert(JSON.stringify(actual) === JSON.stringify(expected), 'RELEASE_SKILL_SET_INVALID', 'Packaged Codex plugin must contain only the generic command router and operator/extension Skills.', { expected, actual });
   for (const name of expected) {
     const skillFile = resolve(skillsRoot, name, 'SKILL.md');
     const text = await readFile(skillFile, 'utf8');
@@ -61,6 +61,9 @@ const validateSkills = async packageRoot => {
       await stat(target);
     }
   }
+  const hooks = JSON.parse(await readFile(resolve(pluginRoot, 'hooks', 'hooks.json'), 'utf8'));
+  assert(hooks.hooks?.UserPromptSubmit?.length === 1, 'RELEASE_CODEX_HOOK_INVALID', 'Packaged Codex plugin requires one UserPromptSubmit pseudo-command hook.');
+  await stat(resolve(pluginRoot, 'hooks', 'pseudo-command-router.mjs'));
   return true;
 };
 

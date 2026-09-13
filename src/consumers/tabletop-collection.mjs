@@ -3,6 +3,7 @@ import { assert } from '../errors.mjs';
 import { validateWorkGraph } from '../kernel/work-graph.mjs';
 import { collectionBatchProfile } from '../profiles/collection-batch.mjs';
 import { defineExtensionPack } from '../extensions/contract.mjs';
+import { defineCommandManifest } from '../extensions/command-contract.mjs';
 
 export const COLLECTION_FINAL_GATE_IDS = Object.freeze([
   'collection-typecheck',
@@ -17,6 +18,45 @@ export const COLLECTION_FINAL_GATE_IDS = Object.freeze([
   'collection-release-contract',
   'collection-cleanroom',
 ]);
+
+export const tabletopCollectionCommandManifest = defineCommandManifest({
+  protocolVersion: '1.0',
+  id: 'batch-production-commands',
+  profileId: 'collection-batch',
+  actions: {
+    full: { targetKind: 'batch-id', presets: { default: { scope: 'rule-readiness..release-receipt', stateChanging: true } } },
+    rules: { targetKind: 'batch-id', presets: { default: { scope: 'rule-readiness', stateChanging: true } } },
+    launch: { targetKind: 'batch-id', presets: { default: { scope: 'batch-launch', stateChanging: true } } },
+    produce: { targetKind: 'batch-id', presets: { default: { scope: 'round-production', stateChanging: true } } },
+    quality: {
+      aliases: ['qa'], targetKind: 'batch-id', defaultPreset: 'all', presets: {
+        all: { scope: 'game-harness-acceptance', stateChanging: true },
+        game: { scope: 'single-game-harness-acceptance', stateChanging: true, argumentPrefix: 'game:' },
+      },
+    },
+    review: {
+      targetKind: 'batch-id', defaultPreset: 'all', presets: {
+        all: { scope: 'independent-release-review', stateChanging: true, sourcePolicy: 'read-only' },
+        game: { scope: 'single-game-release-review', stateChanging: true, sourcePolicy: 'read-only', argumentPrefix: 'game:' },
+      },
+    },
+    accept: {
+      targetKind: 'batch-id', defaultPreset: 'all', presets: {
+        all: { scope: 'user-acceptance', stateChanging: true },
+        game: { scope: 'single-game-user-acceptance', stateChanging: true, argumentPrefix: 'game:' },
+      },
+    },
+    close: { targetKind: 'batch-id', presets: { default: { scope: 'batch-close..release-receipt', stateChanging: true } } },
+    status: { targetKind: 'batch-id-or-run-id', presets: { default: { scope: 'status', stateChanging: false } } },
+    resume: { targetKind: 'batch-id-or-run-id', presets: { default: { scope: 'ordinary-resume', stateChanging: true } } },
+    recover: {
+      targetKind: 'run-id', defaultPreset: 'assess', presets: {
+        assess: { scope: 'recovery-assessment', stateChanging: false },
+        hard: { scope: 'hard-recovery', stateChanging: true, approval: 'live-hard-recovery' },
+      },
+    },
+  },
+});
 
 const pnpmGate = (id, script, timeoutMs = 900000) => ({ id, scope: 'final', required: true, forceFresh: true, command: ['pnpm', script], cwd: '.', timeoutMs });
 
@@ -129,6 +169,7 @@ export const extensionPack = defineExtensionPack({
   id: 'tabletop-collection-profile',
   version: '1.0.0',
   profiles: [collectionBatchProfile],
+  commandManifest: tabletopCollectionCommandManifest,
   operations: {
     createProjectDescriptor: createTabletopCollectionProjectDescriptor,
     compileFeatureGraph: compileTabletopCollectionFeatureGraph,

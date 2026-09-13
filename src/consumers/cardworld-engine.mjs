@@ -4,6 +4,7 @@ import { assert } from '../errors.mjs';
 import { ENGINE_STAGES } from '../profiles/engine-delivery.mjs';
 import { engineDeliveryProfile } from '../profiles/engine-delivery.mjs';
 import { defineExtensionPack } from '../extensions/contract.mjs';
+import { defineCommandManifest } from '../extensions/command-contract.mjs';
 import { validateWorkGraph } from '../kernel/work-graph.mjs';
 
 export const CARDWORLD_FINAL_GATE_IDS = Object.freeze([
@@ -14,10 +15,49 @@ export const CARDWORLD_FINAL_GATE_IDS = Object.freeze([
   'wasm-release-boundary',
 ]);
 
+export const cardWorldCommandManifest = defineCommandManifest({
+  protocolVersion: '1.0',
+  id: 'engine-delivery-commands',
+  profileId: 'engine-delivery',
+  actions: {
+    full: { targetKind: 'version', presets: { default: { scope: 'requirement-intake..delivery-receipt', stateChanging: true } } },
+    requirements: {
+      aliases: ['req'], targetKind: 'version', defaultPreset: 'full', presets: {
+        full: { scope: 'requirements..version-plan', stateChanging: true },
+        'expand-to-plan': { scope: 'requirement-expansion..version-plan', stateChanging: true },
+        'plan-only': { scope: 'version-planning', stateChanging: true },
+      },
+    },
+    plan: { targetKind: 'version', presets: { default: { scope: 'version-planning', stateChanging: true } } },
+    implement: { aliases: ['impl'], targetKind: 'version', presets: { default: { scope: 'implementation', stateChanging: true } } },
+    scope: { targetKind: 'version', presets: { default: { scope: 'scope-resolution', stateChanging: true } } },
+    quality: {
+      aliases: ['qa'], targetKind: 'version', defaultPreset: 'full', presets: {
+        full: { scope: 'quality', stateChanging: true, sourcePolicy: 'review-and-repair' },
+        'review-only': { scope: 'quality', stateChanging: true, sourcePolicy: 'read-only' },
+        recheck: { scope: 'quality-recheck', stateChanging: true, sourcePolicy: 'read-only' },
+      },
+    },
+    docs: { targetKind: 'version', presets: { default: { scope: 'docs-closeout', stateChanging: true } } },
+    review: { targetKind: 'version', presets: { default: { scope: 'user-code-review', stateChanging: true, sourcePolicy: 'read-only' } } },
+    deliver: { targetKind: 'version', presets: { default: { scope: 'delivery-receipt', stateChanging: true } } },
+    status: { targetKind: 'version-or-run-id', presets: { default: { scope: 'status', stateChanging: false } } },
+    resume: { targetKind: 'version-or-run-id', presets: { default: { scope: 'ordinary-resume', stateChanging: true } } },
+    recover: {
+      targetKind: 'run-id', defaultPreset: 'assess', presets: {
+        assess: { scope: 'recovery-assessment', stateChanging: false },
+        hard: { scope: 'hard-recovery', stateChanging: true, approval: 'live-hard-recovery' },
+      },
+    },
+  },
+});
+
 const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const defaultContextBudgetCommand = () => [process.execPath, resolve(packageRoot, 'scripts', 'check-context-budget.mjs')];
 
 const gate = (id, command, cwd, extra = {}) => ({ id, scope: 'final', required: true, forceFresh: true, command, cwd, ...extra });
+const powershell = process.platform === 'win32' ? 'powershell' : 'pwsh';
+const cardWorldTask = (task, ...args) => [powershell, '-NoProfile', '-File', 'scripts/cardworld.ps1', '-Task', task, ...args];
 
 export const createCardWorldProjectDescriptor = ({
   id = 'cardworld-engine',
@@ -32,7 +72,7 @@ export const createCardWorldProjectDescriptor = ({
   maxConcurrency = 1,
 } = {}) => {
   assert(workspaceRoot && isAbsolute(workspaceRoot), 'CARDWORLD_WORKSPACE_REQUIRED', 'CardWorld descriptor requires an absolute workspaceRoot.');
-  const workspace = { root: workspaceRoot, excluded: ['.git', 'card_world_engine/target', 'card_world_engine/pkg', 'node_modules'] };
+  const workspace = { root: workspaceRoot, excluded: ['.git', '.cardworld-local', 'card_world_engine/target', 'card_world_engine/pkg', 'node_modules'] };
   if (remote) workspace.remote = remote;
   const runtimeConfig = { sandbox: 'workspace-write', ephemeral: true, approveForMe: true };
   if (model) runtimeConfig.model = model;
@@ -57,10 +97,10 @@ export const createCardWorldProjectDescriptor = ({
     },
     gateRecipes: [
       gate('context-budget', contextBudgetCommand, '.'),
-      gate('rust-format', ['cargo', 'fmt', '--all', '--', '--check'], 'card_world_engine'),
-      gate('rust-tests-all-targets', ['cargo', 'test', '--all-targets'], 'card_world_engine'),
-      gate('rust-clippy-deny-warnings', ['cargo', 'clippy', '--all-targets', '--', '-D', 'warnings'], 'card_world_engine'),
-      gate('wasm-release-boundary', ['wasm-pack', 'build', '--release', '--target', 'web'], 'card_world_engine'),
+      gate('rust-format', cardWorldTask('engine-fmt'), '.'),
+      gate('rust-tests-all-targets', cardWorldTask('engine-test', '--all-targets'), '.'),
+      gate('rust-clippy-deny-warnings', cardWorldTask('engine-clippy'), '.'),
+      gate('wasm-release-boundary', cardWorldTask('engine-wasm-release-check'), '.'),
     ],
     artifactProviders: [],
   };
@@ -95,6 +135,7 @@ export const extensionPack = defineExtensionPack({
   id: 'cardworld-engine-profile',
   version: '1.0.0',
   profiles: [engineDeliveryProfile],
+  commandManifest: cardWorldCommandManifest,
   operations: {
     createProjectDescriptor: createCardWorldProjectDescriptor,
     compileFeatureGraph: compileCardWorldFeatureGraph,

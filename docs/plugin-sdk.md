@@ -2,7 +2,7 @@
 
 插件通过 manifest 声明 `kind`、API version、capabilities、permissions 和入口。Plugin Host 在加载时冻结版本与权限；Kernel 不按供应商或模型名分支。
 
-Profile、一个或多个插件工厂、Legacy Importer 与构建期 operation 通过 Extension Pack 组合。`createHarness()` 默认只加载中立 Feature Profile 和参考插件；任何消费者、Runtime 供应商或 Legacy 能力都必须通过 Extension Registry 安装或由 API 显式传入。Project Descriptor 的 Extension ID、版本或摘要不满足时，Run 在写入 Authority 前失败。
+Profile、一个或多个插件工厂、声明式 `commandManifest`、Legacy Importer 与构建期 operation 通过 Extension Pack 组合。`commandManifest` 把通用 `h:<动作> <目标> [预设]` 解析到该 Profile 的阶段范围和变更属性，Core 与工具适配器不保存项目命令表。`createHarness()` 默认只加载中立 Feature Profile 和参考插件；任何消费者、Runtime 供应商或 Legacy 能力都必须通过 Extension Registry 安装或由 API 显式传入。Project Descriptor 的 Extension ID、版本或摘要不满足时，Run 在写入 Authority 前失败。
 
 ## 插件类型
 
@@ -47,6 +47,6 @@ Runtime 必须准确声明工作区能力：`workspace-shared` 会被参考 Coor
 
 参考 manifest 位于 `plugins/`，公共契约位于 `src/plugins/contracts.mjs`，加载与权限边界位于 `src/plugins/host.mjs`。
 
-Extension Pack 使用 `defineExtensionPack()` 声明稳定 ID、SemVer、Profiles、plugin factories、recovery importers 与 operations。外部模块默认导出 `extensionPack`。可安装制品必须在根目录提供 `agent-harness-extension.json`，列出入口及全部运行时文件；依赖必须打包进该根并进入清单，禁止依赖未固定的外部 bare package。Harness 发布包可复用 `release-manifest.json`。`extension register` 只接受控制根内、无 symlink/junction 穿越的入口，并在执行代码前核验完整清单摘要。`--extension <module>` 只保留为显式的一次性装载入口，不维护消费者名称分支。详细作者约束随 Codex 插件发布在 `integrations/codex/agent-harness-codex/skills/agent-harness-extension-author/`。
+Extension Pack 使用 `defineExtensionPack()` 声明稳定 ID、SemVer、Profiles、plugin factories、`commandManifest`、recovery importers 与 operations。命令清单通过 `defineCommandManifest()` 校验，使用 `resolveCommandIntent()` 解析动作别名、默认预设和参数化 selector。外部模块默认导出 `extensionPack`。可安装制品必须在根目录提供 `agent-harness-extension.json`，列出入口及全部运行时文件；依赖必须打包进该根并进入清单，禁止依赖未固定的外部 bare package。Harness 发布包可复用 `release-manifest.json`。`extension register` 只接受控制根内、无 symlink/junction 穿越的入口，并在执行代码前核验完整清单摘要。`--extension <module>` 只保留为显式的一次性装载入口，不维护消费者名称分支。详细作者约束随 Codex 插件发布在 `integrations/codex/agent-harness-codex/skills/agent-harness-extension-author/`。
 
 Legacy Importer 必须是只读且确定性的：只接受明确的 `legacyRoot`，返回满足 `migration-manifest.schema.json` 的严格 assessment，不返回未声明字段，也不跟随链接。创建 Capsule 时 Harness 会把 assessment 的逻辑根规范化为 `payload`，并要求 Importer 的 ID、版本、source digest 和文件数与受管 staging 完全一致；Importer 不得把源码、执行内容或私有运行状态带入自身插件状态。

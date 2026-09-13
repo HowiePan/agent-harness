@@ -1,0 +1,18 @@
+{
+  "description": "Recognize short Agent Harness pseudo-commands without embedding project, tool, or model names in the command syntax.",
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$PLUGIN_ROOT/hooks/pseudo-command-router.mjs\"",
+            "commandWindows": "node \"%PLUGIN_ROOT%\\hooks\\pseudo-command-router.mjs\"",
+            "timeout": 5,
+            "additionalContextLimit": 1200
+          }
+        ]
+      }
+    ]
+  }
+}

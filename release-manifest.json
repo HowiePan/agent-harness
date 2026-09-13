@@ -117,8 +117,8 @@
     },
     {
       "path": "docs/operations.md",
-      "sha256": "38f028aef4e6087986a7cf38a0032961300a16832b77c246f2a6911219b0049c",
-      "size": 9227
+      "sha256": "cbee4b6413ea8c16d13dd2fbc85d9498e44b8e888d688ba03fda4df8468921db",
+      "size": 11703
     },
     {
       "path": "docs/operator-contract.md",
@@ -132,8 +132,8 @@
     },
     {
       "path": "docs/plugin-sdk.md",
-      "sha256": "abfc9fde47a8485d41a1d495a6bcd8187a0c529f3652342dac7363dff30050c1",
-      "size": 5668
+      "sha256": "e916b8b76e144d78fcae463d61a0b932346888a27a63928b51c41c3130f28563",
+      "size": 6024
     },
     {
       "path": "docs/post-extraction-register.md",
@@ -197,18 +197,48 @@
     },
     {
       "path": "integrations/codex/agent-harness-codex/.codex-plugin/plugin.json",
-      "sha256": "6011fbdfc1e9b161028507d24b854404829839f171e1850c0981aff43dcbb1ad",
-      "size": 871
+      "sha256": "130eb6195fd016126a42fe63b6e2da010096051ff7a241b40aadbeb576b39d0a",
+      "size": 980
+    },
+    {
+      "path": "integrations/codex/agent-harness-codex/hooks/hooks.json",
+      "sha256": "2da3f106cb5425de64f3962148713c22c48af8afce4124587020b5d09ffe023b",
+      "size": 529
+    },
+    {
+      "path": "integrations/codex/agent-harness-codex/hooks/pseudo-command-router.mjs",
+      "sha256": "ad5859e3d5f71795273d62f42ea7c2e93827d6dfc857336f91e2667cf4e689b5",
+      "size": 2439
+    },
+    {
+      "path": "integrations/codex/agent-harness-codex/references/pseudo-command-contract.md",
+      "sha256": "a92bc34b4e854f603da0323541c292ba6d9fe4cb702997db1c389599ea301280",
+      "size": 2044
+    },
+    {
+      "path": "integrations/codex/agent-harness-codex/skills/agent-harness-command/agents/openai.yaml",
+      "sha256": "84833312945e49b4d2424cebc41ed1e69c27c32af044f2470731dc915ece050d",
+      "size": 285
+    },
+    {
+      "path": "integrations/codex/agent-harness-codex/skills/agent-harness-command/SKILL.md",
+      "sha256": "476332d83c22c7b993bdfba2f407292fe9157d1fa430d749706a804b8cf3d5af",
+      "size": 2175
     },
     {
       "path": "integrations/codex/agent-harness-codex/skills/agent-harness-extension-author/references/extension-contract.md",
-      "sha256": "62edc555233556373d10118fa4489b9b1d432f57263747eb41e9079fac839ced",
-      "size": 2248
+      "sha256": "bdebf6c7746f453521f28d260b71c208bf35e5d4dbef7400ebdf89c7727d8fd3",
+      "size": 2847
     },
     {
       "path": "integrations/codex/agent-harness-codex/skills/agent-harness-extension-author/SKILL.md",
       "sha256": "aa62021ab4ffaaabfa2d784b960d3f5a5737d692559a316fb6e63828b552c8ba",
       "size": 1866
+    },
+    {
+      "path": "integrations/codex/agent-harness-codex/skills/agent-harness-operator/agents/openai.yaml",
+      "sha256": "f24e1211b75fc4075eeb55627b7a06e4f634769520543bf7b938349d8ce18c71",
+      "size": 312
     },
     {
       "path": "integrations/codex/agent-harness-codex/skills/agent-harness-operator/references/operation-contract.md",
@@ -267,8 +297,8 @@
     },
     {
       "path": "README.md",
-      "sha256": "7d321870ce9f60c7ff67c247882448e167a9b22eeff5c4cc35264a7ebdce2e52",
-      "size": 5722
+      "sha256": "94a74e73b23f50818b9ab9b9d2c0afd374ff3c30c5bd1187d51bdd6ae6caa47d",
+      "size": 6901
     },
     {
       "path": "schemas/authority.schema.json",
@@ -352,8 +382,8 @@
     },
     {
       "path": "schemas/result.schema.json",
-      "sha256": "c7ffe1ce1bb0004848f0e8c3f7d9adeda863ded9a9dea99ce60f50d094d28852",
-      "size": 1043
+      "sha256": "5819308059ab44769cb713a32529bc92fe292c9c510a40e8f7621aeb044034b3",
+      "size": 1549
     },
     {
       "path": "scripts/check-context-budget.mjs",
@@ -382,8 +412,8 @@
     },
     {
       "path": "src/consumers/cardworld-engine.mjs",
-      "sha256": "358e41cc63cfe2d434c24c9f6642ab7d35d73ad0ae155af4722a7ba0b0cd43d1",
-      "size": 4748
+      "sha256": "33c3ba148598183e042f87db8f74ef661b353af0baeae51ce87401527717c090",
+      "size": 7259
     },
     {
       "path": "src/consumers/index.mjs",
@@ -392,8 +422,8 @@
     },
     {
       "path": "src/consumers/tabletop-collection.mjs",
-      "sha256": "3a6dcf6649202e51fd83ffc7bf7c2eee6b4b48e39ae47e1341d1f7b9d351dfa8",
-      "size": 6324
+      "sha256": "1c13bbe5ea03446b620c980d5e83b76c02852e1680bfbe3c99622c1dd64275c7",
+      "size": 8602
     },
     {
       "path": "src/coordinator/run-coordinator.mjs",
@@ -411,14 +441,19 @@
       "size": 1121
     },
     {
+      "path": "src/extensions/command-contract.mjs",
+      "sha256": "25b898f97c8d02b556e022f1a78b24cac1aa8877d3ca76aa2cb89372f919750d",
+      "size": 5136
+    },
+    {
       "path": "src/extensions/contract.mjs",
-      "sha256": "36afa9c1a391ab97920075e18f07b34670bee228c1e0f7b4390b98bb6e5e34d2",
-      "size": 9313
+      "sha256": "19a612197b41263a91cb35150cc1c72eff6e98101fbaa2e29254c372d289142c",
+      "size": 9482
     },
     {
       "path": "src/extensions/index.mjs",
-      "sha256": "05776b8de69f66bbb1546a94c457ea185a1e4d54bdc4c29fa1c688ae87533b7f",
-      "size": 219
+      "sha256": "a3cf6f77640df18c8e3340e78812fbe387ec0408cca991b975ed71ee448be8af",
+      "size": 305
     },
     {
       "path": "src/extensions/legacy-compat.mjs",
@@ -477,13 +512,13 @@
     },
     {
       "path": "src/kernel/kernel.mjs",
-      "sha256": "04775f26ba079c97e3a8b37c09b39a997de5f76fd35e01ec301754ef72a8d6fb",
-      "size": 32509
+      "sha256": "3926a9ce5f08f6f06d98341706afe6b06ca384621ff4e2a81aa34ad150641a6d",
+      "size": 33652
     },
     {
       "path": "src/kernel/quality.mjs",
-      "sha256": "b072fea55b18e50f85122ea95ce89ff85235788b91eb7c0fccf55db470b34633",
-      "size": 1103
+      "sha256": "c38c748f8459ae45b4b79b4cd134ce2360dcee7bf3b8f5708f0797e1853a5a84",
+      "size": 1169
     },
     {
       "path": "src/kernel/receipts.mjs",
@@ -736,7 +771,7 @@
       "size": 3735
     }
   ],
-  "packageDigest": "30c009fbc65ded706e896ae5eb3deb445afbc7bbe9b257d8b09aac630df4a615",
+  "packageDigest": "bdc0a802dd9f28f99120d7366e40fe7db01e6134dba8a3672f78b852d1ce07a6",
   "metadataFiles": [
     "release-manifest.json",
     "sbom.spdx.json"

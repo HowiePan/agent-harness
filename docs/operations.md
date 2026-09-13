@@ -34,6 +34,33 @@ Codex 工具集成位于 `integrations/codex/agent-harness-codex/`，是带 `.co
 
 ## 日常运行
 
+### 对话式命令面
+
+安装 `agent-harness-codex` 插件后，直接发送 `h:<动作> <目标> [预设]`。这不是 Codex 自定义斜杠命令，而是由插件 `UserPromptSubmit` Hook 识别的稳定伪命令；`$agent-harness-command` 可作为 Hook 未信任或被管理员禁用时的显式回退入口。
+
+全局 Router 不登记 Engine、Collection、模型或工具专名。它先按当前工作目录从 Project Registry 唯一定位 Project Descriptor，再从 Descriptor 绑定的已安装 Extension Pack 读取 `commandManifest`。因此同一个 `h:quality` 在不同项目中可以解析到不同 Profile 范围，换 Runtime、模型或 Agent 工具不改变用户命令。
+
+当前 Engine Extension 声明：
+
+| 伪命令 | 声明范围 |
+|:---|:---|
+| `h:full <version>` | 需求到 Delivery Receipt 的全流程 |
+| `h:req <version> [full\|expand-to-plan\|plan-only]` | 全量需求审查、从扩展到方案、或只出方案 |
+| `h:plan <version>` | 只生成版本方案与 Feature Work Graph |
+| `h:implement <version>` | 按批准方案执行实现 Waves；`impl` 是别名 |
+| `h:scope <version>` | 独立处置 scope drift |
+| `h:quality <version> [full\|review-only\|recheck]` | 全量质量闭环、只审查、或 finding 复验；`qa` 是别名 |
+| `h:docs <version>` | Docs Closeout |
+| `h:review <version>` | 只读用户代码审核，不代替用户批准 |
+| `h:deliver <version>` | 最终 Gate、Run 关闭与 Delivery Receipt |
+| `h:status <version-or-run-id>` | 只读 Authority 状态 |
+| `h:resume <version-or-run-id>` | ordinary resume，同 Epoch 新 Generation |
+| `h:recover <run-id> [assess\|hard]` | 只读恢复评估或带独立批准的 hard recovery |
+
+当前 Batch Production Extension 在自己的项目中声明 `full`、`rules`、`launch`、`produce`、`quality`、`review`、`accept`、`close`、`status`、`resume`、`recover`。例如 `h:quality B1 all` 和 `h:quality B1 game:chess`；命令名本身不再携带 `collection` 性质。
+
+Hook 只解析单行、最长 512 字符、至多一个预设参数的信封，不启动流程，也不把参数交给 shell。未知动作或预设、多个 Descriptor 命中、Extension 摘要不匹配、前置证据不足都会 fail closed。用户明确说“只评估”“不要启动”或 `dry-run` 时，只返回解析结果和前置条件，不写 Authority；要做只读源码质量审查则显式使用 `h:quality V3.8.4 review-only`。
+
 1. `run status` 读取 revision、epoch、generation、Feature、Lease 和 finding。
 2. `run execute` 让 Coordinator 调度、绑定、等待并提交；`run schedule` 用于需要外部 Runtime 接管的高级场景。
 3. `run gates --scope final --fresh` 从 Project Descriptor 执行确定性最终 Gate。
@@ -82,7 +109,7 @@ hard recovery Decision 的最小输入如下；`context.expectedRevision` 是记
 
 ## 发布与升级
 
-发布候选包含源码、Schema、Profile、Extension、Codex Skills、插件 manifest、checksum 清单和 SPDX SBOM。`npm run build:release-candidate` 拒绝脏工作树，构建真实 tarball，核对 manifest/SBOM/包内容，在隔离控制根安装并验证插件与两个 Skill，最终写入 `.agent-harness-data/release-candidates/<version>/<archive-sha256>/`。升级前验证 Extension/Plugin/Profile 版本和存储迁移说明；先封存状态快照并在复制的数据根执行 canary。运行中 `artifact-rebase` 必须先记录有有效期的 `artifact-rebase` Decision，绑定当前 revision、旧/新制品摘要与影响 Feature 集合。密码学签名、发布、真实切换与旧内容删除由项目所有者批准和执行。缺陷上报、不可变修复和紧急 commit 绑定见 [缺陷、升级与回滚](maintenance.md)。
+发布候选包含源码、Schema、Profile、Extension、Codex Skills、插件 manifest、Hook、checksum 清单和 SPDX SBOM。`npm run build:release-candidate` 拒绝脏工作树，构建真实 tarball，核对 manifest/SBOM/包内容，在隔离控制根安装并验证插件、三个 Skill 与伪命令 Hook，最终写入 `.agent-harness-data/release-candidates/<version>/<archive-sha256>/`。升级前验证 Extension/Plugin/Profile 版本和存储迁移说明；先封存状态快照并在复制的数据根执行 canary。运行中 `artifact-rebase` 必须先记录有有效期的 `artifact-rebase` Decision，绑定当前 revision、旧/新制品摘要与影响 Feature 集合。密码学签名、发布、真实切换与旧内容删除由项目所有者批准和执行。缺陷上报、不可变修复和紧急 commit 绑定见 [缺陷、升级与回滚](maintenance.md)。
 
 当旧 Authority 的 source-unavailable clean-start disposition 已获所有者确认后，可使用提交绑定候选执行现场无写入 Canary：
 

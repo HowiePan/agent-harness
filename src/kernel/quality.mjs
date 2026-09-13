@@ -12,6 +12,7 @@ export const validateFinding = finding => {
     source: String(finding.source ?? 'review'),
     status: finding.status ?? 'open',
     featureId: finding.featureId ?? null,
+    evidence: [...new Set((finding.evidence ?? []).map(String))],
     evidenceRefs: [...new Set(finding.evidenceRefs ?? [])],
     resolutionEvidenceRefs: [...new Set(finding.resolutionEvidenceRefs ?? [])],
     openedAt: finding.openedAt,

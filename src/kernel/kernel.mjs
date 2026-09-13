@@ -22,6 +22,7 @@ export const buildDispatchPacket = (state, dispatch, feature) => ({
   protocolVersion: '1.0', projectId: state.projectId, runId: state.runId, profileId: state.profile.id,
   epoch: state.epoch, generation: state.generation, dispatchId: dispatch.dispatchId, feature: structuredClone(feature), outputRef: dispatch.outputRef,
   sourceDigest: dispatch.sourceDigest ?? state.sourceDigest, sourceSnapshotRef: dispatch.sourceSnapshotRef, policyDigest: state.policyDigest, pluginSetDigest: state.pluginSetDigest, artifactDigest: state.artifactDigest,
+  gates: structuredClone(dispatch.gateSnapshot ?? state.gates),
   execution: structuredClone(dispatch.execution ?? {}),
 });
 
@@ -102,8 +103,9 @@ export class HarnessKernel {
         const outputRef = resolve(this.authorityStore.root, 'outputs', state.projectId, state.runId, `epoch-${state.epoch}`, `generation-${state.generation}`, `${dispatchId}.json`);
         const featureSnapshot = structuredClone(feature);
         const execution = structuredClone(input.executionByFeatureId?.[feature.id] ?? {});
-        const packet = buildDispatchPacket(state, { dispatchId, outputRef, sourceDigest: state.sourceDigest, sourceSnapshotRef: input.sourceSnapshotRef, execution }, featureSnapshot);
-        const dispatch = { dispatchId, featureId: feature.id, featureSnapshot, epoch: state.epoch, generation: state.generation, sourceDigest: state.sourceDigest, sourceSnapshotRef: input.sourceSnapshotRef, execution, packetDigest: digestJson(packet), outputRef, status: 'requested', requestedAt: this.now(), runtimePluginId: input.runtimePluginId ?? null };
+        const gateSnapshot = structuredClone(state.gates);
+        const packet = buildDispatchPacket(state, { dispatchId, outputRef, sourceDigest: state.sourceDigest, sourceSnapshotRef: input.sourceSnapshotRef, gateSnapshot, execution }, featureSnapshot);
+        const dispatch = { dispatchId, featureId: feature.id, featureSnapshot, epoch: state.epoch, generation: state.generation, sourceDigest: state.sourceDigest, sourceSnapshotRef: input.sourceSnapshotRef, gateSnapshot, execution, packetDigest: digestJson(packet), outputRef, status: 'requested', requestedAt: this.now(), runtimePluginId: input.runtimePluginId ?? null };
         feature.state = 'dispatched';
         state.dispatches.push(dispatch);
         event(state, 'dispatch.requested', { dispatchId, featureId: feature.id }, this.now);
@@ -165,6 +167,15 @@ export class HarnessKernel {
         assert(metadata.sourceDigest === dispatch.sourceDigest && metadata.policyDigest === state.policyDigest && metadata.pluginSetDigest === state.pluginSetDigest, 'EVIDENCE_BASELINE_MISMATCH', 'Evidence baseline does not match the immutable Dispatch.', { ref: metadata.ref });
       }
       const changedFiles = [...new Set(input.result.changedFiles ?? [])].map(path => String(path).replaceAll('\\', '/'));
+      const findingIntents = input.result.findings ?? [];
+      assert(Array.isArray(findingIntents), 'RESULT_FINDINGS_INVALID', 'Result findings must be an array.');
+      const findingIds = new Set();
+      const findings = findingIntents.map(intent => {
+        assert(intent && typeof intent === 'object' && !Array.isArray(intent), 'RESULT_FINDINGS_INVALID', 'Every result finding must be an object.');
+        assert(!findingIds.has(intent?.id) && !state.findings.some(item => item.id === intent?.id), 'FINDING_DUPLICATE', `Finding already exists: ${intent?.id}`);
+        findingIds.add(intent.id);
+        return validateFinding({ ...intent, source: 'review', featureId: feature.id, evidenceRefs: input.evidenceRefs, openedAt: this.now(), status: 'open' });
+      });
       const pathWithin = (root, file) => file === root || file.startsWith(`${root.replace(/\/$/, '')}/`);
       for (const file of changedFiles) {
         assert(feature.allowedPaths.some(path => pathWithin(path, file)), 'FEATURE_PATH_NOT_ALLOWED', `Feature ${feature.id} changed an unauthorized path: ${file}`);
@@ -175,6 +186,10 @@ export class HarnessKernel {
       const submission = { submissionId: this.id('submission'), dispatchId: dispatch.dispatchId, leaseId: lease.leaseId, featureId: feature.id, agentId: lease.agentId, epoch: state.epoch, generation: state.generation, inputSourceDigest: dispatch.sourceDigest, outputSourceDigest: input.resultingSourceDigest, changedFiles, result: structuredClone(input.result), evidenceRefs: [...new Set(input.evidenceRefs ?? [])], submittedAt: this.now() };
       submission.submissionDigest = digestJson(submission);
       state.submissions.push(submission);
+      for (const finding of findings) {
+        state.findings.push(finding);
+        event(state, 'finding.opened', { id: finding.id, severity: finding.severity, featureId: feature.id }, this.now);
+      }
       state.sourceDigest = submission.outputSourceDigest;
       state.evidenceRefs.push(...submission.evidenceRefs.filter(ref => !state.evidenceRefs.includes(ref)));
       lease.status = 'committed';
@@ -195,7 +210,7 @@ export class HarnessKernel {
       }
       event(state, 'submission.committed', { submissionId: submission.submissionId, featureId: feature.id, status: feature.state }, this.now);
       state.status = deriveStatus(state, profile);
-      return { submission, featureState: feature.state, runStatus: state.status };
+      return { submission, findings, featureState: feature.state, runStatus: state.status };
     });
   }
 
