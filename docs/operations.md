@@ -13,7 +13,7 @@ node bin/agent-harness.mjs doctor --data-root .agent-harness-data/doctor
 node scripts/check-residue.mjs
 ```
 
-`doctor` 是零写入检查：只解析并验证目标路径，不初始化状态目录。
+`doctor` 是零写入检查：只解析并验证目标路径，不初始化状态目录。输出分别标明控制根模式、安装就绪、数据根/Extension Registry/Project Registry/Authority 是否存在、已登记制品以及 `lifecycleReady`；`writeCapability=not-probed` 表示零写入检查不能证明当前调用方具有写权限。
 
 先用 `project register` 登记 Project Descriptor，再用 `run start` 创建 Run。所有写命令携带唯一 `--command-id`；更新已有 Authority 时同时携带最新 revision。使用 `node bin/agent-harness.mjs --help` 查看完整参数。
 
@@ -48,11 +48,11 @@ codex plugin add agent-harness-codex@agent-harness-local
 
 安装 `agent-harness-codex` 插件并配置绑定后，直接发送 `h:<项目别名> <动作> <目标> [预设]`。这不是 Codex 自定义斜杠命令，而是由插件 `UserPromptSubmit` Hook 识别的稳定伪命令；`$agent-harness-command` 可作为 Hook 未信任或被管理员禁用时的显式回退入口。
 
-项目别名属于插件安装数据，不属于 Kernel 命令表。`PLUGIN_DATA/bindings.json`（本地安装回退为 `<pluginRoot>/.plugin-data/bindings.json`）显式固定 `controlRoot`、`entrypoint`、`dataRoot`、`workspaceRoot`，并把每个别名绑定到准确的 Project、Profile 和 Extension。Router 只接受当前目录位于已绑定 workspace 的命令，不根据目标格式猜项目，也不扫描磁盘。可用以下只读命令检查配置：`h:where` 或 `h:where <项目别名>`。
+项目别名属于插件安装数据，不属于 Kernel 命令表。`PLUGIN_DATA/bindings.json`（本地安装回退为 `<pluginRoot>/.plugin-data/bindings.json`）显式固定 `controlRoot`、`entrypoint`、`dataRoot`、`workspaceRoot` 及可选 Git common-directory identity，并把每个别名绑定到准确的 Project、Profile 和 Extension。Router 接受绑定根的后代路径，也接受 common-directory identity 相同的 linked worktree；它不根据目标格式猜项目，也不扫描磁盘。状态变更 Run 会把 Hook 验证过的实际 worktree 固定进 Authority，后续 Runtime 和 Gate 不得回退到另一个 checkout。可用以下只读命令检查配置：`h:where` 或 `h:where <项目别名>`。
 
 使用 `h:report <项目别名>` 上报当前对话中的 Harness 问题。该保留命令只依赖绑定文件，因此即使 data root、Extension Registry、Project Descriptor 或 Authority 不可用也能登记问题。它从当前对话提取相关摘录、执行脱敏并列出缺失 Evidence，通过绑定的精确入口调用 `issue record`；不创建新对话，不启动 Run/Gate，也不修复实现。输出目录固定为 `<controlRoot>/issues`，不接受任意路径参数，不写业务仓、Codex worktree、用户目录或历史迁移目录。记录只有在用户另行决定提交并推送后才具备跨设备持久性。
 
-绑定由插件随附的 `scripts/configure-bindings.mjs` 写入，例如传入 `--plugin-root`、`--control-root`、`--workspace-root`、`--entrypoint bin/agent-harness.mjs`、`--data-root .agent-harness-data`，并为每个项目重复传入 `--project "<别名>|<projectId>|<profileId>|<extensionId>"`。绑定文件位于业务仓之外，业务仓保持零 Harness 驻留。
+绑定由插件随附的 `scripts/configure-bindings.mjs` 写入，例如传入 `--plugin-root`、`--control-root`、`--workspace-root`、`--entrypoint bin/agent-harness.mjs`、`--data-root .agent-harness-data`，并为每个项目重复传入 `--project "<别名>|<projectId>|<profileId>|<extensionId>"`。配置器在 Git workspace 上固化 common-directory identity。绑定文件位于业务仓之外，业务仓保持零 Harness 驻留。若业务任务沙箱拒绝写外部控制根，只能为绑定的 Node 入口申请精确执行授权；不得把 `dataRoot` 改到业务仓或申请通用 shell 豁免。
 
 当前 Engine Extension 声明：
 

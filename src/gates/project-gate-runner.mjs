@@ -22,12 +22,14 @@ export class ProjectGateRunner {
 
   async run({ projectId, runId, scope = 'final', forceFresh = false, gateIds = [] }) {
     const project = await this.harness.projectRegistry.get(projectId);
+    let state = await this.harness.authorityStore.read(projectId, runId);
+    const workspaceRoot = state.metadata?.workspace?.root ?? project.workspace.root;
     const recipes = (project.gateRecipes ?? []).map(validateRecipe).filter(recipe => recipe.scope === scope && (!gateIds.length || gateIds.includes(recipe.id)));
     assert(recipes.length > 0, 'GATE_RECIPE_NOT_FOUND', `Project ${projectId} has no Gate Recipes for scope ${scope}.`);
     const host = new PluginHost({ allowedPermissions: ['gate.execute'] });
     host.register(manifest, createProcessGateExecutor({
       manifest,
-      workspaceRoot: project.workspace.root,
+      workspaceRoot,
       temporaryRoot: `${this.harness.dataRoot}/tmp/gates`,
       controlRoot: this.harness.controlRoot,
       resolveSandbox: ({ allowed }) => allowed.sandboxPluginId ? this.harness.pluginHost.get(allowed.sandboxPluginId, 'os-sandbox') : null,
@@ -35,8 +37,8 @@ export class ProjectGateRunner {
     }));
     const results = [];
     for (const recipe of recipes) {
-      let state = await this.harness.authorityStore.read(projectId, runId);
-      const before = await captureWorkspace(project.workspace.root, { excluded: project.workspace.excluded ?? [] });
+      state = await this.harness.authorityStore.read(projectId, runId);
+      const before = await captureWorkspace(workspaceRoot, { excluded: project.workspace.excluded ?? [] });
       assert(before.digest === state.sourceDigest, 'WORKSPACE_SOURCE_DRIFT', 'Workspace changed before Gate execution.', { authoritySourceDigest: state.sourceDigest, workspaceSourceDigest: before.digest });
       const spec = { id: recipe.id, commandId: recipe.id, args: [] };
       if (recipe.cwd !== undefined) spec.cwd = recipe.cwd;
@@ -53,7 +55,7 @@ export class ProjectGateRunner {
         evidenceRefs = cached.value.result.evidenceRefs;
       } else {
         executorReceipt = await host.invoke(manifest.id, 'execute', spec);
-        const after = await captureWorkspace(project.workspace.root, { excluded: project.workspace.excluded ?? [] });
+        const after = await captureWorkspace(workspaceRoot, { excluded: project.workspace.excluded ?? [] });
         status = after.digest === before.digest ? executorReceipt.payload.status : 'failed';
         const evidence = await this.harness.evidenceStore.put({ recipe, executorReceipt, sourceBefore: before.digest, sourceAfter: after.digest, sourceDrift: after.digest !== before.digest }, { mediaType: 'application/json', projectId, runId, epoch: state.epoch, generation: state.generation, sourceDigest: state.sourceDigest, artifactDigest: state.artifactDigest, policyDigest: state.policyDigest, pluginSetDigest: state.pluginSetDigest, toolchainDigest, gateSpecDigest: specDigest, labels: ['gate-result', `gate:${recipe.id}`] });
         evidenceRefs = [evidence.ref];

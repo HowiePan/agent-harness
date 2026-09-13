@@ -82,7 +82,7 @@ export const createCodexCliRuntime = ({
         const managedOutputs = await outputSession.prepare();
         const processTemporary = outputSession.paths.temporary;
         workspaceContext = workspaceProvider ? await workspaceProvider.prepare({ project, packet, agentId, runtimeDirectory: directory }) : null;
-        const executionRoot = workspaceContext?.workspaceRoot ?? project.workspace.root;
+        const executionRoot = workspaceContext?.workspaceRoot ?? packet.workspace?.root ?? project.workspace.root;
         const lastMessagePath = resolve(outputSession.paths.debug, 'result.json');
         const eventsPath = resolve(outputSession.paths.debug, 'events.jsonl');
         const args = [...(config.executableArgs ?? executableArgs), 'exec', '--json', '--color', 'never', '--sandbox', sandbox, '--cd', project.workspace.root, '--output-schema', resolve(schemaPath), '--output-last-message', lastMessagePath];
@@ -108,7 +108,7 @@ export const createCodexCliRuntime = ({
         const sandboxReceipt = { mode: sandbox, applied: true, providerId: manifest.id };
         tasks.set(agentId, { child, completion, stdout: () => stdout, stderr: () => stderr, lastMessagePath, eventsPath, packetDigest: packet.packetDigest ?? null, workspaceContext, result: null, outputSession, stopOutputMonitor, sandboxReceipt });
         child.stdin?.end(promptBuilder(structuredClone(packet)));
-        return envelope(manifest, 'receipt', { operation: 'spawn', agentId, transportReceipt: { runtimePluginId: manifest.id, pid: child.pid ?? null, sandbox, managedOutputRoot: directory, managedOutputs: managedOutputs.outputs, workspaceRoot: executionRoot, sourceWorkspaceRoot: project.workspace.root, startedAt: new Date().toISOString() } });
+        return envelope(manifest, 'receipt', { operation: 'spawn', agentId, transportReceipt: { runtimePluginId: manifest.id, pid: child.pid ?? null, sandbox, managedOutputRoot: directory, managedOutputs: managedOutputs.outputs, workspaceRoot: executionRoot, sourceWorkspaceRoot: packet.workspace?.root ?? project.workspace.root, startedAt: new Date().toISOString() } });
       } catch (error) {
         if (child?.exitCode === null) child.kill('SIGTERM');
         if (workspaceProvider && workspaceContext) await workspaceProvider.discard(workspaceContext).catch(() => {});

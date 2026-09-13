@@ -77,6 +77,52 @@ test('doctor validates the write boundary without creating its data root', async
   const result = JSON.parse(stdout);
   assert.equal(result.ok, true);
   assert.equal(result.initialized, false);
+  assert.equal(result.lifecycleReady, false);
+  assert.equal(result.writeCapability, 'not-probed');
+  assert.deepEqual(result.paths, { dataRoot: false, extensionRegistry: false, projectRegistry: false, authority: false });
   assert.equal(result.dataRoot, target);
   await assert.rejects(() => access(target), error => error.code === 'ENOENT');
+});
+
+test('project list is read-only when the data root does not exist', async () => {
+  const projectRoot = harnessProjectRoot();
+  const target = resolve(projectRoot, '.tmp', `project-list-no-write-${process.pid}`);
+  await assert.rejects(() => access(target), error => error.code === 'ENOENT');
+  const { stdout } = await executeFile(process.execPath, [resolve(projectRoot, 'src', 'cli.mjs'), 'project', 'list', '--data-root', target], { cwd: projectRoot, windowsHide: true });
+  assert.deepEqual(JSON.parse(stdout), { ok: true, projects: [] });
+  await assert.rejects(() => access(target), error => error.code === 'ENOENT');
+});
+
+test('run status fails without initializing a missing data root', async () => {
+  const projectRoot = harnessProjectRoot();
+  const target = resolve(projectRoot, '.tmp', `run-status-no-write-${process.pid}`);
+  await assert.rejects(() => access(target), error => error.code === 'ENOENT');
+  await assert.rejects(
+    () => executeFile(process.execPath, [resolve(projectRoot, 'src', 'cli.mjs'), 'run', 'status', '--project', 'missing', '--run', 'missing', '--data-root', target], { cwd: projectRoot, windowsHide: true }),
+    error => /RUN_NOT_FOUND/.test(error.stderr),
+  );
+  await assert.rejects(() => access(target), error => error.code === 'ENOENT');
+});
+
+test('doctor reports lifecycle readiness only when all persisted roots and registries exist', async t => {
+  const projectRoot = harnessProjectRoot();
+  const target = resolve(projectRoot, '.tmp', `doctor-ready-${process.pid}`);
+  t.after(() => rm(target, { recursive: true, force: true }));
+  const registryDirectory = resolve(target, 'registry');
+  const projectDirectory = resolve(registryDirectory, 'projects');
+  await Promise.all([mkdir(projectDirectory, { recursive: true }), mkdir(resolve(target, 'authority'), { recursive: true })]);
+  const exactDigest = 'a'.repeat(64);
+  const extension = { id: 'fixture-extension', version: '1.0.0', digest: exactDigest, entry: 'fixture.mjs', registeredAt: '2026-09-13T00:00:00.000Z' };
+  const extensionBody = { protocolVersion: '1.0', revision: 1, extensions: [extension], commands: {} };
+  await writeFile(resolve(registryDirectory, 'extensions.json'), `${JSON.stringify({ ...extensionBody, registryDigest: digestJson(extensionBody) })}\n`, 'utf8');
+  const descriptorInput = { id: 'fixture-project', harness: { version: '1.0.0', artifactDigest: exactDigest }, workspace: { root: resolve(projectRoot, 'test') }, profiles: ['feature-delivery'], extensions: [], policy: {}, gateRecipes: [], artifactProviders: [] };
+  const commandReceipt = { commandId: 'fixture-register', payloadDigest: digestJson(descriptorInput), revision: 1, committedAt: '2026-09-13T00:00:00.000Z', authorityDecision: null };
+  const descriptorBody = { ...descriptorInput, protocolVersion: '1.0', revision: 1, updatedAt: '2026-09-13T00:00:00.000Z', commands: { 'fixture-register': commandReceipt } };
+  await writeFile(resolve(projectDirectory, 'fixture-project.json'), `${JSON.stringify({ ...descriptorBody, descriptorDigest: digestJson(descriptorBody) })}\n`, 'utf8');
+  const { stdout } = await executeFile(process.execPath, [resolve(projectRoot, 'src', 'cli.mjs'), 'doctor', '--data-root', target], { cwd: projectRoot, windowsHide: true });
+  const result = JSON.parse(stdout);
+  assert.equal(result.initialized, true);
+  assert.equal(result.lifecycleReady, true);
+  assert.deepEqual(result.paths, { dataRoot: true, extensionRegistry: true, projectRegistry: true, authority: true });
+  assert.deepEqual(result.registeredProjects.map(project => project.id), ['fixture-project']);
 });

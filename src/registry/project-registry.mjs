@@ -25,6 +25,7 @@ export class ProjectRegistry {
     if (this.strictIdentity) assert(input.harness && /^\d+\.\d+\.\d+$/.test(input.harness.version ?? '') && /^[a-f0-9]{64}$/.test(input.harness.artifactDigest ?? ''), 'PROJECT_HARNESS_IDENTITY_REQUIRED', 'Production Project Descriptors require an exact Harness version and artifact digest.');
     else if (input.harness) assert(/^\d+\.\d+\.\d+$/.test(input.harness.version ?? '') && (!input.harness.artifactDigest || /^[a-f0-9]{64}$/.test(input.harness.artifactDigest)), 'PROJECT_HARNESS_IDENTITY_INVALID', 'Project Descriptor Harness identity requires a semantic version and optional SHA-256 artifact digest.');
     assert(Array.isArray(input.profiles) && input.profiles.length > 0, 'PROJECT_PROFILES_REQUIRED', 'Project Descriptor requires at least one Profile.');
+    assert(input.workspace.rootSelector === undefined || input.workspace.rootSelector === 'git-worktree', 'PROJECT_WORKSPACE_SELECTOR_INVALID', 'Project Descriptor workspace rootSelector must be git-worktree when present.');
     assert(Array.isArray(input.extensions ?? []), 'PROJECT_EXTENSIONS_INVALID', 'Project Descriptor extensions must be an array.');
     const extensionIds = new Set();
     for (const extension of input.extensions ?? []) {
@@ -71,7 +72,9 @@ export class ProjectRegistry {
   }
 
   async list() {
-    await mkdir(this.directory, { recursive: true });
-    return Promise.all((await readdir(this.directory)).filter(name => name.endsWith('.json')).sort().map(name => this.get(name.slice(0, -5))));
+    let names;
+    try { names = await readdir(this.directory); }
+    catch (error) { if (error.code === 'ENOENT') return []; throw error; }
+    return Promise.all(names.filter(name => name.endsWith('.json')).sort().map(name => this.get(name.slice(0, -5))));
   }
 }

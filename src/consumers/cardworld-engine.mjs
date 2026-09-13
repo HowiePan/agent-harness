@@ -72,7 +72,7 @@ export const createCardWorldProjectDescriptor = ({
   maxConcurrency = 1,
 } = {}) => {
   assert(workspaceRoot && isAbsolute(workspaceRoot), 'CARDWORLD_WORKSPACE_REQUIRED', 'CardWorld descriptor requires an absolute workspaceRoot.');
-  const workspace = { root: workspaceRoot, excluded: ['.git', '.cardworld-local', 'card_world_engine/target', 'card_world_engine/pkg', 'node_modules'] };
+  const workspace = { root: workspaceRoot, rootSelector: 'git-worktree', excluded: ['.git', '.cardworld-local', 'card_world_engine/target', 'card_world_engine/pkg', 'node_modules'] };
   if (remote) workspace.remote = remote;
   const runtimeConfig = { sandbox: 'workspace-write', ephemeral: true, approveForMe: true };
   if (model) runtimeConfig.model = model;

@@ -73,7 +73,7 @@ export const createTabletopCollectionProjectDescriptor = ({
   maxLogicalGames = 10,
 } = {}) => {
   assert(workspaceRoot && isAbsolute(workspaceRoot), 'COLLECTION_WORKSPACE_REQUIRED', 'Collection descriptor requires an absolute workspaceRoot.');
-  const workspace = { root: workspaceRoot, excluded: ['.git', 'node_modules', 'dist', 'build', 'coverage', 'runs'] };
+  const workspace = { root: workspaceRoot, rootSelector: 'git-worktree', excluded: ['.git', 'node_modules', 'dist', 'build', 'coverage', 'runs'] };
   if (remote) workspace.remote = remote;
   const runtimeConfig = { sandbox: 'workspace-write', ephemeral: true, approveForMe: true };
   if (model) runtimeConfig.model = model;

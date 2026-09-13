@@ -21,9 +21,9 @@ const fileDigest = async path => {
 const excludedBy = (relativePath, exclusions) => exclusions.some(value => relativePath === value || relativePath.startsWith(`${value}/`));
 
 export const createIsolatedWorkspaceProvider = ({ manifestId, controlRoot }) => ({
-  async prepare({ project, runtimeDirectory }) {
+  async prepare({ project, packet, runtimeDirectory }) {
     assertHarnessWritePath(runtimeDirectory, 'isolated Runtime directory', controlRoot);
-    const sourceRoot = resolve(project.workspace.root);
+    const sourceRoot = resolve(packet.workspace?.root ?? project.workspace.root);
     const workspaceRoot = resolve(runtimeDirectory, 'workspace');
     const config = project.policy?.runtimeConfigs?.[manifestId] ?? {};
     const linkedDirectories = [...new Set(config.linkedDirectories ?? ['node_modules'])].map(slash);

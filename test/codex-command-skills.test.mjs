@@ -100,10 +100,49 @@ test('binding configuration makes project selection and Harness location determi
     assert.match(reportContext, /controlRoot\/issues/);
     assert.match(reportContext, /"commandId":"report_/);
     assert.match(reportContext, /"projectId":"cardworld-engine"/);
-    assert.equal(reportContext.length <= 1200, true);
+    assert.match(reportContext, /"executionWorkspaceRoot"/);
+    assert.equal(reportContext.length <= 1800, true);
   } finally {
     await rm(fixture, { recursive: true, force: true });
   }
+});
+
+test('binding accepts only linked worktrees with the configured Git common directory', async t => {
+  const fixture = await mkdtemp(resolve(tmpdir(), 'agent-harness-worktree-binding-'));
+  t.after(() => rm(fixture, { recursive: true, force: true }));
+  const localPluginRoot = resolve(fixture, 'plugin');
+  const controlRoot = resolve(fixture, 'control');
+  const repositoryRoot = resolve(fixture, 'CardWorld');
+  const commonDirectory = resolve(repositoryRoot, '.git');
+  const gitDirectory = resolve(commonDirectory, 'worktrees', 'task');
+  const linkedWorktree = resolve(fixture, 'worktrees', 'task', 'CardWorld');
+  const unrelatedWorkspace = resolve(fixture, 'unrelated');
+  await Promise.all([
+    mkdir(localPluginRoot, { recursive: true }),
+    mkdir(controlRoot, { recursive: true }),
+    mkdir(gitDirectory, { recursive: true }),
+    mkdir(linkedWorktree, { recursive: true }),
+    mkdir(resolve(unrelatedWorkspace, '.git'), { recursive: true }),
+  ]);
+  await Promise.all([
+    writeFile(resolve(controlRoot, 'agent-harness.mjs'), '', 'utf8'),
+    writeFile(resolve(gitDirectory, 'commondir'), '../..\n', 'utf8'),
+    writeFile(resolve(linkedWorktree, '.git'), `gitdir: ${gitDirectory}\n`, 'utf8'),
+  ]);
+  const configured = await configureBindings({
+    pluginRoot: localPluginRoot,
+    controlRoot,
+    workspaceRoot: repositoryRoot,
+    entrypoint: 'agent-harness.mjs',
+    dataRoot: 'data',
+    projectSpecs: ['engine|cardworld-engine|engine-delivery|cardworld-engine-profile'],
+  });
+  assert.equal(configured.workspaceIdentity.type, 'git-common-dir');
+  const linked = await hookResponse({ prompt: 'h:engine quality V3.8.4', cwd: linkedWorktree }, { pluginRoot: localPluginRoot });
+  assert.match(linked.hookSpecificOutput.additionalContext, /"workspaceMatch":"linked-worktree"/);
+  assert.match(linked.hookSpecificOutput.additionalContext, /"executionWorkspaceRoot"/);
+  const unrelated = await hookResponse({ prompt: 'h:engine quality V3.8.4', cwd: unrelatedWorkspace }, { pluginRoot: localPluginRoot });
+  assert.match(unrelated.hookSpecificOutput.additionalContext, /不是该仓库经验证的 linked worktree/);
 });
 
 test('the same pseudo actions resolve through the explicitly selected Extension command manifest', () => {

@@ -59,7 +59,7 @@
       "properties": {
         "root": { "type": "string" },
         "remote": { "type": "string" },
-        "rootSelector": { "type": "string" },
+        "rootSelector": { "enum": ["git-worktree"] },
         "excluded": { "type": "array", "items": { "type": "string" } }
       },
       "additionalProperties": false

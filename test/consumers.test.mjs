@@ -13,6 +13,7 @@ test('CardWorld consumer compiles one canonical requirement and project-owned de
   const descriptor = createCardWorldProjectDescriptor({ workspaceRoot: process.cwd(), remote: 'https://github.com/HowiePan/CardWorld.git' });
   assert.deepEqual(descriptor.gateRecipes.map(gate => gate.id), CARDWORLD_FINAL_GATE_IDS);
   assert(descriptor.workspace.excluded.includes('.cardworld-local'));
+  assert.equal(descriptor.workspace.rootSelector, 'git-worktree');
   assert.deepEqual(descriptor.gateRecipes.slice(1).map(gate => gate.command.slice(3, 6)), [
     ['scripts/cardworld.ps1', '-Task', 'engine-fmt'],
     ['scripts/cardworld.ps1', '-Task', 'engine-test'],
@@ -36,6 +37,7 @@ test('CardWorld consumer compiles one canonical requirement and project-owned de
 
 test('Collection consumer keeps ten game lanes, Feature dependencies, and one shared capability owner', () => {
   const descriptor = createTabletopCollectionProjectDescriptor({ workspaceRoot: process.cwd() });
+  assert.equal(descriptor.workspace.rootSelector, 'git-worktree');
   assert.deepEqual(descriptor.gateRecipes.map(gate => gate.id), COLLECTION_FINAL_GATE_IDS);
   assert.deepEqual(descriptor.extensions.map(extension => extension.id), ['tabletop-collection-profile', 'codex-runtime']);
   assert.equal(descriptor.policy.maxConcurrency, 10);

@@ -2,6 +2,7 @@ import { access, mkdir, rename, rm, writeFile } from 'node:fs/promises';
 import { isAbsolute, relative, resolve } from 'node:path';
 import process from 'node:process';
 import { fileURLToPath } from 'node:url';
+import { resolveGitWorkspaceIdentity } from '../hooks/pseudo-command-router.mjs';
 
 const parseArguments = input => {
   const args = [...input];
@@ -61,7 +62,8 @@ export const configureBindings = async input => {
   const target = resolve(directory, 'bindings.json');
   const temporary = resolve(directory, `bindings.${process.pid}.tmp`);
   await mkdir(directory, { recursive: true });
-  const document = { protocolVersion: '1.0', harness: { controlRoot, entrypoint, dataRoot }, workspaceRoot, projects };
+  const workspaceIdentity = await resolveGitWorkspaceIdentity(workspaceRoot);
+  const document = { protocolVersion: '1.0', harness: { controlRoot, entrypoint, dataRoot }, workspaceRoot, ...(workspaceIdentity ? { workspaceIdentity } : {}), projects };
   await writeFile(temporary, `${JSON.stringify(document, null, 2)}\n`, { encoding: 'utf8', flag: 'wx' });
   try {
     await rename(temporary, target);

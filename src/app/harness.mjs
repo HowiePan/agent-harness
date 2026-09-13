@@ -17,6 +17,7 @@ import { RecoveryCoordinator } from '../recovery/coordinator.mjs';
 import { installExtensionPacks } from '../extensions/contract.mjs';
 import { loadReleaseIdentity } from '../release-identity.mjs';
 import { captureWorkspace, diffWorkspaceSnapshots } from '../workspace-snapshot.mjs';
+import { resolveProjectWorkspace } from '../workspace-identity.mjs';
 import { assertHarnessWritePath, harnessControlRoot } from '../write-boundary.mjs';
 
 export const defaultDataRoot = (controlRoot = harnessControlRoot()) => resolve(controlRoot, '.agent-harness-data');
@@ -28,7 +29,7 @@ const manifests = Object.freeze({
   storage: { id: 'reference-file-storage', kind: 'storage-provider', version: '1.0.0', capabilities: ['expected-revision', 'idempotency', 'atomic-write', 'recovery'], permissions: ['state.write'] },
 });
 
-export const createHarness = async ({ controlRoot: controlRootInput, dataRoot: dataRootInput, now, id, releaseIdentity, strictProjectIdentity = true, allowedPluginPermissions = ['state.write', 'agent.conversation', 'process.spawn', 'workspace.read', 'workspace.write', 'gate.execute', 'artifact.read'], extraProfiles = [], extensions = [] } = {}) => {
+export const createHarness = async ({ controlRoot: controlRootInput, dataRoot: dataRootInput, now, id, releaseIdentity, strictProjectIdentity = true, initializeStorage = true, allowedPluginPermissions = ['state.write', 'agent.conversation', 'process.spawn', 'workspace.read', 'workspace.write', 'gate.execute', 'artifact.read'], extraProfiles = [], extensions = [] } = {}) => {
   const controlRoot = harnessControlRoot(controlRootInput);
   const dataRoot = dataRootInput ?? defaultDataRoot(controlRoot);
   const controlledDataRoot = assertHarnessWritePath(dataRoot, 'Harness dataRoot', controlRoot);
@@ -37,7 +38,8 @@ export const createHarness = async ({ controlRoot: controlRootInput, dataRoot: d
   assert(/^\d+\.\d+\.\d+$/.test(currentReleaseIdentity.version ?? ''), 'HARNESS_RELEASE_IDENTITY_INVALID', 'Harness release identity requires a semantic version.');
   assert(currentReleaseIdentity.artifactDigest === null || /^[a-f0-9]{64}$/.test(currentReleaseIdentity.artifactDigest), 'HARNESS_RELEASE_IDENTITY_INVALID', 'Harness artifact digest must be null or SHA-256.');
   if (strictProjectIdentity) assert(/^[a-f0-9]{64}$/.test(currentReleaseIdentity.artifactDigest ?? ''), 'HARNESS_RELEASE_ARTIFACT_REQUIRED', 'Production Harness creation requires a verified release artifact digest.');
-  const authorityStore = await new AuthorityStore({ root: controlledDataRoot, controlRoot, now }).init();
+  const authorityStore = new AuthorityStore({ root: controlledDataRoot, controlRoot, now });
+  if (initializeStorage) await authorityStore.init();
   const evidenceStore = new EvidenceStore({ root: authorityStore.root, controlRoot, now });
   const profileRegistry = new ProfileRegistry([featureDeliveryProfile, ...extraProfiles]);
   const pluginHost = new PluginHost({ allowedPermissions: allowedPluginPermissions });
@@ -72,6 +74,7 @@ export const createHarness = async ({ controlRoot: controlRootInput, dataRoot: d
 
     async startRun(input, command) {
       const project = await projectRegistry.get(input.projectId);
+      const workspace = await resolveProjectWorkspace(project, input.executionWorkspaceRoot);
       if (strictProjectIdentity) assert(project.harness && /^[a-f0-9]{64}$/.test(project.harness.artifactDigest ?? ''), 'PROJECT_HARNESS_IDENTITY_REQUIRED', `Project ${project.id} does not bind an exact Harness artifact.`);
       if (project.harness) {
         assert(project.harness.version === currentReleaseIdentity.version, 'PROJECT_HARNESS_VERSION_MISMATCH', `Project ${project.id} requires Harness ${project.harness.version}.`, { installedVersion: currentReleaseIdentity.version });
@@ -92,23 +95,24 @@ export const createHarness = async ({ controlRoot: controlRootInput, dataRoot: d
         ...(input.profileConfig ?? {}),
         ...(input.profileConfig?.requiredFinalGates === undefined ? { requiredFinalGates } : {}),
       };
-      const snapshot = input.sourceDigest ? null : await captureWorkspace(project.workspace.root, { excluded: project.workspace.excluded ?? [] });
+      const snapshot = input.sourceDigest ? null : await captureWorkspace(workspace.root, { excluded: project.workspace.excluded ?? [] });
       const pluginSet = pluginHost.snapshot();
       const installedCompositionDigest = digestJson({ plugins: pluginSet.manifests, extensions: extensionSet.installed });
       const policyDigest = input.policyDigest ?? digestJson({ profiles: project.profiles, extensions: project.extensions ?? [], policy: project.policy ?? {}, gateRecipes: project.gateRecipes ?? [], artifactProviders: project.artifactProviders ?? [] });
-      return kernel.startRun({ ...input, profileConfig, policyDigest, sourceDigest: input.sourceDigest ?? snapshot.digest, pluginSetDigest: input.pluginSetDigest ?? installedCompositionDigest, metadata: { ...input.metadata, projectDescriptorDigest: project.descriptorDigest, extensionSetDigest: extensionSet.digest } }, command);
+      return kernel.startRun({ ...input, profileConfig, policyDigest, sourceDigest: input.sourceDigest ?? snapshot.digest, pluginSetDigest: input.pluginSetDigest ?? installedCompositionDigest, metadata: { ...input.metadata, workspace: structuredClone(workspace), projectDescriptorDigest: project.descriptorDigest, extensionSetDigest: extensionSet.digest } }, command);
     },
 
     async dispatch(projectId, runId, input, command) {
       const state = await authorityStore.read(projectId, runId);
       assert(state.revision === command.expectedRevision, 'REVISION_CONFLICT', 'Authority revision changed before scheduling.', { expected: command.expectedRevision, actual: state.revision });
       const project = await projectRegistry.get(projectId);
+      const workspaceRoot = state.metadata?.workspace?.root ?? project.workspace.root;
       const runtimePluginId = input.runtimePluginId ?? project.policy?.defaultRuntimePlugin ?? null;
       if (runtimePluginId) {
         assert((project.policy?.runtimePlugins ?? [runtimePluginId]).includes(runtimePluginId), 'PROJECT_RUNTIME_DENIED', `Runtime ${runtimePluginId} is not allowed by Project ${projectId}.`);
         pluginHost.get(runtimePluginId, 'agent-runtime');
       }
-      const snapshot = await captureWorkspace(project.workspace.root, { excluded: project.workspace.excluded ?? [] });
+      const snapshot = await captureWorkspace(workspaceRoot, { excluded: project.workspace.excluded ?? [] });
       assert(snapshot.digest === state.sourceDigest, 'WORKSPACE_SOURCE_DRIFT', 'Workspace changed outside a committed Feature result.', { authoritySourceDigest: state.sourceDigest, workspaceSourceDigest: snapshot.digest });
       const snapshotEvidence = await evidenceStore.put(snapshot, { mediaType: 'application/json', projectId, runId, epoch: state.epoch, generation: state.generation, sourceDigest: state.sourceDigest, artifactDigest: state.artifactDigest, policyDigest: state.policyDigest, pluginSetDigest: state.pluginSetDigest, labels: ['workspace-snapshot'] });
       const scheduledInput = { ...input, runtimePluginId, sourceSnapshotRef: snapshotEvidence.ref };
@@ -152,9 +156,10 @@ export const createHarness = async ({ controlRoot: controlRootInput, dataRoot: d
       const lease = state.leases.find(item => item.dispatchId === dispatchId && item.status === 'active');
       assert(dispatch && lease, 'ACTIVE_LEASE_REQUIRED', `Dispatch does not have an active Lease: ${dispatchId}`);
       const project = await projectRegistry.get(projectId);
+      const workspaceRoot = state.metadata?.workspace?.root ?? project.workspace.root;
       const sourceSnapshotEvidence = await evidenceStore.read(dispatch.sourceSnapshotRef);
       const sourceSnapshot = JSON.parse(sourceSnapshotEvidence.bytes.toString('utf8'));
-      const resultingSnapshot = await captureWorkspace(project.workspace.root, { excluded: project.workspace.excluded ?? [] });
+      const resultingSnapshot = await captureWorkspace(workspaceRoot, { excluded: project.workspace.excluded ?? [] });
       const cumulativeChangedFiles = diffWorkspaceSnapshots(sourceSnapshot, resultingSnapshot);
       const interveningFiles = new Set(state.submissions.filter(submission => submission.inputSourceDigest === dispatch.sourceDigest && !submission.supersededAt).flatMap(submission => submission.changedFiles ?? []));
       const actualChangedFiles = cumulativeChangedFiles.filter(path => !interveningFiles.has(path));

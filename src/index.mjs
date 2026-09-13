@@ -13,6 +13,7 @@ export { ProjectRegistry } from './registry/project-registry.mjs';
 export { assertProjectDescriptorInput, assertProjectDescriptorRecord, projectDescriptorInput, projectDescriptorSchemas } from './registry/project-contract.mjs';
 export { validateJsonSchema } from './json-schema.mjs';
 export { captureWorkspace, diffWorkspaceSnapshots } from './workspace-snapshot.mjs';
+export { resolveGitWorkspaceIdentity, resolveProjectWorkspace } from './workspace-identity.mjs';
 export { RunCoordinator, businessResultFromRuntime } from './coordinator/run-coordinator.mjs';
 export { ProjectGateRunner } from './gates/project-gate-runner.mjs';
 export * from './workflows/index.mjs';

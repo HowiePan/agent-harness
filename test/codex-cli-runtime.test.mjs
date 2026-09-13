@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { dirname, resolve } from 'node:path';
-import { access } from 'node:fs/promises';
+import { access, mkdir } from 'node:fs/promises';
 import { createCodexCliRuntime } from '../src/plugins/runtime/codex-cli-runtime.mjs';
 import { makeFixture } from './test-support.mjs';
 
@@ -9,7 +9,10 @@ test('Codex CLI Runtime uses non-interactive structured output and records trans
   const fixture = await makeFixture({ policy: { runtimePlugins: ['codex-cli-runtime'], defaultRuntimePlugin: 'codex-cli-runtime', runtimeConfigs: { 'codex-cli-runtime': { sandbox: 'workspace-write' } } } });
   t.after(() => fixture.cleanup());
   const runtime = createCodexCliRuntime({ resolveProject: id => fixture.harness.projectRegistry.get(id), runtimeRoot: fixture.dataRoot, executable: process.execPath, executableArgs: [resolve('test/fixtures/codex-cli-probe.mjs')] });
-  const spawned = await runtime.spawn({ projectId: fixture.projectId, dispatchId: 'dispatch-probe', feature: { id: 'probe', allowedPaths: ['src'], forbiddenPaths: [] } });
+  const executionWorkspace = resolve(fixture.root, 'execution-workspace');
+  await mkdir(executionWorkspace, { recursive: true });
+  const spawned = await runtime.spawn({ projectId: fixture.projectId, dispatchId: 'dispatch-probe', workspace: { root: executionWorkspace }, feature: { id: 'probe', allowedPaths: ['src'], forbiddenPaths: [] } });
+  assert.equal(spawned.payload.transportReceipt.workspaceRoot, executionWorkspace);
   const waited = await runtime.wait({ agentId: spawned.payload.agentId });
   assert.equal(waited.payload.status, 'completed');
   assert.equal(waited.payload.result.status, 'completed');

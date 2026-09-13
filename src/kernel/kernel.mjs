@@ -24,6 +24,7 @@ export const buildDispatchPacket = (state, dispatch, feature) => ({
   sourceDigest: dispatch.sourceDigest ?? state.sourceDigest, sourceSnapshotRef: dispatch.sourceSnapshotRef, policyDigest: state.policyDigest, pluginSetDigest: state.pluginSetDigest, artifactDigest: state.artifactDigest,
   gates: structuredClone(dispatch.gateSnapshot ?? state.gates),
   execution: structuredClone(dispatch.execution ?? {}),
+  ...(state.metadata?.workspace ? { workspace: structuredClone(state.metadata.workspace) } : {}),
 });
 
 const event = (state, type, payload, now) => {

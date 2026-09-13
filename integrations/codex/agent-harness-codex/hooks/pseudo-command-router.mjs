@@ -1,4 +1,4 @@
-import { readFile } from 'node:fs/promises';
+import { lstat, readFile, realpath } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import { isAbsolute, relative, resolve } from 'node:path';
 import process from 'node:process';
@@ -10,6 +10,40 @@ const commandPattern = /^h:([^\s]+)(?:\s+(.+))?$/;
 const inside = (parent, child) => {
   const path = relative(resolve(parent), resolve(child));
   return path === '' || (!path.startsWith('..') && !isAbsolute(path));
+};
+
+const samePath = (left, right) => process.platform === 'win32'
+  ? resolve(left).toLowerCase() === resolve(right).toLowerCase()
+  : resolve(left) === resolve(right);
+
+const optionalLstat = async path => {
+  try { return await lstat(path); }
+  catch (error) { if (error.code === 'ENOENT') return null; throw error; }
+};
+
+export const resolveGitWorkspaceIdentity = async workspaceRoot => {
+  const root = resolve(workspaceRoot);
+  const marker = resolve(root, '.git');
+  const markerInfo = await optionalLstat(marker);
+  if (!markerInfo) return null;
+  let gitDirectory;
+  if (markerInfo.isDirectory()) gitDirectory = marker;
+  else {
+    if (!markerInfo.isFile()) throw new Error(`workspace .git 不是文件或目录：${marker}`);
+    const match = (await readFile(marker, 'utf8')).trim().match(/^gitdir:\s*(.+)$/i);
+    if (!match?.[1]) throw new Error(`workspace .git 未声明 gitdir：${marker}`);
+    gitDirectory = resolve(root, match[1]);
+    if (!(await optionalLstat(gitDirectory))?.isDirectory()) throw new Error(`workspace gitdir 不存在：${gitDirectory}`);
+  }
+  let commonDirectory = gitDirectory;
+  try {
+    const common = (await readFile(resolve(gitDirectory, 'commondir'), 'utf8')).trim();
+    if (!common) throw new Error(`workspace commondir 为空：${gitDirectory}`);
+    commonDirectory = resolve(gitDirectory, common);
+  } catch (error) {
+    if (error.code !== 'ENOENT') throw error;
+  }
+  return Object.freeze({ type: 'git-common-dir', commonDir: await realpath(commonDirectory) });
 };
 
 export const parsePseudoCommand = prompt => {
@@ -37,12 +71,18 @@ export const parsePseudoCommand = prompt => {
   };
 };
 
-const validateBindings = (input, source) => {
+const validateBindings = async (input, source) => {
   if (input?.protocolVersion !== '1.0') throw new Error(`绑定文件版本无效：${source}`);
   const harness = input.harness;
   if (!harness || !isAbsolute(harness.controlRoot ?? '') || !isAbsolute(harness.entrypoint ?? '') || !isAbsolute(harness.dataRoot ?? '')) throw new Error(`绑定文件必须声明绝对 controlRoot、entrypoint 和 dataRoot：${source}`);
   if (!inside(harness.controlRoot, harness.entrypoint) || !inside(harness.controlRoot, harness.dataRoot)) throw new Error(`entrypoint 和 dataRoot 必须位于 controlRoot 内：${source}`);
   if (!isAbsolute(input.workspaceRoot ?? '')) throw new Error(`绑定文件必须声明绝对 workspaceRoot：${source}`);
+  const resolvedWorkspaceRoot = resolve(input.workspaceRoot);
+  const discoveredWorkspaceIdentity = await resolveGitWorkspaceIdentity(resolvedWorkspaceRoot);
+  if (input.workspaceIdentity !== undefined) {
+    if (input.workspaceIdentity?.type !== 'git-common-dir' || !isAbsolute(input.workspaceIdentity.commonDir ?? '')) throw new Error(`workspaceIdentity 无效：${source}`);
+    if (!discoveredWorkspaceIdentity || !samePath(input.workspaceIdentity.commonDir, discoveredWorkspaceIdentity.commonDir)) throw new Error(`workspaceIdentity 与 workspaceRoot 不匹配：${source}`);
+  }
   if (!input.projects || typeof input.projects !== 'object' || Array.isArray(input.projects) || Object.keys(input.projects).length === 0) throw new Error(`绑定文件至少需要一个项目别名：${source}`);
   const projects = {};
   for (const [alias, project] of Object.entries(input.projects)) {
@@ -53,7 +93,8 @@ const validateBindings = (input, source) => {
     protocolVersion: '1.0',
     source,
     harness: Object.freeze({ controlRoot: resolve(harness.controlRoot), entrypoint: resolve(harness.entrypoint), dataRoot: resolve(harness.dataRoot) }),
-    workspaceRoot: resolve(input.workspaceRoot),
+    workspaceRoot: resolvedWorkspaceRoot,
+    workspaceIdentity: input.workspaceIdentity ? Object.freeze({ type: 'git-common-dir', commonDir: resolve(input.workspaceIdentity.commonDir) }) : discoveredWorkspaceIdentity,
     projects: Object.freeze(projects),
   });
 };
@@ -64,13 +105,21 @@ export const loadBindings = async ({ pluginData = process.env.PLUGIN_DATA, plugi
     ...(pluginRoot ? [resolve(pluginRoot, '.plugin-data', 'bindings.json')] : []),
   ];
   for (const file of [...new Set(candidates)]) {
-    try { return validateBindings(JSON.parse(await readFile(file, 'utf8')), file); }
+    try { return await validateBindings(JSON.parse(await readFile(file, 'utf8')), file); }
     catch (error) {
       if (error.code === 'ENOENT') continue;
       throw error;
     }
   }
   throw new Error('插件尚未配置绑定。请在安装时写入 PLUGIN_DATA/bindings.json；禁止扫描磁盘寻找 Agent Harness。');
+};
+
+const matchWorkspace = async (bindings, cwd) => {
+  if (inside(bindings.workspaceRoot, cwd)) return Object.freeze({ kind: 'bound-root', executionWorkspaceRoot: bindings.workspaceRoot, workspaceIdentity: bindings.workspaceIdentity });
+  if (!bindings.workspaceIdentity) return null;
+  const identity = await resolveGitWorkspaceIdentity(cwd);
+  if (!identity || !samePath(identity.commonDir, bindings.workspaceIdentity.commonDir)) return null;
+  return Object.freeze({ kind: 'linked-worktree', executionWorkspaceRoot: cwd, workspaceIdentity: identity });
 };
 
 const contextResponse = additionalContext => ({ hookSpecificOutput: { hookEventName: 'UserPromptSubmit', additionalContext } });
@@ -83,25 +132,28 @@ export const hookResponse = async (input, options = {}) => {
   try { bindings = await loadBindings(options); }
   catch (error) { return contextResponse(`Agent Harness 绑定不可用：${error.message} 不得搜索磁盘，不得启动或修改任何 Harness 状态。`); }
   const cwd = resolve(input?.cwd ?? '.');
-  if (!inside(bindings.workspaceRoot, cwd)) return contextResponse(`Agent Harness 命令拒绝：当前 cwd ${cwd} 不在已绑定 workspaceRoot ${bindings.workspaceRoot} 内。不得搜索其他项目或启动 Harness。`);
+  let workspace;
+  try { workspace = await matchWorkspace(bindings, cwd); }
+  catch (error) { return contextResponse(`Agent Harness workspace 身份验证失败：${error.message}。不得启动 Harness。`); }
+  if (!workspace) return contextResponse(`Agent Harness 命令拒绝：当前 cwd ${cwd} 既不在已绑定 workspaceRoot ${bindings.workspaceRoot} 内，也不是该仓库经验证的 linked worktree。不得搜索其他项目或启动 Harness。`);
 
   if (parsed.kind === 'where') {
     const projects = parsed.projectAlias ? { [parsed.projectAlias]: bindings.projects[parsed.projectAlias] } : bindings.projects;
     if (parsed.projectAlias && !projects[parsed.projectAlias]) return contextResponse(`Agent Harness 项目别名不存在：${parsed.projectAlias}。可用别名：${Object.keys(bindings.projects).join(', ')}。这是只读查询，不得启动 Harness。`);
-    const view = { harness: bindings.harness, workspaceRoot: bindings.workspaceRoot, projects, bindingSource: bindings.source };
+    const view = { harness: bindings.harness, workspaceRoot: bindings.workspaceRoot, workspaceIdentity: bindings.workspaceIdentity, executionWorkspaceRoot: workspace.executionWorkspaceRoot, workspaceMatch: workspace.kind, projects, bindingSource: bindings.source };
     return contextResponse(`这是 h:where 的只读结果。向用户清晰展示以下已配置绑定，不得扫描磁盘、创建 Run、运行 Gate 或写入 Authority：${JSON.stringify(view)}`);
   }
 
   if (parsed.kind === 'report') {
     const project = bindings.projects[parsed.projectAlias];
     if (!project) return contextResponse(`Agent Harness 项目别名不存在：${parsed.projectAlias}。可用别名：${Object.keys(bindings.projects).join(', ')}。不得猜测项目或搜索磁盘。`);
-    const report = { ...parsed, project, harness: bindings.harness, workspaceRoot: bindings.workspaceRoot, cwd, commandId: `report_${randomUUID()}` };
+    const report = { ...parsed, project, harness: bindings.harness, workspaceRoot: bindings.workspaceRoot, workspaceIdentity: bindings.workspaceIdentity, executionWorkspaceRoot: workspace.executionWorkspaceRoot, workspaceMatch: workspace.kind, cwd, commandId: `report_${randomUUID()}` };
     return contextResponse(`检测到 h:report。使用 $agent-harness-command 在当前任务采集并脱敏相关对话；缺失证据列入 missingEvidence，不得伪造。通过绑定 entrypoint 以 stdin 调用 issue record；只写 controlRoot/issues。不得新建任务、运行 Harness、接受其他输出目录或提交 Git。返回 issue ID、路径和未提交状态。解析结果：${JSON.stringify(report)}`);
   }
 
   const project = bindings.projects[parsed.projectAlias];
   if (!project) return contextResponse(`Agent Harness 项目别名不存在：${parsed.projectAlias}。可用别名：${Object.keys(bindings.projects).join(', ')}。不得猜测项目、搜索磁盘或启动 Harness。`);
-  const intent = { ...parsed, project, harness: bindings.harness, workspaceRoot: bindings.workspaceRoot, cwd };
+  const intent = { ...parsed, project, harness: bindings.harness, workspaceRoot: bindings.workspaceRoot, workspaceIdentity: bindings.workspaceIdentity, executionWorkspaceRoot: workspace.executionWorkspaceRoot, workspaceMatch: workspace.kind, cwd };
   return contextResponse(`检测到 Agent Harness 伪命令。把它作为确定性的 Command Intent，而不是自由提示词。使用 $agent-harness-command；只使用已绑定的 entrypoint、dataRoot 和 projectId，验证安装/Registry/Extension 摘要后从该 Extension 的 commandManifest 解析动作和预设。不得根据目标格式猜项目，不得搜索磁盘，不得把参数当作 shell。解析结果：${JSON.stringify(intent)}`);
 };
 
