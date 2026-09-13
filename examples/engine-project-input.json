@@ -1,0 +1,6 @@
+{
+  "id": "engine-project",
+  "workspaceRoot": "/workspaces/engine-project",
+  "remote": "https://github.com/HowiePan/CardWorld.git",
+  "maxConcurrency": 1
+}

@@ -1,0 +1,64 @@
+# V1.0.0 运维手册
+
+## 安装与数据边界
+
+要求 Node.js 22+。业务仓 `root` 可以位于其他磁盘，但 Harness 的 `dataRoot` 必须位于 Standalone Control Root 内，默认是 `.agent-harness-data/`。显式路径如果越过控制根会以 `HARNESS_WRITE_OUTSIDE_PROJECT` 拒绝；不再使用 `%LOCALAPPDATA%`、用户主目录或系统 `%TEMP%` 作为默认写入位置。
+
+正式部署的控制根必须位于所有受管业务 workspace 之外。源码 checkout 可直接作为控制根。npm 包部署必须放在专用目录内，并从包内 CLI 执行一次 `installation init --control-root <专用目录>`；位于 `node_modules` 的 Runtime 在没有显式控制根和匹配安装标记时会 fail-closed。当前嵌套目录只用于实现与合成测试。
+
+```powershell
+npm ci
+npm test
+node bin/agent-harness.mjs doctor --data-root .agent-harness-data/doctor
+node scripts/check-residue.mjs
+```
+
+`doctor` 是零写入检查：只解析并验证目标路径，不初始化状态目录。
+
+先用 `project register` 登记 Project Descriptor，再用 `run start` 创建 Run。所有写命令携带唯一 `--command-id`；更新已有 Authority 时同时携带最新 revision。使用 `node bin/agent-harness.mjs --help` 查看完整参数。
+
+Consumer、Runtime 与 Legacy 能力通过 Extension Pack 装载。先在独立控制根注册一次，后续 CLI 进程会按安装回执自动解析，并在执行模块前验证完整制品清单 SHA-256。安装、升级、移除都是可信代码变更，必须提供当前 revision、唯一 command ID 和批准 Decision：
+
+```powershell
+node bin/agent-harness.mjs extension register --module agent-harness/consumers/cardworld-engine --expected-revision 0 --command-id install-engine --decision <approved-decision.json>
+node bin/agent-harness.mjs extension register --module agent-harness/extensions/codex-runtime --expected-revision 1 --command-id install-runtime --decision <approved-decision.json>
+node bin/agent-harness.mjs extension list
+node bin/agent-harness.mjs project descriptor --extension agent-harness/consumers/cardworld-engine --input examples/engine-project-input.json
+```
+
+生产 Project Descriptor 必须同时记录 Harness 版本/制品摘要与每个 Extension 的 ID/版本/制品摘要，Run 创建前精确校验已安装集合。选择非 Codex Runtime 时，Consumer Descriptor 不再声明 `codex-runtime`；调用方显式提供所选 Runtime Extension 身份即可。业务仓无需保存生成器、配置、Skill 或 Harness 代码。
+
+`project-descriptor-input.schema.json` 约束可提交的配置输入；`project-descriptor.schema.json` 约束 Registry 增加 revision、commands、时间和摘要后的持久记录。更新时不得把整个 Registry 记录重新作为输入，Programmatic API 使用 `projectDescriptorInput(record)` 提取配置面。CLI 生成器会把当前 Harness 和已安装 Extension 的精确摘要封入输入。静态示例是 Consumer 生成器输入，不伪造会随发布制品变化的摘要。
+
+Codex 工具集成位于 `integrations/codex/agent-harness-codex/`，是带 `.codex-plugin/plugin.json` 的独立可安装插件。其他 Agent 工具按同一 Operator Contract 提供自己的集成插件，不进入 Harness Core。实际安装插件属于部署步骤，不会把 Skill 复制到业务仓。
+
+## 日常运行
+
+1. `run status` 读取 revision、epoch、generation、Feature、Lease 和 finding。
+2. `run execute` 让 Coordinator 调度、绑定、等待并提交；`run schedule` 用于需要外部 Runtime 接管的高级场景。
+3. `run gates --scope final --fresh` 从 Project Descriptor 执行确定性最终 Gate。
+4. Runtime 绑定 Dispatch 后定期 heartbeat；Agent 输出先进入 Evidence，再 submit。
+5. Gate、finding 和 Decision 分别记录，不用聊天文本替代 Authority。
+6. 所有 P0-P3 关闭、Profile Gate 满足后生成 close Receipt。
+
+## 备份与恢复
+
+一致性备份至少包含 Project Registry、Authority、Evidence、transaction journal、receipts 和 artifact pins。备份前停止写入或取得 Store 锁；恢复到新路径后先运行 doctor 和只读一致性检查，再允许调度。
+
+所有 Harness 启动的 Codex、Process Runtime 和 Gate 子进程都会把 `TEMP`、`TMP`、`TMPDIR` 强制指向控制根内的受管目录，调用方配置不能覆盖。Feature 隔离副本、Gate 临时目录、测试夹具和 clean-room 副本在使用结束后删除；Runtime stdout/stderr 与事件在删除调试文件前写入内容寻址 Evidence。npm 使用控制根内 `.agent-harness-cache/npm` 与 `.tmp/npm-logs`，不写用户级缓存目录；受管测试和打包验证结束后会删除本轮缓存及空目录。
+
+完整路径分类、生命周期和业务 Feature 输出的唯一例外见 [写入路径与清理策略](path-policy.md)。
+
+进程异常时重新启动会处理 journal。revision 冲突应重新读取后重放同一个 command ID；不要手工编辑 Authority JSON。普通断线使用 `run recover` 废止 Transport；格式变化或旧系统迁移使用 Legacy Recovery，不能伪装成 resume。先使用显式 `agent-harness/extensions/legacy-compat` Extension 创建带摘要和容量限制的 Recovery Capsule；Capsule 只保留状态与 Evidence，拒绝源码、脚本、EXE、DLL 与 PDB。协调式 hard recovery 会先写入内容寻址的 Authority 回滚快照；必要时使用 `run recovery-rollback --snapshot-ref <ref>` 建立另一个安全 Epoch，旧完成态仍须重验。
+
+## 故障响应
+
+- Provider outage：停止新绑定，保留 Authority；可切换兼容 Runtime，逻辑 Attempt 不刷新。
+- Gate 环境失败：记录环境失败，不伪造业务 finding；修复环境后使用相同 source/gate key 重试。
+- stale/late result：拒绝提交并保留审计记录；基于当前 generation 重新 Dispatch。
+- Artifact 变化：执行 impact rebase，只失效受影响 Feature。
+- 存储损坏：隔离副本，从最后一致备份恢复并核对 Evidence digest；禁止直接覆盖现场。
+
+## 发布与升级
+
+发布候选包含源码、Schema、Profile、Extension、Codex Skills、插件 manifest、checksum 清单和 SPDX SBOM。升级前验证 Extension/Plugin/Profile 版本和存储迁移说明；先封存状态快照并在复制的数据根执行 canary。密码学签名、发布、真实切换与旧内容删除由项目所有者批准和执行。缺陷上报、不可变修复和紧急 commit 绑定见 [缺陷、升级与回滚](maintenance.md)。

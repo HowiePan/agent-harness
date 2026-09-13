@@ -1,0 +1,24 @@
+[
+  {
+    "id": "api-contract",
+    "kind": "implementation",
+    "ownerRole": "developer",
+    "logicalRoot": "api-contract",
+    "laneId": "api",
+    "acceptance": ["contract tests pass"],
+    "steps": [
+      { "id": "design", "title": "Freeze the public contract" },
+      { "id": "implement", "title": "Implement and verify it" }
+    ],
+    "dependsOn": [],
+    "allowedPaths": ["src/api", "test/api"],
+    "forbiddenPaths": ["secrets"],
+    "symbols": ["PublicApi"],
+    "contracts": ["http-v1"],
+    "generatedOutputs": [],
+    "artifactInputs": [],
+    "artifactOutputs": [],
+    "conflictKeys": [],
+    "gatePlan": ["focused-test"]
+  }
+]

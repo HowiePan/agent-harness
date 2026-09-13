@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-harness.local/schemas/recovery-capsule.schema.json",
+  "title": "Agent Harness Legacy Recovery Capsule",
+  "type": "object",
+  "required": ["protocolVersion", "capsuleId", "commandId", "createdAt", "importer", "sourceDigest", "assessmentDigest", "fileCount", "totalBytes", "files", "executableContent", "retention", "manifestDigest"],
+  "properties": {
+    "protocolVersion": { "const": "1.0" },
+    "capsuleId": { "type": "string" },
+    "commandId": { "type": "string" },
+    "createdAt": { "type": "string", "format": "date-time" },
+    "importer": {
+      "type": "object",
+      "required": ["id", "version"],
+      "properties": { "id": { "type": "string" }, "version": { "type": "string" } },
+      "additionalProperties": false
+    },
+    "sourceDigest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "assessmentDigest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "fileCount": { "type": "integer", "minimum": 0 },
+    "totalBytes": { "type": "integer", "minimum": 0 },
+    "files": { "type": "array", "items": { "type": "object" } },
+    "executableContent": { "const": false },
+    "retention": { "const": "user-controlled" },
+    "manifestDigest": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+  },
+  "additionalProperties": false
+}

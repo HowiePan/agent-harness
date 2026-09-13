@@ -1,0 +1,7 @@
+{
+  "id": "tabletop-project",
+  "workspaceRoot": "/workspaces/tabletop-collection",
+  "remote": "https://github.com/HowiePan/CardWorld.git",
+  "maxConcurrency": 10,
+  "maxLogicalGames": 10
+}

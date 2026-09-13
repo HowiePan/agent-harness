@@ -1,0 +1,47 @@
+import { spawn } from 'node:child_process';
+import { resolve } from 'node:path';
+import { digestJson, sha256 } from '../../canonical.mjs';
+import { assert } from '../../errors.mjs';
+import { assertInside } from '../../paths.mjs';
+import { envelope } from '../contracts.mjs';
+import { createManagedOutputSession, DEFAULT_PROCESS_OUTPUTS, prepareSandboxLaunch, replaceOutputTokens } from '../execution/managed-output.mjs';
+
+const run = ({ executable, args, cwd, env, timeoutMs, onSpawn }) => new Promise((resolveRun, reject) => {
+  const child = spawn(executable, args, { cwd, env, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
+  onSpawn(child);
+  let stdout = '';
+  let stderr = '';
+  child.stdout.on('data', chunk => { stdout += chunk; });
+  child.stderr.on('data', chunk => { stderr += chunk; });
+  const timer = setTimeout(() => child.kill('SIGTERM'), timeoutMs);
+  child.on('error', error => { clearTimeout(timer); resolveRun({ exitCode: null, signal: null, stdout, stderr, environmentError: { code: error.code ?? 'SPAWN_FAILED', message: error.message } }); });
+  child.on('close', (exitCode, signal) => { clearTimeout(timer); resolveRun({ exitCode, signal, stdout, stderr }); });
+});
+
+export const createProcessGateExecutor = ({ manifest, workspaceRoot, allowlist, baseEnvironment = {}, temporaryRoot, controlRoot, outputDeclarations = manifest.execution?.outputs ?? DEFAULT_PROCESS_OUTPUTS, sandbox = null, resolveSandbox = null, sandboxMode = manifest.execution?.sandbox?.mode ?? 'optional', monitorIntervalMs = 100 }) => ({
+  async execute(spec) {
+    const allowed = allowlist.find(item => item.id === spec.commandId);
+    assert(allowed, 'GATE_COMMAND_DENIED', `Gate command is not allowlisted: ${spec.commandId}`);
+    const cwd = assertInside(workspaceRoot, resolve(workspaceRoot, spec.cwd ?? allowed.cwd ?? '.'), 'gate cwd');
+    const declarations = spec.outputs ?? allowed.outputs ?? outputDeclarations;
+    const session = createManagedOutputSession({ root: temporaryRoot, controlRoot, operationId: `${spec.id}-${Date.now()}`, declarations });
+    const startedAt = new Date().toISOString();
+    let result;
+    let outputReceipt;
+    let sandboxReceipt = null;
+    try {
+      const prepared = await session.prepare();
+      const requestedLaunch = { executable: allowed.executable, args: [...(allowed.args ?? []), ...(spec.args ?? [])].map(value => replaceOutputTokens(value, session.paths)), cwd, environment: { ...process.env, ...baseEnvironment, ...(allowed.environment ?? {}), ...prepared.environment } };
+      const selectedSandbox = resolveSandbox ? resolveSandbox({ spec, allowed }) : sandbox;
+      const sandboxed = await prepareSandboxLaunch({ sandbox: selectedSandbox, mode: spec.sandboxMode ?? allowed.sandboxMode ?? sandboxMode, launch: requestedLaunch });
+      sandboxReceipt = sandboxed.receipt;
+      result = await run({ executable: sandboxed.launch.executable, args: sandboxed.launch.args, cwd: sandboxed.launch.cwd, env: sandboxed.launch.environment, timeoutMs: Number(spec.timeoutMs ?? allowed.timeoutMs ?? 300000), onSpawn: child => session.monitor(child, { intervalMs: monitorIntervalMs }) });
+    } finally {
+      outputReceipt = await session.finish({ reason: result ? 'gate-finished' : 'gate-failed', sandboxReceipt });
+    }
+    const finishedAt = new Date().toISOString();
+    const status = outputReceipt.status === 'budget-exceeded' ? 'budget-exceeded' : result.environmentError || result.signal ? 'environment-failed' : result.exitCode === 0 ? 'passed' : 'failed';
+    const payload = { operation: 'gate', gateId: spec.id, commandId: spec.commandId, status, exitCode: result.exitCode, signal: result.signal, environmentError: result.environmentError ?? null, stdout: result.stdout, stderr: result.stderr, outputDigest: sha256(`${result.stdout}\0${result.stderr}`), specDigest: digestJson(spec), outputReceipt, sandboxReceipt, startedAt, finishedAt };
+    return envelope(manifest, 'receipt', payload);
+  },
+});

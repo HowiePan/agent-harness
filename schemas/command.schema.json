@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-harness.local/schemas/command.schema.json",
+  "title": "Agent Harness Authority Command",
+  "type": "object",
+  "required": ["commandId", "type", "payload"],
+  "properties": {
+    "commandId": { "type": "string", "minLength": 1, "maxLength": 256 },
+    "expectedRevision": { "type": "integer", "minimum": 0 },
+    "type": { "type": "string", "minLength": 1 },
+    "projectId": { "type": "string" },
+    "runId": { "type": "string" },
+    "epoch": { "type": "integer", "minimum": 1 },
+    "generation": { "type": "integer", "minimum": 1 },
+    "payload": {}
+  },
+  "additionalProperties": false
+}

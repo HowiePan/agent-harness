@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-harness.local/schemas/installation.schema.json",
+  "title": "Agent Harness Standalone Installation",
+  "type": "object",
+  "required": ["protocolVersion", "runtimeRoot", "dataRoot", "temporaryRoot", "initializedAt"],
+  "properties": {
+    "protocolVersion": { "const": "1.0" },
+    "runtimeRoot": { "type": "string", "minLength": 1 },
+    "dataRoot": { "const": ".agent-harness-data" },
+    "temporaryRoot": { "const": ".tmp" },
+    "initializedAt": { "type": "string", "format": "date-time" }
+  },
+  "additionalProperties": false
+}

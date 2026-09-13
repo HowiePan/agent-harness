@@ -1,0 +1,176 @@
+import { resolve } from 'node:path';
+import { atomicWriteJson } from '../kernel/atomic-io.mjs';
+import { AuthorityStore } from '../kernel/authority-store.mjs';
+import { EvidenceStore } from '../kernel/evidence-store.mjs';
+import { buildDispatchPacket, HarnessKernel } from '../kernel/kernel.mjs';
+import { digestJson } from '../canonical.mjs';
+import { assert } from '../errors.mjs';
+import { PluginHost } from '../plugins/host.mjs';
+import { createConflictScheduler } from '../plugins/scheduler/conflict-scheduler.mjs';
+import { createJsonCodec } from '../plugins/codec/json-codec.mjs';
+import { createStaticModelRouter } from '../plugins/model/static-router.mjs';
+import { createAuthorityStoragePlugin } from '../plugins/storage/authority-storage.mjs';
+import { featureDeliveryProfile } from '../profiles/feature-delivery.mjs';
+import { ProfileRegistry } from '../profiles/registry.mjs';
+import { ProjectRegistry } from '../registry/project-registry.mjs';
+import { RecoveryCoordinator } from '../recovery/coordinator.mjs';
+import { installExtensionPacks } from '../extensions/contract.mjs';
+import { loadReleaseIdentity } from '../release-identity.mjs';
+import { captureWorkspace, diffWorkspaceSnapshots } from '../workspace-snapshot.mjs';
+import { assertHarnessWritePath, harnessControlRoot } from '../write-boundary.mjs';
+
+export const defaultDataRoot = (controlRoot = harnessControlRoot()) => resolve(controlRoot, '.agent-harness-data');
+
+const manifests = Object.freeze({
+  scheduler: { id: 'reference-conflict-scheduler', kind: 'scheduler', version: '1.0.0', capabilities: ['feature-dag', 'conflict-graph', 'lane-fairness'], permissions: [] },
+  codec: { id: 'reference-json-codec', kind: 'codec', version: '1.0.0', capabilities: ['json', 'structured-result'], permissions: [] },
+  model: { id: 'reference-static-model-router', kind: 'model-router', version: '1.0.0', capabilities: ['capability-route', 'risk-route'], permissions: [] },
+  storage: { id: 'reference-file-storage', kind: 'storage-provider', version: '1.0.0', capabilities: ['expected-revision', 'idempotency', 'atomic-write', 'recovery'], permissions: ['state.write'] },
+});
+
+export const createHarness = async ({ controlRoot: controlRootInput, dataRoot: dataRootInput, now, id, releaseIdentity, strictProjectIdentity = true, allowedPluginPermissions = ['state.write', 'agent.conversation', 'process.spawn', 'workspace.read', 'workspace.write', 'gate.execute', 'artifact.read'], extraProfiles = [], extensions = [] } = {}) => {
+  const controlRoot = harnessControlRoot(controlRootInput);
+  const dataRoot = dataRootInput ?? defaultDataRoot(controlRoot);
+  const controlledDataRoot = assertHarnessWritePath(dataRoot, 'Harness dataRoot', controlRoot);
+  releaseIdentity ??= await loadReleaseIdentity();
+  const currentReleaseIdentity = { version: releaseIdentity?.version, artifactDigest: releaseIdentity?.artifactDigest ?? null };
+  assert(/^\d+\.\d+\.\d+$/.test(currentReleaseIdentity.version ?? ''), 'HARNESS_RELEASE_IDENTITY_INVALID', 'Harness release identity requires a semantic version.');
+  assert(currentReleaseIdentity.artifactDigest === null || /^[a-f0-9]{64}$/.test(currentReleaseIdentity.artifactDigest), 'HARNESS_RELEASE_IDENTITY_INVALID', 'Harness artifact digest must be null or SHA-256.');
+  if (strictProjectIdentity) assert(/^[a-f0-9]{64}$/.test(currentReleaseIdentity.artifactDigest ?? ''), 'HARNESS_RELEASE_ARTIFACT_REQUIRED', 'Production Harness creation requires a verified release artifact digest.');
+  const authorityStore = await new AuthorityStore({ root: controlledDataRoot, controlRoot, now }).init();
+  const evidenceStore = new EvidenceStore({ root: authorityStore.root, controlRoot, now });
+  const profileRegistry = new ProfileRegistry([featureDeliveryProfile, ...extraProfiles]);
+  const pluginHost = new PluginHost({ allowedPermissions: allowedPluginPermissions });
+  pluginHost.register(manifests.scheduler, createConflictScheduler({ manifest: manifests.scheduler }));
+  pluginHost.register(manifests.codec, createJsonCodec({ manifest: manifests.codec }));
+  pluginHost.register(manifests.model, createStaticModelRouter({ manifest: manifests.model, routes: [] }));
+  pluginHost.register(manifests.storage, createAuthorityStoragePlugin({ manifest: manifests.storage, store: authorityStore }));
+  const projectRegistry = new ProjectRegistry({ root: authorityStore.root, controlRoot, now, strictIdentity: strictProjectIdentity });
+  const extensionSet = await installExtensionPacks(extensions, {
+    profileRegistry,
+    pluginHost,
+    factoryContext: { controlRoot, dataRoot: authorityStore.root, resolveProject: projectId => projectRegistry.get(projectId), now },
+    requireVerifiedArtifacts: strictProjectIdentity,
+  });
+  const kernel = new HarnessKernel({ authorityStore, evidenceStore, profiles: profileRegistry, now, id });
+  const recovery = new RecoveryCoordinator({ kernel, importers: extensionSet.recoveryImporters, controlRoot });
+
+  const api = {
+    dataRoot: authorityStore.root,
+    controlRoot,
+    authorityStore,
+    evidenceStore,
+    profileRegistry,
+    pluginHost,
+    projectRegistry,
+    kernel,
+    recovery,
+    extensionSet: { installed: extensionSet.installed, digest: extensionSet.digest },
+    releaseIdentity: Object.freeze(structuredClone(currentReleaseIdentity)),
+
+    registerPlugin(manifest, instance) { return pluginHost.register(manifest, instance); },
+
+    async startRun(input, command) {
+      const project = await projectRegistry.get(input.projectId);
+      if (strictProjectIdentity) assert(project.harness && /^[a-f0-9]{64}$/.test(project.harness.artifactDigest ?? ''), 'PROJECT_HARNESS_IDENTITY_REQUIRED', `Project ${project.id} does not bind an exact Harness artifact.`);
+      if (project.harness) {
+        assert(project.harness.version === currentReleaseIdentity.version, 'PROJECT_HARNESS_VERSION_MISMATCH', `Project ${project.id} requires Harness ${project.harness.version}.`, { installedVersion: currentReleaseIdentity.version });
+        if (project.harness.artifactDigest) assert(project.harness.artifactDigest === currentReleaseIdentity.artifactDigest, 'PROJECT_HARNESS_DIGEST_MISMATCH', `Project ${project.id} requires a different Harness artifact.`, { installedArtifactDigest: currentReleaseIdentity.artifactDigest });
+      }
+      for (const required of project.extensions ?? []) {
+        if (strictProjectIdentity) assert(/^[a-f0-9]{64}$/.test(required.digest ?? ''), 'PROJECT_EXTENSION_DIGEST_REQUIRED', `Project ${project.id} does not bind an exact ${required.id} artifact.`);
+        const installed = extensionSet.installed.find(extension => extension.id === required.id);
+        assert(installed, 'PROJECT_EXTENSION_MISSING', `Project ${project.id} requires Extension Pack ${required.id}.`);
+        assert(installed.version === required.version, 'PROJECT_EXTENSION_VERSION_MISMATCH', `Project ${project.id} requires Extension Pack ${required.id}@${required.version}.`, { installedVersion: installed.version });
+        if (required.digest) assert(installed.digest === required.digest, 'PROJECT_EXTENSION_DIGEST_MISMATCH', `Project ${project.id} requires a different ${required.id} artifact.`, { expectedDigest: required.digest, installedDigest: installed.digest ?? null });
+      }
+      assert(profileRegistry.get(input.profileId), 'PROFILE_NOT_INSTALLED', `Profile is not installed: ${input.profileId}`);
+      assert(project.profiles.includes(input.profileId), 'PROJECT_PROFILE_DENIED', `Project ${project.id} does not allow Profile ${input.profileId}.`);
+      const requiredFinalGates = (project.gateRecipes ?? []).filter(recipe => recipe.scope === 'final' && recipe.required !== false).map(recipe => recipe.id);
+      const profileConfig = {
+        ...(project.policy?.profileConfigs?.[input.profileId] ?? {}),
+        ...(input.profileConfig ?? {}),
+        ...(input.profileConfig?.requiredFinalGates === undefined ? { requiredFinalGates } : {}),
+      };
+      const snapshot = input.sourceDigest ? null : await captureWorkspace(project.workspace.root, { excluded: project.workspace.excluded ?? [] });
+      const pluginSet = pluginHost.snapshot();
+      const installedCompositionDigest = digestJson({ plugins: pluginSet.manifests, extensions: extensionSet.installed });
+      const policyDigest = input.policyDigest ?? digestJson({ profiles: project.profiles, extensions: project.extensions ?? [], policy: project.policy ?? {}, gateRecipes: project.gateRecipes ?? [], artifactProviders: project.artifactProviders ?? [] });
+      return kernel.startRun({ ...input, profileConfig, policyDigest, sourceDigest: input.sourceDigest ?? snapshot.digest, pluginSetDigest: input.pluginSetDigest ?? installedCompositionDigest, metadata: { ...input.metadata, projectDescriptorDigest: project.descriptorDigest, extensionSetDigest: extensionSet.digest } }, command);
+    },
+
+    async dispatch(projectId, runId, input, command) {
+      const state = await authorityStore.read(projectId, runId);
+      assert(state.revision === command.expectedRevision, 'REVISION_CONFLICT', 'Authority revision changed before scheduling.', { expected: command.expectedRevision, actual: state.revision });
+      const project = await projectRegistry.get(projectId);
+      const runtimePluginId = input.runtimePluginId ?? project.policy?.defaultRuntimePlugin ?? null;
+      if (runtimePluginId) {
+        assert((project.policy?.runtimePlugins ?? [runtimePluginId]).includes(runtimePluginId), 'PROJECT_RUNTIME_DENIED', `Runtime ${runtimePluginId} is not allowed by Project ${projectId}.`);
+        pluginHost.get(runtimePluginId, 'agent-runtime');
+      }
+      const snapshot = await captureWorkspace(project.workspace.root, { excluded: project.workspace.excluded ?? [] });
+      assert(snapshot.digest === state.sourceDigest, 'WORKSPACE_SOURCE_DRIFT', 'Workspace changed outside a committed Feature result.', { authoritySourceDigest: state.sourceDigest, workspaceSourceDigest: snapshot.digest });
+      const snapshotEvidence = await evidenceStore.put(snapshot, { mediaType: 'application/json', projectId, runId, epoch: state.epoch, generation: state.generation, sourceDigest: state.sourceDigest, artifactDigest: state.artifactDigest, policyDigest: state.policyDigest, pluginSetDigest: state.pluginSetDigest, labels: ['workspace-snapshot'] });
+      const scheduledInput = { ...input, runtimePluginId, sourceSnapshotRef: snapshotEvidence.ref };
+      if (input.candidateFeatureIds) return kernel.schedule(projectId, runId, scheduledInput, command);
+      const activeFeatureIds = [...new Set([...state.leases.filter(lease => ['requested', 'active'].includes(lease.status)).map(lease => lease.featureId), ...state.dispatches.filter(dispatch => ['requested', 'assigned'].includes(dispatch.status)).map(dispatch => dispatch.featureId)])];
+      const strategy = await pluginHost.invoke(input.schedulerPluginId ?? manifests.scheduler.id, 'select', { revision: state.revision, features: state.features, activeFeatureIds, limit: Number(input.maxConcurrency ?? 1), deniedFeatureIds: [] });
+      const executionByFeatureId = {};
+      const modelRouterPluginId = input.modelRouterPluginId ?? project.policy?.modelRouterPlugin ?? null;
+      const toolBrokerPluginId = input.toolBrokerPluginId ?? project.policy?.toolBrokerPlugin ?? null;
+      if (toolBrokerPluginId) pluginHost.get(toolBrokerPluginId, 'tool-broker');
+      for (const featureId of strategy.payload.featureIds) {
+        const feature = state.features.find(item => item.id === featureId);
+        const execution = {};
+        if (modelRouterPluginId) {
+          const request = { featureId, role: feature.ownerRole, capabilities: feature.metadata.requiredCapabilities ?? [], risk: Number(feature.metadata.risk ?? 0) };
+          const route = await pluginHost.invoke(modelRouterPluginId, 'route', { ...request, requestDigest: digestJson(request) });
+          execution.modelRoute = { pluginId: route.pluginId, pluginVersion: route.pluginVersion, ...structuredClone(route.payload) };
+        }
+        if (toolBrokerPluginId) execution.toolBroker = { pluginId: toolBrokerPluginId };
+        executionByFeatureId[featureId] = execution;
+      }
+      return kernel.schedule(projectId, runId, { ...scheduledInput, candidateFeatureIds: strategy.payload.featureIds, executionByFeatureId, schedulerReceipt: { pluginId: strategy.pluginId, pluginVersion: strategy.pluginVersion } }, command);
+    },
+
+    async spawnDispatch(projectId, runId, dispatchId, runtimePluginId, commandId) {
+      let state = await authorityStore.read(projectId, runId);
+      const dispatch = state.dispatches.find(item => item.dispatchId === dispatchId);
+      assert(dispatch?.status === 'requested', 'DISPATCH_NOT_SPAWNABLE', `Dispatch is not awaiting a Runtime: ${dispatchId}`);
+      const feature = dispatch.featureSnapshot ?? state.features.find(item => item.id === dispatch.featureId);
+      const packet = buildDispatchPacket(state, dispatch, feature);
+      assert(digestJson(packet) === dispatch.packetDigest, 'PACKET_DIGEST_MISMATCH', 'Persisted Dispatch no longer matches its packet.');
+      const runtime = await pluginHost.invoke(runtimePluginId, 'spawn', packet);
+      const payload = runtime.payload;
+      const bound = await kernel.bindLease(projectId, runId, { dispatchId, agentId: payload.agentId, packetDigest: dispatch.packetDigest, runtimeReceipt: payload.transportReceipt }, { expectedRevision: state.revision, commandId });
+      return { packet, runtimeReceipt: runtime, lease: bound.result.lease, state: bound.state };
+    },
+
+    async recordResult(projectId, runId, dispatchId, result, { commandId, evidenceMetadata = {}, runtimeEvidence = null }) {
+      const state = await authorityStore.read(projectId, runId);
+      const dispatch = state.dispatches.find(item => item.dispatchId === dispatchId);
+      const lease = state.leases.find(item => item.dispatchId === dispatchId && item.status === 'active');
+      assert(dispatch && lease, 'ACTIVE_LEASE_REQUIRED', `Dispatch does not have an active Lease: ${dispatchId}`);
+      const project = await projectRegistry.get(projectId);
+      const sourceSnapshotEvidence = await evidenceStore.read(dispatch.sourceSnapshotRef);
+      const sourceSnapshot = JSON.parse(sourceSnapshotEvidence.bytes.toString('utf8'));
+      const resultingSnapshot = await captureWorkspace(project.workspace.root, { excluded: project.workspace.excluded ?? [] });
+      const cumulativeChangedFiles = diffWorkspaceSnapshots(sourceSnapshot, resultingSnapshot);
+      const interveningFiles = new Set(state.submissions.filter(submission => submission.inputSourceDigest === dispatch.sourceDigest && !submission.supersededAt).flatMap(submission => submission.changedFiles ?? []));
+      const actualChangedFiles = cumulativeChangedFiles.filter(path => !interveningFiles.has(path));
+      const claimedChangedFiles = [...new Set(result.changedFiles ?? [])].map(path => String(path).replaceAll('\\', '/')).sort();
+      if (result.changedFiles) assert(digestJson(claimedChangedFiles) === digestJson(actualChangedFiles), 'RESULT_CHANGED_FILES_MISMATCH', 'Runtime changed-files claim does not match the workspace snapshot diff.', { claimedChangedFiles, actualChangedFiles });
+      const verifiedResult = { ...structuredClone(result), changedFiles: actualChangedFiles };
+      await atomicWriteJson(dispatch.outputRef, verifiedResult, { root: authorityStore.root });
+      const preservedRuntimeEvidence = runtimeEvidence ? JSON.parse(JSON.stringify(runtimeEvidence)) : null;
+      const evidence = await evidenceStore.put({ result: verifiedResult, runtimeEvidence: preservedRuntimeEvidence, inputSourceDigest: dispatch.sourceDigest, outputSourceDigest: resultingSnapshot.digest, sourceSnapshotRef: dispatch.sourceSnapshotRef }, { ...evidenceMetadata, mediaType: 'application/json', projectId, runId, epoch: state.epoch, generation: state.generation, featureId: dispatch.featureId, dispatchId, sourceDigest: dispatch.sourceDigest, artifactDigest: state.artifactDigest, policyDigest: state.policyDigest, pluginSetDigest: state.pluginSetDigest, labels: ['agent-result'] });
+      return kernel.submit(projectId, runId, { dispatchId, outputRef: dispatch.outputRef, agentId: lease.agentId, packetDigest: dispatch.packetDigest, epoch: state.epoch, generation: state.generation, result: verifiedResult, resultingSourceDigest: resultingSnapshot.digest, evidenceRefs: [evidence.ref] }, { expectedRevision: state.revision, commandId });
+    },
+
+    async status(projectId, runId) {
+      const state = await authorityStore.read(projectId, runId);
+      return { authority: state, projection: profileRegistry.get(state.profile.id).project(state) };
+    },
+  };
+  return api;
+};

@@ -1,0 +1,14 @@
+{
+  "id": "local-process-runtime",
+  "kind": "agent-runtime",
+  "version": "1.0.0",
+  "capabilities": ["spawn", "wait", "send", "heartbeat", "interrupt", "structured-result", "managed-outputs"],
+  "permissions": ["process.spawn"],
+  "execution": {
+    "outputs": [
+      { "id": "temporary", "retention": "ephemeral", "environment": ["TEMP", "TMP", "TMPDIR"], "maxBytes": 67108864, "maxFiles": 10000 }
+    ],
+    "sandbox": { "mode": "optional" }
+  },
+  "entry": "../src/plugins/modules/process-runtime-plugin.mjs"
+}

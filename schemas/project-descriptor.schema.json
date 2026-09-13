@@ -1,0 +1,82 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-harness.local/schemas/project-descriptor.schema.json",
+  "title": "Agent Harness Persisted Project Descriptor",
+  "type": "object",
+  "$defs": {
+    "extensionIdentity": {
+      "type": "object",
+      "required": ["id", "version", "digest"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9.-]+$" },
+        "version": { "type": "string", "pattern": "^\\d+\\.\\d+\\.\\d+$" },
+        "digest": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+      },
+      "additionalProperties": false
+    },
+    "commandReceipt": {
+      "type": "object",
+      "required": ["commandId", "payloadDigest", "revision", "committedAt", "authorityDecision"],
+      "properties": {
+        "commandId": { "type": "string", "minLength": 1 },
+        "payloadDigest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "revision": { "type": "integer", "minimum": 1 },
+        "committedAt": { "type": "string", "format": "date-time" },
+        "authorityDecision": {
+          "anyOf": [
+            { "type": "null" },
+            {
+              "type": "object",
+              "required": ["actor", "decision"],
+              "properties": {
+                "actor": { "type": "string", "minLength": 1 },
+                "decision": { "const": "approved" }
+              },
+              "additionalProperties": true
+            }
+          ]
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "required": ["protocolVersion", "id", "harness", "workspace", "profiles", "revision", "updatedAt", "commands", "descriptorDigest"],
+  "properties": {
+    "protocolVersion": { "const": "1.0" },
+    "id": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$" },
+    "harness": {
+      "type": "object",
+      "required": ["version", "artifactDigest"],
+      "properties": {
+        "version": { "type": "string", "pattern": "^\\d+\\.\\d+\\.\\d+$" },
+        "artifactDigest": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+      },
+      "additionalProperties": false
+    },
+    "workspace": {
+      "type": "object",
+      "required": ["root"],
+      "properties": {
+        "root": { "type": "string" },
+        "remote": { "type": "string" },
+        "rootSelector": { "type": "string" },
+        "excluded": { "type": "array", "items": { "type": "string" } }
+      },
+      "additionalProperties": false
+    },
+    "profiles": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "type": "string", "minLength": 1 } },
+    "extensions": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": { "$ref": "#/$defs/extensionIdentity" }
+    },
+    "policy": { "type": "object" },
+    "gateRecipes": { "type": "array", "items": { "type": "object" } },
+    "artifactProviders": { "type": "array", "items": { "type": "string" } },
+    "revision": { "type": "integer", "minimum": 1 },
+    "updatedAt": { "type": "string", "format": "date-time" },
+    "commands": { "type": "object", "additionalProperties": { "$ref": "#/$defs/commandReceipt" } },
+    "descriptorDigest": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+  },
+  "additionalProperties": false
+}

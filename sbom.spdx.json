@@ -1,0 +1,37 @@
+{
+  "spdxVersion": "SPDX-2.3",
+  "dataLicense": "CC0-1.0",
+  "SPDXID": "SPDXRef-DOCUMENT",
+  "name": "agent-harness-1.0.0",
+  "documentNamespace": "https://agent-harness.local/spdx/25ddddf3ccd4f08175317f3b742ace32f73b327caf02d7723a33098bcda5b5f1",
+  "creationInfo": {
+    "created": "2026-09-13T03:53:03.218Z",
+    "creators": [
+      "Tool: agent-harness-build-release-metadata-1.0.0"
+    ]
+  },
+  "packages": [
+    {
+      "name": "agent-harness",
+      "SPDXID": "SPDXRef-Package",
+      "versionInfo": "1.0.0",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": true,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "UNLICENSED",
+      "checksums": [
+        {
+          "algorithm": "SHA256",
+          "checksumValue": "25ddddf3ccd4f08175317f3b742ace32f73b327caf02d7723a33098bcda5b5f1"
+        }
+      ]
+    }
+  ],
+  "relationships": [
+    {
+      "spdxElementId": "SPDXRef-DOCUMENT",
+      "relationshipType": "DESCRIBES",
+      "relatedSpdxElement": "SPDXRef-Package"
+    }
+  ]
+}

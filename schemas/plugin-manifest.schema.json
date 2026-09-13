@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-harness.local/schemas/plugin-manifest.schema.json",
+  "title": "Agent Harness Plugin Manifest",
+  "type": "object",
+  "required": ["id", "kind", "version", "capabilities", "permissions", "entry"],
+  "properties": {
+    "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9.-]+$" },
+    "kind": { "enum": ["scheduler", "agent-runtime", "model-router", "tool-broker", "codec", "gate-executor", "artifact-provider", "storage-provider", "os-sandbox"] },
+    "version": { "type": "string", "pattern": "^\\d+\\.\\d+\\.\\d+$" },
+    "capabilities": { "type": "array", "uniqueItems": true, "items": { "type": "string" } },
+    "permissions": { "type": "array", "uniqueItems": true, "items": { "type": "string" } },
+    "entry": { "type": "string" },
+    "configSchema": { "type": "string" },
+    "execution": {
+      "type": "object",
+      "properties": {
+        "outputs": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "required": ["id", "retention", "maxBytes", "maxFiles"],
+            "properties": {
+              "id": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$" },
+              "retention": { "enum": ["ephemeral", "evidence-then-delete", "cache", "artifact"] },
+              "environment": { "type": "array", "uniqueItems": true, "items": { "type": "string" } },
+              "maxBytes": { "type": "integer", "minimum": 1 },
+              "maxFiles": { "type": "integer", "minimum": 1 }
+            },
+            "additionalProperties": false
+          }
+        },
+        "sandbox": {
+          "type": "object",
+          "required": ["mode"],
+          "properties": { "mode": { "enum": ["disabled", "optional", "required"] } },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

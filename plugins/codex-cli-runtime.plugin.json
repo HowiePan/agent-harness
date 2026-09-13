@@ -1,0 +1,16 @@
+{
+  "id": "codex-cli-runtime",
+  "kind": "agent-runtime",
+  "version": "1.0.0",
+  "capabilities": ["spawn", "wait", "heartbeat", "interrupt", "structured-result", "workspace-shared", "managed-outputs"],
+  "permissions": ["agent.conversation", "process.spawn", "workspace.read", "workspace.write"],
+  "execution": {
+    "outputs": [
+      { "id": "temporary", "retention": "ephemeral", "environment": ["TEMP", "TMP", "TMPDIR"], "maxBytes": 268435456, "maxFiles": 20000 },
+      { "id": "debug", "retention": "evidence-then-delete", "environment": [], "maxBytes": 67108864, "maxFiles": 10000 },
+      { "id": "workspace", "retention": "ephemeral", "environment": [], "maxBytes": 2147483648, "maxFiles": 200000 }
+    ],
+    "sandbox": { "mode": "required" }
+  },
+  "entry": "../src/plugins/modules/codex-cli-runtime-plugin.mjs"
+}

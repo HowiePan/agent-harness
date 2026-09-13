@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-harness.local/schemas/evidence-metadata.schema.json",
+  "title": "Agent Harness Evidence Metadata",
+  "type": "object",
+  "required": ["sha256", "metadataDigest", "ref", "mediaType", "projectId", "runId", "epoch", "generation", "sourceDigest", "policyDigest", "pluginSetDigest"],
+  "properties": {
+    "sha256": { "$ref": "#/$defs/digest" },
+    "metadataDigest": { "$ref": "#/$defs/digest" },
+    "ref": { "type": "string" },
+    "mediaType": { "type": "string" },
+    "projectId": { "type": "string" },
+    "runId": { "type": "string" },
+    "epoch": { "type": "integer", "minimum": 1 },
+    "generation": { "type": "integer", "minimum": 1 },
+    "featureId": { "type": ["string", "null"] },
+    "dispatchId": { "type": ["string", "null"] },
+    "sourceDigest": { "$ref": "#/$defs/digest" },
+    "artifactDigest": { "type": ["string", "null"] },
+    "policyDigest": { "$ref": "#/$defs/digest" },
+    "pluginSetDigest": { "$ref": "#/$defs/digest" },
+    "labels": { "type": "array", "items": { "type": "string" } }
+  },
+  "additionalProperties": true,
+  "$defs": { "digest": { "type": "string", "pattern": "^[a-f0-9]{64}$" } }
+}

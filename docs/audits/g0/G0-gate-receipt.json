@@ -1,0 +1,29 @@
+{
+  "protocolVersion": "1.0",
+  "receiptType": "differential-audit-gate",
+  "gateId": "G0",
+  "version": "1.0.0",
+  "status": "passed",
+  "completedAt": "2026-09-12T00:00:00.000Z",
+  "mode": "read-only-characterization",
+  "inputs": {
+    "engineHarnessAggregateSha256": "1D24BAF0216FA15CCD5017524A70C5A4FF2C155B0736A79531A650EA1E42229B",
+    "collectionScriptsAggregateSha256": "D8402E0916D05386531EF3B318D41588051F81484795E65EB7E85A1BAF17CD21",
+    "collectionGameHarnessAggregateSha256": "C7402B0AB6DC0E44F4D4491A42E9F51DBCB91F853C19ACEEF0B6C2676C0645F3",
+    "collectionB1R001AggregateSha256": "8476F8ADC7FFFBC8FCD5036B99CC51EB0352B69CF1501D9B023E7FEE838113B9"
+  },
+  "artifacts": [
+    "implementation-inventory.md",
+    "capability-difference-matrix.md",
+    "state-scheduling-map.md",
+    "evidence-recovery-map.md",
+    "rejected-legacy-behaviors.md",
+    "golden-scenarios.json"
+  ],
+  "unresolved": [],
+  "decision": "W1 may start. Major newly discovered differences must reopen G0.",
+  "limitations": [
+    "This receipt does not authorize or perform a real-run recovery.",
+    "Legacy completion and approval states remain non-authoritative."
+  ]
+}

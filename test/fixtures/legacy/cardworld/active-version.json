@@ -1,0 +1,13 @@
+{
+  "protocolVersion": "2.0",
+  "version": "V3.8.4",
+  "status": "running",
+  "generation": 7,
+  "completedStages": ["requirements", "planning"],
+  "leases": [
+    { "leaseId": "legacy-lease-1", "agentId": "legacy-agent-1", "status": "active" }
+  ],
+  "attempts": {
+    "feature:engine-implementation:product": { "failures": 2, "limit": 3 }
+  }
+}

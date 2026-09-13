@@ -1,0 +1,48 @@
+import { assert } from '../errors.mjs';
+import { validateOutputDeclarations } from './execution/managed-output.mjs';
+
+export const PLUGIN_KINDS = Object.freeze(['scheduler', 'agent-runtime', 'model-router', 'tool-broker', 'codec', 'gate-executor', 'artifact-provider', 'storage-provider', 'os-sandbox']);
+
+const requiredMethods = Object.freeze({
+  scheduler: ['select'],
+  'agent-runtime': ['spawn', 'wait', 'send', 'heartbeat', 'interrupt'],
+  'model-router': ['route'],
+  'tool-broker': ['invoke'],
+  codec: ['encode', 'decode'],
+  'gate-executor': ['execute'],
+  'artifact-provider': ['resolve'],
+  'storage-provider': ['read', 'create', 'transact'],
+  'os-sandbox': ['prepare'],
+});
+
+export const validatePluginManifest = manifest => {
+  assert(manifest?.id && /^[a-z0-9][a-z0-9.-]+$/.test(manifest.id), 'PLUGIN_ID_INVALID', 'Plugin manifest requires a stable lowercase ID.');
+  assert(PLUGIN_KINDS.includes(manifest.kind), 'PLUGIN_KIND_INVALID', `Unsupported plugin kind: ${manifest.kind}`);
+  assert(/^\d+\.\d+\.\d+$/.test(manifest.version ?? ''), 'PLUGIN_VERSION_INVALID', `Plugin ${manifest.id} requires a semantic version.`);
+  assert(Array.isArray(manifest.capabilities), 'PLUGIN_CAPABILITIES_REQUIRED', `Plugin ${manifest.id} requires a capability list.`);
+  assert(Array.isArray(manifest.permissions), 'PLUGIN_PERMISSIONS_REQUIRED', `Plugin ${manifest.id} requires a permission list.`);
+  const launchesProcess = (manifest.kind === 'agent-runtime' && manifest.permissions.includes('process.spawn')) || (manifest.kind === 'gate-executor' && manifest.capabilities.includes('process'));
+  if (launchesProcess) assert(manifest.capabilities.includes('managed-outputs'), 'PLUGIN_MANAGED_OUTPUTS_REQUIRED', `Process plugin ${manifest.id} must declare the managed-outputs capability.`);
+  if (manifest.capabilities.includes('managed-outputs')) assert(manifest.execution?.outputs?.length, 'PLUGIN_OUTPUT_DECLARATIONS_REQUIRED', `Plugin ${manifest.id} declares managed-outputs but has no execution.outputs.`);
+  const execution = manifest.execution ? {
+    ...(manifest.execution.outputs ? { outputs: validateOutputDeclarations(manifest.execution.outputs) } : {}),
+    ...(manifest.execution.sandbox ? { sandbox: { mode: manifest.execution.sandbox.mode } } : {}),
+  } : null;
+  if (execution?.sandbox) assert(['disabled', 'optional', 'required'].includes(execution.sandbox.mode), 'PLUGIN_SANDBOX_MODE_INVALID', `Plugin ${manifest.id} has an invalid sandbox mode.`);
+  return { ...structuredClone(manifest), ...(execution ? { execution } : {}), capabilities: [...new Set(manifest.capabilities)].sort(), permissions: [...new Set(manifest.permissions)].sort() };
+};
+
+export const validatePluginInstance = (manifest, instance) => {
+  for (const method of requiredMethods[manifest.kind]) assert(typeof instance?.[method] === 'function', 'PLUGIN_CONTRACT_INVALID', `Plugin ${manifest.id} is missing ${method}().`);
+  return instance;
+};
+
+export const assertPluginIntent = intent => {
+  assert(intent && ['intent', 'event', 'receipt'].includes(intent.type), 'PLUGIN_OUTPUT_INVALID', 'Plugins may return only Intent, Event, or Receipt envelopes.');
+  assert(intent.pluginId && intent.pluginVersion, 'PLUGIN_OUTPUT_IDENTITY_REQUIRED', 'Plugin output requires plugin identity.');
+  assert(intent.payload && typeof intent.payload === 'object', 'PLUGIN_OUTPUT_PAYLOAD_REQUIRED', 'Plugin output requires an object payload.');
+  assert(!Object.hasOwn(intent.payload, 'authority') && !Object.hasOwn(intent.payload, 'authorityWrite'), 'PLUGIN_AUTHORITY_WRITE_REJECTED', 'Plugins cannot return direct Authority writes.');
+  return intent;
+};
+
+export const envelope = (manifest, type, payload) => ({ type, pluginId: manifest.id, pluginVersion: manifest.version, payload });

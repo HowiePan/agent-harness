@@ -1,0 +1,9 @@
+{
+  "id": "collection-batch",
+  "version": "1.0.0",
+  "stages": ["rule-readiness", "batch-launch", "feature-work", "game-acceptance", "release-review", "user-acceptance", "batch-close", "collection-release"],
+  "quality": { "blockingSeverities": ["P0", "P1", "P2", "P3"], "allowCurrentDebt": false },
+  "concurrency": { "maxLogicalGames": 10, "physicalConcurrency": "min(user-limit,runtime-capacity,conflict-free-eligible-features)" },
+  "barriers": ["previous-batch-closed", "user-batch-launch-decision"],
+  "acceptance": ["game-harness-acceptance", "independent-release-review", "user-game-acceptance", "user-batch-close-decision"]
+}

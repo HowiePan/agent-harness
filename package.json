@@ -1,0 +1,57 @@
+{
+  "name": "agent-harness",
+  "version": "1.0.0",
+  "description": "Portable authority-first orchestration harness for agent workflows",
+  "type": "module",
+  "license": "UNLICENSED",
+  "engines": {
+    "node": ">=22"
+  },
+  "bin": {
+    "agent-harness": "bin/agent-harness.mjs"
+  },
+  "exports": {
+    ".": "./src/index.mjs",
+    "./kernel": "./src/kernel/index.mjs",
+    "./maintenance": "./src/maintenance/index.mjs",
+    "./plugins": "./src/plugins/index.mjs",
+    "./plugins/codex-cli-runtime": "./src/plugins/runtime/codex-cli-runtime.mjs",
+    "./plugins/codex-conversation-runtime": "./src/plugins/runtime/codex-runtime.mjs",
+    "./profiles": "./src/profiles/index.mjs",
+    "./extensions": "./src/extensions/index.mjs",
+    "./extensions/codex-runtime": "./src/extensions/codex-runtime.mjs",
+    "./extensions/legacy-compat": "./src/extensions/legacy-compat.mjs",
+    "./consumers": "./src/consumers/index.mjs",
+    "./consumers/cardworld-engine": "./src/consumers/cardworld-engine.mjs",
+    "./consumers/tabletop-collection": "./src/consumers/tabletop-collection.mjs",
+    "./recovery": "./src/recovery/index.mjs",
+    "./schemas/*": "./schemas/*"
+  },
+  "files": [
+    "bin/",
+    "src/",
+    "schemas/",
+    "profiles/",
+    "plugins/",
+    "scripts/check-context-budget.mjs",
+    "docs/",
+    "integrations/",
+    "examples/",
+    "release-manifest.json",
+    "sbom.spdx.json",
+    "README.md",
+    "CONTRIBUTING.md",
+    "SECURITY.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "test": "node scripts/run-tests.mjs all",
+    "test:conformance": "node scripts/run-tests.mjs conformance",
+    "test:canary": "node scripts/run-tests.mjs canary",
+    "check": "node scripts/check-project.mjs",
+    "check:clean-room": "node scripts/check-clean-room.mjs",
+    "check:residue": "node scripts/check-residue.mjs",
+    "build:release-metadata": "node scripts/build-release-metadata.mjs",
+    "pack:dry-run": "node scripts/pack-dry-run.mjs"
+  }
+}

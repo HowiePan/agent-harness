@@ -1,0 +1,10 @@
+node_modules/
+coverage/
+dist/
+*.tgz
+*.log
+.DS_Store
+.agent-harness-data/
+.agent-harness-cache/
+test/.tmp/
+.tmp/

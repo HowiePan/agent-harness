@@ -1,0 +1,10 @@
+{
+  "protocol": "engine-t2",
+  "status": "quality",
+  "dispatches": [
+    { "dispatchId": "legacy-dispatch-1", "featureId": "engine-implementation", "status": "assigned" }
+  ],
+  "attempts": {
+    "engine-implementation": { "failures": 2 }
+  }
+}

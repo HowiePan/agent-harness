@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-harness.local/schemas/result.schema.json",
+  "title": "Agent Harness Business Result",
+  "type": "object",
+  "required": ["status", "summary", "changedFiles"],
+  "properties": {
+    "status": { "enum": ["completed", "blocked", "failed"] },
+    "summary": { "type": "string", "minLength": 1 },
+    "checkpoints": { "type": "array", "items": { "type": "object" } },
+    "made": { "type": "array", "items": { "type": "string" } },
+    "notMade": { "type": "array", "items": { "type": "string" } },
+    "changedFiles": { "type": "array", "uniqueItems": true, "items": { "type": "string" } },
+    "observations": { "type": "array", "items": { "type": "string" } },
+    "failureClass": { "type": "string" },
+    "blocker": { "type": "object", "required": ["kind", "summary"], "properties": { "kind": { "type": "string" }, "summary": { "type": "string" }, "resumeWhen": { "type": "string" } }, "additionalProperties": true }
+  },
+  "additionalProperties": true
+}

@@ -1,0 +1,54 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-harness.local/schemas/extension-installation.schema.json",
+  "title": "Agent Harness Extension Installation Registry",
+  "type": "object",
+  "required": ["protocolVersion", "revision", "extensions", "commands", "registryDigest"],
+  "properties": {
+    "protocolVersion": { "const": "1.0" },
+    "revision": { "type": "integer", "minimum": 0 },
+    "extensions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "version", "digest", "entry", "registeredAt"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9.-]+$" },
+          "version": { "type": "string", "pattern": "^\\d+\\.\\d+\\.\\d+$" },
+          "digest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+          "entry": { "type": "string", "minLength": 1 },
+          "registeredAt": { "type": "string", "format": "date-time" }
+        },
+        "additionalProperties": false
+      }
+    },
+    "commands": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "required": ["commandId", "operation", "requestDigest", "payloadDigest", "result", "revision", "committedAt", "authorityDecision"],
+        "properties": {
+          "commandId": { "type": "string", "minLength": 1 },
+          "operation": { "enum": ["register", "remove"] },
+          "requestDigest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+          "payloadDigest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+          "result": { "type": "object" },
+          "revision": { "type": "integer", "minimum": 1 },
+          "committedAt": { "type": "string", "format": "date-time" },
+          "authorityDecision": {
+            "type": "object",
+            "required": ["actor", "decision"],
+            "properties": {
+              "actor": { "type": "string", "minLength": 1 },
+              "decision": { "const": "approved" }
+            },
+            "additionalProperties": true
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "registryDigest": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+  },
+  "additionalProperties": false
+}

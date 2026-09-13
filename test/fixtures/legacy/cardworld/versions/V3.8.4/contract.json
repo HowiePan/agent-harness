@@ -1,0 +1,7 @@
+{
+  "protocolVersion": "2.0",
+  "version": "V3.8.4",
+  "status": "completed",
+  "completedStages": ["requirements", "planning", "implementation", "quality"],
+  "requirementsDigest": "synthetic-characterization-only"
+}

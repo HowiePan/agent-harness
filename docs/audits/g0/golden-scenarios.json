@@ -1,0 +1,22 @@
+{
+  "protocolVersion": "1.0",
+  "gate": "G0",
+  "scenarios": [
+    { "id": "engine-canonical-before-fanout", "profile": "engine-delivery", "assertion": "canonical requirement 未形成前没有 implementation dispatch" },
+    { "id": "engine-feature-conflict-wave", "profile": "engine-delivery", "assertion": "依赖或路径/符号/契约/生成物冲突的 Feature 不并行" },
+    { "id": "engine-quality-all-severities", "profile": "engine-delivery", "assertion": "当前 Epoch 任一 P0-P3 finding 阻止准出" },
+    { "id": "collection-ten-games-logically-active", "profile": "collection-batch", "assertion": "同批十个游戏可同时保持 active，物理并发服从容量与冲突" },
+    { "id": "collection-slot-release", "profile": "collection-batch", "assertion": "阻塞 Feature 释放槽且不阻止无依赖 Feature" },
+    { "id": "collection-same-game-mixed-progress", "profile": "collection-batch", "assertion": "同游戏无冲突 Feature 可并行，有依赖或冲突 Feature 串行" },
+    { "id": "collection-capability-single-owner", "profile": "collection-batch", "assertion": "共享能力只有一个 owner，只有消费者等待" },
+    { "id": "collection-batch-barrier", "profile": "collection-batch", "assertion": "B1 未 closed 或无用户 launch Decision 时 B2 不 eligible" },
+    { "id": "collection-artifact-impact-set", "profile": "collection-batch", "assertion": "artifact 漂移只失效声明受影响的 Feature 和回归集" },
+    { "id": "quality-p0-p3-no-defer", "profile": "all", "assertion": "known debt 不能关闭当前 P0-P3" },
+    { "id": "kernel-reject-stale-result", "profile": "all", "assertion": "迟到、重复冲突、越权和跨 generation Result 被拒绝" },
+    { "id": "kernel-stable-attempt-budget", "profile": "all", "assertion": "恢复、换 dispatch 或换 feature id 不刷新 logical root 预算" },
+    { "id": "recovery-engine-new-epoch", "profile": "engine-delivery", "assertion": "T1/T2 只读导入建立新 Epoch，旧 Lease 不复活" },
+    { "id": "recovery-collection-new-epoch", "profile": "collection-batch", "assertion": "M2/B1 只读导入建立新 Epoch，旧 Round 完成状态不直升" },
+    { "id": "runtime-equivalent-authority", "profile": "all", "assertion": "Codex 与非 Codex Runtime 产生等价 Authority 语义" },
+    { "id": "zero-repository-residency", "profile": "all", "assertion": "业务仓无需 Harness 代码、Prompt、状态或技术文档" }
+  ]
+}

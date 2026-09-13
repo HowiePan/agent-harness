@@ -1,0 +1,15 @@
+{
+  "version": "0.4",
+  "roundId": "round-characterization",
+  "batch": "B1",
+  "status": "review-required",
+  "terminationReason": "round-complete",
+  "summary": { "completed": 1, "blocked": 1 },
+  "games": [
+    { "gameId": "game-a", "status": "completed" },
+    { "gameId": "game-b", "status": "blocked" }
+  ],
+  "leases": [],
+  "decisionsRequired": ["batch-close"],
+  "evidence": []
+}

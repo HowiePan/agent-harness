@@ -1,0 +1,43 @@
+name: Harness defect
+description: Report a sanitized, reproducible Agent Harness defect
+title: "[Defect] "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: Never attach credentials, private prompts, raw business data, Authority stores, Evidence payloads, or Recovery Capsules.
+  - type: input
+    id: release
+    attributes:
+      label: Harness version and artifact digest
+      placeholder: 1.0.0 / sha256
+    validations:
+      required: true
+  - type: textarea
+    id: extensions
+    attributes:
+      label: Extension and Plugin identities
+      description: List IDs and exact versions.
+    validations:
+      required: true
+  - type: textarea
+    id: observed
+    attributes:
+      label: Expected and actual result
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Sanitized minimal reproduction
+      description: Prefer synthetic data conforming to schemas/defect-bundle.schema.json.
+    validations:
+      required: true
+  - type: checkboxes
+    id: sanitization
+    attributes:
+      label: Sanitization
+      options:
+        - label: I removed secrets, personal paths, private prompts, raw business data, and live state.
+          required: true
+

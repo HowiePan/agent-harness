@@ -1,0 +1,7 @@
+{
+  "id": "engine-delivery",
+  "version": "1.0.0",
+  "stages": ["requirement-intake", "canonical-requirement", "version-planning", "implementation", "scope-resolution", "quality", "docs-closeout", "user-code-review"],
+  "quality": { "blockingSeverities": ["P0", "P1", "P2", "P3"], "allowCurrentDebt": false },
+  "decisions": ["canonical-requirement-approved", "user-code-review"]
+}

@@ -1,0 +1,8 @@
+{
+  "id": "codex-conversation-runtime",
+  "kind": "agent-runtime",
+  "version": "1.0.0",
+  "capabilities": ["spawn", "wait", "send", "heartbeat", "interrupt", "structured-result"],
+  "permissions": ["agent.conversation"],
+  "entry": "../src/plugins/modules/codex-conversation-runtime-plugin.mjs"
+}

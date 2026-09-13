@@ -1,0 +1,19 @@
+{
+  "version": "0.2",
+  "roundId": "round-characterization",
+  "batch": "B1",
+  "status": "all-remaining-blocked",
+  "goal": "Synthetic public characterization fixture",
+  "artifactIdentity": { "digest": "synthetic-engine-artifact" },
+  "maxAgents": 10,
+  "requestedAgentCount": 10,
+  "leases": [
+    { "agentId": "legacy-game-agent", "workItemIds": ["game-a/implementation"], "status": "active", "attempt": 1 }
+  ],
+  "items": [
+    { "id": "game-a/implementation", "gameId": "game-a", "kind": "implementation", "status": "completed", "dependencies": [], "attempts": 1 },
+    { "id": "game-b/implementation", "gameId": "game-b", "kind": "implementation", "status": "blocked", "dependencies": [], "attempts": 2 }
+  ],
+  "events": [],
+  "termination": { "reason": "all-remaining-blocked" }
+}

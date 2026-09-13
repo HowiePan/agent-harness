@@ -1,0 +1,6 @@
+{
+  "id": "feature-delivery",
+  "version": "1.0.0",
+  "stages": ["feature-work", "quality", "approval", "closure"],
+  "quality": { "blockingSeverities": ["P0", "P1", "P2", "P3"], "allowCurrentDebt": false }
+}
