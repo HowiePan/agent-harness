@@ -127,6 +127,8 @@ hard recovery Decision 的最小输入如下；`context.expectedRevision` 是记
 
 ## 故障响应
 
+Codex CLI Runtime 将自动审批和显式 sandbox 作为互斥启动模式。`approveForMe: true` 只允许与 `sandbox: workspace-write` 配置配对，并只向 CLI 传递 `--approve-for-me`；`approveForMe: false` 或未配置时只传递 `--sandbox <mode>`。不兼容配置在进程启动前 fail closed。Runtime Receipt 分别记录请求的 sandbox、审批模式和由 `thread.started` 确认的实际应用状态；CLI 在会话建立前退出时记录稳定的 startup failure，不得以缺少结果文件替代根因。
+
 - Provider outage：停止新绑定，保留 Authority；可切换兼容 Runtime，逻辑 Attempt 不刷新。
 - Gate 环境失败：记录环境失败，不伪造业务 finding；修复环境后使用相同 source/gate key 重试。
 - stale/late result：拒绝提交并保留审计记录；基于当前 generation 重新 Dispatch。

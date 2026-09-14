@@ -36,6 +36,20 @@ const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..',
 const resultSchema = resolve(packageRoot, 'schemas', 'result.schema.json');
 const sandboxValues = new Set(['read-only', 'workspace-write', 'danger-full-access']);
 
+export const resolveCodexExecutionPolicy = (config = {}) => {
+  const sandbox = config.sandbox ?? 'workspace-write';
+  assert(sandboxValues.has(sandbox), 'CODEX_SANDBOX_INVALID', `Unsupported Codex sandbox: ${sandbox}`);
+  assert(sandbox !== 'danger-full-access' || config.allowDangerFullAccess === true, 'CODEX_DANGER_SANDBOX_DENIED', 'danger-full-access requires an explicit Project policy opt-in.');
+  assert(config.approveForMe === undefined || typeof config.approveForMe === 'boolean', 'CODEX_APPROVAL_POLICY_INVALID', 'approveForMe must be a boolean when configured.');
+  const approveForMe = config.approveForMe === true;
+  assert(!approveForMe || sandbox === 'workspace-write', 'CODEX_APPROVAL_SANDBOX_CONFLICT', 'approveForMe requires workspace-write and cannot be combined with another sandbox mode.');
+  return {
+    sandbox,
+    approvalMode: approveForMe ? 'approve-for-me' : 'sandbox-only',
+    cliArgs: approveForMe ? ['--approve-for-me'] : ['--sandbox', sandbox],
+  };
+};
+
 export const buildCodexPrompt = packet => `You are an execution Runtime controlled by Agent Harness.
 
 Complete exactly the supplied Feature inside the current workspace. Treat the Feature allowedPaths and forbiddenPaths as hard boundaries. Do not edit Harness Authority, Evidence, Dispatch, Lease, or Receipt data. Feature steps are ordered and share one logical attempt.
@@ -70,9 +84,8 @@ export const createCodexCliRuntime = ({
       const project = await resolveProject(packet.projectId);
       const config = project.policy?.runtimeConfigs?.[manifest.id] ?? {};
       assert((project.policy?.runtimePlugins ?? [manifest.id]).includes(manifest.id), 'PROJECT_RUNTIME_DENIED', `Project ${project.id} does not allow ${manifest.id}.`);
-      const sandbox = config.sandbox ?? 'workspace-write';
-      assert(sandboxValues.has(sandbox), 'CODEX_SANDBOX_INVALID', `Unsupported Codex sandbox: ${sandbox}`);
-      assert(sandbox !== 'danger-full-access' || config.allowDangerFullAccess === true, 'CODEX_DANGER_SANDBOX_DENIED', 'danger-full-access requires an explicit Project policy opt-in.');
+      const executionPolicy = resolveCodexExecutionPolicy(config);
+      const { sandbox, approvalMode } = executionPolicy;
       const agentId = newId('codex-agent');
       const outputSession = createManagedOutputSession({ root: resolve(controlledRuntimeRoot, 'runtime', 'codex-cli'), controlRoot, operationId: agentId, declarations: config.outputs ?? manifest.execution?.outputs ?? CODEX_OUTPUTS });
       const directory = outputSession.operationRoot;
@@ -85,9 +98,8 @@ export const createCodexCliRuntime = ({
         const executionRoot = workspaceContext?.workspaceRoot ?? packet.workspace?.root ?? project.workspace.root;
         const lastMessagePath = resolve(outputSession.paths.debug, 'result.json');
         const eventsPath = resolve(outputSession.paths.debug, 'events.jsonl');
-        const args = [...(config.executableArgs ?? executableArgs), 'exec', '--json', '--color', 'never', '--sandbox', sandbox, '--cd', project.workspace.root, '--output-schema', resolve(schemaPath), '--output-last-message', lastMessagePath];
+        const args = [...(config.executableArgs ?? executableArgs), 'exec', '--json', '--color', 'never', ...executionPolicy.cliArgs, '--cd', project.workspace.root, '--output-schema', resolve(schemaPath), '--output-last-message', lastMessagePath];
         if (config.ephemeral !== false) args.push('--ephemeral');
-        if (config.approveForMe !== false) args.push('--approve-for-me');
         const routedModel = packet.execution?.modelRoute?.route?.model ?? config.model;
         if (routedModel) args.push('--model', String(routedModel));
         args.push('-');
@@ -105,14 +117,14 @@ export const createCodexCliRuntime = ({
           child.on('error', error => settle({ exitCode: null, signal: null, error: { code: error.code, message: error.message } }));
           child.on('close', (exitCode, signal) => settle({ exitCode, signal, error: null }));
         });
-        const sandboxReceipt = { mode: sandbox, applied: true, providerId: manifest.id };
+        const sandboxReceipt = { mode: sandbox, approvalMode, requested: true, applied: false, providerId: manifest.id };
         tasks.set(agentId, { child, completion, stdout: () => stdout, stderr: () => stderr, lastMessagePath, eventsPath, packetDigest: packet.packetDigest ?? null, workspaceContext, result: null, outputSession, stopOutputMonitor, sandboxReceipt });
         child.stdin?.end(promptBuilder(structuredClone(packet)));
-        return envelope(manifest, 'receipt', { operation: 'spawn', agentId, transportReceipt: { runtimePluginId: manifest.id, pid: child.pid ?? null, sandbox, managedOutputRoot: directory, managedOutputs: managedOutputs.outputs, workspaceRoot: executionRoot, sourceWorkspaceRoot: packet.workspace?.root ?? project.workspace.root, startedAt: new Date().toISOString() } });
+        return envelope(manifest, 'receipt', { operation: 'spawn', agentId, transportReceipt: { runtimePluginId: manifest.id, pid: child.pid ?? null, sandbox, approvalMode, managedOutputRoot: directory, managedOutputs: managedOutputs.outputs, workspaceRoot: executionRoot, sourceWorkspaceRoot: packet.workspace?.root ?? project.workspace.root, startedAt: new Date().toISOString() } });
       } catch (error) {
         if (child?.exitCode === null) child.kill('SIGTERM');
         if (workspaceProvider && workspaceContext) await workspaceProvider.discard(workspaceContext).catch(() => {});
-        await outputSession.finish({ reason: 'spawn-failed', sandboxReceipt: { mode: sandbox, applied: false, providerId: manifest.id } }).catch(() => {});
+        await outputSession.finish({ reason: 'spawn-failed', sandboxReceipt: { mode: sandbox, approvalMode, requested: true, applied: false, providerId: manifest.id } }).catch(() => {});
         tasks.delete(agentId);
         throw error;
       }
@@ -127,6 +139,15 @@ export const createCodexCliRuntime = ({
       await writeFile(task.eventsPath, stdout, 'utf8');
       const events = parseEvents(stdout);
       const threadId = events.find(event => event.type === 'thread.started')?.thread_id ?? null;
+      task.sandboxReceipt = { ...task.sandboxReceipt, applied: Boolean(threadId) };
+      const stderrDigest = sha256(stderr);
+      const startupError = !threadId && (completion.error || completion.exitCode !== 0)
+        ? {
+            code: completion.error ? 'CODEX_CLI_SPAWN_FAILED' : 'CODEX_CLI_STARTUP_FAILED',
+            message: completion.error ? 'Codex CLI process could not be started.' : `Codex CLI exited before starting the agent session (exit ${completion.exitCode}).`,
+            details: { exitCode: completion.exitCode, signal: completion.signal, stderrDigest },
+          }
+        : null;
       let result = null;
       let resultError = null;
       try { result = JSON.parse(await readFile(task.lastMessagePath, 'utf8')); }
@@ -142,7 +163,7 @@ export const createCodexCliRuntime = ({
       }
       task.result = result;
       const status = completion.exitCode === 0 && result ? 'completed' : 'failed';
-      return envelope(manifest, 'event', { operation: 'wait', agentId, status, exitCode: completion.exitCode, signal: completion.signal, processError: completion.error, resultError, result, threadId, eventCount: events.length, events, eventsPath: task.eventsPath, eventsDigest: sha256(stdout), stderr, stderrDigest: sha256(stderr), outputSnapshot, sandboxReceipt: task.sandboxReceipt, completedAt: new Date().toISOString() });
+      return envelope(manifest, 'event', { operation: 'wait', agentId, status, exitCode: completion.exitCode, signal: completion.signal, processError: completion.error, startupError, resultError, result, threadId, eventCount: events.length, events, eventsPath: task.eventsPath, eventsDigest: sha256(stdout), stderr, stderrDigest, outputSnapshot, sandboxReceipt: task.sandboxReceipt, completedAt: new Date().toISOString() });
     },
 
     async send({ agentId }) {

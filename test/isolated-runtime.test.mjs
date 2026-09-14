@@ -11,7 +11,7 @@ const probe = resolve(dirname(fileURLToPath(import.meta.url)), 'fixtures', 'isol
 
 test('isolated Codex Runtime executes and safely integrates ten game Features in physical parallel', async t => {
   const runtime = 'codex-isolated-runtime';
-  const fixture = await makeFixture({ extensions: [codexRuntimeExtension], policy: { runtimePlugins: [runtime], defaultRuntimePlugin: runtime, maxConcurrency: 10, runtimeConfigs: { [runtime]: { executable: process.execPath, executableArgs: [probe], linkedDirectories: [] } } } });
+  const fixture = await makeFixture({ extensions: [codexRuntimeExtension], policy: { runtimePlugins: [runtime], defaultRuntimePlugin: runtime, maxConcurrency: 10, runtimeConfigs: { [runtime]: { executable: process.execPath, executableArgs: [probe], linkedDirectories: [], sandbox: 'workspace-write', approveForMe: true } } } });
   t.after(() => fixture.cleanup());
   const features = Array.from({ length: 10 }, (_, index) => feature(`game-${index + 1}`, {}, { laneId: `game-${index + 1}`, allowedPaths: [`work/game-${index + 1}.txt`] }));
   await startRun(fixture, { features });
@@ -20,6 +20,9 @@ test('isolated Codex Runtime executes and safely integrates ten game Features in
   assert.equal(tick.physicalLimit, 10);
   assert.equal(tick.committed.length, 10);
   assert.equal(tick.committed.every(item => item.runtimeReceipt.payload.events[0].temp.startsWith(fixture.dataRoot)), true);
+  assert.equal(tick.committed.every(item => item.runtimeReceipt.payload.events[0].args.includes('--approve-for-me')), true);
+  assert.equal(tick.committed.every(item => !item.runtimeReceipt.payload.events[0].args.includes('--sandbox')), true);
+  assert.equal(tick.committed.every(item => item.runtimeReceipt.payload.sandboxReceipt.applied === true), true);
   assert.equal(tick.committed.every(item => item.cleanupReceipt.payload.outputReceipt.status === 'cleaned'), true);
   const evidence = await fixture.harness.evidenceStore.read(tick.state.submissions[0].evidenceRefs[0]);
   const evidenceValue = JSON.parse(evidence.bytes.toString('utf8'));

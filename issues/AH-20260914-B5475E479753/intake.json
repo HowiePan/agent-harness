@@ -1,0 +1,73 @@
+{
+  "protocolVersion": "1.0",
+  "projectAlias": "engine",
+  "project": {
+    "projectId": "cardworld-engine",
+    "profileId": "engine-delivery",
+    "extensionId": "cardworld-engine-profile"
+  },
+  "observedAt": "2026-09-14T10:52:11.934Z",
+  "summary": "V3.8.4 quality Runtime cannot start because Codex CLI rejects sandbox with approve-for-me.",
+  "severity": "P1",
+  "environment": {
+    "harnessVersion": "1.0.0",
+    "runtimePlugin": "codex-cli-runtime",
+    "sandbox": "workspace-write",
+    "qualityRun": "v3-8-4-quality-20260914"
+  },
+  "expected": {
+    "result": "The bound quality Runtime starts and returns a structured business result for the V3.8.4 quality Feature."
+  },
+  "actual": {
+    "result": "The Runtime exits before starting the Feature and the Run is marked all-remaining-blocked.",
+    "errorCode": "CODEX_CLI_INVALID_FLAG_COMBINATION",
+    "stderr": "the argument --sandbox <SANDBOX_MODE> cannot be used with --approve-for-me"
+  },
+  "reproduction": {
+    "steps": [
+      "Resolve the bound engine project and verify project readiness.",
+      "Start quality Run v3-8-4-quality-20260914 with the bound codex-cli-runtime.",
+      "Observe that the Runtime invokes codex exec with --sandbox workspace-write and --approve-for-me.",
+      "Observe that the Runtime exits before producing result.json; the quality Feature has no changed files and remains blocked."
+    ],
+    "runId": "v3-8-4-quality-20260914",
+    "gateResult": "All five declared final Gates passed independently."
+  },
+  "conversation": {
+    "source": "current-thread",
+    "excerpts": [
+      {
+        "role": "user",
+        "text": "h:engine quality V3.8.4"
+      },
+      {
+        "role": "tool",
+        "text": "The bound quality Run was created successfully. Runtime execution recorded: ENOENT opening the managed debug result file. The preserved Runtime stderr states that --sandbox cannot be used with --approve-for-me."
+      },
+      {
+        "role": "tool",
+        "text": "The five final Gates all passed: context-budget, rust-format, rust-tests-all-targets, rust-clippy-deny-warnings, and wasm-release-boundary."
+      }
+    ]
+  },
+  "missingEvidence": [
+    "A corrected Project Runtime configuration or Runtime artifact was not available in this run.",
+    "A successful quality Runtime retry after correcting the flag combination is not available."
+  ],
+  "correlation": {
+    "category": "runtime-configuration",
+    "failureCode": "CODEX_CLI_INVALID_FLAG_COMBINATION",
+    "scope": "cardworld-engine/codex-cli-runtime/quality"
+  },
+  "sanitization": {
+    "confirmed": true,
+    "removed": [
+      "absolute filesystem paths",
+      "process identifiers",
+      "agent and dispatch UUIDs",
+      "content-addressed evidence identifiers"
+    ]
+  },
+  "incidentFingerprint": "182e61907b899664e9b07dacbf275581e8e3dbdab9e97c64f7c6c30ff2d609b7",
+  "intakeDigest": "b5475e479753fd76998491e6503d7369fb4f81e8a1726eaf71dd2142f13ac761"
+}

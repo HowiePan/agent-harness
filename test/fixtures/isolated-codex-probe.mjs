@@ -11,5 +11,5 @@ await writeFile(resolve(changedFile), `${packet.feature.id}\n`, 'utf8');
 const result = { status: 'completed', summary: `isolated:${packet.feature.id}`, changedFiles: packet.feature.metadata?.omitChangedFiles ? [] : [changedFile] };
 const outputIndex = process.argv.indexOf('--output-last-message');
 await writeFile(process.argv[outputIndex + 1], `${JSON.stringify(result)}\n`, 'utf8');
-process.stdout.write(`${JSON.stringify({ type: 'thread.started', thread_id: `isolated-${packet.feature.id}`, temp: process.env.TEMP })}\n`);
+process.stdout.write(`${JSON.stringify({ type: 'thread.started', thread_id: `isolated-${packet.feature.id}`, temp: process.env.TEMP, args: process.argv.slice(2) })}\n`);
 process.stdout.write(`${JSON.stringify({ type: 'turn.completed' })}\n`);

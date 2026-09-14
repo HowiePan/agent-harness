@@ -23,6 +23,7 @@ test('CardWorld consumer compiles one canonical requirement and project-owned de
   assert.equal(descriptor.gateRecipes.find(gate => gate.id === 'rust-tests-all-targets').command.at(-1), '--all-targets');
   assert.deepEqual(descriptor.extensions.map(extension => extension.id), ['cardworld-engine-profile', 'codex-runtime']);
   assert.equal(descriptor.policy.defaultRuntimePlugin, 'codex-cli-runtime');
+  assert.deepEqual(descriptor.policy.runtimeConfigs['codex-cli-runtime'], { sandbox: 'workspace-write', ephemeral: true, approveForMe: true });
   const graph = compileCardWorldFeatureGraph({
     requirement: { id: 'v-next', acceptance: ['requirement is singular and approved'] },
     features: [
@@ -42,6 +43,7 @@ test('Collection consumer keeps ten game lanes, Feature dependencies, and one sh
   assert.deepEqual(descriptor.extensions.map(extension => extension.id), ['tabletop-collection-profile', 'codex-runtime']);
   assert.equal(descriptor.policy.maxConcurrency, 10);
   assert.equal(descriptor.policy.defaultRuntimePlugin, 'codex-isolated-runtime');
+  assert.deepEqual(descriptor.policy.runtimeConfigs['codex-isolated-runtime'], { sandbox: 'workspace-write', ephemeral: true, approveForMe: true });
   const games = Array.from({ length: 10 }, (_, index) => ({
     id: `game-${index + 1}`,
     features: [{ id: 'implementation', acceptance: ['game accepted'], allowedPaths: [`packages/games/game-${index + 1}`], metadata: index === 0 ? { capabilityUses: ['shared-ui'] } : {} }],
