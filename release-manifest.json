@@ -272,8 +272,8 @@
     },
     {
       "path": "package.json",
-      "sha256": "9d6d13d00e17b82a6abbc05655e362b3da6876ec3e34bf119a1350d103be0367",
-      "size": 2371
+      "sha256": "1e29128b27894febacfe9175bed950b576469db2cdbaa8338e09e37ad59acb36",
+      "size": 2420
     },
     {
       "path": "plugins/codex-cli-runtime.plugin.json",
@@ -861,7 +861,7 @@
       "size": 3735
     }
   ],
-  "packageDigest": "e37aed5cf69205fb6df07e7ab87deb9f0463265009196642a3677fbdc7b78562",
+  "packageDigest": "bc6b310666b2586137aea2cfc8e3ea16b25502ccdf0b790980db4bab2a949444",
   "metadataFiles": [
     "release-manifest.json",
     "sbom.spdx.json"

@@ -61,6 +61,7 @@
     "check:residue": "node scripts/check-residue.mjs",
     "build:release-metadata": "node scripts/build-release-metadata.mjs",
     "build:release-candidate": "node scripts/build-release-candidate.mjs",
-    "pack:dry-run": "node scripts/pack-dry-run.mjs"
+    "pack:dry-run": "node scripts/pack-dry-run.mjs",
+    "prepack": "node scripts/check-project.mjs"
   }
 }
