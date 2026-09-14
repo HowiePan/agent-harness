@@ -1,6 +1,6 @@
 {
   "name": "agent-harness-codex",
-  "version": "1.0.0+codex.20260914125417",
+  "version": "1.0.0",
   "description": "Explicit-project pseudo-command routing and persistent installation bindings for a standalone Agent Harness",
   "author": {
     "name": "Agent Harness contributors"
