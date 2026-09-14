@@ -14,6 +14,10 @@ Operator Contract 是工具无关的 Harness 协调规范。Codex Skill、未来
 
 默认 Harness 只装载中立 Core、Feature Profile 和参考插件。已批准的 Extension Pack 位于独立控制根，通过持久安装回执自动解析。Project Descriptor 必须精确声明 Harness 制品及所需 Extension Pack 的 ID、版本与制品摘要；任一身份缺失或不符必须在 Run 创建前失败。Runtime、模型、工具和 OS 沙箱都通过 Extension/Plugin 解析，Operator 不得写死供应商。
 
+状态变更伪命令在 Run 创建前必须生成并验证版本化 `LifecycleCommandPlan`。Plan 绑定 Command Intent、Project/Extension/Harness 身份、Authority expected revision、确定性 Run/Feature/Profile/Gate 配置、受保护操作列表和 stop condition。Extension 只能返回 Plan Intent，不能直接写 Kernel Authority；适配器和模型不得自行补齐或修改 Plan。一次显式命令授权 Plan 声明范围内的普通状态变更，发布、commit/push、权限扩张、live hard recovery、不可逆迁移、删除和 cutover 仍需单独批准。
+
+已初始化控制根的制品轮换不走 Bootstrap。发布激活先把 Registry 与 Project Descriptor 写入候选 generation，全部摘要和兼容性验证通过后再一次切换 `active-release` pointer；读路径只消费活动 generation，旧 generation 保留为审计输入。
+
 ## 路径与回执
 
 Harness 数据、临时目录、调试输出、构建制品和缓存只能写入 Standalone Control Root 内。npm 包目录不能隐式成为数据根。进程插件必须声明容量预算、保留策略和沙箱模式，并在成功、失败、超限与取消路径返回清理回执。未声明输出视为协议错误。

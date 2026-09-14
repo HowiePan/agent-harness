@@ -3,3 +3,4 @@ export { createIssueIntake, recordIssueIntake, verifyIssueIntake } from './issue
 export { listIssueRecords, readIssueTriage, recordIssueTriage, validateIssueTriageInput } from './issue-triage.mjs';
 export { sealReleaseCandidateReceipt, verifyReleaseCandidateReceipt } from './release-receipt.mjs';
 export { assertArtifactRebaseDecision } from './upgrade-authorization.mjs';
+export { applyReleaseActivationPlan, createReleaseActivationPlan, releaseActivationPlanDigest, verifyReleaseActivationPlan } from './release-activation.mjs';

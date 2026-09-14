@@ -16,6 +16,7 @@ import { assertHarnessWritePath, harnessControlRoot, harnessProjectRoot } from '
 import { verifyDefectBundle } from './maintenance/defect-bundle.mjs';
 import { recordIssueIntake } from './maintenance/issue-intake.mjs';
 import { listIssueRecords, readIssueTriage, recordIssueTriage } from './maintenance/issue-triage.mjs';
+import { applyReleaseActivationPlan, createReleaseActivationPlan } from './maintenance/release-activation.mjs';
 
 const argv = process.argv.slice(2);
 const take = name => {
@@ -67,6 +68,11 @@ agent-harness run artifact-rebase --project <id> --run <id> --artifact-digest <d
 agent-harness run recover --project <id> --run <id> --mode <ordinary-resume|hard-recovery> [--capsule-verification <evidence-ref>] [--decision-id <id>] [--expected-revision <n>] [--command-id <id>] [--dispositions <json>] [--verified-evidence <json>]
 agent-harness run recovery-rollback --project <id> --run <id> --snapshot-ref <evidence-ref>
 agent-harness run close --project <id> --run <id>
+agent-harness run supersede --project <id> --run <id> --replacement-run <id> --plan-digest <digest> [--reason <text>]
+agent-harness lifecycle plan --input <json|-> [--control-root <path>] [--data-root <path>]
+agent-harness lifecycle execute --plan <json|-> --command-id <id> [--max <n>] [--max-rounds <n>]
+agent-harness release activation-plan [--control-root <path>] [--data-root <path>]
+agent-harness release activation-apply --plan <json|-> --command-id <id> --decision <json>
 agent-harness evidence add --project <id> --run <id> --file <path> [--feature <id>] [--dispatch <id>]
 agent-harness recovery assess --extension <module> --importer <id> --legacy-root <path>
 agent-harness recovery plan --importer <id> --legacy-root <path> --project <id> --run <id>
@@ -122,6 +128,17 @@ if (command === 'issue' && subject === 'triage') {
 const dataRoot = resolve(take('--data-root') ?? defaultDataRoot(controlRoot));
 const releaseIdentity = await loadReleaseIdentity({ artifactDigest: take('--harness-digest') });
 const extensionRegistry = new ExtensionRegistry({ dataRoot, controlRoot });
+
+if (command === 'release' && subject === 'activation-plan') {
+  const plan = await createReleaseActivationPlan({ controlRoot, dataRoot, releaseIdentity, projectIds: takeAll('--project') });
+  console.log(JSON.stringify({ ok: true, plan }, null, 2));
+  process.exit(0);
+}
+if (command === 'release' && subject === 'activation-apply') {
+  const output = await applyReleaseActivationPlan(await jsonInput('--plan'), { controlRoot, dataRoot, releaseIdentity, commandId: take('--command-id'), authorityDecision: take('--decision') ? await jsonFile(take('--decision')) : null });
+  console.log(JSON.stringify({ ok: true, ...output }, null, 2));
+  process.exit(0);
+}
 
 if (command === 'bootstrap' && subject === 'plan') {
   const plan = await createBootstrapPlan(await jsonInput('--input'), { controlRoot, dataRoot, releaseIdentity });
@@ -203,6 +220,13 @@ for (const pack of explicitExtensions) {
   extensionsById.set(pack.id, pack);
 }
 const extensions = [...extensionsById.values()];
+if (command === 'lifecycle' && subject === 'plan') {
+  const input = await jsonInput('--input');
+  const harness = await createHarness({ controlRoot, dataRoot, extensions, releaseIdentity, initializeStorage: false });
+  const plan = await harness.createLifecyclePlan(input);
+  console.log(JSON.stringify({ ok: true, plan }, null, 2));
+  process.exit(0);
+}
 if (command === 'project' && subject === 'descriptor') {
   const capable = (explicitExtensions.length ? explicitExtensions : extensions).filter(pack => typeof pack.operations.createProjectDescriptor === 'function');
   if (capable.length !== 1) throw new Error('Exactly one descriptor-capable Extension Pack is required.');
@@ -245,6 +269,9 @@ if (command === 'features' && subject === 'compile') {
     const input = { projectId: take('--project'), runId: take('--run'), profileId: take('--profile'), features: await jsonFile(take('--features')), profileConfig: take('--config') ? await jsonFile(take('--config')) : {}, artifactDigest: take('--artifact-digest') ?? null, ...(take('--execution-workspace') ? { executionWorkspaceRoot: resolve(take('--execution-workspace')) } : {}) };
     const output = await harness.startRun(input, { commandId: take('--command-id') ?? newId('command') });
     console.log(JSON.stringify({ ok: true, state: output.state, reused: output.reused }, null, 2));
+  } else if (command === 'lifecycle' && subject === 'execute') {
+    const output = await harness.executeLifecyclePlan(await jsonInput('--plan'), { commandId: take('--command-id'), maxConcurrency: Number(take('--max') ?? 1), maxRounds: Number(take('--max-rounds') ?? 100), forceFreshGates: !has('--no-fresh-gates') });
+    console.log(JSON.stringify({ ok: output.status === 'closed', ...output }, null, 2));
   } else if (command === 'run' && subject === 'schedule') {
     const state = await harness.authorityStore.read(take('--project'), take('--run'));
     const output = await harness.dispatch(state.projectId, state.runId, { maxConcurrency: Number(take('--max') ?? 1), runtimePluginId: take('--runtime') ?? null }, { expectedRevision: state.revision, commandId: take('--command-id') ?? newId('command') });
@@ -309,6 +336,10 @@ if (command === 'features' && subject === 'compile') {
   } else if (command === 'run' && subject === 'close') {
     const state = await harness.authorityStore.read(take('--project'), take('--run'));
     const output = await harness.kernel.closeRun(state.projectId, state.runId, {}, { expectedRevision: state.revision, commandId: take('--command-id') ?? newId('command') });
+    console.log(JSON.stringify({ ok: true, ...output.result, revision: output.state.revision }, null, 2));
+  } else if (command === 'run' && subject === 'supersede') {
+    const state = await harness.authorityStore.read(take('--project'), take('--run'));
+    const output = await harness.kernel.supersedeRun(state.projectId, state.runId, { replacementRunId: take('--replacement-run'), planDigest: take('--plan-digest'), reason: take('--reason') }, { expectedRevision: state.revision, commandId: take('--command-id') ?? newId('command') });
     console.log(JSON.stringify({ ok: true, ...output.result, revision: output.state.revision }, null, 2));
   } else if (command === 'evidence' && subject === 'add') {
     const state = await harness.authorityStore.read(take('--project'), take('--run'));

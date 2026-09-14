@@ -13,6 +13,7 @@ import { inspectLifecycleReadiness } from './readiness.mjs';
 import { ProjectRegistry } from './registry/project-registry.mjs';
 import { assertProjectDescriptorInput } from './registry/project-contract.mjs';
 import { assertHarnessWritePath, harnessControlRoot } from './write-boundary.mjs';
+import { activeReleaseFile } from './registry/active-generation.mjs';
 
 const requestSchema = JSON.parse(readFileSync(new URL('../schemas/bootstrap-request.schema.json', import.meta.url), 'utf8'));
 
@@ -39,6 +40,7 @@ export const createBootstrapPlan = async (input, { controlRoot: controlRootInput
   const request = validateBootstrapRequest(input);
   const controlRoot = harnessControlRoot(controlRootInput);
   const dataRoot = assertHarnessWritePath(dataRootInput ?? resolve(controlRoot, '.agent-harness-data'), 'Harness dataRoot', controlRoot);
+  assert(!(await readJson(activeReleaseFile(dataRoot), null)), 'BOOTSTRAP_REQUIRES_RELEASE_ACTIVATION', 'An initialized active release must be upgraded through release activation, not Bootstrap.');
   assert(releaseIdentity?.verified && /^\d+\.\d+\.\d+$/.test(releaseIdentity.version ?? '') && /^[a-f0-9]{64}$/.test(releaseIdentity.artifactDigest ?? ''), 'BOOTSTRAP_RELEASE_IDENTITY_REQUIRED', 'Bootstrap requires a verified Harness release identity.');
   const extensionRegistry = new ExtensionRegistry({ controlRoot, dataRoot });
   const extensionState = await extensionRegistry.list();

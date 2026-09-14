@@ -5,6 +5,7 @@ import { AuthorityStore } from './kernel/authority-store.mjs';
 import { ProjectRegistry } from './registry/project-registry.mjs';
 import { resolveProjectWorkspace } from './workspace-identity.mjs';
 import { assertHarnessWritePath, harnessControlRoot, harnessProjectRoot } from './write-boundary.mjs';
+import { activeReleaseFile, resolveActiveRegistryRoot } from './registry/active-generation.mjs';
 
 const errorView = error => ({ code: error.code ?? 'UNEXPECTED_ERROR', message: error.message });
 
@@ -62,13 +63,15 @@ export const inspectLifecycleReadiness = async ({ controlRoot: controlRootInput,
   const projectReadiness = [];
   for (const project of selectedProjects) projectReadiness.push(await inspectProject({ project, extensionState, extensionVerification, releaseIdentity, profileId, extensionId, executionWorkspaceRoot }));
   if (projectId && selectedProjects.length === 0) projectReadiness.push({ projectId, projectReady: false, issues: [{ code: 'PROJECT_NOT_REGISTERED', message: `Project is not registered: ${projectId}` }], extensions: [] });
+  const registryRoot = await resolveActiveRegistryRoot(dataRoot, controlRoot);
   const paths = {
     dataRoot: existsSync(dataRoot),
-    extensionRegistry: existsSync(resolve(dataRoot, 'registry', 'extensions.json')),
-    projectRegistry: existsSync(resolve(dataRoot, 'registry', 'projects')),
+    extensionRegistry: existsSync(resolve(registryRoot, 'extensions.json')),
+    projectRegistry: existsSync(resolve(registryRoot, 'projects')),
     authority: existsSync(resolve(dataRoot, 'authority')),
   };
-  const storageReady = Object.values(paths).every(Boolean);
+  const activeRelease = existsSync(activeReleaseFile(dataRoot));
+  const storageReady = ['dataRoot', 'extensionRegistry', 'projectRegistry', 'authority'].every(key => paths[key]);
   const projectsReady = projectReadiness.length > 0 && projectReadiness.every(item => item.projectReady);
   return {
     protocolVersion: '1.0',
@@ -79,6 +82,7 @@ export const inspectLifecycleReadiness = async ({ controlRoot: controlRootInput,
     installationReady: true,
     writeCapability: 'not-probed',
     paths,
+    activeRelease,
     storageReady,
     extensionRegistryRevision: extensionState.revision,
     registeredExtensions: extensionState.extensions.map(item => ({ ...structuredClone(item), artifactVerified: extensionVerification.get(item.id)?.ok === true })),

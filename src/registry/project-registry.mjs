@@ -6,18 +6,22 @@ import { safeSegment } from '../paths.mjs';
 import { atomicWriteJson, readJson, withDirectoryLock } from '../kernel/atomic-io.mjs';
 import { assertHarnessWritePath } from '../write-boundary.mjs';
 import { assertProjectDescriptorInput, assertProjectDescriptorRecord } from './project-contract.mjs';
+import { resolveActiveRegistryRoot } from './active-generation.mjs';
+import { activeReleaseFile } from './active-generation.mjs';
 
 export class ProjectRegistry {
   constructor({ root, controlRoot, now = () => new Date().toISOString(), strictIdentity = true }) {
     this.root = assertHarnessWritePath(root, 'Project Registry root', controlRoot);
-    this.directory = resolve(this.root, 'registry', 'projects');
+    this.legacyDirectory = resolve(this.root, 'registry', 'projects');
     this.now = now;
     this.strictIdentity = strictIdentity;
   }
 
-  file(id) { return resolve(this.directory, `${safeSegment(id, 'projectId')}.json`); }
+  async directoryPath() { return resolve(await resolveActiveRegistryRoot(this.root, this.controlRoot), 'projects'); }
+  async file(id) { return resolve(await this.directoryPath(), `${safeSegment(id, 'projectId')}.json`); }
 
   async register(input, { expectedRevision = 0, commandId, authorityDecision = null } = {}) {
+    assert(!(await readJson(activeReleaseFile(this.root), null)), 'ACTIVE_RELEASE_IMMUTABLE', 'Active release generations are immutable; use release activation to update Project Descriptors.');
     assert(input.id && input.workspace?.root && isAbsolute(input.workspace.root), 'PROJECT_DESCRIPTOR_INVALID', 'Project Descriptor requires an ID and absolute workspace root.');
     const workspaceRoot = resolve(input.workspace.root);
     const dataRelative = relative(workspaceRoot, this.root);
@@ -37,8 +41,9 @@ export class ProjectRegistry {
     }
     assertProjectDescriptorInput(input, { strictIdentity: this.strictIdentity });
     assert(commandId, 'COMMAND_ID_REQUIRED', 'Project Registry writes require a command ID.');
-    await mkdir(this.directory, { recursive: true });
-    const file = this.file(input.id);
+    const directory = await this.directoryPath();
+    await mkdir(directory, { recursive: true });
+    const file = await this.file(input.id);
     return withDirectoryLock(`${file}.lock`, async () => {
       const current = await readJson(file, null);
       const payloadDigest = digestJson(input);
@@ -65,7 +70,7 @@ export class ProjectRegistry {
   }
 
   async get(id) {
-    const descriptor = await readJson(this.file(id));
+    const descriptor = await readJson(await this.file(id));
     assert(descriptor.descriptorDigest === digestJson(withoutKeys(descriptor, ['descriptorDigest'])), 'PROJECT_DESCRIPTOR_DIGEST_MISMATCH', 'Project Descriptor digest mismatch.');
     assertProjectDescriptorRecord(descriptor, { strictIdentity: this.strictIdentity });
     return descriptor;
@@ -73,7 +78,7 @@ export class ProjectRegistry {
 
   async list() {
     let names;
-    try { names = await readdir(this.directory); }
+    try { names = await readdir(await this.directoryPath()); }
     catch (error) { if (error.code === 'ENOENT') return []; throw error; }
     return Promise.all(names.filter(name => name.endsWith('.json')).sort().map(name => this.get(name.slice(0, -5))));
   }

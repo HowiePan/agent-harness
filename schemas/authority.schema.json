@@ -11,7 +11,7 @@
     "revision": { "type": "integer", "minimum": 1 },
     "epoch": { "type": "integer", "minimum": 1 },
     "generation": { "type": "integer", "minimum": 1 },
-    "status": { "enum": ["ready", "running", "ready-to-close", "closure-blocked", "all-remaining-blocked", "closed"] },
+    "status": { "enum": ["ready", "running", "ready-to-close", "closure-blocked", "all-remaining-blocked", "closed", "superseded"] },
     "sourceDigest": { "$ref": "#/$defs/digest" },
     "policyDigest": { "$ref": "#/$defs/digest" },
     "pluginSetDigest": { "$ref": "#/$defs/digest" },

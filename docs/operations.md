@@ -38,6 +38,24 @@ node bin/agent-harness.mjs doctor --project cardworld-engine --profile engine-de
 
 Bootstrap 只建立新 Harness Authority 基础设施，不导入旧状态、不创建业务 Run，也不构成 cutover、发布或旧 Harness 删除授权。
 
+已存在 `active-release` 的控制根必须使用发布激活完成制品轮换：
+
+```text
+node bin/agent-harness.mjs release activation-plan
+node bin/agent-harness.mjs release activation-apply --plan <plan.json> --command-id <id> --decision <approved-decision.json>
+```
+
+激活一次性绑定候选 Harness、Extension 集合和受影响 Project；事务先提交候选 generation，最后切换活动指针。业务生命周期命令不得隐式触发 Bootstrap 或逐项请求制品升级授权。
+
+生命周期命令先生成确定性的 `LifecycleCommandPlan`，再由受管执行器持续运行到 Plan stop condition：
+
+```text
+node bin/agent-harness.mjs lifecycle plan --input <intent.json>
+node bin/agent-harness.mjs lifecycle execute --plan <plan.json> --command-id <command-id>
+```
+
+Plan 中的 Run ID、Feature graph、Profile config、Runtime、Gate plan 和 protected-operation 列表由已安装 Extension 的 compiler 产生，模型和 Hook 不得自行构造。
+
 `project-descriptor-input.schema.json` 约束可提交的配置输入；`project-descriptor.schema.json` 约束 Registry 增加 revision、commands、时间和摘要后的持久记录。更新时不得把整个 Registry 记录重新作为输入，Programmatic API 使用 `projectDescriptorInput(record)` 提取配置面。CLI 生成器会把当前 Harness 和已安装 Extension 的精确摘要封入输入。静态示例是 Consumer 生成器输入，不伪造会随发布制品变化的摘要。
 
 Codex 工具集成位于 `integrations/codex/agent-harness-codex/`，是带 `.codex-plugin/plugin.json` 的独立可安装插件。其他 Agent 工具按同一 Operator Contract 提供自己的集成插件，不进入 Harness Core。实际安装插件属于部署步骤，不会把 Skill 复制到业务仓。

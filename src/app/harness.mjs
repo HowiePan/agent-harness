@@ -15,10 +15,14 @@ import { ProfileRegistry } from '../profiles/registry.mjs';
 import { ProjectRegistry } from '../registry/project-registry.mjs';
 import { RecoveryCoordinator } from '../recovery/coordinator.mjs';
 import { installExtensionPacks } from '../extensions/contract.mjs';
+import { resolveCommandIntent } from '../extensions/command-contract.mjs';
+import { createLifecycleCommandPlan, validateLifecycleCommandPlan } from '../lifecycle-command-plan.mjs';
 import { loadReleaseIdentity } from '../release-identity.mjs';
 import { captureWorkspace, diffWorkspaceSnapshots } from '../workspace-snapshot.mjs';
 import { resolveProjectWorkspace } from '../workspace-identity.mjs';
 import { assertHarnessWritePath, harnessControlRoot } from '../write-boundary.mjs';
+import { RunCoordinator } from '../coordinator/run-coordinator.mjs';
+import { ProjectGateRunner } from '../gates/project-gate-runner.mjs';
 
 export const defaultDataRoot = (controlRoot = harnessControlRoot()) => resolve(controlRoot, '.agent-harness-data');
 
@@ -56,6 +60,7 @@ export const createHarness = async ({ controlRoot: controlRootInput, dataRoot: d
   });
   const kernel = new HarnessKernel({ authorityStore, evidenceStore, profiles: profileRegistry, now, id });
   const recovery = new RecoveryCoordinator({ kernel, importers: extensionSet.recoveryImporters, controlRoot });
+  const extensionPacks = new Map(extensions.map(extension => [extension.id, extension]));
 
   const api = {
     dataRoot: authorityStore.root,
@@ -69,6 +74,84 @@ export const createHarness = async ({ controlRoot: controlRootInput, dataRoot: d
     recovery,
     extensionSet: { installed: extensionSet.installed, digest: extensionSet.digest },
     releaseIdentity: Object.freeze(structuredClone(currentReleaseIdentity)),
+
+    async createLifecyclePlan(input) {
+      const project = await projectRegistry.get(input.projectId);
+      const workspace = await resolveProjectWorkspace(project, input.executionWorkspaceRoot);
+      const extensionId = input.extensionId ?? project.extensions?.find(required => extensionPacks.has(required.id))?.id;
+      const extension = extensionPacks.get(extensionId);
+      assert(extension, 'PROJECT_COMMAND_EXTENSION_MISSING', `No loaded Extension Pack can plan commands for Project ${project.id}.`);
+      assert(extension.commandManifest, 'COMMAND_MANIFEST_MISSING', `Extension ${extension.id} does not provide a Command Manifest.`);
+      assert(extension.commandManifest.profileId === input.profileId || !input.profileId, 'COMMAND_PROFILE_MISMATCH', 'Command Profile does not match the selected Extension Manifest.');
+      const intent = resolveCommandIntent(extension.commandManifest, input);
+      assert(project.profiles.includes(intent.profileId), 'PROJECT_PROFILE_DENIED', `Project ${project.id} does not allow Profile ${intent.profileId}.`);
+      const required = project.extensions?.find(item => item.id === extension.id);
+      assert(required, 'PROJECT_EXTENSION_NOT_BOUND', `Project ${project.id} does not bind Extension ${extension.id}.`);
+      assert(required.version === extension.version && required.digest === extension.digest, 'PROJECT_EXTENSION_IDENTITY_MISMATCH', `Project ${project.id} does not bind the active Extension ${extension.id}.`);
+      if (strictProjectIdentity) assert(project.harness?.version === currentReleaseIdentity.version && project.harness?.artifactDigest === currentReleaseIdentity.artifactDigest, 'PROJECT_HARNESS_IDENTITY_MISMATCH', `Project ${project.id} does not bind the active Harness release.`);
+      const snapshot = await captureWorkspace(workspace.root, { excluded: project.workspace.excluded ?? [] });
+      const derivedRunId = createLifecycleCommandPlan({
+        intent,
+        project,
+        extension,
+        releaseIdentity: { ...currentReleaseIdentity, verified: true },
+        sourceDigest: snapshot.digest,
+        executionWorkspaceRoot: workspace.root,
+        authorityRevision: 0,
+        compiler: extension.operations?.createLifecyclePlan,
+      }).run.runId;
+      const existing = await authorityStore.read(project.id, derivedRunId, { required: false });
+      const plan = createLifecycleCommandPlan({
+        intent,
+        project,
+        extension,
+        releaseIdentity: { ...currentReleaseIdentity, verified: true },
+        sourceDigest: snapshot.digest,
+        executionWorkspaceRoot: workspace.root,
+        authorityRevision: existing?.revision ?? 0,
+        existingRunId: existing?.runId ?? null,
+        compiler: extension.operations?.createLifecyclePlan,
+      });
+      if (existing) assert(existing.metadata?.lifecyclePlanDigest === plan.planDigest, 'LIFECYCLE_PLAN_RUN_CONFLICT', 'A Run with the deterministic lifecycle ID exists for a different Command Plan.', { runId: existing.runId, existingPlanDigest: existing.metadata?.lifecyclePlanDigest, planDigest: plan.planDigest });
+      return plan;
+    },
+
+    async executeLifecyclePlan(planInput, { commandId, maxConcurrency = 1, maxRounds = 100, forceFreshGates = true } = {}) {
+      assert(commandId, 'COMMAND_ID_REQUIRED', 'Lifecycle execution requires a command ID.');
+      const plan = validateLifecycleCommandPlan(planInput);
+      const project = await projectRegistry.get(plan.project.id);
+      assert(project.revision === plan.project.revision && project.descriptorDigest === plan.project.descriptorDigest, 'LIFECYCLE_PLAN_PROJECT_STALE', 'Lifecycle Command Plan is stale for the current Project Descriptor.');
+      assert(currentReleaseIdentity.artifactDigest === plan.harness.artifactDigest && currentReleaseIdentity.version === plan.harness.version, 'LIFECYCLE_PLAN_RELEASE_STALE', 'Lifecycle Command Plan is stale for the active Harness release.');
+      const existing = await authorityStore.read(plan.project.id, plan.run.runId, { required: false });
+      let state = existing;
+      if (!state) {
+        const started = await api.startRun({
+          projectId: plan.project.id,
+          runId: plan.run.runId,
+          profileId: plan.run.profileId,
+          features: plan.run.features,
+          profileConfig: plan.run.profileConfig,
+          artifactDigest: plan.run.artifactDigest,
+          sourceDigest: plan.run.sourceDigest,
+          executionWorkspaceRoot: plan.run.executionWorkspaceRoot,
+          metadata: { ...(plan.run.metadata ?? {}), lifecyclePlanDigest: plan.planDigest, commandIntent: plan.intent, stopCondition: plan.stopCondition },
+        }, { commandId: `${commandId}.start` });
+        state = started.state;
+      } else {
+        assert(state.metadata?.lifecyclePlanDigest === plan.planDigest, 'LIFECYCLE_PLAN_RUN_CONFLICT', 'Existing Run is bound to another Command Plan.');
+      }
+      if (state.status === 'closed') return { status: 'closed', planDigest: plan.planDigest, state };
+      assert(state.status !== 'superseded', 'LIFECYCLE_PLAN_RUN_SUPERSEDED', 'Lifecycle execution cannot resume a superseded Run.');
+      const coordinator = new RunCoordinator({ harness: api });
+      const execution = await coordinator.run({ projectId: plan.project.id, runId: plan.run.runId, runtimePluginId: plan.run.runtimePluginId, maxConcurrency, maxRounds });
+      state = await authorityStore.read(plan.project.id, plan.run.runId);
+      if (!state.features.every(feature => feature.state === 'completed')) return { status: execution.status, planDigest: plan.planDigest, execution, state };
+      const gateRunner = new ProjectGateRunner({ harness: api });
+      const gates = await gateRunner.run({ projectId: plan.project.id, runId: plan.run.runId, scope: 'final', forceFresh: forceFreshGates, gateIds: plan.stopCondition.requiredFinalGates ?? [] });
+      state = await authorityStore.read(plan.project.id, plan.run.runId);
+      const closed = await api.kernel.closeRun(plan.project.id, plan.run.runId, {}, { expectedRevision: state.revision, commandId: `${commandId}.close` });
+      return { status: 'closed', planDigest: plan.planDigest, execution, gates, state: closed.state };
+    },
 
     registerPlugin(manifest, instance) { return pluginHost.register(manifest, instance); },
 

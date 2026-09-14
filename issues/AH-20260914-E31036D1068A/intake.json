@@ -1,0 +1,89 @@
+{
+  "protocolVersion": "1.0",
+  "projectAlias": "engine",
+  "project": {
+    "projectId": "cardworld-engine",
+    "profileId": "engine-delivery",
+    "extensionId": "cardworld-engine-profile"
+  },
+  "observedAt": "2026-09-14T12:04:00.000Z",
+  "summary": "h:engine quality requires repeated user approvals and model-constructed Run configuration, defeating the command automation boundary after Harness artifact updates.",
+  "severity": "P1",
+  "environment": {
+    "command": "h:engine quality V3.8.4",
+    "workspaceRoot": "F:\\CardWorld",
+    "controlRoot": "F:\\agent-harness",
+    "entrypoint": "F:\\agent-harness\\bin\\agent-harness.mjs",
+    "dataRoot": "F:\\agent-harness\\.agent-harness-data",
+    "workspaceMatch": "bound-root",
+    "affectedRuns": [
+      "v3-8-4-quality-20260914",
+      "v3-8-4-quality-20260914-r2"
+    ]
+  },
+  "expected": {
+    "behavior": "One explicit h:engine quality V3.8.4 command authorizes all state changes declared by the quality/full manifest scope: deterministic Run construction, scheduling, review-and-repair, and required Gates.",
+    "additionalApprovalBoundary": "Request another approval only for actions outside the declared scope or separately protected operations such as publication, commit or push, hard recovery, deletion, or privilege expansion.",
+    "artifactUpgradeBehavior": "Approve or trust a verified Harness artifact rotation at install or release time, update bound project identities atomically, and avoid interrupting the next business lifecycle command."
+  },
+  "actual": {
+    "bootstrap": "A Harness artifact digest rotation made project lifecycle readiness false and interrupted the quality command with PROJECT_HARNESS_IDENTITY_MISMATCH and EXTENSION_ARTIFACT_DIGEST_MISMATCH until a separate bootstrap approval was supplied.",
+    "orchestration": "After bootstrap, the assistant had to reconstruct the quality Feature and Run manually because the adapter only parsed intent. The new Run inherited engine-delivery defaults requireCanonicalDecision=true and requireUserCodeReview=true, so scheduling produced no Dispatch.",
+    "userExperience": "The user was repeatedly asked to authorize bootstrap, choose a prerequisite strategy, and explicitly approve a canonical decision even though the original command was intended as an automated quality workflow.",
+    "residue": "Run v3-8-4-quality-20260914-r2 remains ready with zero Dispatches; business source code and Gates were not changed or executed."
+  },
+  "reproduction": {
+    "steps": [
+      "Install or publish a new verified Harness artifact whose digest differs from the digest pinned by the cardworld-engine Project Descriptor.",
+      "From F:\\CardWorld, submit h:engine quality V3.8.4.",
+      "Observe lifecycleReady=false and a required bootstrap plan/apply authorization during the business command.",
+      "After authorizing bootstrap, construct the quality Run through the current adapter path.",
+      "Observe that the adapter does not own deterministic action-to-Feature/profile configuration, so the Run uses engine-delivery defaults and schedule returns an empty Dispatch list because canonical-requirement-approved is absent.",
+      "Observe subsequent conversational requests for prerequisite or safeguard-bypass authorization instead of an automated quality workflow."
+    ]
+  },
+  "conversation": {
+    "source": "current-thread",
+    "excerpts": [
+      {
+        "role": "user",
+        "text": "h:engine quality V3.8.4"
+      },
+      {
+        "role": "assistant",
+        "text": "The command resolved to quality/full with review-and-repair, but lifecycle readiness failed because the Project Descriptor and Extension artifact digests did not match the active Harness release; a separate bootstrap approval was requested."
+      },
+      {
+        "role": "assistant",
+        "text": "After bootstrap succeeded, a manually constructed quality Run inherited canonical requirement and user code review safeguards. Scheduling returned no Dispatch, which led to further authorization questions."
+      },
+      {
+        "role": "user",
+        "text": "先停止，我觉得现在整个流程不对，不应该有这么多需要我授权的东西，我启动了就已经代表我是知晓中间要做什么，反复中断需要我每一步授权，那我做这个Harness的自动化流程有什么意义"
+      },
+      {
+        "role": "user",
+        "text": "每次修改Harness的代码，重新发布，制品都会升级，这需要我每次都确认？"
+      },
+      {
+        "role": "assistant",
+        "text": "Under the current contract, each newly installed artifact digest can require bootstrap reauthorization on the next bound project command. The intended fix is to move approval to installation or release and make command-to-Run composition deterministic."
+      }
+    ]
+  },
+  "missingEvidence": [
+    "No packaged Operator Contract trace was available to show the intended deterministic quality action-to-Run configuration.",
+    "No stable failure code exists for the combined repeated-authorization and command-composition failure; component readiness codes are recorded in actual.bootstrap.",
+    "No successful Dispatch exists for run v3-8-4-quality-20260914-r2 because scheduling returned an empty list."
+  ],
+  "sanitization": {
+    "confirmed": true,
+    "removed": [
+      "Windows account and device identifiers",
+      "Unrelated conversation content",
+      "Full command outputs and registry payloads",
+      "Secrets, credentials, and tokens"
+    ]
+  },
+  "intakeDigest": "e31036d1068a41632e3b65af698a224425afd76ecd7bcdcce6dae017bd24d9e4"
+}

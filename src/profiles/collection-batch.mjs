@@ -21,6 +21,7 @@ export const collectionBatchProfile = Object.freeze({
       requireIndependentReview: config.requireIndependentReview !== false,
       requireUserGameAcceptance: config.requireUserGameAcceptance !== false,
       requireBatchCloseDecision: config.requireBatchCloseDecision !== false,
+      requireBatchLaunchDecision: config.requireBatchLaunchDecision !== false,
     };
   },
 
@@ -48,7 +49,7 @@ export const collectionBatchProfile = Object.freeze({
     if (feature.metadata.batchId !== activeBatch) return { ok: false, reason: 'batch-barrier' };
     const active = state.profile.config.batches.find(batch => batch.id === activeBatch);
     if (!orderedBarrier({ currentId: activeBatch, entries: state.profile.config.batches }).ok) return { ok: false, reason: 'previous-batch-not-closed' };
-    if (!approvalSatisfied(state, `batch:${activeBatch}:launched`)) return { ok: false, reason: 'batch-launch-decision-required' };
+    if (state.profile.config.requireBatchLaunchDecision && !approvalSatisfied(state, `batch:${activeBatch}:launched`)) return { ok: false, reason: 'batch-launch-decision-required' };
     if (state.profile.config.requireRuleReady && feature.metadata.ruleStatus !== 'rule-ready') return { ok: false, reason: 'rule-readiness-required' };
     return { ok: true };
   },

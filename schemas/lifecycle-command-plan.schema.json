@@ -1,0 +1,70 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-harness.local/schemas/lifecycle-command-plan.schema.json",
+  "title": "Agent Harness Lifecycle Command Plan",
+  "type": "object",
+  "required": ["protocolVersion", "kind", "intent", "project", "extension", "harness", "authority", "run", "stopCondition", "protectedOperations", "planDigest"],
+  "properties": {
+    "protocolVersion": { "const": "1.0" },
+    "kind": { "const": "lifecycle-command-plan" },
+    "intent": { "type": "object" },
+    "project": {
+      "type": "object",
+      "required": ["id", "revision", "descriptorDigest"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "revision": { "type": "integer", "minimum": 1 },
+        "descriptorDigest": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+      },
+      "additionalProperties": false
+    },
+    "extension": {
+      "type": "object",
+      "required": ["id", "version", "digest", "manifestId"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "version": { "type": "string", "pattern": "^\\d+\\.\\d+\\.\\d+$" },
+        "digest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "manifestId": { "type": "string", "minLength": 1 }
+      },
+      "additionalProperties": false
+    },
+    "harness": {
+      "type": "object",
+      "required": ["version", "artifactDigest"],
+      "properties": {
+        "version": { "type": "string", "pattern": "^\\d+\\.\\d+\\.\\d+$" },
+        "artifactDigest": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+      },
+      "additionalProperties": false
+    },
+    "authority": {
+      "type": "object",
+      "required": ["expectedRevision"],
+      "properties": {
+        "expectedRevision": { "type": "integer", "minimum": 0 },
+        "existingRunId": { "type": ["string", "null"] }
+      },
+      "additionalProperties": false
+    },
+    "run": {
+      "type": "object",
+      "required": ["runId", "profileId", "profileConfig", "features", "sourceDigest", "artifactDigest", "executionWorkspaceRoot"],
+      "properties": {
+        "runId": { "type": "string", "minLength": 1 },
+        "profileId": { "type": "string", "minLength": 1 },
+        "profileConfig": { "type": "object" },
+        "features": { "type": "array", "minItems": 1 },
+        "sourceDigest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "artifactDigest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "executionWorkspaceRoot": { "type": "string", "minLength": 1 },
+        "runtimePluginId": { "type": ["string", "null"] }
+      },
+      "additionalProperties": true
+    },
+    "stopCondition": { "type": "object", "required": ["type"], "properties": { "type": { "type": "string", "minLength": 1 } }, "additionalProperties": true },
+    "protectedOperations": { "type": "array", "items": { "type": "string" }, "uniqueItems": true },
+    "planDigest": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+  },
+  "additionalProperties": false
+}

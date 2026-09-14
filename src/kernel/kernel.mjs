@@ -383,6 +383,19 @@ export class HarnessKernel {
     });
   }
 
+  async supersedeRun(projectId, runId, input, command) {
+    return this.authorityStore.transact(projectId, runId, { expectedRevision: command.expectedRevision, commandId: command.commandId, payload: input }, state => {
+      assert(state.status !== 'closed' && state.status !== 'superseded', 'RUN_NOT_SUPERSEDABLE', `Run cannot be superseded from status ${state.status}.`);
+      assert(input.replacementRunId && input.planDigest, 'RUN_SUPERSEDE_CONTEXT_REQUIRED', 'Run supersede requires a replacement Run ID and Command Plan digest.');
+      for (const lease of state.leases.filter(activeLease)) { lease.status = 'superseded'; lease.supersededAt = this.now(); lease.supersededReason = 'run-superseded'; }
+      for (const dispatch of state.dispatches.filter(activeDispatch)) { dispatch.status = 'superseded'; dispatch.supersededAt = this.now(); dispatch.supersededReason = 'run-superseded'; }
+      state.status = 'superseded';
+      state.metadata = { ...(state.metadata ?? {}), supersededByRunId: input.replacementRunId, supersedePlanDigest: input.planDigest, supersededReason: input.reason ?? 'replacement-lifecycle-plan' };
+      event(state, 'run.superseded', { replacementRunId: input.replacementRunId, planDigest: input.planDigest }, this.now);
+      return { runId, replacementRunId: input.replacementRunId, planDigest: input.planDigest, status: state.status };
+    });
+  }
+
   async rebaseArtifact(projectId, runId, input, command) {
     return this.authorityStore.transact(projectId, runId, { expectedRevision: command.expectedRevision, commandId: command.commandId, payload: input }, state => {
       assert(input.artifactDigest && input.artifactDigest !== state.artifactDigest, 'ARTIFACT_REBASE_INVALID', 'Artifact rebase requires a new artifact digest.');

@@ -131,6 +131,64 @@ export const compileCardWorldFeatureGraph = ({ requirement, features = [] } = {}
   return validateWorkGraph([canonical, ...compiled]);
 };
 
+const CARDWORLD_QUALITY_ALLOWED_PATHS = Object.freeze([
+  'card_world_engine/src',
+  'card_world_engine/tests',
+  'card_world_engine/Cargo.toml',
+  'card_world_engine/Cargo.lock',
+  'card_world_web/src',
+  'card_world_web/tests',
+  'docs/versions/v3/v3.8.4.md',
+  'docs/versions/INDEX.md',
+  'docs/integration_guide.md',
+]);
+
+/**
+ * Compile the action-level plan consumed by the neutral lifecycle executor.
+ * This function only returns data; it never touches Authority or the workspace.
+ */
+export const createCardWorldLifecyclePlan = ({ intent, project, runId }) => {
+  const gateIds = (project.gateRecipes ?? []).filter(recipe => recipe.scope === 'final' && recipe.required !== false).map(recipe => recipe.id);
+  const quality = intent.action === 'quality';
+  const readOnly = intent.sourcePolicy === 'read-only';
+  const profileConfig = {
+    ...(project.policy?.profileConfigs?.['engine-delivery'] ?? {}),
+    requiredFinalGates: gateIds,
+    ...(quality ? { requireCanonicalDecision: false, requireUserCodeReview: false } : {}),
+  };
+  const feature = {
+    id: `${intent.action}/${intent.target}`,
+    kind: intent.action,
+    ownerRole: quality ? 'reviewer' : 'operator',
+    logicalRoot: `${intent.action}:${intent.target}`,
+    laneId: quality ? 'quality' : intent.action,
+    acceptance: quality
+      ? [
+          `Review the complete ${intent.target} implementation against the authoritative version documents and current workspace state.`,
+          'Run the relevant focused checks and record evidence for every quality conclusion.',
+          ...(readOnly ? [] : ['Repair actionable P0-P3 findings within the allowed paths, then re-run affected checks.']),
+          'Return a complete structured result with accurate changedFiles and any unresolved blockers.',
+        ]
+      : [`Execute the declared ${intent.action} scope for ${intent.target} and return structured evidence.`],
+    steps: quality ? [
+      { id: 'review', title: `Review ${intent.target} implementation, tests, contracts, and release-boundary evidence.` },
+      ...(readOnly ? [] : [{ id: 'repair', title: 'Repair actionable quality findings and verify each repair with focused checks.' }]),
+      { id: 'report', title: 'Report the final disposition and remaining blockers.' },
+    ] : [{ id: 'execute', title: `Execute ${intent.action} for ${intent.target}.` }],
+    dependsOn: [],
+    allowedPaths: readOnly ? [] : [...CARDWORLD_QUALITY_ALLOWED_PATHS],
+    forbiddenPaths: ['.git', '.agent-harness-data', '.cardworld-local', 'F:/agent-harness'],
+    conflictKeys: [`${intent.target}-${intent.action}`],
+    gatePlan: gateIds,
+    metadata: { scope: intent.scope, sourcePolicy: intent.sourcePolicy ?? 'review-and-repair', stage: quality ? 'quality' : intent.action, target: intent.target, version: intent.target },
+  };
+  return {
+    run: { runId, profileId: 'engine-delivery', profileConfig, features: [feature], runtimePluginId: project.policy?.defaultRuntimePlugin },
+    stopCondition: { type: 'quality-run-complete', requiresFeatureCompletion: true, requiresAllFindingsResolved: true, requiredFinalGates: gateIds },
+    protectedOperations: ['publication', 'commit', 'push', 'hard-recovery', 'deletion', 'privilege-expansion', 'cutover'],
+  };
+};
+
 export const extensionPack = defineExtensionPack({
   id: 'cardworld-engine-profile',
   version: '1.0.0',
@@ -139,6 +197,7 @@ export const extensionPack = defineExtensionPack({
   operations: {
     createProjectDescriptor: createCardWorldProjectDescriptor,
     compileFeatureGraph: compileCardWorldFeatureGraph,
+    createLifecyclePlan: createCardWorldLifecyclePlan,
   },
 });
 

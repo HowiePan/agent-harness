@@ -165,6 +165,49 @@ export const compileTabletopCollectionFeatureGraph = ({ batchId, games, sharedCa
   return validateWorkGraph([...shared, ...gameFeatures]);
 };
 
+export const createTabletopCollectionLifecyclePlan = ({ intent, project, runId }) => {
+  const gateIds = (project.gateRecipes ?? []).filter(recipe => recipe.scope === 'final' && recipe.required !== false).map(recipe => recipe.id);
+  const quality = intent.action === 'quality';
+  const selector = intent.selector ?? null;
+  const profileConfig = {
+    ...(project.policy?.profileConfigs?.['collection-batch'] ?? {}),
+    activeBatch: intent.target,
+    maxLogicalGames: Number(project.policy?.maxLogicalGames ?? 10),
+    requiredFinalGates: gateIds,
+    ...(quality ? {
+      requireRuleReady: false,
+      requireHarnessAcceptance: false,
+      requireIndependentReview: false,
+      requireUserGameAcceptance: false,
+      requireBatchCloseDecision: false,
+      requireBatchLaunchDecision: false,
+    } : {}),
+  };
+  const feature = {
+    id: `${intent.action}/${intent.target}${selector ? `/${selector}` : ''}`,
+    kind: intent.action,
+    ownerRole: quality ? 'reviewer' : 'operator',
+    logicalRoot: `${intent.action}:${intent.target}${selector ? `:${selector}` : ''}`,
+    laneId: selector ?? intent.target,
+    acceptance: [
+      `Execute the declared ${intent.action} scope for batch ${intent.target}${selector ? ` and game ${selector}` : ''}.`,
+      'Return structured evidence and an accurate changedFiles list.',
+    ],
+    steps: [{ id: 'execute', title: `Execute ${intent.action} for ${intent.target}${selector ? `/${selector}` : ''}.` }],
+    dependsOn: [],
+    allowedPaths: intent.sourcePolicy === 'read-only' ? [] : [ 'src', 'tests', 'docs', 'packages' ],
+    forbiddenPaths: ['.git', '.agent-harness-data', 'runs'],
+    conflictKeys: [`${intent.action}-${intent.target}-${selector ?? 'all'}`],
+    gatePlan: gateIds,
+    metadata: { scope: intent.scope, sourcePolicy: intent.sourcePolicy ?? 'review-and-repair', stage: intent.action, batchId: intent.target, gameId: selector, ruleStatus: 'rule-ready' },
+  };
+  return {
+    run: { runId, profileId: 'collection-batch', profileConfig, features: [feature], runtimePluginId: project.policy?.defaultRuntimePlugin },
+    stopCondition: { type: 'collection-run-complete', requiresFeatureCompletion: true, requiresAllFindingsResolved: true, requiredFinalGates: gateIds },
+    protectedOperations: ['publication', 'commit', 'push', 'hard-recovery', 'deletion', 'privilege-expansion', 'cutover'],
+  };
+};
+
 export const extensionPack = defineExtensionPack({
   id: 'tabletop-collection-profile',
   version: '1.0.0',
@@ -173,6 +216,7 @@ export const extensionPack = defineExtensionPack({
   operations: {
     createProjectDescriptor: createTabletopCollectionProjectDescriptor,
     compileFeatureGraph: compileTabletopCollectionFeatureGraph,
+    createLifecyclePlan: createTabletopCollectionLifecyclePlan,
   },
 });
 

@@ -8,6 +8,8 @@ import { assertNoLinkPath } from '../paths.mjs';
 import { assertHarnessWritePath } from '../write-boundary.mjs';
 import { extensionIdentity, inspectExtensionArtifact, loadExtensionPack, resolveExtensionModule } from './contract.mjs';
 import { assertJsonSchema } from '../json-schema.mjs';
+import { resolveActiveRegistryRoot } from '../registry/active-generation.mjs';
+import { activeReleaseFile } from '../registry/active-generation.mjs';
 
 const seal = value => ({ ...value, registryDigest: digestJson(value) });
 const emptyRegistry = () => seal({ protocolVersion: '1.0', revision: 0, extensions: [], commands: {} });
@@ -17,13 +19,15 @@ export class ExtensionRegistry {
   constructor({ dataRoot, controlRoot, now = () => new Date().toISOString() }) {
     this.controlRoot = resolve(controlRoot);
     this.dataRoot = assertHarnessWritePath(dataRoot, 'Extension Registry data root', this.controlRoot);
-    this.file = resolve(this.dataRoot, 'registry', 'extensions.json');
-    this.lock = `${this.file}.lock`;
+    this.legacyFile = resolve(this.dataRoot, 'registry', 'extensions.json');
+    this.lock = `${this.legacyFile}.lock`;
     this.now = now;
   }
 
+  async filePath() { return resolve(await resolveActiveRegistryRoot(this.dataRoot, this.controlRoot), 'extensions.json'); }
+
   async list() {
-    const registry = await readJson(this.file, emptyRegistry());
+    const registry = await readJson(await this.filePath(), emptyRegistry());
     assertJsonSchema(registry, registrySchema, { code: 'EXTENSION_REGISTRY_SCHEMA_INVALID', label: 'Extension Registry' });
     assert(registry.registryDigest === digestJson(withoutKeys(registry, ['registryDigest'])), 'EXTENSION_REGISTRY_DIGEST_MISMATCH', 'Extension Registry digest mismatch.');
     return registry;
@@ -81,6 +85,7 @@ export class ExtensionRegistry {
       assert(existingCommand.requestDigest === requestDigest, 'COMMAND_ID_REUSED', 'Extension Registry command ID was reused with a different request.');
       return structuredClone(existingCommand.result);
     }
+    assert(!(await readJson(activeReleaseFile(this.dataRoot), null)), 'ACTIVE_RELEASE_IMMUTABLE', 'Active release generations are immutable; use release activation to update trusted Extensions.');
     assert(Number.isInteger(expectedRevision), 'EXPECTED_REVISION_REQUIRED', 'Extension Registry writes require a numeric expected revision.');
     assert(preliminary.revision === expectedRevision, 'EXTENSION_REGISTRY_REVISION_CONFLICT', 'Extension Registry revision changed.', { expected: expectedRevision, actual: preliminary.revision });
     assert(authorityDecision?.actor && authorityDecision?.decision === 'approved', 'EXTENSION_AUTHORITY_DECISION_REQUIRED', 'Installing or updating trusted Extension code requires an approved Authority Decision.');
@@ -109,14 +114,16 @@ export class ExtensionRegistry {
       commands[commandId] = { commandId, operation: 'register', requestDigest, payloadDigest, result: receipt, revision: current.revision + 1, committedAt: this.now(), authorityDecision: structuredClone(authorityDecision) };
       const next = seal({ protocolVersion: '1.0', revision: current.revision + 1, extensions, commands });
       assertJsonSchema(next, registrySchema, { code: 'EXTENSION_REGISTRY_SCHEMA_INVALID', label: 'Extension Registry' });
-      await mkdir(resolve(this.file, '..'), { recursive: true });
-      await atomicWriteJson(this.file, next, { root: this.dataRoot });
+      const file = await this.filePath();
+      await mkdir(resolve(file, '..'), { recursive: true });
+      await atomicWriteJson(file, next, { root: this.dataRoot });
       return receipt;
     }, { root: this.dataRoot });
   }
 
   async remove(id, { expectedRevision, commandId, authorityDecision } = {}) {
     assert(commandId, 'COMMAND_ID_REQUIRED', 'Extension Registry writes require a command ID.');
+    assert(!(await readJson(activeReleaseFile(this.dataRoot), null)), 'ACTIVE_RELEASE_IMMUTABLE', 'Active release generations are immutable; use release activation to remove trusted Extensions.');
     const payloadDigest = digestJson({ operation: 'remove', id });
     await mkdir(this.dataRoot, { recursive: true });
     assertHarnessWritePath(this.dataRoot, 'Extension Registry data root', this.controlRoot);
@@ -136,7 +143,7 @@ export class ExtensionRegistry {
       commands[commandId] = { commandId, operation: 'remove', requestDigest: payloadDigest, payloadDigest, result: existing, revision: current.revision + 1, committedAt: this.now(), authorityDecision: structuredClone(authorityDecision) };
       const next = seal({ protocolVersion: '1.0', revision: current.revision + 1, extensions: current.extensions.filter(item => item.id !== id), commands });
       assertJsonSchema(next, registrySchema, { code: 'EXTENSION_REGISTRY_SCHEMA_INVALID', label: 'Extension Registry' });
-      await atomicWriteJson(this.file, next, { root: this.dataRoot });
+      await atomicWriteJson(await this.filePath(), next, { root: this.dataRoot });
       return existing;
     }, { root: this.dataRoot });
   }

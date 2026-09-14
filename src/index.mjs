@@ -18,5 +18,7 @@ export { captureWorkspace, diffWorkspaceSnapshots } from './workspace-snapshot.m
 export { resolveGitWorkspaceIdentity, resolveProjectWorkspace } from './workspace-identity.mjs';
 export { RunCoordinator, businessResultFromRuntime } from './coordinator/run-coordinator.mjs';
 export { ProjectGateRunner } from './gates/project-gate-runner.mjs';
+export { createLifecycleCommandPlan, deriveLifecycleRunId, lifecyclePlanDigest, validateLifecycleCommandPlan } from './lifecycle-command-plan.mjs';
+export { applyReleaseActivationPlan, createReleaseActivationPlan, releaseActivationPlanDigest, verifyReleaseActivationPlan } from './maintenance/release-activation.mjs';
 export * from './workflows/index.mjs';
 export { assertHarnessWritePath, harnessControlRoot, harnessProjectRoot, harnessTemporaryRoot, installationMarkerName, temporaryEnvironment } from './write-boundary.mjs';

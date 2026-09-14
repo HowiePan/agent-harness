@@ -122,13 +122,13 @@
     },
     {
       "path": "docs/operations.md",
-      "sha256": "ac46deee90219cb6558b47099b5fac44be1054a151c1c720e1653a150ea6e6a2",
-      "size": 16874
+      "sha256": "e8c05cb2fba365c16e67f1455ff52af65143daf10bbb9fdfae8801f73d0f44d6",
+      "size": 17859
     },
     {
       "path": "docs/operator-contract.md",
-      "sha256": "363044260e3f184fd34cc00f1a327980cb4ebf2797b9d195b342b1a7bb97fc32",
-      "size": 2370
+      "sha256": "70ae6ddf3015389124868237f2014b5b250ead946b18826d9857bd7f26ef2c67",
+      "size": 3249
     },
     {
       "path": "docs/path-policy.md",
@@ -137,8 +137,8 @@
     },
     {
       "path": "docs/plugin-sdk.md",
-      "sha256": "1acd317b613030f0c31b9bc609c7713b78d43f089024bac7fd5a3b8e474a0814",
-      "size": 6115
+      "sha256": "37c324fbf6bbb90a96388ac2362da9eb8fa87f4ae4a2abf74b4c01fed67f535b",
+      "size": 6253
     },
     {
       "path": "docs/post-extraction-register.md",
@@ -222,8 +222,8 @@
     },
     {
       "path": "integrations/codex/agent-harness-codex/references/pseudo-command-contract.md",
-      "sha256": "bc3585b0ba161a52a3b2b658c213431eafff81c1d3149b87d029cacf50b30236",
-      "size": 4311
+      "sha256": "4df4ea0ceee0674c45658b7701d6b6e9c734a5c75caa5956c11b57f4dc6bdff4",
+      "size": 4998
     },
     {
       "path": "integrations/codex/agent-harness-codex/scripts/configure-bindings.mjs",
@@ -237,8 +237,8 @@
     },
     {
       "path": "integrations/codex/agent-harness-codex/skills/agent-harness-command/SKILL.md",
-      "sha256": "38fa1f61462f67cc31098636d796928b62b264b8821c61e1f1b7eca439d23060",
-      "size": 5301
+      "sha256": "120ad143ecf2e7d1c36e2e3f40ab061911598d57e538fa565c472dba4d4469ce",
+      "size": 5510
     },
     {
       "path": "integrations/codex/agent-harness-codex/skills/agent-harness-extension-author/references/extension-contract.md",
@@ -317,8 +317,8 @@
     },
     {
       "path": "schemas/authority.schema.json",
-      "sha256": "eec99ba1d7c25ad4abef55bf8911cdb27c9473dc09aa4020dad3862613a3843d",
-      "size": 6670
+      "sha256": "96541daf31708297334e1e1bd6841e98e304cdd9e4eeca4cb4626e38a0e51c2e",
+      "size": 6684
     },
     {
       "path": "schemas/bootstrap-request.schema.json",
@@ -386,6 +386,11 @@
       "size": 2583
     },
     {
+      "path": "schemas/lifecycle-command-plan.schema.json",
+      "sha256": "63cca201d1bbf3bcfe68c25e807dc2c99edad123ffd64f54f21aee544a260b87",
+      "size": 3021
+    },
+    {
       "path": "schemas/migration-manifest.schema.json",
       "sha256": "026bdb9198c2965f49a9549e89cd35ef2193ca1d6edda869eb030e0dc7c65bf8",
       "size": 2091
@@ -437,13 +442,13 @@
     },
     {
       "path": "src/app/harness.mjs",
-      "sha256": "b71b7cb3a612e7bb7e95805a4b6fbc37684720cf373faa6c3194c7447bdc79e5",
-      "size": 17123
+      "sha256": "f45a1495d38ee8cddbd6bb103981c4fde1452910228d3de0c3a882398f8f02f2",
+      "size": 23747
     },
     {
       "path": "src/bootstrap.mjs",
-      "sha256": "62851b97fd619d81462f175fdc570995661aa3f3d8267a2805320d427a1525c3",
-      "size": 11176
+      "sha256": "60b9bb6140d9a4366c2964e8f8ffe7a3ab2c67c409c468cdfa08bbb52d620d09",
+      "size": 11444
     },
     {
       "path": "src/canonical.mjs",
@@ -452,13 +457,13 @@
     },
     {
       "path": "src/cli.mjs",
-      "sha256": "a03d263b45d32b1375eeb29adb116a8189d524d21e4b925d904029f2bc11f839",
-      "size": 25562
+      "sha256": "a3af03fdba88cf4ad100714f817edfb3494059333cfe6f5ecf80c501b7e05ffb",
+      "size": 28117
     },
     {
       "path": "src/consumers/cardworld-engine.mjs",
-      "sha256": "92a682e708de7142cab63316f7ff1c75c796f2aaa4ca8559cdf106600b0a7a12",
-      "size": 7289
+      "sha256": "81066e0d058667ebb3278d09a742bcd0b8464ed29a241f4e942cb08f53d79ed0",
+      "size": 10589
     },
     {
       "path": "src/consumers/index.mjs",
@@ -467,8 +472,8 @@
     },
     {
       "path": "src/consumers/tabletop-collection.mjs",
-      "sha256": "3b0ab9046f4ed1b995c87d00c524adb070a3660694f6cb25dbc98c6ab48926fb",
-      "size": 8632
+      "sha256": "0b8a526d4bad21effc7203d14f884dd2d3303dca85de09b48747c010f47a4e31",
+      "size": 11066
     },
     {
       "path": "src/coordinator/run-coordinator.mjs",
@@ -507,8 +512,8 @@
     },
     {
       "path": "src/extensions/registry.mjs",
-      "sha256": "5cc39da3ba5bc838566c6a364fa62676fe4a545d124fa10152650d4842fd0239",
-      "size": 10330
+      "sha256": "0fe0819a4beda50031b23c72c1963367b85eb4f7cff652464a864dd6c01fc155",
+      "size": 11067
     },
     {
       "path": "src/gates/project-gate-runner.mjs",
@@ -517,8 +522,8 @@
     },
     {
       "path": "src/index.mjs",
-      "sha256": "3a771e27a8366acfd9e4ab638d371bf0f108b65de4926ead0e7a957d04ca10e1",
-      "size": 1552
+      "sha256": "43b0abbe7373032b026302da8833794633fb08b8db585c9c68952a7a8db81bf1",
+      "size": 1870
     },
     {
       "path": "src/installation.mjs",
@@ -557,8 +562,8 @@
     },
     {
       "path": "src/kernel/kernel.mjs",
-      "sha256": "44ada67fdc612d376b190ec09112c648326a3030c9f287e9e52e4d7e2147fb0b",
-      "size": 33750
+      "sha256": "0c48fe3c676932c5d062560b84179df0d85c9ef1d67c27a5d193fc36c36675ee",
+      "size": 35136
     },
     {
       "path": "src/kernel/quality.mjs",
@@ -576,14 +581,19 @@
       "size": 5398
     },
     {
+      "path": "src/lifecycle-command-plan.mjs",
+      "sha256": "ac4e605c2b7ac087546964c113d18a392b22a4a573c4a73fa41c231d467d6ff1",
+      "size": 5098
+    },
+    {
       "path": "src/maintenance/defect-bundle.mjs",
       "sha256": "e9ed7987292bafaa57dafb2797b392f0bdf05c5e95bdc7ad88941401042926cb",
       "size": 2683
     },
     {
       "path": "src/maintenance/index.mjs",
-      "sha256": "1b64c05d6b75486f5af870a2de6394b8a678326e3274e561777d2118b1348e44",
-      "size": 465
+      "sha256": "cf3f379745fba7c805af128ba693b8e336c664b618b46ca53df1f7a7bc72649d",
+      "size": 623
     },
     {
       "path": "src/maintenance/issue-intake.mjs",
@@ -594,6 +604,11 @@
       "path": "src/maintenance/issue-triage.mjs",
       "sha256": "4be905f8ebf2fa208b7660458aa1a3ef686d6867d6909daa8cdd9beda4ff0766",
       "size": 6010
+    },
+    {
+      "path": "src/maintenance/release-activation.mjs",
+      "sha256": "a25842dc2765b882193b428a42661684130655f08cb3ea4c039bc80018d3d686",
+      "size": 12718
     },
     {
       "path": "src/maintenance/release-receipt.mjs",
@@ -722,8 +737,8 @@
     },
     {
       "path": "src/profiles/collection-batch.mjs",
-      "sha256": "bca01da20922bec98774af336825676ad37782d5c0aa3778061171fa34c11d76",
-      "size": 5412
+      "sha256": "bfdae15615fe0973a7754b1dfb93706842b4a13f2e0a5772c890ad51ca985b51",
+      "size": 5542
     },
     {
       "path": "src/profiles/engine-delivery.mjs",
@@ -747,8 +762,8 @@
     },
     {
       "path": "src/readiness.mjs",
-      "sha256": "0f5404b155e0e76756a990cb49dfd97649c55c00d969b8abbe995eb357f70b7d",
-      "size": 6442
+      "sha256": "90d04b83fa9e9f0f9842ee410802d7674c5f3189e077177054d96607a936dc43",
+      "size": 6741
     },
     {
       "path": "src/recovery/authorization.mjs",
@@ -796,14 +811,19 @@
       "size": 2999
     },
     {
+      "path": "src/registry/active-generation.mjs",
+      "sha256": "d5369cf6f98f150cdc83398440fb2a7f8bff46d596d899d4989ba244fc6a24e3",
+      "size": 1649
+    },
+    {
       "path": "src/registry/project-contract.mjs",
       "sha256": "2709f77923d6cec3005c7a23c400b7a9eb72902d22a887700c2ea36a52b08229",
       "size": 2958
     },
     {
       "path": "src/registry/project-registry.mjs",
-      "sha256": "6836c92d8d692a2f94a862437473ed720a5fea36ec63ac04ec0775e3b489c0d8",
-      "size": 6648
+      "sha256": "efb1350f8ab4f899a001072c2be31bf5ab7987e6f27ead78dba6b836d96f3f9b",
+      "size": 7183
     },
     {
       "path": "src/release-identity.mjs",
@@ -836,7 +856,7 @@
       "size": 3735
     }
   ],
-  "packageDigest": "7fd3b1b5bd354855f7bfa92bca49859948e6e1bb2b35e049b585277e63496a9a",
+  "packageDigest": "7c128ee2d1fc69e9c96a3f8cbb8e460bc54dbab6aff0eea986bb02920d1be29a",
   "metadataFiles": [
     "release-manifest.json",
     "sbom.spdx.json"
