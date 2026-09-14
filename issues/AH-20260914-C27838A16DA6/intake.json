@@ -1,0 +1,75 @@
+{
+  "protocolVersion": "1.0",
+  "projectAlias": "engine",
+  "project": {
+    "projectId": "cardworld-engine",
+    "profileId": "engine-delivery",
+    "extensionId": "cardworld-engine-profile"
+  },
+  "observedAt": "2026-09-14T13:30:45.0339072Z",
+  "summary": "V3.8.4 quality Runtime failed three times because codex-cli did not produce the managed result.json output.",
+  "severity": "P1",
+  "environment": {
+    "harness": "Agent Harness 1.0.0",
+    "runtime": "codex-cli-runtime",
+    "workspace": "F:\\CardWorld",
+    "runId": "v3.8.4-quality-2f3bfaef8102a996"
+  },
+  "expected": {
+    "outcome": "The managed Runtime should write a structured result.json so the quality Feature can be reviewed and Gates can run."
+  },
+  "actual": {
+    "status": "failed-budget",
+    "failureCode": "ENOENT",
+    "message": "The managed runtime debug result.json file was missing on all three attempts.",
+    "changedFiles": [],
+    "gatesExecuted": false
+  },
+  "reproduction": {
+    "steps": [
+      "Resolve the bound engine project and run h:engine quality V3.8.4.",
+      "Execute the generated quality Run v3.8.4-quality-2f3bfaef8102a996 with codex-cli-runtime.",
+      "Observe three runtime submissions failing while opening the managed debug result.json path.",
+      "The Feature ends in failed-budget before quality review or final Gates."
+    ]
+  },
+  "conversation": {
+    "source": "current-thread",
+    "excerpts": [
+      {
+        "role": "user",
+        "text": "h:engine quality V3.8.4"
+      },
+      {
+        "role": "tool",
+        "text": "Lifecycle execution recorded Runtime failures on three attempts: ENOENT opening F:\\\\agent-harness\\\\.agent-harness-data\\\\runtime\\\\codex-cli\\\\<agent-id>\\\\debug\\\\result.json."
+      },
+      {
+        "role": "assistant",
+        "text": "The V3.8.4 quality Run ended failed-budget; code review and five final Gates did not execute; the workspace had no changes."
+      },
+      {
+        "role": "user",
+        "text": "h:report engine"
+      }
+    ]
+  },
+  "missingEvidence": [
+    "Raw codex-cli stderr and event stream were not available in the recorded Runtime submission.",
+    "No structured quality review result was produced.",
+    "No Gate evidence exists because execution stopped before the Gate phase."
+  ],
+  "correlation": {
+    "category": "runtime",
+    "failureCode": "ENOENT",
+    "scope": "quality/V3.8.4"
+  },
+  "sanitization": {
+    "confirmed": true,
+    "removed": [
+      "No credentials, tokens, personal identifiers, or unrelated conversation content were included."
+    ]
+  },
+  "incidentFingerprint": "5eb62797dc772627530cd0bd46cd48275d9294521b2136143b08cf43114f1fd3",
+  "intakeDigest": "c27838a16da690d53f32f5473c99505ad13e22064f7cf081a7effb8958dc5b01"
+}

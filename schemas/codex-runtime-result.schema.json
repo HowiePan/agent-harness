@@ -1,0 +1,60 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-harness.local/schemas/codex-runtime-result.schema.json",
+  "title": "Codex CLI Runtime Business Result",
+  "type": "object",
+  "required": ["status", "summary", "checkpoints", "made", "notMade", "changedFiles", "observations", "findings", "failureClass", "blocker"],
+  "properties": {
+    "status": { "type": "string", "enum": ["completed", "blocked", "failed"] },
+    "summary": { "type": "string", "minLength": 1 },
+    "checkpoints": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "status", "summary", "evidence"],
+        "properties": {
+          "id": { "type": "string", "minLength": 1 },
+          "status": { "type": "string", "minLength": 1 },
+          "summary": { "type": "string", "minLength": 1 },
+          "evidence": { "type": "array", "items": { "type": "string" } }
+        },
+        "additionalProperties": false
+      }
+    },
+    "made": { "type": "array", "items": { "type": "string" } },
+    "notMade": { "type": "array", "items": { "type": "string" } },
+    "changedFiles": { "type": "array", "uniqueItems": true, "items": { "type": "string" } },
+    "observations": { "type": "array", "items": { "type": "string" } },
+    "findings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "severity", "summary", "evidence"],
+        "properties": {
+          "id": { "type": "string", "minLength": 1 },
+          "severity": { "type": "string", "enum": ["P0", "P1", "P2", "P3"] },
+          "summary": { "type": "string", "minLength": 1 },
+          "evidence": { "type": "array", "uniqueItems": true, "items": { "type": "string", "minLength": 1 } }
+        },
+        "additionalProperties": false
+      }
+    },
+    "failureClass": { "type": ["string", "null"] },
+    "blocker": {
+      "anyOf": [
+        {
+          "type": "object",
+          "required": ["kind", "summary", "resumeWhen"],
+          "properties": {
+            "kind": { "type": "string", "minLength": 1 },
+            "summary": { "type": "string", "minLength": 1 },
+            "resumeWhen": { "type": ["string", "null"] }
+          },
+          "additionalProperties": false
+        },
+        { "type": "null" }
+      ]
+    }
+  },
+  "additionalProperties": false
+}

@@ -15,10 +15,11 @@ const parseLastJsonObject = text => {
 export const businessResultFromRuntime = payload => {
   const candidate = payload?.result && typeof payload.result === 'object' ? payload.result : parseLastJsonObject(payload?.stdout);
   if (candidate && ['completed', 'blocked', 'failed'].includes(candidate.status) && candidate.summary) return candidate;
-  const startupFailure = payload?.startupError ?? payload?.processError ?? null;
-  const summary = startupFailure?.message ?? payload?.resultError?.message ?? `Runtime ended without a valid business result${payload?.exitCode === undefined ? '' : ` (exit ${payload.exitCode})`}.`;
-  const failureClass = startupFailure ? 'runtime-startup' : 'runtime';
-  return { status: 'failed', summary, failureClass, blocker: { kind: failureClass, summary }, changedFiles: [] };
+  const runtimeFailure = payload?.providerError ?? payload?.startupError ?? payload?.processError ?? null;
+  const summary = runtimeFailure?.message ?? payload?.resultError?.message ?? `Runtime ended without a valid business result${payload?.exitCode === undefined ? '' : ` (exit ${payload.exitCode})`}.`;
+  const failureClass = runtimeFailure?.failureClass ?? (payload?.startupError || payload?.processError ? 'runtime-startup' : 'runtime');
+  const blocker = { kind: failureClass, summary, ...(runtimeFailure?.code ? { code: runtimeFailure.code } : {}) };
+  return { status: 'failed', summary, failureClass, blocker, changedFiles: [] };
 };
 
 export class RunCoordinator {

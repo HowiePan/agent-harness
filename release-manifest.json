@@ -326,6 +326,11 @@
       "size": 1679
     },
     {
+      "path": "schemas/codex-runtime-result.schema.json",
+      "sha256": "8ae1ab37891a72866c73ef8e3b9627aa76dd7b16e4542f6da009ae35f922f8fb",
+      "size": 2344
+    },
+    {
       "path": "schemas/command.schema.json",
       "sha256": "efc93405f5db3d00b4f3bd0851e24b75225c226c4bc2db901d54010adc468015",
       "size": 683
@@ -477,8 +482,8 @@
     },
     {
       "path": "src/coordinator/run-coordinator.mjs",
-      "sha256": "abad19126d92d2cfb606a78ba9311ba45decb0d2f0d5caa7bcd05904f866383a",
-      "size": 6541
+      "sha256": "1ee0df5e2465d2a1e57eea97ac347f211696e46d94138423da00055d66c95709",
+      "size": 6715
     },
     {
       "path": "src/errors.mjs",
@@ -697,8 +702,8 @@
     },
     {
       "path": "src/plugins/runtime/codex-cli-runtime.mjs",
-      "sha256": "12263757225773803cf23b8b0a157f6fee21e5a1fce67d4fe77fdb92bd86dc34",
-      "size": 13666
+      "sha256": "687a6625e9ba0020a72566ed08dd477145220f4ff92645db46a3259e4e419d08",
+      "size": 17290
     },
     {
       "path": "src/plugins/runtime/codex-runtime.mjs",
@@ -856,7 +861,7 @@
       "size": 3735
     }
   ],
-  "packageDigest": "7c128ee2d1fc69e9c96a3f8cbb8e460bc54dbab6aff0eea986bb02920d1be29a",
+  "packageDigest": "e37aed5cf69205fb6df07e7ab87deb9f0463265009196642a3677fbdc7b78562",
   "metadataFiles": [
     "release-manifest.json",
     "sbom.spdx.json"

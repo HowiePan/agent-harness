@@ -4,6 +4,7 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { newId, sha256 } from '../../canonical.mjs';
 import { assert } from '../../errors.mjs';
+import { assertSchemaDefinition } from '../../json-schema.mjs';
 import { envelope } from '../contracts.mjs';
 import { assertHarnessWritePath, temporaryEnvironment } from '../../write-boundary.mjs';
 import { createManagedOutputSession } from '../execution/managed-output.mjs';
@@ -33,8 +34,41 @@ export const CODEX_ISOLATED_RUNTIME_MANIFEST = Object.freeze({
 });
 
 const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
-const resultSchema = resolve(packageRoot, 'schemas', 'result.schema.json');
+const codexResultSchema = resolve(packageRoot, 'schemas', 'codex-runtime-result.schema.json');
 const sandboxValues = new Set(['read-only', 'workspace-write', 'danger-full-access']);
+
+/** Validate the stricter subset required by Codex Structured Outputs. */
+export const validateCodexStructuredOutputSchema = schema => {
+  try { assertSchemaDefinition(schema, 'Codex Runtime output Schema'); }
+  catch (error) { assert(false, 'CODEX_OUTPUT_SCHEMA_INVALID', error.message, { cause: error.code }); }
+  const visited = new Set();
+  const resolveLocalReference = reference => {
+    const [file, fragment = ''] = String(reference).split('#');
+    if (file || !fragment.startsWith('/')) return null;
+    return fragment.split('/').slice(1).reduce((value, segment) => value?.[segment.replaceAll('~1', '/').replaceAll('~0', '~')], schema);
+  };
+  const visit = rule => {
+    if (!rule || typeof rule !== 'object' || visited.has(rule)) return;
+    visited.add(rule);
+    if (rule.$ref) {
+      const target = resolveLocalReference(rule.$ref);
+      if (target) visit(target);
+      return;
+    }
+    if (rule.type === 'object') {
+      const names = Object.keys(rule.properties ?? {}).sort();
+      const required = [...(rule.required ?? [])].sort();
+      assert(rule.additionalProperties === false, 'CODEX_OUTPUT_SCHEMA_INVALID', 'Every object in a Codex output Schema must set additionalProperties to false.');
+      assert(required.length === names.length && required.every((name, index) => name === names[index]), 'CODEX_OUTPUT_SCHEMA_INVALID', 'Every Codex output Schema property must be required.');
+      for (const value of Object.values(rule.properties ?? {})) visit(value);
+    }
+    for (const value of Object.values(rule.$defs ?? {})) visit(value);
+    if (rule.items) visit(rule.items);
+    for (const value of rule.anyOf ?? []) visit(value);
+  };
+  visit(schema);
+  return schema;
+};
 
 export const resolveCodexExecutionPolicy = (config = {}) => {
   const sandbox = config.sandbox ?? 'workspace-write';
@@ -64,13 +98,41 @@ const parseEvents = text => text.split(/\r?\n/).filter(Boolean).flatMap(line => 
   try { return [JSON.parse(line)]; } catch { return []; }
 });
 
+const parseEmbeddedJson = value => {
+  if (typeof value !== 'string') return value;
+  try { return JSON.parse(value); } catch { return value; }
+};
+
+const providerFailureFromEvents = events => {
+  for (const event of events) {
+    if (!['error', 'turn.failed', 'item.completed'].includes(event.type)) continue;
+    const item = event.error ?? event.item ?? event;
+    const embedded = parseEmbeddedJson(item?.message ?? event.message);
+    const error = embedded?.error ?? embedded;
+    if (!error || typeof error !== 'object') continue;
+    const providerCode = error.code ?? error.type ?? null;
+    const message = error.message ?? event.message ?? 'Codex provider request failed.';
+    if (!providerCode && !message) continue;
+    const code = providerCode === 'invalid_json_schema'
+      ? 'CODEX_OUTPUT_SCHEMA_INVALID'
+      : `CODEX_CLI_${String(providerCode ?? 'PROVIDER_ERROR').toUpperCase().replace(/[^A-Z0-9]+/g, '_')}`;
+    return {
+      code,
+      failureClass: code === 'CODEX_OUTPUT_SCHEMA_INVALID' ? 'runtime-contract' : 'runtime-provider',
+      message: String(message),
+      details: { providerCode, parameter: error.param ?? null, eventType: event.type },
+    };
+  }
+  return null;
+};
+
 export const createCodexCliRuntime = ({
   resolveProject,
   runtimeRoot,
   controlRoot,
   executable = 'codex',
   executableArgs = [],
-  schemaPath = resultSchema,
+  schemaPath = codexResultSchema,
   spawnProcess = nodeSpawn,
   promptBuilder = buildCodexPrompt,
   manifest = CODEX_CLI_RUNTIME_MANIFEST,
@@ -79,6 +141,12 @@ export const createCodexCliRuntime = ({
   assert(typeof resolveProject === 'function', 'CODEX_PROJECT_RESOLVER_REQUIRED', 'Codex CLI Runtime requires a Project resolver.');
   const controlledRuntimeRoot = assertHarnessWritePath(runtimeRoot, 'Codex Runtime root', controlRoot);
   const tasks = new Map();
+  const loadOutputSchema = async () => {
+    let schema;
+    try { schema = JSON.parse(await readFile(resolve(schemaPath), 'utf8')); }
+    catch (error) { assert(false, 'CODEX_OUTPUT_SCHEMA_INVALID', `Codex Runtime output Schema could not be loaded: ${error.message}`, { cause: error.code ?? 'SCHEMA_READ_FAILED' }); }
+    return validateCodexStructuredOutputSchema(schema);
+  };
   return {
     async spawn(packet) {
       const project = await resolveProject(packet.projectId);
@@ -86,6 +154,7 @@ export const createCodexCliRuntime = ({
       assert((project.policy?.runtimePlugins ?? [manifest.id]).includes(manifest.id), 'PROJECT_RUNTIME_DENIED', `Project ${project.id} does not allow ${manifest.id}.`);
       const executionPolicy = resolveCodexExecutionPolicy(config);
       const { sandbox, approvalMode } = executionPolicy;
+      const outputSchema = await loadOutputSchema();
       const agentId = newId('codex-agent');
       const outputSession = createManagedOutputSession({ root: resolve(controlledRuntimeRoot, 'runtime', 'codex-cli'), controlRoot, operationId: agentId, declarations: config.outputs ?? manifest.execution?.outputs ?? CODEX_OUTPUTS });
       const directory = outputSession.operationRoot;
@@ -118,7 +187,7 @@ export const createCodexCliRuntime = ({
           child.on('close', (exitCode, signal) => settle({ exitCode, signal, error: null }));
         });
         const sandboxReceipt = { mode: sandbox, approvalMode, requested: true, applied: false, providerId: manifest.id };
-        tasks.set(agentId, { child, completion, stdout: () => stdout, stderr: () => stderr, lastMessagePath, eventsPath, packetDigest: packet.packetDigest ?? null, workspaceContext, result: null, outputSession, stopOutputMonitor, sandboxReceipt });
+        tasks.set(agentId, { child, completion, stdout: () => stdout, stderr: () => stderr, lastMessagePath, eventsPath, packetDigest: packet.packetDigest ?? null, workspaceContext, result: null, outputSession, stopOutputMonitor, sandboxReceipt, outputSchemaDigest: sha256(JSON.stringify(outputSchema)) });
         child.stdin?.end(promptBuilder(structuredClone(packet)));
         return envelope(manifest, 'receipt', { operation: 'spawn', agentId, transportReceipt: { runtimePluginId: manifest.id, pid: child.pid ?? null, sandbox, approvalMode, managedOutputRoot: directory, managedOutputs: managedOutputs.outputs, workspaceRoot: executionRoot, sourceWorkspaceRoot: packet.workspace?.root ?? project.workspace.root, startedAt: new Date().toISOString() } });
       } catch (error) {
@@ -141,6 +210,7 @@ export const createCodexCliRuntime = ({
       const threadId = events.find(event => event.type === 'thread.started')?.thread_id ?? null;
       task.sandboxReceipt = { ...task.sandboxReceipt, applied: Boolean(threadId) };
       const stderrDigest = sha256(stderr);
+      const providerError = providerFailureFromEvents(events);
       const startupError = !threadId && (completion.error || completion.exitCode !== 0)
         ? {
             code: completion.error ? 'CODEX_CLI_SPAWN_FAILED' : 'CODEX_CLI_STARTUP_FAILED',
@@ -163,7 +233,7 @@ export const createCodexCliRuntime = ({
       }
       task.result = result;
       const status = completion.exitCode === 0 && result ? 'completed' : 'failed';
-      return envelope(manifest, 'event', { operation: 'wait', agentId, status, exitCode: completion.exitCode, signal: completion.signal, processError: completion.error, startupError, resultError, result, threadId, eventCount: events.length, events, eventsPath: task.eventsPath, eventsDigest: sha256(stdout), stderr, stderrDigest, outputSnapshot, sandboxReceipt: task.sandboxReceipt, completedAt: new Date().toISOString() });
+      return envelope(manifest, 'event', { operation: 'wait', agentId, status, exitCode: completion.exitCode, signal: completion.signal, processError: completion.error, startupError, providerError, resultError, result, threadId, eventCount: events.length, events, stdout, eventsPath: task.eventsPath, eventsDigest: sha256(stdout), stderr, stderrDigest, outputSchemaDigest: task.outputSchemaDigest, outputSnapshot, sandboxReceipt: task.sandboxReceipt, completedAt: new Date().toISOString() });
     },
 
     async send({ agentId }) {
