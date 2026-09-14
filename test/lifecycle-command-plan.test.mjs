@@ -25,9 +25,10 @@ test('lifecycle planning deterministically composes quality/full without convers
   await mkdir(resolve(workspaceRoot, '.git'), { recursive: true });
   await writeFile(resolve(workspaceRoot, 'README.md'), 'fixture\n', 'utf8');
   const extension = await loadExtensionPack('./src/consumers/cardworld-engine.mjs', { cwd: controlRoot, controlRoot });
-  const harness = await createHarness({ controlRoot, dataRoot, releaseIdentity, strictProjectIdentity: false, extensions: [extension] });
+  const runtimeExtension = await loadExtensionPack('./src/extensions/codex-runtime.mjs', { cwd: controlRoot, controlRoot });
+  const harness = await createHarness({ controlRoot, dataRoot, releaseIdentity, strictProjectIdentity: false, extensions: [extension, runtimeExtension] });
   const descriptor = createCardWorldProjectDescriptor({ workspaceRoot, harness: releaseIdentity });
-  descriptor.extensions = descriptor.extensions.map(item => ({ ...item, digest: extension.digest }));
+  descriptor.extensions = descriptor.extensions.map(item => ({ ...item, digest: item.id === extension.id ? extension.digest : runtimeExtension.digest }));
   await harness.projectRegistry.register(descriptor, { expectedRevision: 0, commandId: 'plan-project-register' });
   const first = await harness.createLifecyclePlan({ projectId: descriptor.id, action: 'quality', target: 'V3.8.4', arguments: ['full'], extensionId: extension.id, executionWorkspaceRoot: workspaceRoot });
   const second = await harness.createLifecyclePlan({ projectId: descriptor.id, action: 'quality', target: 'V3.8.4', arguments: ['full'], extensionId: extension.id, executionWorkspaceRoot: workspaceRoot });
@@ -37,8 +38,15 @@ test('lifecycle planning deterministically composes quality/full without convers
   assert.equal(first.run.profileConfig.requireUserCodeReview, false);
   assert.equal(first.run.features.length, 1);
   assert.equal(first.run.features[0].metadata.stage, 'quality');
+  assert.equal(first.run.runtimePluginId, 'codex-conversation-runtime');
   assert.equal(first.stopCondition.type, 'quality-run-complete');
   assert.deepEqual(first.protectedOperations.includes('hard-recovery'), true);
+  const started = await harness.startLifecyclePlan(first, { commandId: 'visible-lifecycle' });
+  assert.equal(started.status, 'started');
+  assert.equal(started.runtimePolicy.mode, 'conversation-visible');
+  const blockedCoordinator = await harness.executeLifecyclePlan(first, { commandId: 'visible-lifecycle-execute' });
+  assert.equal(blockedCoordinator.status, 'attention-required');
+  assert.equal(blockedCoordinator.reason, 'user-visible-runtime-requires-host-orchestration');
 });
 
 test('release activation stages a complete generation and switches the active pointer once', async t => {

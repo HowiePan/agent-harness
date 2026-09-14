@@ -6,8 +6,10 @@ import { readRecoveryVerification, recoveryVerificationMediaType, sealRecoveryVe
 import { recordLegacySourceUnavailable } from './source-disposition.mjs';
 
 export class RecoveryCoordinator {
+  #kernel;
+
   constructor({ kernel, importers, dataRoot = kernel.authorityStore.root, controlRoot }) {
-    this.kernel = kernel;
+    this.#kernel = kernel;
     this.dataRoot = dataRoot;
     this.controlRoot = controlRoot;
     this.importers = new Map(importers.map(importer => [importer.id, importer]));
@@ -28,17 +30,17 @@ export class RecoveryCoordinator {
   async recordUnavailableSource({ importerId, projectId, legacyRoot, decision }, command) {
     const importer = this.importers.get(importerId);
     assert(importer, 'LEGACY_IMPORTER_NOT_FOUND', 'Legacy Importer not found: ' + importerId);
-    return recordLegacySourceUnavailable({ projectId, legacyRoot, importer, decision, expectedRevision: command?.expectedRevision, commandId: command?.commandId, dataRoot: this.dataRoot, controlRoot: this.controlRoot, now: this.kernel.now });
+    return recordLegacySourceUnavailable({ projectId, legacyRoot, importer, decision, expectedRevision: command?.expectedRevision, commandId: command?.commandId, dataRoot: this.dataRoot, controlRoot: this.controlRoot, now: this.#kernel.now });
   }
 
   async verifyCapsule(capsuleRoot, { projectId, runId, ttlMs = 60 * 60 * 1000 } = {}) {
     assert(projectId && runId, 'RECOVERY_VERIFICATION_CONTEXT_REQUIRED', 'Capsule verification requires a project and run context.');
     assert(Number.isInteger(ttlMs) && ttlMs > 0, 'RECOVERY_VERIFICATION_TTL_INVALID', 'Capsule verification TTL must be a positive integer.');
-    const state = await this.kernel.authorityStore.read(projectId, runId);
+    const state = await this.#kernel.authorityStore.read(projectId, runId);
     const verified = await verifyRecoveryCapsule(capsuleRoot, { controlRoot: this.controlRoot });
     const importer = this.importers.get(verified.manifest.importer.id);
     assert(importer && importer.version === verified.manifest.importer.version, 'RECOVERY_CAPSULE_IMPORTER_UNAVAILABLE', 'The exact Recovery Capsule importer is not installed.');
-    const verifiedAt = this.kernel.now();
+    const verifiedAt = this.#kernel.now();
     const receipt = sealRecoveryVerification({
       protocolVersion: '1.0', kind: 'recovery-capsule-verification', verifiedAt,
       expiresAt: new Date(Date.parse(verifiedAt) + ttlMs).toISOString(),
@@ -48,7 +50,7 @@ export class RecoveryCoordinator {
       projectId, runId, authorityEpoch: state.epoch, authorityGeneration: state.generation, targetEpoch: state.epoch + 1,
       fileCount: verified.manifest.fileCount, totalBytes: verified.manifest.totalBytes,
     });
-    const evidence = await this.kernel.evidenceStore.put(receipt, {
+    const evidence = await this.#kernel.evidenceStore.put(receipt, {
       mediaType: recoveryVerificationMediaType, projectId, runId, epoch: state.epoch, generation: state.generation,
       sourceDigest: state.sourceDigest, artifactDigest: state.artifactDigest, policyDigest: state.policyDigest,
       pluginSetDigest: state.pluginSetDigest, labels: ['recovery-capsule-verification'],
@@ -58,7 +60,7 @@ export class RecoveryCoordinator {
 
   async plan({ importerId, legacyRoot, projectId, runId }) {
     const assessment = await this.assess(importerId, { legacyRoot });
-    const state = await this.kernel.authorityStore.read(projectId, runId);
+    const state = await this.#kernel.authorityStore.read(projectId, runId);
     const body = {
       protocolVersion: '1.0', projectId, runId, importerId, assessmentDigest: assessment.assessmentDigest,
       legacySourceDigest: assessment.sourceDigest, currentAuthorityDigest: state.authorityDigest,
@@ -75,7 +77,7 @@ export class RecoveryCoordinator {
     assert(verificationRef, 'RECOVERY_VERIFICATION_REQUIRED', 'Live hard recovery requires a Recovery Capsule verification reference.');
     assert(decisionId, 'RECOVERY_AUTHORITY_DECISION_REQUIRED', 'Live hard recovery requires an approved Authority Decision.');
     const requestDigest = digestJson({ projectId, runId, verificationRef, decisionId, dispositions, verifiedEvidenceRefs });
-    const current = await this.kernel.authorityStore.read(projectId, runId);
+    const current = await this.#kernel.authorityStore.read(projectId, runId);
     const prior = current.commands?.[command.commandId];
     if (prior) {
       const archive = current.recoveryArchives.find(item => item.commandId === command.commandId);
@@ -83,18 +85,18 @@ export class RecoveryCoordinator {
       return { state: current, receipt: prior, result: structuredClone(prior.result), reused: true };
     }
     assert(current.revision === command.expectedRevision, 'REVISION_CONFLICT', 'Authority revision changed before recovery snapshot.', { expected: command.expectedRevision, actual: current.revision });
-    const verification = await readRecoveryVerification(this.kernel.evidenceStore, verificationRef, { projectId, runId, state: current, now: this.kernel.now });
+    const verification = await readRecoveryVerification(this.#kernel.evidenceStore, verificationRef, { projectId, runId, state: current, now: this.#kernel.now });
     const capsule = await verifyRecoveryCapsule(verification.capsuleRoot, { controlRoot: this.controlRoot });
     assert(capsule.manifest.manifestDigest === verification.capsuleManifestDigest && capsule.manifest.sourceDigest === verification.sourceDigest && capsule.manifest.assessmentDigest === verification.assessmentDigest, 'RECOVERY_CAPSULE_CHANGED_AFTER_VERIFICATION', 'Recovery Capsule changed after its verification Receipt was issued.');
     const importer = this.importers.get(verification.importer.id);
     assert(importer && importer.version === verification.importer.version, 'RECOVERY_CAPSULE_IMPORTER_UNAVAILABLE', 'The exact Recovery Capsule importer is not installed.');
-    assertHardRecoveryDecision(current, decisionId, verification, this.kernel.now);
-    const rollbackSnapshot = await this.kernel.evidenceStore.put(current, {
+    assertHardRecoveryDecision(current, decisionId, verification, this.#kernel.now);
+    const rollbackSnapshot = await this.#kernel.evidenceStore.put(current, {
       mediaType: 'application/json', projectId, runId, epoch: current.epoch, generation: current.generation,
       sourceDigest: current.sourceDigest, artifactDigest: current.artifactDigest, policyDigest: current.policyDigest,
       pluginSetDigest: current.pluginSetDigest, labels: ['recovery-rollback-snapshot'],
     });
-    return this.kernel.recover(projectId, runId, {
+    return this.#kernel.recover(projectId, runId, {
       mode: 'hard-recovery', assessmentDigest: verification.assessmentDigest, sourceDigest: verification.sourceDigest,
       importer: structuredClone(verification.importer), recoveryVerificationRef: verificationRef, authorityDecisionId: decisionId,
       recoveryRequestDigest: requestDigest, dispositions, verifiedEvidenceRefs, rollbackSnapshotRef: rollbackSnapshot.ref,
@@ -102,6 +104,6 @@ export class RecoveryCoordinator {
   }
 
   async rollback({ projectId, runId, rollbackSnapshotRef }, command) {
-    return this.kernel.rollbackRecovery(projectId, runId, { rollbackSnapshotRef }, command);
+    return this.#kernel.rollbackRecovery(projectId, runId, { rollbackSnapshotRef }, command);
   }
 }

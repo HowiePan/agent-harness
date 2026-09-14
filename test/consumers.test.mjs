@@ -22,9 +22,10 @@ test('CardWorld consumer compiles one canonical requirement and project-owned de
   ]);
   assert.equal(descriptor.gateRecipes.find(gate => gate.id === 'rust-tests-all-targets').command.at(-1), '--all-targets');
   assert.deepEqual(descriptor.extensions.map(extension => extension.id), ['cardworld-engine-profile', 'codex-runtime']);
-  assert.equal(descriptor.policy.defaultRuntimePlugin, 'codex-isolated-runtime');
+  assert.equal(descriptor.policy.agentExecutionMode, 'conversation-visible');
+  assert.equal(descriptor.policy.defaultRuntimePlugin, 'codex-conversation-runtime');
   assert.equal(descriptor.policy.maxConcurrency, 'auto');
-  assert.deepEqual(descriptor.policy.runtimeConfigs['codex-isolated-runtime'], { sandbox: 'workspace-write', ephemeral: true, approveForMe: true });
+  assert.deepEqual(descriptor.policy.runtimeConfigs['codex-conversation-runtime'], {});
   const graph = compileCardWorldFeatureGraph({
     requirement: { id: 'v-next', acceptance: ['requirement is singular and approved'] },
     features: [
@@ -43,8 +44,9 @@ test('Collection consumer keeps ten game lanes, Feature dependencies, and one sh
   assert.deepEqual(descriptor.gateRecipes.map(gate => gate.id), COLLECTION_FINAL_GATE_IDS);
   assert.deepEqual(descriptor.extensions.map(extension => extension.id), ['tabletop-collection-profile', 'codex-runtime']);
   assert.equal(descriptor.policy.maxConcurrency, 10);
-  assert.equal(descriptor.policy.defaultRuntimePlugin, 'codex-isolated-runtime');
-  assert.deepEqual(descriptor.policy.runtimeConfigs['codex-isolated-runtime'], { sandbox: 'workspace-write', ephemeral: true, approveForMe: true });
+  assert.equal(descriptor.policy.agentExecutionMode, 'conversation-visible');
+  assert.equal(descriptor.policy.defaultRuntimePlugin, 'codex-conversation-runtime');
+  assert.deepEqual(descriptor.policy.runtimeConfigs['codex-conversation-runtime'], {});
   const games = Array.from({ length: 10 }, (_, index) => ({
     id: `game-${index + 1}`,
     features: [{ id: 'implementation', acceptance: ['game accepted'], allowedPaths: [`packages/games/game-${index + 1}`], metadata: index === 0 ? { capabilityUses: ['shared-ui'] } : {} }],
@@ -64,10 +66,14 @@ test('Collection consumer rejects an eleventh logical game', () => {
 });
 
 test('consumer descriptors do not retain Codex when another Runtime is selected', () => {
-  const engine = createCardWorldProjectDescriptor({ workspaceRoot: process.cwd(), runtimePluginId: 'another-runtime' });
-  const collection = createTabletopCollectionProjectDescriptor({ workspaceRoot: process.cwd(), runtimePluginId: 'another-runtime' });
+  assert.throws(() => createCardWorldProjectDescriptor({ workspaceRoot: process.cwd(), runtimePluginId: 'another-runtime' }), error => error.code === 'HEADLESS_EXECUTION_MODE_EXPLICIT_REQUIRED');
+  assert.throws(() => createTabletopCollectionProjectDescriptor({ workspaceRoot: process.cwd(), runtimePluginId: 'another-runtime' }), error => error.code === 'HEADLESS_EXECUTION_MODE_EXPLICIT_REQUIRED');
+  const engine = createCardWorldProjectDescriptor({ workspaceRoot: process.cwd(), runtimePluginId: 'another-runtime', agentExecutionMode: 'headless' });
+  const collection = createTabletopCollectionProjectDescriptor({ workspaceRoot: process.cwd(), runtimePluginId: 'another-runtime', agentExecutionMode: 'headless' });
   assert.deepEqual(engine.extensions.map(extension => extension.id), ['cardworld-engine-profile']);
   assert.deepEqual(collection.extensions.map(extension => extension.id), ['tabletop-collection-profile']);
-  const explicit = createTabletopCollectionProjectDescriptor({ workspaceRoot: process.cwd(), runtimePluginId: 'another-runtime', runtimeExtension: { id: 'another-runtime-pack', version: '2.0.0', digest: 'a'.repeat(64) } });
+  assert.equal(engine.policy.agentExecutionMode, 'headless');
+  assert.equal(collection.policy.agentExecutionMode, 'headless');
+  const explicit = createTabletopCollectionProjectDescriptor({ workspaceRoot: process.cwd(), runtimePluginId: 'another-runtime', agentExecutionMode: 'headless', runtimeExtension: { id: 'another-runtime-pack', version: '2.0.0', digest: 'a'.repeat(64) } });
   assert.deepEqual(explicit.extensions.map(extension => extension.id), ['tabletop-collection-profile', 'another-runtime-pack']);
 });

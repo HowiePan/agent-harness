@@ -19,9 +19,10 @@ const temporary = resolve(processRoot, `${process.pid}-${Date.now()}`);
 await mkdir(temporary, { recursive: true });
 
 const run = () => new Promise((resolveRun, reject) => {
+  process.stderr.write(`[process:start] node test (${mode})\n`);
   const child = spawn(process.execPath, ['--test', '--test-isolation=none', '--test-concurrency=1', ...files], { cwd: root, env: { ...process.env, ...temporaryEnvironment(temporary) }, windowsHide: true, stdio: 'inherit' });
-  child.on('error', reject);
-  child.on('close', (exitCode, signal) => resolveRun({ exitCode, signal }));
+  child.on('error', error => { process.stderr.write(`[process:error] ${error.message}\n`); reject(error); });
+  child.on('close', (exitCode, signal) => { process.stderr.write(`[process:finish] exit=${exitCode ?? 'null'} signal=${signal ?? 'none'}\n`); resolveRun({ exitCode, signal }); });
 });
 
 let outcome;

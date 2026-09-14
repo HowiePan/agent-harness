@@ -19,7 +19,7 @@ export const CODEX_CLI_RUNTIME_MANIFEST = Object.freeze({
   id: 'codex-cli-runtime',
   kind: 'agent-runtime',
   version: '1.0.0',
-  capabilities: ['spawn', 'wait', 'heartbeat', 'interrupt', 'structured-result', 'workspace-shared', 'managed-outputs'],
+  capabilities: ['spawn', 'wait', 'heartbeat', 'interrupt', 'structured-result', 'workspace-shared', 'managed-outputs', 'headless'],
   permissions: ['agent.conversation', 'process.spawn', 'workspace.read', 'workspace.write'],
   execution: { outputs: CODEX_OUTPUTS, sandbox: { mode: 'required' } },
 });
@@ -28,7 +28,7 @@ export const CODEX_ISOLATED_RUNTIME_MANIFEST = Object.freeze({
   id: 'codex-isolated-runtime',
   kind: 'agent-runtime',
   version: '1.0.0',
-  capabilities: ['spawn', 'wait', 'heartbeat', 'interrupt', 'structured-result', 'workspace-isolated', 'managed-outputs'],
+  capabilities: ['spawn', 'wait', 'heartbeat', 'interrupt', 'structured-result', 'workspace-isolated', 'managed-outputs', 'headless'],
   permissions: ['agent.conversation', 'process.spawn', 'workspace.read', 'workspace.write'],
   execution: { outputs: CODEX_OUTPUTS, sandbox: { mode: 'required' } },
 });

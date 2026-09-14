@@ -29,6 +29,9 @@ export class ProjectRegistry {
     if (this.strictIdentity) assert(input.harness && /^\d+\.\d+\.\d+$/.test(input.harness.version ?? '') && /^[a-f0-9]{64}$/.test(input.harness.artifactDigest ?? ''), 'PROJECT_HARNESS_IDENTITY_REQUIRED', 'Production Project Descriptors require an exact Harness version and artifact digest.');
     else if (input.harness) assert(/^\d+\.\d+\.\d+$/.test(input.harness.version ?? '') && (!input.harness.artifactDigest || /^[a-f0-9]{64}$/.test(input.harness.artifactDigest)), 'PROJECT_HARNESS_IDENTITY_INVALID', 'Project Descriptor Harness identity requires a semantic version and optional SHA-256 artifact digest.');
     assert(Array.isArray(input.profiles) && input.profiles.length > 0, 'PROJECT_PROFILES_REQUIRED', 'Project Descriptor requires at least one Profile.');
+    assert(['conversation-visible', 'headless'].includes(input.policy?.agentExecutionMode), 'PROJECT_AGENT_EXECUTION_MODE_REQUIRED', 'Project Descriptor must explicitly select conversation-visible or headless Agent execution.');
+    assert(typeof input.policy?.defaultRuntimePlugin === 'string' && input.policy.defaultRuntimePlugin.length > 0, 'PROJECT_DEFAULT_RUNTIME_REQUIRED', 'Project Descriptor requires an explicit default Agent Runtime.');
+    assert(Array.isArray(input.policy?.runtimePlugins) && input.policy.runtimePlugins.includes(input.policy.defaultRuntimePlugin), 'PROJECT_RUNTIME_ALLOWLIST_INVALID', 'Project Descriptor runtimePlugins must include its default Agent Runtime.');
     assert(input.workspace.rootSelector === undefined || input.workspace.rootSelector === 'git-worktree', 'PROJECT_WORKSPACE_SELECTOR_INVALID', 'Project Descriptor workspace rootSelector must be git-worktree when present.');
     assert(Array.isArray(input.extensions ?? []), 'PROJECT_EXTENSIONS_INVALID', 'Project Descriptor extensions must be an array.');
     const extensionIds = new Set();

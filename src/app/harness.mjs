@@ -24,6 +24,7 @@ import { assertHarnessWritePath, harnessControlRoot } from '../write-boundary.mj
 import { RunCoordinator } from '../coordinator/run-coordinator.mjs';
 import { AUTO_CONCURRENCY, AUTO_CONCURRENCY_LIMIT, resolveConcurrencyLimit } from '../concurrency.mjs';
 import { ProjectGateRunner } from '../gates/project-gate-runner.mjs';
+import { assertAgentRuntimeCompatible, assertRuntimeTransportReceipt } from '../plugins/runtime/execution-policy.mjs';
 
 export const defaultDataRoot = (controlRoot = harnessControlRoot()) => resolve(controlRoot, '.agent-harness-data');
 
@@ -34,7 +35,7 @@ const manifests = Object.freeze({
   storage: { id: 'reference-file-storage', kind: 'storage-provider', version: '1.0.0', capabilities: ['expected-revision', 'idempotency', 'atomic-write', 'recovery'], permissions: ['state.write'] },
 });
 
-export const createHarness = async ({ controlRoot: controlRootInput, dataRoot: dataRootInput, now, id, releaseIdentity, strictProjectIdentity = true, initializeStorage = true, allowedPluginPermissions = ['state.write', 'agent.conversation', 'process.spawn', 'workspace.read', 'workspace.write', 'gate.execute', 'artifact.read'], extraProfiles = [], extensions = [] } = {}) => {
+export const createHarness = async ({ controlRoot: controlRootInput, dataRoot: dataRootInput, now, id, releaseIdentity, strictProjectIdentity = true, initializeStorage = true, allowedPluginPermissions = ['state.write', 'agent.conversation', 'process.spawn', 'workspace.read', 'workspace.write', 'gate.execute', 'artifact.read'], extraProfiles = [], extensions = [], agentAdapter = null } = {}) => {
   const controlRoot = harnessControlRoot(controlRootInput);
   const dataRoot = dataRootInput ?? defaultDataRoot(controlRoot);
   const controlledDataRoot = assertHarnessWritePath(dataRoot, 'Harness dataRoot', controlRoot);
@@ -56,12 +57,32 @@ export const createHarness = async ({ controlRoot: controlRootInput, dataRoot: d
   const extensionSet = await installExtensionPacks(extensions, {
     profileRegistry,
     pluginHost,
-    factoryContext: { controlRoot, dataRoot: authorityStore.root, resolveProject: projectId => projectRegistry.get(projectId), now },
+    factoryContext: { controlRoot, dataRoot: authorityStore.root, resolveProject: projectId => projectRegistry.get(projectId), now, agentAdapter },
     requireVerifiedArtifacts: strictProjectIdentity,
   });
   const kernel = new HarnessKernel({ authorityStore, evidenceStore, profiles: profileRegistry, now, id });
   const recovery = new RecoveryCoordinator({ kernel, importers: extensionSet.recoveryImporters, controlRoot });
   const extensionPacks = new Map(extensions.map(extension => [extension.id, extension]));
+  const publicKernel = new Proxy(kernel, {
+    get(target, property) {
+      if (property === 'bindLease') return async () => assert(false, 'DIRECT_LEASE_BIND_DENIED', 'Lease binding must use the policy-aware Harness bindDispatch API.');
+      const value = Reflect.get(target, property, target);
+      return typeof value === 'function' ? value.bind(target) : value;
+    },
+  });
+  const publicPluginHost = Object.freeze({
+    get(pluginId, kind) {
+      const plugin = pluginHost.get(pluginId, kind);
+      if (['agent-runtime', 'gate-executor'].includes(plugin.manifest.kind)) return { manifest: plugin.manifest };
+      return plugin;
+    },
+    async invoke(pluginId, method, ...args) {
+      const plugin = pluginHost.get(pluginId);
+      assert(!['agent-runtime', 'gate-executor'].includes(plugin.manifest.kind), 'DIRECT_EXECUTION_PLUGIN_INVOKE_DENIED', `${plugin.manifest.kind} ${pluginId} must be invoked through its policy-aware Harness API.`);
+      return pluginHost.invoke(pluginId, method, ...args);
+    },
+    snapshot() { return pluginHost.snapshot(); },
+  });
 
   const api = {
     dataRoot: authorityStore.root,
@@ -69,9 +90,9 @@ export const createHarness = async ({ controlRoot: controlRootInput, dataRoot: d
     authorityStore,
     evidenceStore,
     profileRegistry,
-    pluginHost,
+    pluginHost: publicPluginHost,
     projectRegistry,
-    kernel,
+    kernel: publicKernel,
     recovery,
     extensionSet: { installed: extensionSet.installed, digest: extensionSet.digest },
     releaseIdentity: Object.freeze(structuredClone(currentReleaseIdentity)),
@@ -114,15 +135,19 @@ export const createHarness = async ({ controlRoot: controlRootInput, dataRoot: d
         compiler: extension.operations?.createLifecyclePlan,
       });
       if (existing) assert(existing.metadata?.lifecyclePlanDigest === plan.planDigest, 'LIFECYCLE_PLAN_RUN_CONFLICT', 'A Run with the deterministic lifecycle ID exists for a different Command Plan.', { runId: existing.runId, existingPlanDigest: existing.metadata?.lifecyclePlanDigest, planDigest: plan.planDigest });
+      const runtimeManifest = pluginHost.get(plan.run.runtimePluginId, 'agent-runtime').manifest;
+      assertAgentRuntimeCompatible({ project, manifest: runtimeManifest });
       return plan;
     },
 
-    async executeLifecyclePlan(planInput, { commandId, maxConcurrency, maxRounds = 100, forceFreshGates = true } = {}) {
-      assert(commandId, 'COMMAND_ID_REQUIRED', 'Lifecycle execution requires a command ID.');
+    async startLifecyclePlan(planInput, { commandId } = {}) {
+      assert(commandId, 'COMMAND_ID_REQUIRED', 'Lifecycle start requires a command ID.');
       const plan = validateLifecycleCommandPlan(planInput);
       const project = await projectRegistry.get(plan.project.id);
       assert(project.revision === plan.project.revision && project.descriptorDigest === plan.project.descriptorDigest, 'LIFECYCLE_PLAN_PROJECT_STALE', 'Lifecycle Command Plan is stale for the current Project Descriptor.');
       assert(currentReleaseIdentity.artifactDigest === plan.harness.artifactDigest && currentReleaseIdentity.version === plan.harness.version, 'LIFECYCLE_PLAN_RELEASE_STALE', 'Lifecycle Command Plan is stale for the active Harness release.');
+      const runtimeManifest = pluginHost.get(plan.run.runtimePluginId, 'agent-runtime').manifest;
+      const runtimePolicy = assertAgentRuntimeCompatible({ project, manifest: runtimeManifest });
       const existing = await authorityStore.read(plan.project.id, plan.run.runId, { required: false });
       let state = existing;
       if (!state) {
@@ -141,13 +166,22 @@ export const createHarness = async ({ controlRoot: controlRootInput, dataRoot: d
       } else {
         assert(state.metadata?.lifecyclePlanDigest === plan.planDigest, 'LIFECYCLE_PLAN_RUN_CONFLICT', 'Existing Run is bound to another Command Plan.');
       }
+      return { status: state.status === 'closed' ? 'closed' : 'started', planDigest: plan.planDigest, plan, runtimePolicy, state };
+    },
+
+    async executeLifecyclePlan(planInput, { commandId, maxConcurrency, maxRounds = 100, forceFreshGates = true, onGateProgress = null } = {}) {
+      assert(commandId, 'COMMAND_ID_REQUIRED', 'Lifecycle execution requires a command ID.');
+      const started = await api.startLifecyclePlan(planInput, { commandId });
+      const { plan, runtimePolicy } = started;
+      let { state } = started;
       if (state.status === 'closed') return { status: 'closed', planDigest: plan.planDigest, state };
       assert(state.status !== 'superseded', 'LIFECYCLE_PLAN_RUN_SUPERSEDED', 'Lifecycle execution cannot resume a superseded Run.');
+      if (runtimePolicy.hostOrchestrated) return { status: 'attention-required', reason: 'user-visible-runtime-requires-host-orchestration', planDigest: plan.planDigest, state };
       const coordinator = new RunCoordinator({ harness: api });
       const execution = await coordinator.run({ projectId: plan.project.id, runId: plan.run.runId, runtimePluginId: plan.run.runtimePluginId, maxConcurrency, maxRounds });
       state = await authorityStore.read(plan.project.id, plan.run.runId);
       if (!state.features.every(feature => feature.state === 'completed')) return { status: execution.status, planDigest: plan.planDigest, execution, state };
-      const gateRunner = new ProjectGateRunner({ harness: api });
+      const gateRunner = new ProjectGateRunner({ harness: api, onProgress: onGateProgress });
       const gates = await gateRunner.run({ projectId: plan.project.id, runId: plan.run.runId, scope: 'final', forceFresh: forceFreshGates, gateIds: plan.stopCondition.requiredFinalGates ?? [] });
       state = await authorityStore.read(plan.project.id, plan.run.runId);
       const closed = await api.kernel.closeRun(plan.project.id, plan.run.runId, {}, { expectedRevision: state.revision, commandId: `${commandId}.close` });
@@ -155,6 +189,27 @@ export const createHarness = async ({ controlRoot: controlRootInput, dataRoot: d
     },
 
     registerPlugin(manifest, instance) { return pluginHost.register(manifest, instance); },
+
+    getRuntimeManifest(runtimePluginId) {
+      return pluginHost.get(runtimePluginId, 'agent-runtime').manifest;
+    },
+
+    runtimeSupports(runtimePluginId, method) {
+      const runtime = pluginHost.get(runtimePluginId, 'agent-runtime');
+      return typeof runtime.instance[method] === 'function';
+    },
+
+    async invokeBoundRuntime(projectId, runId, dispatchId, method, input = {}) {
+      assert(['wait', 'integrate', 'discard', 'cleanup', 'heartbeat', 'interrupt', 'send'].includes(method), 'RUNTIME_CONTROL_METHOD_DENIED', `Unsupported managed Runtime operation: ${method}`);
+      const [project, state] = await Promise.all([projectRegistry.get(projectId), authorityStore.read(projectId, runId)]);
+      const dispatch = state.dispatches.find(item => item.dispatchId === dispatchId);
+      const lease = state.leases.find(item => item.dispatchId === dispatchId && item.status === 'active');
+      assert(dispatch && lease, 'ACTIVE_LEASE_REQUIRED', `Dispatch does not have an active managed Lease: ${dispatchId}`);
+      const manifest = pluginHost.get(dispatch.runtimePluginId, 'agent-runtime').manifest;
+      const runtimePolicy = assertAgentRuntimeCompatible({ project, manifest });
+      assert(runtimePolicy.mode === 'headless', 'VISIBLE_AGENT_HOST_REQUIRED', 'Conversation-visible Agents must be controlled by the interactive host, not through Runtime plugin invocation.');
+      return pluginHost.invoke(dispatch.runtimePluginId, method, { agentId: lease.agentId, ...structuredClone(input) });
+    },
 
     async startRun(input, command) {
       const project = await projectRegistry.get(input.projectId);
@@ -192,10 +247,13 @@ export const createHarness = async ({ controlRoot: controlRootInput, dataRoot: d
       const project = await projectRegistry.get(projectId);
       const workspaceRoot = state.metadata?.workspace?.root ?? project.workspace.root;
       const runtimePluginId = input.runtimePluginId ?? project.policy?.defaultRuntimePlugin ?? null;
+      assert(runtimePluginId, 'DEFAULT_RUNTIME_REQUIRED', `Project ${projectId} requires an explicit default Runtime.`);
       let runtimeManifest = null;
+      let runtimePolicy = null;
       if (runtimePluginId) {
         assert((project.policy?.runtimePlugins ?? [runtimePluginId]).includes(runtimePluginId), 'PROJECT_RUNTIME_DENIED', `Runtime ${runtimePluginId} is not allowed by Project ${projectId}.`);
         runtimeManifest = pluginHost.get(runtimePluginId, 'agent-runtime').manifest;
+        runtimePolicy = assertAgentRuntimeCompatible({ project, manifest: runtimeManifest });
       }
       const configuredLimit = resolveConcurrencyLimit(project.policy?.maxConcurrency, project.policy?.maxConcurrency === AUTO_CONCURRENCY ? AUTO_CONCURRENCY_LIMIT : 1);
       const requestedLimit = resolveConcurrencyLimit(input.maxConcurrency, configuredLimit);
@@ -203,7 +261,9 @@ export const createHarness = async ({ controlRoot: controlRootInput, dataRoot: d
       const snapshot = await captureWorkspace(workspaceRoot, { excluded: project.workspace.excluded ?? [] });
       assert(snapshot.digest === state.sourceDigest, 'WORKSPACE_SOURCE_DRIFT', 'Workspace changed outside a committed Feature result.', { authoritySourceDigest: state.sourceDigest, workspaceSourceDigest: snapshot.digest });
       const snapshotEvidence = await evidenceStore.put(snapshot, { mediaType: 'application/json', projectId, runId, epoch: state.epoch, generation: state.generation, sourceDigest: state.sourceDigest, artifactDigest: state.artifactDigest, policyDigest: state.policyDigest, pluginSetDigest: state.pluginSetDigest, labels: ['workspace-snapshot'] });
-      const scheduledInput = { ...input, maxConcurrency: schedulingLimit, runtimePluginId, sourceSnapshotRef: snapshotEvidence.ref };
+      const visibleHeartbeatTimeoutMs = Number(project.policy?.visibleHeartbeatTimeoutMs ?? 120000);
+      if (runtimePolicy.mode === 'conversation-visible') assert(Number.isFinite(visibleHeartbeatTimeoutMs) && visibleHeartbeatTimeoutMs > 0, 'VISIBLE_AGENT_HEARTBEAT_TIMEOUT_INVALID', 'Visible Agent heartbeat timeout must be a positive number of milliseconds.');
+      const scheduledInput = { ...input, maxConcurrency: schedulingLimit, runtimePluginId, runtimeRequirements: { mode: runtimePolicy.mode, userVisible: runtimePolicy.userVisible, hostOrchestrated: runtimePolicy.hostOrchestrated, ...(runtimePolicy.mode === 'conversation-visible' ? { heartbeatTimeoutMs: visibleHeartbeatTimeoutMs } : {}) }, sourceSnapshotRef: snapshotEvidence.ref };
       if (input.candidateFeatureIds) return kernel.schedule(projectId, runId, scheduledInput, command);
       const activeFeatureIds = [...new Set([...state.leases.filter(lease => ['requested', 'active'].includes(lease.status)).map(lease => lease.featureId), ...state.dispatches.filter(dispatch => ['requested', 'assigned'].includes(dispatch.status)).map(dispatch => dispatch.featureId)])];
       const strategy = await pluginHost.invoke(input.schedulerPluginId ?? manifests.scheduler.id, 'select', { revision: state.revision, features: state.features, activeFeatureIds, limit: schedulingLimit, deniedFeatureIds: [] });
@@ -213,7 +273,7 @@ export const createHarness = async ({ controlRoot: controlRootInput, dataRoot: d
       if (toolBrokerPluginId) pluginHost.get(toolBrokerPluginId, 'tool-broker');
       for (const featureId of strategy.payload.featureIds) {
         const feature = state.features.find(item => item.id === featureId);
-        const execution = {};
+        const execution = runtimePolicy ? { runtime: { mode: runtimePolicy.mode, userVisible: runtimePolicy.userVisible, hostOrchestrated: runtimePolicy.hostOrchestrated } } : {};
         if (modelRouterPluginId) {
           const request = { featureId, role: feature.ownerRole, capabilities: feature.metadata.requiredCapabilities ?? [], risk: Number(feature.metadata.risk ?? 0) };
           const route = await pluginHost.invoke(modelRouterPluginId, 'route', { ...request, requestDigest: digestJson(request) });
@@ -227,15 +287,52 @@ export const createHarness = async ({ controlRoot: controlRootInput, dataRoot: d
 
     async spawnDispatch(projectId, runId, dispatchId, runtimePluginId, commandId) {
       let state = await authorityStore.read(projectId, runId);
+      const project = await projectRegistry.get(projectId);
       const dispatch = state.dispatches.find(item => item.dispatchId === dispatchId);
       assert(dispatch?.status === 'requested', 'DISPATCH_NOT_SPAWNABLE', `Dispatch is not awaiting a Runtime: ${dispatchId}`);
+      assert(dispatch.runtimePluginId === runtimePluginId, 'DISPATCH_RUNTIME_MISMATCH', `Dispatch ${dispatchId} is bound to Runtime ${dispatch.runtimePluginId}, not ${runtimePluginId}.`);
+      const manifest = pluginHost.get(runtimePluginId, 'agent-runtime').manifest;
+      const runtimePolicy = assertAgentRuntimeCompatible({ project, manifest });
+      assert(!runtimePolicy.hostOrchestrated, 'VISIBLE_AGENT_HOST_REQUIRED', `Runtime ${runtimePluginId} must be started by the interactive host as a visible child Agent.`);
       const feature = dispatch.featureSnapshot ?? state.features.find(item => item.id === dispatch.featureId);
       const packet = buildDispatchPacket(state, dispatch, feature);
       assert(digestJson(packet) === dispatch.packetDigest, 'PACKET_DIGEST_MISMATCH', 'Persisted Dispatch no longer matches its packet.');
       const runtime = await pluginHost.invoke(runtimePluginId, 'spawn', packet);
       const payload = runtime.payload;
-      const bound = await kernel.bindLease(projectId, runId, { dispatchId, agentId: payload.agentId, packetDigest: dispatch.packetDigest, runtimeReceipt: payload.transportReceipt }, { expectedRevision: state.revision, commandId });
+      const bound = await api.bindDispatch(projectId, runId, { dispatchId, agentId: payload.agentId, runtimeReceipt: payload.transportReceipt }, { expectedRevision: state.revision, commandId });
       return { packet, runtimeReceipt: runtime, lease: bound.result.lease, state: bound.state };
+    },
+
+    async readDispatchPacket(projectId, runId, dispatchId) {
+      const state = await authorityStore.read(projectId, runId);
+      const dispatch = state.dispatches.find(item => item.dispatchId === dispatchId);
+      assert(dispatch?.status === 'requested', 'DISPATCH_NOT_READABLE', `Dispatch is not awaiting a visible Agent: ${dispatchId}`);
+      const feature = dispatch.featureSnapshot ?? state.features.find(item => item.id === dispatch.featureId);
+      const packet = buildDispatchPacket(state, dispatch, feature);
+      assert(digestJson(packet) === dispatch.packetDigest, 'PACKET_DIGEST_MISMATCH', 'Persisted Dispatch no longer matches its packet.');
+      return { dispatch: structuredClone(dispatch), packet };
+    },
+
+    async bindDispatch(projectId, runId, input, command) {
+      const state = await authorityStore.read(projectId, runId);
+      assert(state.revision === command.expectedRevision, 'REVISION_CONFLICT', 'Authority revision changed before Runtime binding.', { expected: command.expectedRevision, actual: state.revision });
+      const dispatch = state.dispatches.find(item => item.dispatchId === input.dispatchId);
+      assert(dispatch?.status === 'requested', 'DISPATCH_NOT_BINDABLE', `Dispatch is not awaiting a Runtime: ${input.dispatchId}`);
+      const project = await projectRegistry.get(projectId);
+      const manifest = pluginHost.get(dispatch.runtimePluginId, 'agent-runtime').manifest;
+      const runtimePolicy = assertRuntimeTransportReceipt({ project, manifest, receipt: input.runtimeReceipt });
+      let runtimeReceipt = structuredClone(input.runtimeReceipt);
+      if (runtimePolicy.mode === 'conversation-visible') {
+        assert(runtimeReceipt.agentId === input.agentId, 'RUNTIME_RECEIPT_AGENT_MISMATCH', 'Runtime Receipt Agent identity does not match the requested Lease binding.');
+        assert(runtimeReceipt.dispatchId === dispatch.dispatchId, 'RUNTIME_RECEIPT_DISPATCH_MISMATCH', 'Runtime Receipt Dispatch identity does not match the managed Dispatch.');
+        assert(runtimeReceipt.packetDigest === dispatch.packetDigest, 'PACKET_DIGEST_MISMATCH', 'Runtime Receipt does not match the immutable Dispatch packet.');
+        assert(typeof agentAdapter?.verifyVisibleLease === 'function', 'VISIBLE_AGENT_HOST_ATTESTOR_REQUIRED', 'Conversation-visible Lease binding requires a trusted host adapter that can verify the visible child Agent.');
+        const attestation = await agentAdapter.verifyVisibleLease({ project: structuredClone(project), dispatch: structuredClone(dispatch), agentId: input.agentId, runtimeReceipt: structuredClone(runtimeReceipt) });
+        assert(attestation?.verified === true, 'VISIBLE_AGENT_HOST_ATTESTATION_REJECTED', 'The interactive host did not verify the visible child Agent Lease.');
+        assert(attestation.agentId === input.agentId && attestation.dispatchId === dispatch.dispatchId && attestation.packetDigest === dispatch.packetDigest, 'VISIBLE_AGENT_HOST_ATTESTATION_MISMATCH', 'Host attestation is not bound to this Agent, Dispatch, and packet.');
+        runtimeReceipt.hostAttestation = { ...structuredClone(attestation), verified: true };
+      }
+      return kernel.bindLease(projectId, runId, { dispatchId: dispatch.dispatchId, agentId: input.agentId, packetDigest: dispatch.packetDigest, runtimeReceipt }, command);
     },
 
     async recordResult(projectId, runId, dispatchId, result, { commandId, evidenceMetadata = {}, runtimeEvidence = null }) {
@@ -243,6 +340,11 @@ export const createHarness = async ({ controlRoot: controlRootInput, dataRoot: d
       const dispatch = state.dispatches.find(item => item.dispatchId === dispatchId);
       const lease = state.leases.find(item => item.dispatchId === dispatchId && item.status === 'active');
       assert(dispatch && lease, 'ACTIVE_LEASE_REQUIRED', `Dispatch does not have an active Lease: ${dispatchId}`);
+      if (dispatch.execution?.runtime?.mode === 'conversation-visible') {
+        assert(Number(lease.heartbeatCount ?? 0) > 0, 'VISIBLE_AGENT_HEARTBEAT_REQUIRED', 'Conversation-visible Agent result requires at least one recorded host heartbeat.');
+        const timeoutMs = Number(lease.heartbeatTimeoutMs ?? 120000);
+        assert(Date.parse(kernel.now()) - Date.parse(lease.lastHeartbeatAt) < timeoutMs, 'VISIBLE_AGENT_HEARTBEAT_EXPIRED', 'Conversation-visible Agent heartbeat expired before result recording.');
+      }
       const project = await projectRegistry.get(projectId);
       const workspaceRoot = state.metadata?.workspace?.root ?? project.workspace.root;
       const sourceSnapshotEvidence = await evidenceStore.read(dispatch.sourceSnapshotRef);

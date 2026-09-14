@@ -5,7 +5,7 @@ import { createInMemoryRuntime, createProcessRuntime, DEFAULT_PROCESS_OUTPUTS, P
 import { createCodexRuntime } from '../src/plugins/runtime/codex-runtime.mjs';
 import { makeFixture } from './test-support.mjs';
 
-const memoryManifest = { id: 'memory-non-codex-runtime', kind: 'agent-runtime', version: '1.0.0', capabilities: ['spawn', 'wait', 'send', 'heartbeat', 'interrupt'], permissions: [] };
+const memoryManifest = { id: 'memory-non-codex-runtime', kind: 'agent-runtime', version: '1.0.0', capabilities: ['spawn', 'wait', 'send', 'heartbeat', 'interrupt', 'headless'], permissions: [] };
 
 test('Codex and non-Codex runtimes satisfy the same lifecycle contract', async () => {
   const host = new PluginHost({ allowedPermissions: ['agent.conversation'] });
@@ -17,7 +17,7 @@ test('Codex and non-Codex runtimes satisfy the same lifecycle contract', async (
     async interrupt() { return { interrupted: true }; },
   });
   const memory = createInMemoryRuntime({ manifest: memoryManifest, handler: async packet => ({ status: 'completed', summary: packet.dispatchId }) });
-  host.register({ id: 'codex-conversation-runtime', kind: 'agent-runtime', version: '1.0.0', capabilities: ['spawn', 'wait', 'send', 'heartbeat', 'interrupt'], permissions: ['agent.conversation'] }, codex);
+  host.register({ id: 'codex-conversation-runtime', kind: 'agent-runtime', version: '1.0.0', capabilities: ['spawn', 'wait', 'send', 'heartbeat', 'interrupt', 'user-visible', 'host-orchestrated'], permissions: ['agent.conversation'] }, codex);
   host.register(memoryManifest, memory);
   const packet = { dispatchId: 'd1' };
   const codexSpawn = await host.invoke('codex-conversation-runtime', 'spawn', packet);
@@ -41,7 +41,7 @@ test('plugin host rejects direct Authority mutation envelopes', async () => {
 
 test('local process runtime is a non-Codex provider with structured receipts', async t => {
   const fixture = await makeFixture(); t.after(() => fixture.cleanup());
-  const manifest = { id: 'local-process-runtime', kind: 'agent-runtime', version: '1.0.0', capabilities: ['spawn', 'wait', 'send', 'heartbeat', 'interrupt', 'managed-outputs'], permissions: ['process.spawn'], execution: { outputs: DEFAULT_PROCESS_OUTPUTS, sandbox: { mode: 'optional' } } };
+  const manifest = { id: 'local-process-runtime', kind: 'agent-runtime', version: '1.0.0', capabilities: ['spawn', 'wait', 'send', 'heartbeat', 'interrupt', 'managed-outputs', 'headless'], permissions: ['process.spawn'], execution: { outputs: DEFAULT_PROCESS_OUTPUTS, sandbox: { mode: 'optional' } } };
   const runtime = createProcessRuntime({ manifest, executable: process.execPath, args: ['test/fixtures/process-agent.mjs'], cwd: process.cwd(), temporaryRoot: resolve(fixture.dataRoot, 'tmp', 'process-runtime') });
   const spawned = await runtime.spawn({ dispatchId: 'process-dispatch' });
   const waited = await runtime.wait({ agentId: spawned.payload.agentId });

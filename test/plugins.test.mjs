@@ -63,24 +63,35 @@ test('Artifact Provider verifies every packaged file digest', async t => {
 test('Gate Executor separates product failure from an executable receipt', async t => {
   const fixture = await makeFixture(); t.after(() => fixture.cleanup());
   const manifest = { id: 'process-gates', kind: 'gate-executor', version: '1.0.0', capabilities: ['process', 'managed-outputs'], permissions: ['gate.execute'], execution: { outputs: DEFAULT_PROCESS_OUTPUTS, sandbox: { mode: 'optional' } } };
-  const executor = createProcessGateExecutor({ manifest, workspaceRoot: process.cwd(), temporaryRoot: resolve(fixture.dataRoot, 'tmp', 'gates'), allowlist: [{ id: 'probe', executable: process.execPath, args: ['test/fixtures/gate-probe.mjs'] }] });
+  const progress = [];
+  const executor = createProcessGateExecutor({ manifest, workspaceRoot: process.cwd(), temporaryRoot: resolve(fixture.dataRoot, 'tmp', 'gates'), allowlist: [{ id: 'probe', executable: process.execPath, args: ['test/fixtures/gate-probe.mjs'] }], onProgress: event => progress.push(event) });
   const passed = await executor.execute({ id: 'gate-pass', commandId: 'probe', args: [] });
   const failed = await executor.execute({ id: 'gate-fail', commandId: 'probe', args: ['--fail'] });
   assert.equal(passed.payload.status, 'passed');
   assert.ok(passed.payload.stdout.replaceAll('\\', '/').includes(fixture.dataRoot.replaceAll('\\', '/')));
   assert.equal(failed.payload.status, 'failed');
   assert.equal(failed.payload.exitCode, 2);
+  assert(progress.some(event => event.phase === 'started'));
+  assert(progress.some(event => event.phase === 'output' && event.stream === 'stdout'));
+  assert(progress.some(event => event.phase === 'finished' && event.status === 'passed'));
 });
 
 test('Gate Executor enforces declared output budgets and cleans before returning', async t => {
   const fixture = await makeFixture(); t.after(() => fixture.cleanup());
   const outputs = [{ id: 'gate-build', retention: 'ephemeral', environment: ['GATE_OUTPUT'], maxBytes: 16, maxFiles: 10 }];
   const manifest = { id: 'budgeted-gate', kind: 'gate-executor', version: '1.0.0', capabilities: ['process', 'managed-outputs'], permissions: ['gate.execute'], execution: { outputs, sandbox: { mode: 'optional' } } };
-  const executor = createProcessGateExecutor({ manifest, workspaceRoot: process.cwd(), temporaryRoot: resolve(fixture.dataRoot, 'tmp', 'budgeted-gate'), monitorIntervalMs: 10, allowlist: [{ id: 'budget', executable: process.execPath, args: ['test/fixtures/gate-output-probe.mjs', '1024', '250'] }] });
+  const executor = createProcessGateExecutor({ manifest, workspaceRoot: process.cwd(), temporaryRoot: resolve(fixture.dataRoot, 'tmp', 'budgeted-gate'), monitorIntervalMs: 10, allowlist: [{ id: 'budget', executable: process.execPath, args: ['test/fixtures/gate-output-probe.mjs', '1024', '250'] }], onProgress: () => {} });
   const result = await executor.execute({ id: 'budget', commandId: 'budget' });
   assert.equal(result.payload.status, 'budget-exceeded');
   assert.equal(result.payload.outputReceipt.violations[0].metric, 'bytes');
   assert.deepEqual(result.payload.outputReceipt.remaining[0], { id: 'gate-build', files: 0, bytes: 0 });
+});
+
+test('Process Gate refuses to launch without a live progress observer', async t => {
+  const fixture = await makeFixture(); t.after(() => fixture.cleanup());
+  const manifest = { id: 'unobserved-gate', kind: 'gate-executor', version: '1.0.0', capabilities: ['process', 'managed-outputs'], permissions: ['gate.execute'], execution: { outputs: DEFAULT_PROCESS_OUTPUTS, sandbox: { mode: 'optional' } } };
+  const executor = createProcessGateExecutor({ manifest, workspaceRoot: process.cwd(), temporaryRoot: resolve(fixture.dataRoot, 'tmp', 'unobserved-gate'), allowlist: [{ id: 'probe', executable: process.execPath, args: ['test/fixtures/gate-probe.mjs'] }] });
+  await assert.rejects(() => executor.execute({ id: 'unobserved', commandId: 'probe' }), error => error.code === 'PROCESS_PROGRESS_OBSERVER_REQUIRED');
 });
 
 test('Gate cache is success-only and all baseline digests participate in the key', async t => {
@@ -96,15 +107,15 @@ test('Gate cache is success-only and all baseline digests participate in the key
 });
 
 test('Application binds a Runtime receipt before accepting its result', async t => {
-  const fixture = await makeFixture(); t.after(() => fixture.cleanup());
-  const manifest = { id: 'app-memory-runtime', kind: 'agent-runtime', version: '1.0.0', capabilities: ['spawn', 'wait', 'send', 'heartbeat', 'interrupt'], permissions: [] };
+  const manifest = { id: 'app-memory-runtime', kind: 'agent-runtime', version: '1.0.0', capabilities: ['spawn', 'wait', 'send', 'heartbeat', 'interrupt', 'headless'], permissions: [] };
+  const fixture = await makeFixture({ policy: { runtimePlugins: [manifest.id], defaultRuntimePlugin: manifest.id } }); t.after(() => fixture.cleanup());
   fixture.harness.registerPlugin(manifest, createInMemoryRuntime({ manifest, handler: async () => ({ status: 'completed', summary: 'runtime done' }) }));
   await startRun(fixture);
   let state = await fixture.harness.authorityStore.read(fixture.projectId, 'run');
   const scheduled = await fixture.harness.dispatch(fixture.projectId, 'run', { maxConcurrency: 1, runtimePluginId: manifest.id }, command(state));
   const dispatch = scheduled.result.dispatches[0];
   const spawned = await fixture.harness.spawnDispatch(fixture.projectId, 'run', dispatch.dispatchId, manifest.id, command().commandId);
-  const waited = await fixture.harness.pluginHost.invoke(manifest.id, 'wait', { agentId: spawned.lease.agentId });
+  const waited = await fixture.harness.invokeBoundRuntime(fixture.projectId, 'run', dispatch.dispatchId, 'wait');
   const recorded = await fixture.harness.recordResult(fixture.projectId, 'run', dispatch.dispatchId, waited.payload.result, { commandId: command().commandId });
   assert.equal(recorded.state.features[0].state, 'completed');
 });

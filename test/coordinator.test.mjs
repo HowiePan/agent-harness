@@ -4,7 +4,7 @@ import { createInMemoryRuntime, createStaticModelRouter, RunCoordinator } from '
 import { feature, makeFixture, startRun } from './test-support.mjs';
 
 test('Coordinator schedules, binds, waits, and commits Runtime results to Authority', async t => {
-  const manifest = { id: 'coordinator-memory-runtime', kind: 'agent-runtime', version: '1.0.0', capabilities: ['spawn', 'wait', 'send', 'heartbeat', 'interrupt', 'workspace-isolated'], permissions: [] };
+  const manifest = { id: 'coordinator-memory-runtime', kind: 'agent-runtime', version: '1.0.0', capabilities: ['spawn', 'wait', 'send', 'heartbeat', 'interrupt', 'workspace-isolated', 'headless'], permissions: [] };
   const fixture = await makeFixture({ policy: { runtimePlugins: [manifest.id], defaultRuntimePlugin: manifest.id, maxConcurrency: 2 } });
   t.after(() => fixture.cleanup());
   fixture.harness.registerPlugin(manifest, createInMemoryRuntime({ manifest, handler: async packet => ({ status: 'completed', summary: `completed:${packet.feature.id}`, changedFiles: [] }) }));
@@ -18,7 +18,7 @@ test('Coordinator schedules, binds, waits, and commits Runtime results to Author
 });
 
 test('Coordinator binds a replaceable Model Router decision into the immutable Dispatch packet', async t => {
-  const runtimeManifest = { id: 'routed-memory-runtime', kind: 'agent-runtime', version: '1.0.0', capabilities: ['spawn', 'wait', 'send', 'heartbeat', 'interrupt', 'workspace-isolated'], permissions: [] };
+  const runtimeManifest = { id: 'routed-memory-runtime', kind: 'agent-runtime', version: '1.0.0', capabilities: ['spawn', 'wait', 'send', 'heartbeat', 'interrupt', 'workspace-isolated', 'headless'], permissions: [] };
   const routerManifest = { id: 'project-model-router', kind: 'model-router', version: '1.0.0', capabilities: ['capability-route'], permissions: [] };
   const fixture = await makeFixture({ policy: { runtimePlugins: [runtimeManifest.id], defaultRuntimePlugin: runtimeManifest.id, modelRouterPlugin: routerManifest.id } });
   t.after(() => fixture.cleanup());
@@ -34,7 +34,7 @@ test('Coordinator binds a replaceable Model Router decision into the immutable D
 });
 
 test('Coordinator auto mode schedules all currently eligible isolated Features', async t => {
-  const manifest = { id: 'auto-isolated-runtime', kind: 'agent-runtime', version: '1.0.0', capabilities: ['spawn', 'wait', 'send', 'heartbeat', 'interrupt', 'workspace-isolated'], permissions: [] };
+  const manifest = { id: 'auto-isolated-runtime', kind: 'agent-runtime', version: '1.0.0', capabilities: ['spawn', 'wait', 'send', 'heartbeat', 'interrupt', 'workspace-isolated', 'headless'], permissions: [] };
   const fixture = await makeFixture({ policy: { runtimePlugins: [manifest.id], defaultRuntimePlugin: manifest.id, maxConcurrency: 'auto' } });
   t.after(() => fixture.cleanup());
   fixture.harness.registerPlugin(manifest, createInMemoryRuntime({ manifest, handler: async packet => ({ status: 'completed', summary: `completed:${packet.feature.id}`, changedFiles: [] }) }));
@@ -45,7 +45,7 @@ test('Coordinator auto mode schedules all currently eligible isolated Features',
 });
 
 test('Coordinator keeps shared workspaces serial even in auto mode', async t => {
-  const manifest = { id: 'auto-shared-runtime', kind: 'agent-runtime', version: '1.0.0', capabilities: ['spawn', 'wait', 'send', 'heartbeat', 'interrupt', 'workspace-shared'], permissions: [] };
+  const manifest = { id: 'auto-shared-runtime', kind: 'agent-runtime', version: '1.0.0', capabilities: ['spawn', 'wait', 'send', 'heartbeat', 'interrupt', 'workspace-shared', 'headless'], permissions: [] };
   const fixture = await makeFixture({ policy: { runtimePlugins: [manifest.id], defaultRuntimePlugin: manifest.id, maxConcurrency: 'auto' } });
   t.after(() => fixture.cleanup());
   fixture.harness.registerPlugin(manifest, createInMemoryRuntime({ manifest, handler: async packet => ({ status: 'completed', summary: `completed:${packet.feature.id}`, changedFiles: [] }) }));

@@ -15,7 +15,7 @@
       "additionalProperties": false
     }
   },
-  "required": ["id", "harness", "workspace", "profiles"],
+  "required": ["id", "harness", "workspace", "profiles", "policy"],
   "properties": {
     "id": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$" },
     "harness": {
@@ -40,7 +40,16 @@
     },
     "profiles": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "type": "string", "minLength": 1 } },
     "extensions": { "type": "array", "uniqueItems": true, "items": { "$ref": "#/$defs/extensionIdentity" } },
-    "policy": { "type": "object" },
+    "policy": {
+      "type": "object",
+      "required": ["agentExecutionMode", "defaultRuntimePlugin", "runtimePlugins"],
+      "properties": {
+        "agentExecutionMode": { "enum": ["conversation-visible", "headless"] },
+        "defaultRuntimePlugin": { "type": "string", "pattern": "^[a-z0-9][a-z0-9.-]+$" },
+        "runtimePlugins": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "type": "string", "pattern": "^[a-z0-9][a-z0-9.-]+$" } }
+      },
+      "additionalProperties": true
+    },
     "gateRecipes": { "type": "array", "items": { "type": "object" } },
     "artifactProviders": { "type": "array", "items": { "type": "string" } }
   },

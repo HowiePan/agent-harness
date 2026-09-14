@@ -66,7 +66,8 @@ export const createCardWorldProjectDescriptor = ({
   harness,
   workspaceRoot,
   remote,
-  runtimePluginId = 'codex-isolated-runtime',
+  runtimePluginId = 'codex-conversation-runtime',
+  agentExecutionMode,
   runtimeExtension,
   extensions = [],
   model,
@@ -74,12 +75,15 @@ export const createCardWorldProjectDescriptor = ({
   maxConcurrency = AUTO_CONCURRENCY,
 } = {}) => {
   assert(workspaceRoot && isAbsolute(workspaceRoot), 'CARDWORLD_WORKSPACE_REQUIRED', 'CardWorld descriptor requires an absolute workspaceRoot.');
+  if (runtimePluginId !== 'codex-conversation-runtime') assert(agentExecutionMode, 'HEADLESS_EXECUTION_MODE_EXPLICIT_REQUIRED', 'Selecting a non-default Runtime requires an explicit agentExecutionMode; headless execution is never inferred from a Runtime ID.');
+  const resolvedAgentExecutionMode = agentExecutionMode ?? 'conversation-visible';
   const workspace = { root: workspaceRoot, rootSelector: 'git-worktree', excluded: ['.git', '.cardworld-local', 'card_world_engine/target', 'card_world_engine/pkg', 'node_modules'] };
   if (remote) workspace.remote = remote;
-  const runtimeConfig = { sandbox: 'workspace-write', ephemeral: true, approveForMe: true };
+  const processBackedRuntime = ['codex-cli-runtime', 'codex-isolated-runtime'].includes(runtimePluginId);
+  const runtimeConfig = processBackedRuntime ? { sandbox: 'workspace-write', ephemeral: true, approveForMe: true } : {};
   if (model) runtimeConfig.model = model;
   const selectedRuntimeExtension = runtimeExtension === undefined
-    ? (['codex-cli-runtime', 'codex-isolated-runtime'].includes(runtimePluginId) ? { id: 'codex-runtime', version: '1.0.0' } : null)
+    ? (['codex-conversation-runtime', 'codex-cli-runtime', 'codex-isolated-runtime'].includes(runtimePluginId) ? { id: 'codex-runtime', version: '1.0.0' } : null)
     : runtimeExtension;
   return {
     id,
@@ -92,6 +96,7 @@ export const createCardWorldProjectDescriptor = ({
       ...structuredClone(extensions),
     ],
     policy: {
+      agentExecutionMode: resolvedAgentExecutionMode,
       defaultRuntimePlugin: runtimePluginId,
       runtimePlugins: [runtimePluginId],
       runtimeConfigs: { [runtimePluginId]: runtimeConfig },

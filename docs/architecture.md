@@ -88,7 +88,12 @@ Kernel 只认识通用对象：
 
 ### Agent Runtime
 
-负责 `spawn/wait/send/heartbeat/interrupt`。Codex、其他 Agent CLI、HTTP Agent、Local Model 和 Human Worker 都通过该接口接入。Runtime 不得写 Authority 或宣告阶段准出。
+负责 `spawn/wait/send/heartbeat/interrupt`。Runtime 不得写 Authority 或宣告阶段准出。Project Descriptor 必须显式选择以下模式：
+
+- `conversation-visible`：交互式默认。Runtime 同时声明 `user-visible` 与 `host-orchestrated`、使用宿主原生子 Agent/委派界面、返回可检查任务引用，并且不得申请 `process.spawn`。可信宿主证明必须绑定 Agent、Dispatch 与 Packet，提交前要求新鲜 heartbeat。缺少任一能力时 fail closed，不允许回退到 CLI 或隐藏进程。
+- `headless`：仅供用户请求和 Descriptor 双重明确选择的 CI、无人值守或兼容执行，不能按 Runtime ID 自动推断。Runtime 声明 `headless`；若启动进程，还必须满足受管输出与 OS sandbox 合同。
+
+Codex、HTTP Agent、Local Model 和 Human Worker 都可以实现同一 Runtime 接口，但“对话可见”是可验证能力，不是供应商名称推断。交互式 Harness 的 Host Coordinator 负责把 Dispatch 投影为可见子 Agent、持续发布状态并记录 heartbeat；阻塞式 Coordinator 不得接管 `host-orchestrated` Runtime。
 
 ### Model Router
 
@@ -104,7 +109,7 @@ Kernel 只认识通用对象：
 
 ### Gate Executor
 
-执行构建、测试、审计和发布合同等确定性检查。AI Runtime 与 Gate Executor 是不同信任域。
+执行构建、测试、审计和发布合同等确定性检查。AI Runtime 与 Gate Executor 是不同信任域。Gate 可以启动受管进程，但启动前必须存在实时观察器，并投影 started、output/progress、finished/interrupted 状态；缺少观察器时拒绝启动，且不得在 Gate 进程中执行 Agent 推理。
 
 ### Storage Provider
 
@@ -138,6 +143,7 @@ Descriptor 分为两个合同：配置输入只包含业务工作区、Profile�
 8. source、policy、plugin set、artifact 和 toolchain 摘要发生漂移时旧证据按影响集失效。
 9. 失败预算按稳定 logical root 累计，不能通过改 ID 或恢复刷新。
 10. 最终自然语言报告只能从不可变 Receipt 渲染。
+11. 交互式 Agent 执行必须绑定可见任务引用；缺失可见宿主能力时停止，不得切换为进程 Runtime。
 
 ## 七、Gate 模型
 

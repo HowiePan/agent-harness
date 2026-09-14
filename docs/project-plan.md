@@ -20,7 +20,8 @@ V1.0.0 只在以下整体目标共同满足后准出：
 7. 至少一个非 Codex Runtime 通过同一 Conformance Suite；
 8. 业务仓零 Harness 驻留模式完成 Canary；
 9. W1 前通过 G0 双轨差异审计，所有有效行为都有来源、处置和架构归属；
-10. 用户批准最终切换候选。
+10. 用户批准最终切换候选；
+11. 交互式 Agent 执行全部通过可见子 Agent，宿主委派不可用时 fail closed；进程 Agent Runtime 仅允许显式 headless/CI。
 
 ## 二、已满足前置条件
 
@@ -238,7 +239,7 @@ Gate：任一故障点不产生半权威状态；业务仓内不产生 Harness �
 - Plugin Manifest、capabilities、permissions、生命周期和版本冻结；
 - 恶意、异常和不兼容插件测试。
 
-Gate：插件不能写 Authority、提升权限、重置预算或伪造用户决定。
+Gate：插件不能写 Authority、提升权限、重置预算或伪造用户决定；交互式 Runtime 不能持有 `process.spawn` 或回退到后台 Agent CLI。
 
 ### W4：参考控制面与 Runtime
 
@@ -248,6 +249,7 @@ Gate：插件不能写 Authority、提升权限、重置预算或伪造用户决
 
 - CLI、Programmatic API 和可选本地服务；
 - Codex Runtime Plugin；
+- conversation-visible Host Coordinator、可检查 Lease Receipt 和进度 heartbeat；
 - conflict-graph Scheduler；
 - capability-based Model Router；
 - local workspace Tool Broker；
@@ -322,7 +324,7 @@ Gate：单款阻塞不终止其他 eligible Feature；同一逻辑问题不能�
 
 - 至少一个非 Codex Runtime；
 - 至少两种 Model Router 策略；
-- Runtime 切换、能力降级和 Provider outage；
+- Runtime 切换、能力降级和 Provider outage；可见宿主缺失时停止而不降级为 headless；
 - Plugin permission/threat model；
 - 大型 Feature Graph、缓存、事件和 Evidence 压力测试；
 - Windows/Linux、离线安装和跨机器重附着；
@@ -444,7 +446,7 @@ read-only discovery
 | W5 | ✅ | Workflow Primitive 与三套 Profile |
 | W6 | ✅ 候选 | Engine Profile、Importer、CardWorld 现场只读 dry-run |
 | W7 | ✅ 候选 | Collection Profile、10 游戏逻辑/隔离物理并发、Importer 与现场只读 dry-run |
-| W8 | ✅ | 非 Codex process Runtime、1000 Feature 压测、三类零驻留 Canary |
+| W8 | ✅ | 显式 headless 非 Codex process Runtime、1000 Feature 压测、三类零驻留 Canary |
 | W9 制品 | ✅ | checksum manifest、SPDX SBOM、运维/恢复文档、npm dry-run |
 | 抽离后 RCV | ✅ | 一致性 staging、完整验证、verification Evidence、Authority Decision、链接拒绝与负向测试完成 |
 | 抽离后 PUB-008 | 🧪 待演练 | Card World 发起脱敏缺陷、独立上游修复、制品/Descriptor 升级、原 Run 续跑与 rollback；Collection 回归 Canary |

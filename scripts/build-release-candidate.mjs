@@ -17,6 +17,7 @@ const npmCli = process.env.npm_execpath;
 assert(npmCli, 'NPM_EXECUTABLE_REQUIRED', 'build:release-candidate must be started through npm.');
 
 const run = (executable, args, { cwd = root, environment = {}, inherit = false } = {}) => new Promise((resolveRun, reject) => {
+  process.stderr.write(`[process:start] ${executable} ${args.join(' ')}\n`);
   const child = spawn(executable, args, {
     cwd,
     env: { ...process.env, ...environment },
@@ -26,11 +27,12 @@ const run = (executable, args, { cwd = root, environment = {}, inherit = false }
   let stdout = '';
   let stderr = '';
   if (!inherit) {
-    child.stdout.on('data', chunk => { stdout += chunk; });
-    child.stderr.on('data', chunk => { stderr += chunk; });
+    child.stdout.on('data', chunk => { stdout += chunk; process.stderr.write(chunk); });
+    child.stderr.on('data', chunk => { stderr += chunk; process.stderr.write(chunk); });
   }
-  child.on('error', reject);
+  child.on('error', error => { process.stderr.write(`[process:error] ${error.message}\n`); reject(error); });
   child.on('close', (exitCode, signal) => {
+    process.stderr.write(`[process:finish] exit=${exitCode ?? 'null'} signal=${signal ?? 'none'}\n`);
     if (exitCode === 0 && !signal) resolveRun({ stdout, stderr });
     else reject(Object.assign(new Error(`${executable} exited with ${signal ?? exitCode}: ${stderr.trim()}`), { code: 'RELEASE_CANDIDATE_COMMAND_FAILED', exitCode, signal }));
   });

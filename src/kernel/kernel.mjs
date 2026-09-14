@@ -15,7 +15,9 @@ const activeDispatch = dispatch => ['requested', 'assigned'].includes(dispatch.s
 
 export const leaseHealth = (state, now = Date.now()) => state.leases.filter(activeLease).map(lease => {
   const elapsedMs = Math.max(0, now - Date.parse(lease.lastHeartbeatAt));
-  return { leaseId: lease.leaseId, featureId: lease.featureId, elapsedMs, health: elapsedMs >= 60 * 60 * 1000 ? 'soft-warning' : elapsedMs >= 15 * 60 * 1000 ? 'warning' : 'healthy', hardExpired: false };
+  const timeoutMs = Number(lease.heartbeatTimeoutMs ?? Number.POSITIVE_INFINITY);
+  const hardExpired = Number.isFinite(timeoutMs) && elapsedMs >= timeoutMs;
+  return { leaseId: lease.leaseId, featureId: lease.featureId, elapsedMs, health: hardExpired ? 'expired' : elapsedMs >= 60 * 1000 ? 'warning' : 'healthy', hardExpired };
 });
 
 export const buildDispatchPacket = (state, dispatch, feature) => ({
@@ -92,6 +94,8 @@ export class HarnessKernel {
   }
 
   async schedule(projectId, runId, input, command) {
+    assert(input.runtimePluginId, 'DEFAULT_RUNTIME_REQUIRED', 'Scheduling requires an explicit Runtime identity.');
+    assert(['conversation-visible', 'headless'].includes(input.runtimeRequirements?.mode), 'RUNTIME_REQUIREMENTS_REQUIRED', 'Scheduling requires explicit Agent execution requirements.');
     const snapshotEvidence = await this.evidenceStore.read(input.sourceSnapshotRef);
     return this.authorityStore.transact(projectId, runId, { expectedRevision: command.expectedRevision, commandId: command.commandId, payload: input }, state => {
       assert(snapshotEvidence.metadata.projectId === projectId && snapshotEvidence.metadata.runId === runId && snapshotEvidence.metadata.epoch === state.epoch && snapshotEvidence.metadata.generation === state.generation && snapshotEvidence.metadata.sourceDigest === state.sourceDigest, 'SOURCE_SNAPSHOT_CONTEXT_MISMATCH', 'Scheduling requires a workspace snapshot bound to the current Authority source.');
@@ -103,7 +107,7 @@ export class HarnessKernel {
         const dispatchId = this.id('dispatch');
         const outputRef = resolve(this.authorityStore.root, 'outputs', state.projectId, state.runId, `epoch-${state.epoch}`, `generation-${state.generation}`, `${dispatchId}.json`);
         const featureSnapshot = structuredClone(feature);
-        const execution = structuredClone(input.executionByFeatureId?.[feature.id] ?? {});
+        const execution = { runtime: structuredClone(input.runtimeRequirements), ...structuredClone(input.executionByFeatureId?.[feature.id] ?? {}) };
         const gateSnapshot = structuredClone(state.gates);
         const packet = buildDispatchPacket(state, { dispatchId, outputRef, sourceDigest: state.sourceDigest, sourceSnapshotRef: input.sourceSnapshotRef, gateSnapshot, execution }, featureSnapshot);
         const dispatch = { dispatchId, featureId: feature.id, featureSnapshot, epoch: state.epoch, generation: state.generation, sourceDigest: state.sourceDigest, sourceSnapshotRef: input.sourceSnapshotRef, gateSnapshot, execution, packetDigest: digestJson(packet), outputRef, status: 'requested', requestedAt: this.now(), runtimePluginId: input.runtimePluginId ?? null };
@@ -124,9 +128,17 @@ export class HarnessKernel {
       assert(dispatch.status === 'requested', 'DISPATCH_NOT_BINDABLE', 'Only a requested Dispatch can be bound.');
       assert(dispatch.epoch === state.epoch && dispatch.generation === state.generation, 'STALE_DISPATCH', 'Dispatch belongs to an older epoch or generation.');
       assert(input.agentId && input.runtimeReceipt?.runtimePluginId, 'RUNTIME_RECEIPT_REQUIRED', 'Lease binding requires an agent identity and Runtime Receipt.');
+      assert(input.runtimeReceipt.runtimePluginId === dispatch.runtimePluginId, 'RUNTIME_RECEIPT_PLUGIN_MISMATCH', 'Runtime Receipt does not match the Runtime selected for this Dispatch.');
+      if (dispatch.execution?.runtime?.mode === 'conversation-visible') {
+        assert(input.runtimeReceipt.visibility?.mode === 'user-visible', 'USER_VISIBLE_RUNTIME_RECEIPT_REQUIRED', 'A conversation-visible Dispatch requires a user-visible Runtime Receipt.');
+        assert(typeof input.runtimeReceipt.visibility.surface === 'string' && input.runtimeReceipt.visibility.surface.length > 0, 'USER_VISIBLE_RUNTIME_SURFACE_REQUIRED', 'A conversation-visible Dispatch requires a visible surface kind.');
+        assert(typeof input.runtimeReceipt.visibility.inspectRef === 'string' && input.runtimeReceipt.visibility.inspectRef.length > 0, 'USER_VISIBLE_RUNTIME_INSPECT_REF_REQUIRED', 'A conversation-visible Dispatch requires an inspectable task reference.');
+        assert(input.runtimeReceipt.agentId === input.agentId && input.runtimeReceipt.dispatchId === dispatch.dispatchId && input.runtimeReceipt.packetDigest === dispatch.packetDigest, 'USER_VISIBLE_RUNTIME_BINDING_MISMATCH', 'Visible Runtime Receipt must bind the Agent, Dispatch, and immutable packet.');
+        assert(input.runtimeReceipt.hostAttestation?.verified === true, 'VISIBLE_AGENT_HOST_ATTESTATION_REQUIRED', 'A conversation-visible Dispatch requires trusted host attestation.');
+      }
       assert(input.packetDigest === dispatch.packetDigest, 'PACKET_DIGEST_MISMATCH', 'Runtime receipt does not match the managed Dispatch packet.');
       const feature = state.features.find(item => item.id === dispatch.featureId);
-      const lease = { leaseId: this.id('lease'), dispatchId: dispatch.dispatchId, featureId: feature.id, logicalRoot: feature.logicalRoot, agentId: input.agentId, runtimePluginId: input.runtimeReceipt.runtimePluginId, runtimeReceipt: structuredClone(input.runtimeReceipt), epoch: state.epoch, generation: state.generation, packetDigest: dispatch.packetDigest, outputRef: dispatch.outputRef, status: 'active', startedAt: this.now(), lastHeartbeatAt: this.now() };
+      const lease = { leaseId: this.id('lease'), dispatchId: dispatch.dispatchId, featureId: feature.id, logicalRoot: feature.logicalRoot, agentId: input.agentId, runtimePluginId: input.runtimeReceipt.runtimePluginId, runtimeReceipt: structuredClone(input.runtimeReceipt), epoch: state.epoch, generation: state.generation, packetDigest: dispatch.packetDigest, outputRef: dispatch.outputRef, status: 'active', startedAt: this.now(), lastHeartbeatAt: this.now(), heartbeatCount: 0, ...(dispatch.execution?.runtime?.heartbeatTimeoutMs ? { heartbeatTimeoutMs: dispatch.execution.runtime.heartbeatTimeoutMs } : {}) };
       dispatch.status = 'assigned';
       dispatch.agentId = input.agentId;
       feature.state = 'running';
@@ -143,6 +155,7 @@ export class HarnessKernel {
       assert(lease?.status === 'active', 'LEASE_NOT_ACTIVE', 'Heartbeat requires an active Lease.');
       assert(lease.agentId === input.agentId && lease.epoch === state.epoch && lease.generation === state.generation, 'LEASE_IDENTITY_MISMATCH', 'Heartbeat identity does not match the active Lease.');
       lease.lastHeartbeatAt = this.now();
+      lease.heartbeatCount = Number(lease.heartbeatCount ?? 0) + 1;
       lease.progress = input.progress ?? null;
       event(state, 'lease.heartbeat', { leaseId: lease.leaseId, progress: lease.progress }, this.now);
       return { leaseId: lease.leaseId, lastHeartbeatAt: lease.lastHeartbeatAt };
@@ -159,6 +172,11 @@ export class HarnessKernel {
       assert(dispatch && lease, 'ACTIVE_LEASE_REQUIRED', 'Submission requires an active managed Lease.');
       assert(input.outputRef === dispatch.outputRef, 'OUTPUT_REF_OVERRIDE_REJECTED', 'Submission output must use the Dispatch-managed output reference.');
       assert(input.agentId === lease.agentId && input.packetDigest === lease.packetDigest, 'SUBMISSION_IDENTITY_MISMATCH', 'Submission identity does not match the Lease.');
+      if (dispatch.execution?.runtime?.mode === 'conversation-visible') {
+        assert(Number(lease.heartbeatCount ?? 0) > 0, 'VISIBLE_AGENT_HEARTBEAT_REQUIRED', 'Conversation-visible Agent submission requires at least one recorded host heartbeat.');
+        const timeoutMs = Number(lease.heartbeatTimeoutMs ?? 120000);
+        assert(Date.parse(this.now()) - Date.parse(lease.lastHeartbeatAt) < timeoutMs, 'VISIBLE_AGENT_HEARTBEAT_EXPIRED', 'Conversation-visible Agent heartbeat expired before submission.');
+      }
       assert(input.epoch === state.epoch && input.generation === state.generation, 'STALE_SUBMISSION', 'Submission belongs to an older epoch or generation.');
       assert(['completed', 'blocked', 'failed'].includes(input.result?.status), 'RESULT_STATUS_INVALID', 'Result status must be completed, blocked, or failed.');
       const feature = state.features.find(item => item.id === lease.featureId);

@@ -65,7 +65,8 @@ export const createTabletopCollectionProjectDescriptor = ({
   harness,
   workspaceRoot,
   remote,
-  runtimePluginId = 'codex-isolated-runtime',
+  runtimePluginId = 'codex-conversation-runtime',
+  agentExecutionMode,
   runtimeExtension,
   extensions = [],
   model,
@@ -73,12 +74,15 @@ export const createTabletopCollectionProjectDescriptor = ({
   maxLogicalGames = 10,
 } = {}) => {
   assert(workspaceRoot && isAbsolute(workspaceRoot), 'COLLECTION_WORKSPACE_REQUIRED', 'Collection descriptor requires an absolute workspaceRoot.');
+  if (runtimePluginId !== 'codex-conversation-runtime') assert(agentExecutionMode, 'HEADLESS_EXECUTION_MODE_EXPLICIT_REQUIRED', 'Selecting a non-default Runtime requires an explicit agentExecutionMode; headless execution is never inferred from a Runtime ID.');
+  const resolvedAgentExecutionMode = agentExecutionMode ?? 'conversation-visible';
   const workspace = { root: workspaceRoot, rootSelector: 'git-worktree', excluded: ['.git', 'node_modules', 'dist', 'build', 'coverage', 'runs'] };
   if (remote) workspace.remote = remote;
-  const runtimeConfig = { sandbox: 'workspace-write', ephemeral: true, approveForMe: true };
+  const processBackedRuntime = ['codex-cli-runtime', 'codex-isolated-runtime'].includes(runtimePluginId);
+  const runtimeConfig = processBackedRuntime ? { sandbox: 'workspace-write', ephemeral: true, approveForMe: true } : {};
   if (model) runtimeConfig.model = model;
   const selectedRuntimeExtension = runtimeExtension === undefined
-    ? (runtimePluginId === 'codex-isolated-runtime' ? { id: 'codex-runtime', version: '1.0.0' } : null)
+    ? (['codex-conversation-runtime', 'codex-cli-runtime', 'codex-isolated-runtime'].includes(runtimePluginId) ? { id: 'codex-runtime', version: '1.0.0' } : null)
     : runtimeExtension;
   return {
     id,
@@ -91,6 +95,7 @@ export const createTabletopCollectionProjectDescriptor = ({
       ...structuredClone(extensions),
     ],
     policy: {
+      agentExecutionMode: resolvedAgentExecutionMode,
       defaultRuntimePlugin: runtimePluginId,
       runtimePlugins: [runtimePluginId],
       runtimeConfigs: { [runtimePluginId]: runtimeConfig },

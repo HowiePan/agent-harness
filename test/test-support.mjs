@@ -7,7 +7,7 @@ import { extensionPack as collectionBatchExtension } from '../src/consumers/tabl
 let sequence = 0;
 export const command = state => ({ commandId: `test-command-${++sequence}`, ...(state ? { expectedRevision: state.revision } : {}) });
 
-export const makeFixture = async ({ projectId = 'project', profiles = ['feature-delivery'], policy = {}, gateRecipes = [], artifactProviders = [], extensions = [], releaseIdentity = { version: '1.0.0', artifactDigest: null } } = {}) => {
+export const makeFixture = async ({ projectId = 'project', profiles = ['feature-delivery'], policy = {}, gateRecipes = [], artifactProviders = [], extensions = [], agentAdapter = null, releaseIdentity = { version: '1.0.0', artifactDigest: null } } = {}) => {
   const parent = resolve(harnessTemporaryRoot(), 'tests');
   await mkdir(parent, { recursive: true });
   const root = await mkdtemp(resolve(parent, 'case-'));
@@ -25,10 +25,10 @@ export const makeFixture = async ({ projectId = 'project', profiles = ['feature-
     await rmdir(harnessTemporaryRoot()).catch(error => { if (!['ENOENT', 'ENOTEMPTY'].includes(error.code)) throw error; });
   };
   try {
-    const harness = await createHarness({ dataRoot, releaseIdentity, strictProjectIdentity: false, extensions: [...profileExtensions, ...extensions] });
-    const testRuntimeManifest = { id: 'test-runtime', kind: 'agent-runtime', version: '1.0.0', capabilities: ['spawn', 'wait', 'send', 'heartbeat', 'interrupt'], permissions: [] };
+    const harness = await createHarness({ dataRoot, releaseIdentity, strictProjectIdentity: false, extensions: [...profileExtensions, ...extensions], agentAdapter });
+    const testRuntimeManifest = { id: 'test-runtime', kind: 'agent-runtime', version: '1.0.0', capabilities: ['spawn', 'wait', 'send', 'heartbeat', 'interrupt', 'headless'], permissions: [] };
     harness.registerPlugin(testRuntimeManifest, createInMemoryRuntime({ manifest: testRuntimeManifest, handler: async () => ({ status: 'completed', summary: 'test runtime completed' }) }));
-    await harness.projectRegistry.register({ id: projectId, workspace: { root: workspace }, profiles, policy, gateRecipes, artifactProviders }, { commandId: `register-${projectId}` });
+    await harness.projectRegistry.register({ id: projectId, workspace: { root: workspace }, profiles, policy: { agentExecutionMode: 'headless', runtimePlugins: ['test-runtime'], defaultRuntimePlugin: 'test-runtime', ...policy }, gateRecipes, artifactProviders }, { commandId: `register-${projectId}` });
     return { root, workspace, dataRoot, harness, projectId, cleanup };
   } catch (error) {
     await cleanup();
@@ -49,7 +49,7 @@ export const dispatchAndBind = async (fixture, runId, { maxConcurrency = 1, inde
   const dispatch = scheduled.result.dispatches[index];
   if (!dispatch) return { state: scheduled.state, dispatch: null, lease: null, dispatches: scheduled.result.dispatches };
   state = scheduled.state;
-  const bound = await fixture.harness.kernel.bindLease(fixture.projectId, runId, { dispatchId: dispatch.dispatchId, agentId: `agent-${dispatch.dispatchId}`, packetDigest: dispatch.packetDigest, runtimeReceipt: { runtimePluginId: 'test-runtime', receiptId: `receipt-${dispatch.dispatchId}` } }, command(state));
+  const bound = await fixture.harness.bindDispatch(fixture.projectId, runId, { dispatchId: dispatch.dispatchId, agentId: `agent-${dispatch.dispatchId}`, runtimeReceipt: { runtimePluginId: 'test-runtime', receiptId: `receipt-${dispatch.dispatchId}` } }, command(state));
   return { state: bound.state, dispatch, lease: bound.result.lease, dispatches: scheduled.result.dispatches };
 };
 

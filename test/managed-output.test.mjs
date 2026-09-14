@@ -6,11 +6,11 @@ import { createCommandWrapperSandbox, createManagedOutputSession, createProcessR
 import { makeFixture } from './test-support.mjs';
 
 const declarations = maxBytes => [{ id: 'probe', retention: 'ephemeral', environment: ['PROBE_OUTPUT'], maxBytes, maxFiles: 10 }];
-const runtimeManifest = outputs => ({ id: 'managed-process-runtime', kind: 'agent-runtime', version: '1.0.0', capabilities: ['spawn', 'wait', 'send', 'heartbeat', 'interrupt', 'managed-outputs'], permissions: ['process.spawn'], execution: { outputs, sandbox: { mode: 'optional' } } });
+const runtimeManifest = outputs => ({ id: 'managed-process-runtime', kind: 'agent-runtime', version: '1.0.0', capabilities: ['spawn', 'wait', 'send', 'heartbeat', 'interrupt', 'managed-outputs', 'headless'], permissions: ['process.spawn'], execution: { outputs, sandbox: { mode: 'optional' } } });
 
 test('Plugin Host rejects a process plugin without managed output declarations', () => {
   const host = new PluginHost({ allowedPermissions: ['process.spawn'] });
-  const manifest = { id: 'unmanaged-process', kind: 'agent-runtime', version: '1.0.0', capabilities: ['spawn', 'wait', 'send', 'heartbeat', 'interrupt'], permissions: ['process.spawn'] };
+  const manifest = { id: 'unmanaged-process', kind: 'agent-runtime', version: '1.0.0', capabilities: ['spawn', 'wait', 'send', 'heartbeat', 'interrupt', 'headless'], permissions: ['process.spawn'] };
   const instance = { spawn() {}, wait() {}, send() {}, heartbeat() {}, interrupt() {} };
   assert.throws(() => host.register(manifest, instance), error => error.code === 'PLUGIN_MANAGED_OUTPUTS_REQUIRED');
 });

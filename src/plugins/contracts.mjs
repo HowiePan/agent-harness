@@ -22,6 +22,16 @@ export const validatePluginManifest = manifest => {
   assert(Array.isArray(manifest.capabilities), 'PLUGIN_CAPABILITIES_REQUIRED', `Plugin ${manifest.id} requires a capability list.`);
   assert(Array.isArray(manifest.permissions), 'PLUGIN_PERMISSIONS_REQUIRED', `Plugin ${manifest.id} requires a permission list.`);
   const launchesProcess = (manifest.kind === 'agent-runtime' && manifest.permissions.includes('process.spawn')) || (manifest.kind === 'gate-executor' && manifest.capabilities.includes('process'));
+  if (manifest.kind === 'agent-runtime' && manifest.permissions.includes('process.spawn')) {
+    assert(manifest.capabilities.includes('headless'), 'PROCESS_AGENT_RUNTIME_MUST_BE_HEADLESS', `Process-backed Agent Runtime ${manifest.id} must declare headless capability.`);
+    assert(!manifest.capabilities.includes('user-visible'), 'PROCESS_AGENT_RUNTIME_CANNOT_BE_USER_VISIBLE', `Process-backed Agent Runtime ${manifest.id} cannot claim user-visible capability.`);
+  }
+  if (manifest.kind === 'agent-runtime' && manifest.capabilities.includes('user-visible')) {
+    assert(manifest.permissions.includes('agent.conversation'), 'USER_VISIBLE_RUNTIME_CONVERSATION_PERMISSION_REQUIRED', `User-visible Agent Runtime ${manifest.id} requires agent.conversation permission.`);
+    assert(!manifest.permissions.includes('process.spawn'), 'USER_VISIBLE_RUNTIME_PROCESS_PERMISSION_DENIED', `User-visible Agent Runtime ${manifest.id} cannot request process.spawn.`);
+    assert(manifest.capabilities.includes('host-orchestrated'), 'USER_VISIBLE_RUNTIME_MUST_BE_HOST_ORCHESTRATED', `User-visible Agent Runtime ${manifest.id} must be driven by the interactive host.`);
+  }
+  if (manifest.kind === 'agent-runtime' && manifest.capabilities.includes('host-orchestrated')) assert(manifest.capabilities.includes('user-visible'), 'HOST_ORCHESTRATED_RUNTIME_MUST_BE_VISIBLE', `Host-orchestrated Runtime ${manifest.id} must be user-visible.`);
   if (launchesProcess) assert(manifest.capabilities.includes('managed-outputs'), 'PLUGIN_MANAGED_OUTPUTS_REQUIRED', `Process plugin ${manifest.id} must declare the managed-outputs capability.`);
   if (manifest.capabilities.includes('managed-outputs')) assert(manifest.execution?.outputs?.length, 'PLUGIN_OUTPUT_DECLARATIONS_REQUIRED', `Plugin ${manifest.id} declares managed-outputs but has no execution.outputs.`);
   const execution = manifest.execution ? {

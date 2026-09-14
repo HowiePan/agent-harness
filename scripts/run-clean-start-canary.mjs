@@ -22,13 +22,15 @@ const inside = (parent, child) => {
   return value === '' || (!value.startsWith('..') && !isAbsolute(value));
 };
 const run = (executable, args, { cwd, environment }) => new Promise((resolveRun, reject) => {
+  process.stderr.write(`[process:start] ${executable} ${args.join(' ')}\n`);
   const child = spawn(executable, args, { cwd, env: { ...process.env, ...environment }, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
   let stdout = '';
   let stderr = '';
-  child.stdout.on('data', chunk => { stdout += chunk; });
-  child.stderr.on('data', chunk => { stderr += chunk; });
-  child.on('error', reject);
+  child.stdout.on('data', chunk => { stdout += chunk; process.stderr.write(chunk); });
+  child.stderr.on('data', chunk => { stderr += chunk; process.stderr.write(chunk); });
+  child.on('error', error => { process.stderr.write(`[process:error] ${error.message}\n`); reject(error); });
   child.on('close', (exitCode, signal) => {
+    process.stderr.write(`[process:finish] exit=${exitCode ?? 'null'} signal=${signal ?? 'none'}\n`);
     if (exitCode === 0 && !signal) resolveRun({ stdout, stderr });
     else reject(Object.assign(new Error(`${executable} exited with ${signal ?? exitCode}: ${stderr.trim()}`), { code: 'CUTOVER_COMMAND_FAILED', exitCode, signal }));
   });
@@ -96,7 +98,7 @@ await registry.register(collectionEntry, { expectedRevision: 1, commandId: 'cuto
 const extensions = await registry.loadInstalled();
 const extensionById = new Map(extensions.map(extension => [extension.id, extension]));
 const harness = await installed.createHarness({ controlRoot, dataRoot, extensions, releaseIdentity });
-const runtimeManifest = { id: 'cutover-in-memory-runtime', kind: 'agent-runtime', version: '1.0.0', capabilities: ['spawn', 'wait', 'send', 'heartbeat', 'interrupt'], permissions: [] };
+const runtimeManifest = { id: 'cutover-in-memory-runtime', kind: 'agent-runtime', version: '1.0.0', capabilities: ['spawn', 'wait', 'send', 'heartbeat', 'interrupt', 'headless'], permissions: [] };
 harness.registerPlugin(runtimeManifest, installed.createInMemoryRuntime({ manifest: runtimeManifest, handler: async packet => ({ status: 'completed', summary: `clean-start canary completed for ${packet.projectId}`, changedFiles: [] }) }));
 
 const exactExtensions = descriptor => ({
@@ -112,8 +114,8 @@ const cardExtension = extensionById.get('cardworld-engine-profile');
 const collectionExtension = extensionById.get('tabletop-collection-profile');
 const harnessIdentity = { version: releaseIdentity.version, artifactDigest: releaseIdentity.artifactDigest };
 const descriptors = [
-  exactExtensions(cardExtension.operations.createProjectDescriptor({ id: 'cardworld-engine-clean-start', harness: harnessIdentity, workspaceRoot: cardworldRoot, runtimePluginId: runtimeManifest.id, runtimeExtension: null })),
-  exactExtensions(collectionExtension.operations.createProjectDescriptor({ id: 'tabletop-collection-clean-start', harness: harnessIdentity, workspaceRoot: collectionRoot, runtimePluginId: runtimeManifest.id, runtimeExtension: null })),
+  exactExtensions(cardExtension.operations.createProjectDescriptor({ id: 'cardworld-engine-clean-start', harness: harnessIdentity, workspaceRoot: cardworldRoot, runtimePluginId: runtimeManifest.id, agentExecutionMode: 'headless', runtimeExtension: null })),
+  exactExtensions(collectionExtension.operations.createProjectDescriptor({ id: 'tabletop-collection-clean-start', harness: harnessIdentity, workspaceRoot: collectionRoot, runtimePluginId: runtimeManifest.id, agentExecutionMode: 'headless', runtimeExtension: null })),
 ];
 for (const descriptor of descriptors) await harness.projectRegistry.register(descriptor, { expectedRevision: 0, commandId: `cutover-register-project-${descriptor.id}` });
 
@@ -128,7 +130,7 @@ const executeCanary = async ({ descriptor, profileId, feature, profileConfig, pr
   const dispatch = scheduled.result.dispatches[0];
   assert(dispatch, 'CUTOVER_DISPATCH_MISSING', `No Canary Dispatch was created for ${descriptor.id}.`);
   const spawned = await harness.spawnDispatch(descriptor.id, state.runId, dispatch.dispatchId, runtimeManifest.id, command().commandId);
-  const waited = await harness.pluginHost.invoke(runtimeManifest.id, 'wait', { agentId: spawned.lease.agentId });
+  const waited = await harness.invokeBoundRuntime(descriptor.id, state.runId, dispatch.dispatchId, 'wait');
   const recorded = await harness.recordResult(descriptor.id, state.runId, dispatch.dispatchId, waited.payload.result, { commandId: command().commandId, runtimeEvidence: waited });
   const closed = await harness.kernel.closeRun(descriptor.id, state.runId, {}, command(recorded.state));
   const after = await installed.captureWorkspace(descriptor.workspace.root, { excluded: descriptor.workspace.excluded ?? [] });

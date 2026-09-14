@@ -9,7 +9,8 @@ test('Project Gate Runner executes Descriptor recipes, records Evidence, and reu
   t.after(() => fixture.cleanup());
   const started = await startRun(fixture);
   assert.deepEqual(started.profile.config.requiredFinalGates, ['probe-final']);
-  const runner = new ProjectGateRunner({ harness: fixture.harness });
+  const progress = [];
+  const runner = new ProjectGateRunner({ harness: fixture.harness, onProgress: event => progress.push(event) });
   const first = await runner.run({ projectId: fixture.projectId, runId: 'run', scope: 'final' });
   assert.equal(first.results[0].status, 'passed');
   assert.equal(first.results[0].executorReceipt.payload.outputReceipt.status, 'cleaned');
@@ -21,4 +22,5 @@ test('Project Gate Runner executes Descriptor recipes, records Evidence, and reu
   const fresh = await runner.run({ projectId: fixture.projectId, runId: 'run', scope: 'final', forceFresh: true });
   assert.equal(fresh.results[0].cacheHit, false);
   assert.equal(fresh.state.gates[0].forcedFresh, true);
+  assert(progress.some(event => event.phase === 'process-started'));
 });

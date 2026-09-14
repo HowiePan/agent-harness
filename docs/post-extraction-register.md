@@ -1,7 +1,7 @@
 # 仓库抽离后修复与验证台账
 
 **建立日期**：2026-09-13  
-**当前判定**：Local Clean-start Cutover Ready；RCV、本地候选制品和两类制品绑定 Canary 完成；远端发布延期，Production hard recovery 不可补做
+**当前判定**：Migration Code Ready 候选；RCV 已完成，2026-09-13 候选与 Canary 保留为历史证据；可见子 Agent Runtime 修订后的候选制品和宿主 Canary 待重建，远端发布延期，Production hard recovery 不可补做
 **适用边界**：本台账中的“迁移后”指 `agent-harness` 源码进入独立上游仓库之后、任何业务入口切换和旧 Harness 删除之前。
 
 ## 一、已经满足的仓库抽离条件
@@ -74,7 +74,7 @@ RCV 修复已重新生成 `release-manifest.json` 与 `sbom.spdx.json`；正式 
 - **Local Release Candidate Ready**：RCV、PUB-004～008 的本地部分与提交绑定候选 Receipt 已关闭；当前已达到。
 - **Release Candidate Ready**：还要求 PUB-003 远端双平台 CI 通过；项目所有者已明确延期，当前未达到。
 - **Production Cutover Ready**：真实 Capsule、隔离恢复、Canary 和 rollback 均通过且获得用户切换批准；现场源已不存在，因此该 hard-recovery 状态无法达到。
-- **Local Clean-start Cutover Ready**：源不可用 Receipt、所有者状态损失确认、本地候选制品绑定、全新 Run Canary 和外部入口 Evidence 全部完成；当前已达到，内容寻址 Receipt 为 `0bdd46c261dfb939daccf9fa7bde404a79882a58ea3a21a4ebe4e9894581bc51`，完整证据只保存在外部 `.agent-harness-data`，避免把制品摘要回灌制品本身。
+- **Local Clean-start Cutover Ready**：源不可用 Receipt、所有者状态损失确认、本地候选制品绑定、全新 Run Canary 和外部入口 Evidence 全部完成。提交 `1961e578...` 曾达到该状态，内容寻址 Receipt 为 `0bdd46c261dfb939daccf9fa7bde404a79882a58ea3a21a4ebe4e9894581bc51`；2026-09-15 可见 Runtime 修订后，该 Receipt 仅是历史证据，新候选尚需重建并执行宿主可见子 Agent Canary。
 - **Clean-start Cutover Ready**：若以 Registry/Release 作为正式分发入口，仍须恢复 PUB-003 并完成签名、tag、Release/Registry 发布；当前按所有者决定延期。
 - **Legacy Deletion Approved**：用户对准确目标另行明确授权；当前未达到，也不能由 Harness 自动推导。
 

@@ -1,6 +1,7 @@
 import { newId } from '../canonical.mjs';
 import { assert } from '../errors.mjs';
 import { AUTO_CONCURRENCY, AUTO_CONCURRENCY_LIMIT, resolveConcurrencyLimit } from '../concurrency.mjs';
+import { assertAgentRuntimeCompatible } from '../plugins/runtime/execution-policy.mjs';
 
 const parseLastJsonObject = text => {
   const lines = String(text ?? '').split(/\r?\n/).filter(Boolean);
@@ -34,11 +35,13 @@ export class RunCoordinator {
     const selectedRuntime = runtimePluginId ?? project.policy?.defaultRuntimePlugin;
     assert(selectedRuntime, 'DEFAULT_RUNTIME_REQUIRED', `Project ${projectId} requires a default Runtime or an explicit runtimePluginId.`);
     assert((project.policy?.runtimePlugins ?? []).includes(selectedRuntime), 'PROJECT_RUNTIME_DENIED', `Runtime ${selectedRuntime} is not allowed by Project ${projectId}.`);
-    const runtime = this.harness.pluginHost.get(selectedRuntime, 'agent-runtime');
+    const runtimeManifest = this.harness.getRuntimeManifest(selectedRuntime);
+    const runtimePolicy = assertAgentRuntimeCompatible({ project, manifest: runtimeManifest });
     const configuredLimit = resolveConcurrencyLimit(project.policy?.maxConcurrency, project.policy?.maxConcurrency === AUTO_CONCURRENCY ? AUTO_CONCURRENCY_LIMIT : 1);
     const requestedLimit = resolveConcurrencyLimit(maxConcurrency, configuredLimit);
-    const physicalLimit = runtime.manifest.capabilities.includes('workspace-shared') ? 1 : requestedLimit;
+    const physicalLimit = runtimeManifest.capabilities.includes('workspace-shared') ? 1 : requestedLimit;
     let state = await this.harness.authorityStore.read(projectId, runId);
+    if (runtimePolicy.hostOrchestrated) return { status: 'attention-required', reason: 'user-visible-runtime-requires-host-orchestration', runtimePluginId: selectedRuntime, state, physicalLimit };
     const orphaned = state.leases.filter(lease => lease.status === 'active');
     if (orphaned.length) return { status: 'attention-required', reason: 'active-leases-require-original-runtime-or-resume', leaseIds: orphaned.map(lease => lease.leaseId), state };
     let dispatches = state.dispatches.filter(dispatch => dispatch.status === 'requested');
@@ -59,12 +62,12 @@ export class RunCoordinator {
         spawned.push({ dispatch, lease: result.lease });
         state = result.state;
       }
-      const waits = await Promise.all(spawned.map(async item => ({ item, receipt: await this.harness.pluginHost.invoke(selectedRuntime, 'wait', { agentId: item.lease.agentId }) })));
+      const waits = await Promise.all(spawned.map(async item => ({ item, receipt: await this.harness.invokeBoundRuntime(projectId, runId, item.lease.dispatchId, 'wait') })));
       for (const { item, receipt } of waits) {
         let result = businessResultFromRuntime(receipt.payload);
-        if (typeof runtime.instance.integrate === 'function' && result.status === 'completed') await this.harness.pluginHost.invoke(selectedRuntime, 'integrate', { agentId: item.lease.agentId });
-        else if (typeof runtime.instance.discard === 'function') { await this.harness.pluginHost.invoke(selectedRuntime, 'discard', { agentId: item.lease.agentId }); result = { ...result, changedFiles: [] }; }
-        const cleanupReceipt = typeof runtime.instance.cleanup === 'function' ? await this.harness.pluginHost.invoke(selectedRuntime, 'cleanup', { agentId: item.lease.agentId }) : null;
+        if (this.harness.runtimeSupports(selectedRuntime, 'integrate') && result.status === 'completed') await this.harness.invokeBoundRuntime(projectId, runId, item.lease.dispatchId, 'integrate');
+        else if (this.harness.runtimeSupports(selectedRuntime, 'discard')) { await this.harness.invokeBoundRuntime(projectId, runId, item.lease.dispatchId, 'discard'); result = { ...result, changedFiles: [] }; }
+        const cleanupReceipt = this.harness.runtimeSupports(selectedRuntime, 'cleanup') ? await this.harness.invokeBoundRuntime(projectId, runId, item.lease.dispatchId, 'cleanup') : null;
         if (cleanupReceipt) cleanedAgents.add(item.lease.agentId);
         const output = await this.harness.recordResult(projectId, runId, item.dispatch.dispatchId, result, { commandId: `coordinator-submit-${item.dispatch.dispatchId}`, evidenceMetadata: { labels: ['agent-result', `runtime:${selectedRuntime}`] }, runtimeEvidence: { wait: receipt, cleanup: cleanupReceipt } });
         committed.push({ dispatchId: item.dispatch.dispatchId, featureId: item.dispatch.featureId, submissionId: output.result.submission.submissionId, status: output.result.featureState, runtimeReceipt: receipt, cleanupReceipt });
@@ -74,8 +77,8 @@ export class RunCoordinator {
       primaryError = error;
       throw error;
     } finally {
-      if (typeof runtime.instance.cleanup === 'function') {
-        const cleanupResults = await Promise.allSettled(spawned.filter(item => !cleanedAgents.has(item.lease.agentId)).map(item => this.harness.pluginHost.invoke(selectedRuntime, 'cleanup', { agentId: item.lease.agentId })));
+      if (this.harness.runtimeSupports(selectedRuntime, 'cleanup')) {
+        const cleanupResults = await Promise.allSettled(spawned.filter(item => !cleanedAgents.has(item.lease.agentId)).map(item => this.harness.invokeBoundRuntime(projectId, runId, item.lease.dispatchId, 'cleanup')));
         const cleanupFailure = cleanupResults.find(result => result.status === 'rejected');
         if (!primaryError && cleanupFailure) throw cleanupFailure.reason;
       }

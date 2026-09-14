@@ -5,7 +5,7 @@ export const manifest = Object.freeze({
   id: 'local-process-runtime',
   kind: 'agent-runtime',
   version: '1.0.0',
-  capabilities: ['spawn', 'wait', 'send', 'heartbeat', 'interrupt', 'structured-result', 'managed-outputs'],
+  capabilities: ['spawn', 'wait', 'send', 'heartbeat', 'interrupt', 'structured-result', 'managed-outputs', 'headless'],
   permissions: ['process.spawn'],
   execution: {
     outputs: [{ id: 'temporary', retention: 'ephemeral', environment: ['TEMP', 'TMP', 'TMPDIR'], maxBytes: 67_108_864, maxFiles: 10_000 }],

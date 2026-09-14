@@ -2,7 +2,7 @@
   "id": "codex-cli-runtime",
   "kind": "agent-runtime",
   "version": "1.0.0",
-  "capabilities": ["spawn", "wait", "heartbeat", "interrupt", "structured-result", "workspace-shared", "managed-outputs"],
+  "capabilities": ["spawn", "wait", "heartbeat", "interrupt", "structured-result", "workspace-shared", "managed-outputs", "headless"],
   "permissions": ["agent.conversation", "process.spawn", "workspace.read", "workspace.write"],
   "execution": {
     "outputs": [

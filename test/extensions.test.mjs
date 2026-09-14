@@ -37,7 +37,7 @@ test('production Project Registry requires exact Harness and Extension artifact 
     () => registry.register({ id: 'strict-project', workspace: { root: fixture.workspace }, profiles: ['feature-delivery'] }, { commandId: 'strict-project' }),
     error => error.code === 'PROJECT_HARNESS_IDENTITY_REQUIRED',
   );
-  const input = { id: 'strict-project', harness: { version: '1.0.0', artifactDigest: 'a'.repeat(64) }, workspace: { root: fixture.workspace }, profiles: ['feature-delivery'], extensions: [], policy: {} };
+  const input = { id: 'strict-project', harness: { version: '1.0.0', artifactDigest: 'a'.repeat(64) }, workspace: { root: fixture.workspace }, profiles: ['feature-delivery'], extensions: [], policy: { agentExecutionMode: 'headless', defaultRuntimePlugin: 'test-runtime', runtimePlugins: ['test-runtime'] } };
   const record = await registry.register(input, { commandId: 'strict-project-valid' });
   assert.equal(validateJsonSchema(input, projectDescriptorSchemas.input).valid, true);
   assert.equal(validateJsonSchema(record, projectDescriptorSchemas.record).valid, true);
@@ -68,7 +68,7 @@ test('Extension plugin factories cannot receive Authority stores', async t => {
     } }],
   });
   const fixture = await makeFixture({ extensions: [extension] }); t.after(() => fixture.cleanup());
-  assert.deepEqual(Object.keys(received).sort(), ['controlRoot', 'dataRoot', 'now', 'resolveProject']);
+  assert.deepEqual(Object.keys(received).sort(), ['agentAdapter', 'controlRoot', 'dataRoot', 'now', 'resolveProject']);
   assert.equal(Object.hasOwn(received, 'authorityStore'), false);
 });
 

@@ -14,13 +14,15 @@ const validateRecipe = recipe => {
 };
 
 export class ProjectGateRunner {
-  constructor({ harness, id = newId }) {
+  constructor({ harness, id = newId, onProgress = null }) {
     this.harness = harness;
     this.id = id;
+    this.onProgress = onProgress;
     this.cache = new GateCache({ root: harness.dataRoot, controlRoot: harness.controlRoot });
   }
 
   async run({ projectId, runId, scope = 'final', forceFresh = false, gateIds = [] }) {
+    assert(typeof this.onProgress === 'function', 'PROCESS_PROGRESS_OBSERVER_REQUIRED', 'Project Gate execution requires a live progress observer.');
     const project = await this.harness.projectRegistry.get(projectId);
     let state = await this.harness.authorityStore.read(projectId, runId);
     const workspaceRoot = state.metadata?.workspace?.root ?? project.workspace.root;
@@ -34,6 +36,7 @@ export class ProjectGateRunner {
       controlRoot: this.harness.controlRoot,
       resolveSandbox: ({ allowed }) => allowed.sandboxPluginId ? this.harness.pluginHost.get(allowed.sandboxPluginId, 'os-sandbox') : null,
       allowlist: recipes.map(recipe => ({ id: recipe.id, executable: recipe.command[0], args: recipe.command.slice(1), cwd: recipe.cwd, timeoutMs: recipe.timeoutMs, environment: recipe.environment, outputs: recipe.outputs, sandboxMode: recipe.sandboxMode, sandboxPluginId: recipe.sandboxPluginId })),
+      onProgress: this.onProgress,
     }));
     const results = [];
     for (const recipe of recipes) {
@@ -51,6 +54,7 @@ export class ProjectGateRunner {
       let evidenceRefs;
       let executorReceipt = null;
       if (cached.hit) {
+        this.onProgress({ gateId: recipe.id, phase: 'cache-hit', status: 'passed' });
         status = 'passed';
         evidenceRefs = cached.value.result.evidenceRefs;
       } else {

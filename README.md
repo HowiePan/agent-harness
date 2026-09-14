@@ -1,6 +1,6 @@
 # Agent Harness
 
-**状态**：Local Clean-start Cutover Ready；Recovery、UNLICENSED、本地候选制品及 CardWorld/Collection 制品绑定 Canary 已完成；远端 CI 与发布按所有者决定延期
+**状态**：V1.0.0 Migration Code Ready 候选；交互式 Runtime 已改为可见子 Agent，既有本地候选制品证据需基于新提交重新生成；远端 CI 与发布按所有者决定延期
 **定位**：与业务项目、Agent 工具和模型供应商解耦的持久化 Agent 工作流控制面
 
 Agent Harness 负责把需求、工作图、Agent 执行、确定性 Gate、审核、人工决定和恢复组织成可持久化、可审计、可替换执行工具的流程。业务仓默认不保存 Harness 实现、运行状态、Prompt 或 Harness 技术文档。
@@ -12,7 +12,7 @@ Agent Harness 负责把需求、工作图、Agent 执行、确定性 Gate、审�
 - expected revision、command ID、原子事务、崩溃恢复、Evidence 和 Receipt；
 - Feature 依赖/冲突图、Lease/Attempt 预算、P0-P3 全阻断质量闭环；
 - Scheduler、Runtime、Model、Tool、Codec、Gate、Artifact、Storage 插件契约；
-- 非交互 Codex CLI Runtime、10 路隔离工作区 Codex Runtime、callback Runtime 与独立进程 Runtime；
+- 默认交互式 `codex-conversation-runtime`、可见子 Agent Lease/heartbeat/inspect reference，以及仅供显式 headless/CI 使用的 Codex CLI、隔离工作区和独立进程 Runtime；
 - 可替换 Model Router 决定写入不可变 Dispatch，Gate Recipe 由 Project Descriptor 执行；
 - 中性 Feature Delivery、CardWorld Engine Delivery、Collection Batch Production Profile；
 - CardWorld 与 Collection 旧状态只读评估和新 Epoch 导入；
@@ -62,6 +62,8 @@ Codex 插件提供通用伪命令 Router：`h:<项目别名> <动作> <目标> [
 例如：`h:engine full V3.8.4`、`h:engine req V3.8.4 expand-to-plan`、`h:engine quality V3.8.4 review-only`，以及 `h:collection quality B1 all`。`engine` 和 `collection` 只是该安装选择的别名，不进入 Kernel；`h:where` 可只读显示 Harness 路径和全部项目绑定。
 
 Hook 只把符合语法的输入转换成 Command Intent，不直接启动流程。`$agent-harness-command` 是显式回退入口。需求审查的多个预设和两条 Harness 的完整流程都由各自 Extension 声明，Authority/Evidence、P0-P3 阻断与批准边界仍由统一 Operator Contract 保证。完整参数见 [运维手册](docs/operations.md)。
+
+交互式 Project Descriptor 必须声明 `agentExecutionMode: conversation-visible`。每个 Dispatch 由当前 Codex 宿主创建可见子 Agent；可信宿主适配器把 Agent、Dispatch、Packet 与可检查任务引用绑定后才能建立 Lease，提交前还必须有新鲜 heartbeat。缺少原生子 Agent、宿主证明或观察能力时流程以 `attention-required` 停止，禁止用原始 CLI Receipt、`codex exec` 或其他后台 Agent 进程兜底。`headless` 必须由用户请求与 Descriptor 分别明确授权，不能根据 Runtime ID 推断。测试、构建、打包和确定性 Gate 仍可使用受管子进程，但启动前必须挂接实时观察器并显示启动、进度/输出和结束状态，且不能承载 Agent 推理。
 
 ## 项目边界
 

@@ -1,6 +1,6 @@
 # 插件执行输出、预算与 OS 沙箱
 
-V1.0.0 把外部进程的中间产物纳入统一 Execution Controller。任何申请 `process.spawn` 的 Agent Runtime，以及声明 `process` capability 的 Gate Executor，都必须同时声明 `managed-outputs` 和 `execution.outputs`；缺失时 Plugin Host 以 `PLUGIN_MANAGED_OUTPUTS_REQUIRED` 或 `PLUGIN_OUTPUT_DECLARATIONS_REQUIRED` 拒绝加载。
+V1.0.0 把外部进程的中间产物纳入统一 Execution Controller。任何申请 `process.spawn` 的 Agent Runtime，以及声明 `process` capability 的 Gate Executor，都必须同时声明 `managed-outputs` 和 `execution.outputs`；缺失时 Plugin Host 以 `PLUGIN_MANAGED_OUTPUTS_REQUIRED` 或 `PLUGIN_OUTPUT_DECLARATIONS_REQUIRED` 拒绝加载。进程型 Agent Runtime 还必须声明 `headless`，并被 `agentExecutionMode: headless` 的 Project 显式选择；`conversation-visible` Project 在进程启动前以 `OPAQUE_AGENT_PROCESS_DENIED`/`USER_VISIBLE_AGENT_RUNTIME_REQUIRED` 拒绝。
 
 ## 输出声明
 
@@ -36,6 +36,8 @@ V1.0.0 把外部进程的中间产物纳入统一 Execution Controller。任何�
 ## 执行与清理闭环
 
 生命周期固定为：声明校验 → 项目内目录分配 → 可选沙箱包装 → 进程启动 → 周期扫描 → 超限终止 → 最终核算 → 按保留策略清理 → 生成 Receipt。
+
+对于确定性 Gate，执行器要求实时观察器，并发送 `started`、`process-started`、stdout/stderr `output`、`process-finished` 和 `finished` 进度事件；缺少观察器时在 spawn 前拒绝执行。CLI 始终把事件写入可观察终端，`--progress` 仅保留兼容性。Gate 进程只运行已列入 Descriptor allowlist 的确定性命令，不得替代 Agent Runtime。
 
 容量扫描同时核算普通文件、符号链接数量和普通文件字节数。运行中首次超限会终止子进程；最终结果变为 `budget-exceeded`/`output-budget`。无论正常退出、超限、启动失败还是 Coordinator 后续提交失败，均进入清理路径。
 

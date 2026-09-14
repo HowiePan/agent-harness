@@ -47,14 +47,22 @@ node bin/agent-harness.mjs release activation-apply --plan <plan.json> --command
 
 激活一次性绑定候选 Harness、Extension 集合和受影响 Project；事务先提交候选 generation，最后切换活动指针。业务生命周期命令不得隐式触发 Bootstrap 或逐项请求制品升级授权。
 
-生命周期命令先生成确定性的 `LifecycleCommandPlan`，再由受管执行器持续运行到 Plan stop condition：
+生命周期命令先生成确定性的 `LifecycleCommandPlan`。交互式 Codex 默认只启动 Authority，再由当前宿主把 Dispatch 委派给可见子 Agent：
 
 ```text
 node bin/agent-harness.mjs lifecycle plan --input <intent.json>
-node bin/agent-harness.mjs lifecycle execute --plan <plan.json> --command-id <command-id>
+node bin/agent-harness.mjs lifecycle start --plan <plan.json> --command-id <command-id>
+node bin/agent-harness.mjs run schedule --project <id> --run <id>
+node bin/agent-harness.mjs run dispatch --project <id> --run <id> --dispatch <dispatch-id>
 ```
 
-Plan 中的 Run ID、Feature graph、Profile config、Runtime、Gate plan 和 protected-operation 列表由已安装 Extension 的 compiler 产生，模型和 Hook 不得自行构造。
+Plan 中的 Run ID、Feature graph、Profile config、Runtime、Gate plan 和 protected-operation 列表由已安装 Extension 的 compiler 产生，模型和 Hook 不得自行构造。Codex Operator 使用宿主原生 multi-agent delegation 创建可见子 Agent，并由可信宿主适配器证明 Agent、Dispatch、Packet 与 inspect reference 后绑定 Lease；原始 `run bind` JSON 不能充当证明。运行期间至少记录一次新鲜 heartbeat，最后提交结构化结果。没有可见委派或可信绑定能力时返回 `attention-required`；禁止调用 `codex exec`、后台 Agent CLI、`run execute` 或 `lifecycle execute` 兜底。
+
+只有 Project Descriptor 明确声明 `agentExecutionMode: headless`，且用户明确请求 CI/无人值守执行时，才可使用阻塞 Coordinator：
+
+```text
+node bin/agent-harness.mjs lifecycle execute --plan <plan.json> --command-id <command-id> --progress
+```
 
 `project-descriptor-input.schema.json` 约束可提交的配置输入；`project-descriptor.schema.json` 约束 Registry 增加 revision、commands、时间和摘要后的持久记录。更新时不得把整个 Registry 记录重新作为输入，Programmatic API 使用 `projectDescriptorInput(record)` 提取配置面。CLI 生成器会把当前 Harness 和已安装 Extension 的精确摘要封入输入。静态示例是 Consumer 生成器输入，不伪造会随发布制品变化的摘要。
 
@@ -106,9 +114,9 @@ Hook 只解析单行、最长 512 字符、至多一个预设参数的信封，�
 CLI 的底层问题登记入口为 `issue record --input <json|-> --command-id <id>`。稳定故障码可通过 `correlation` 生成与观察时间无关的 incident fingerprint。不可变 Intake 写入后，使用 `issue triage` 另行记录带 revision、批准 Decision、关系和 resolution Evidence 的分诊状态；`issue list`/`issue status` 都是零写入查询。初始化类故障归类为 `deployment-incident`，不伪造 Defect Bundle 所需的 Descriptor 或 Authority 身份。
 
 1. `run status` 读取 revision、epoch、generation、Feature、Lease 和 finding。
-2. `run execute` 让 Coordinator 调度、绑定、等待并提交；`run schedule` 用于需要外部 Runtime 接管的高级场景。
-3. `run gates --scope final --fresh` 从 Project Descriptor 执行确定性最终 Gate。
-4. Runtime 绑定 Dispatch 后定期 heartbeat；Agent 输出先进入 Evidence，再 submit。
+2. `conversation-visible` 是交互式默认：`run schedule` 生成 Dispatch，`run dispatch` 读取不可变 Packet，当前宿主创建可见子 Agent 后通过可信宿主适配器绑定；没有适配器时禁止改用原始 `run bind`。`run execute` 仅供用户请求与 Descriptor 双重显式 headless。
+3. `run gates --scope final --fresh` 从 Project Descriptor 执行确定性最终 Gate，并始终把启动、输出和结束事件显示在可观察终端；无观察器时不启动进程。
+4. 可见子 Agent 运行时，Operator 持续报告任务身份和状态并定期写 heartbeat；Agent 输出先进入 Evidence，再 submit。
 5. Gate、finding 和 Decision 分别记录，不用聊天文本替代 Authority。
 6. 所有 P0-P3 关闭、Profile Gate 满足后生成 close Receipt。
 
@@ -116,7 +124,7 @@ CLI 的底层问题登记入口为 `issue record --input <json|-> --command-id <
 
 一致性备份至少包含 Project Registry、Authority、Evidence、transaction journal、receipts 和 artifact pins。备份前停止写入或取得 Store 锁；恢复到新路径后先运行 doctor 和只读一致性检查，再允许调度。
 
-所有 Harness 启动的 Codex、Process Runtime 和 Gate 子进程都会把 `TEMP`、`TMP`、`TMPDIR` 强制指向控制根内的受管目录，调用方配置不能覆盖。Feature 隔离副本、Gate 临时目录、测试夹具和 clean-room 副本在使用结束后删除；Runtime stdout/stderr 与事件在删除调试文件前写入内容寻址 Evidence。npm 使用控制根内 `.agent-harness-cache/npm` 与 `.tmp/npm-logs`，不写用户级缓存目录；受管测试和打包验证结束后会删除本轮缓存及空目录。
+所有显式 headless Runtime、Gate、构建、测试和打包子进程都会把 `TEMP`、`TMP`、`TMPDIR` 强制指向控制根内的受管目录，调用方配置不能覆盖。交互式 Agent Runtime 不启动子进程，而由宿主创建可见子 Agent。Feature 隔离副本、Gate 临时目录、测试夹具和 clean-room 副本在使用结束后删除；headless Runtime/Gate stdout、stderr 与事件在删除调试文件前写入内容寻址 Evidence。npm 使用控制根内 `.agent-harness-cache/npm` 与 `.tmp/npm-logs`，不写用户级缓存目录；受管测试和打包验证结束后会删除本轮缓存及空目录。
 
 完整路径分类、生命周期和业务 Feature 输出的唯一例外见 [写入路径与清理策略](path-policy.md)。
 
@@ -145,7 +153,7 @@ hard recovery Decision 的最小输入如下；`context.expectedRevision` 是记
 
 ## 故障响应
 
-Codex CLI Runtime 将自动审批和显式 sandbox 作为互斥启动模式。`approveForMe: true` 只允许与 `sandbox: workspace-write` 配置配对，并只向 CLI 传递 `--approve-for-me`；`approveForMe: false` 或未配置时只传递 `--sandbox <mode>`。不兼容配置在进程启动前 fail closed。Runtime Receipt 分别记录请求的 sandbox、审批模式和由 `thread.started` 确认的实际应用状态；CLI 在会话建立前退出时记录稳定的 startup failure，不得以缺少结果文件替代根因。
+Codex CLI Runtime 仅属于显式 headless 模式。它将自动审批和显式 sandbox 作为互斥启动模式：`approveForMe: true` 只允许与 `sandbox: workspace-write` 配置配对，并只向 CLI 传递 `--approve-for-me`；`approveForMe: false` 或未配置时只传递 `--sandbox <mode>`。不兼容配置在进程启动前 fail closed。Runtime Receipt 分别记录请求的 sandbox、审批模式和由 `thread.started` 确认的实际应用状态；CLI 在会话建立前退出时记录稳定的 startup failure，不得以缺少结果文件替代根因。交互式 Project 在到达这些参数处理前就会拒绝该 Runtime。
 
 - Provider outage：停止新绑定，保留 Authority；可切换兼容 Runtime，逻辑 Attempt 不刷新。
 - Gate 环境失败：记录环境失败，不伪造业务 finding；修复环境后使用相同 source/gate key 重试。

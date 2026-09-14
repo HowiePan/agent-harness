@@ -8,12 +8,14 @@
 4. Register or read the Project Descriptor from the Harness Project Registry, not the business repository.
 5. Start a run with its selected Profile and immutable Feature graph.
 6. Schedule eligible Features using the configured Scheduler.
-7. For each Dispatch, verify packet digest, bind a Runtime receipt to a Lease, and wait for a structured result.
+7. For each Dispatch, verify packet digest. In `conversation-visible` mode, create a native visible child Agent, disclose its task identity/status, and use the trusted host adapter to attest and bind its Agent/Dispatch/packet-specific Runtime receipt to a Lease before waiting for a structured result. Direct Kernel/PluginHost calls and raw CLI receipt JSON are forbidden bypasses. In explicit `headless` mode, bind the selected headless Runtime receipt instead.
 8. Derive changed files from workspace snapshots. Preserve result, runtime, output-cleanup, sandbox, and Gate receipts as Evidence.
 9. Record completion, blocker, failure, finding, decision, or Gate result through Kernel commands with expected revision and a unique command ID.
 10. Repeat until closure is allowed or user authority is required.
 
 Feature Steps remain serial within one Feature. Separate Features may run concurrently only when dependencies, conflict paths, lane policy, logical limits, and physical capacity all permit it.
+
+Interactive execution must not become opaque: a conversation-visible Runtime must be host-orchestrated and cannot hold `process.spawn`; it cannot be driven by the blocking Coordinator; and failure to create, attest, observe, or heartbeat a visible child Agent is attention-required with no CLI/process/standalone-task fallback. Record at least one fresh heartbeat before submission and keep the current conversation updated with its inspectable reference and meaningful status changes. Headless mode requires separate explicit authorization in both the user request and Project Descriptor and is never inferred.
 
 ## Attention conditions
 
@@ -25,4 +27,4 @@ Ordinary resume invalidates obsolete Transport and continues the same Epoch unde
 
 ## Output control
 
-Every process-capable plugin declares output roots, file and byte budgets, retention, cleanup behavior, and sandbox mode. Successful and failed operations must produce a cleanup receipt. Retained Evidence is deliberate state; ephemeral output must be removed before the plugin returns.
+Every process-capable plugin declares output roots, file and byte budgets, retention, cleanup behavior, and sandbox mode. A process-backed Agent Runtime additionally declares `headless` and is rejected by a conversation-visible Project. Successful and failed operations must produce a cleanup receipt. Retained Evidence is deliberate state; ephemeral output must be removed before the plugin returns. Deterministic Gate/build/test processes require a live observer before launch and expose start, output/progress, finish, and interruption state to the operator; missing observation fails closed.

@@ -38,6 +38,7 @@ const jsonInput = async name => {
   for await (const chunk of process.stdin) raw += chunk;
   return JSON.parse(raw);
 };
+const progressWriter = event => process.stderr.write(`${JSON.stringify({ type: 'agent-harness.progress', ...event })}\n`);
 const command = argv[0] ?? 'help';
 const subject = argv[1];
 
@@ -51,17 +52,18 @@ agent-harness extension register --module <module> --expected-revision <n> --com
 agent-harness extension list
 agent-harness extension remove --id <id> --expected-revision <n> --command-id <id> --decision <json>
 agent-harness project register --descriptor <json>
-agent-harness project register --id <id> --workspace <absolute-path> --profiles <id,id>
+agent-harness project register --id <id> --workspace <absolute-path> --profiles <id,id> --agent-execution-mode <conversation-visible|headless> --runtime <plugin-id>
 agent-harness project descriptor --extension <module> --input <json>
 agent-harness project list
 agent-harness features compile --extension <module> --input <json>
 agent-harness run start --project <id> --run <id> --profile <id> --features <json> [--config <json>] [--execution-workspace <absolute-path>]
 agent-harness run status --project <id> --run <id>
 agent-harness run schedule --project <id> --run <id> [--max <n|auto>] [--runtime <plugin-id>]
+agent-harness run dispatch --project <id> --run <id> --dispatch <id>
 agent-harness run execute --project <id> --run <id> [--max <n|auto>] [--runtime <plugin-id>] [--max-rounds <n>]
-agent-harness run gates --project <id> --run <id> --scope <feature|stable|final> [--fresh] [--ids <id,id>]
-agent-harness run bind --project <id> --run <id> --dispatch <id> --agent <id> --runtime-receipt <json>
-agent-harness run submit --project <id> --run <id> --dispatch <id> --result <json>
+agent-harness run gates --project <id> --run <id> --scope <feature|stable|final> [--fresh] [--ids <id,id>] [--progress]
+agent-harness run bind --project <id> --run <id> --dispatch <id> --agent <id> --runtime-receipt <json|->
+agent-harness run submit --project <id> --run <id> --dispatch <id> --result <json|->
 agent-harness run heartbeat --project <id> --run <id> --lease <id> --agent <id>
 agent-harness run decision --project <id> --run <id> --decision <json>
 agent-harness run gate --project <id> --run <id> --gate-result <json>
@@ -74,7 +76,8 @@ agent-harness run recovery-rollback --project <id> --run <id> --snapshot-ref <ev
 agent-harness run close --project <id> --run <id>
 agent-harness run supersede --project <id> --run <id> --replacement-run <id> --plan-digest <digest> [--reason <text>]
 agent-harness lifecycle plan --input <json|-> [--control-root <path>] [--data-root <path>]
-agent-harness lifecycle execute --plan <json|-> --command-id <id> [--max <n>] [--max-rounds <n>]
+agent-harness lifecycle start --plan <json|-> --command-id <id>
+agent-harness lifecycle execute --plan <json|-> --command-id <id> [--max <n>] [--max-rounds <n>] [--progress]
 agent-harness release activation-plan [--control-root <path>] [--data-root <path>]
 agent-harness release activation-apply --plan <json|-> --command-id <id> --decision <json>
 agent-harness evidence add --project <id> --run <id> --file <path> [--feature <id>] [--dispatch <id>]
@@ -258,7 +261,8 @@ if (command === 'features' && subject === 'compile') {
   const readOnlyHarness = command === 'recovery' && ['assess', 'plan'].includes(subject);
   const harness = await createHarness({ controlRoot, dataRoot, extensions, releaseIdentity, initializeStorage: !readOnlyHarness });
   if (command === 'project' && subject === 'register') {
-    const rawInput = take('--descriptor') ? await jsonFile(take('--descriptor')) : { id: take('--id'), workspace: { root: resolve(take('--workspace')) }, profiles: String(take('--profiles') ?? '').split(',').filter(Boolean), policy: {} };
+    const runtimePluginId = take('--runtime');
+    const rawInput = take('--descriptor') ? await jsonFile(take('--descriptor')) : { id: take('--id'), workspace: { root: resolve(take('--workspace')) }, profiles: String(take('--profiles') ?? '').split(',').filter(Boolean), policy: { agentExecutionMode: take('--agent-execution-mode'), defaultRuntimePlugin: runtimePluginId, runtimePlugins: runtimePluginId ? [runtimePluginId] : [] } };
     const input = {
       ...rawInput,
       harness: rawInput.harness ?? { version: releaseIdentity.version, artifactDigest: releaseIdentity.artifactDigest },
@@ -273,28 +277,33 @@ if (command === 'features' && subject === 'compile') {
     const input = { projectId: take('--project'), runId: take('--run'), profileId: take('--profile'), features: await jsonFile(take('--features')), profileConfig: take('--config') ? await jsonFile(take('--config')) : {}, artifactDigest: take('--artifact-digest') ?? null, ...(take('--execution-workspace') ? { executionWorkspaceRoot: resolve(take('--execution-workspace')) } : {}) };
     const output = await harness.startRun(input, { commandId: take('--command-id') ?? newId('command') });
     console.log(JSON.stringify({ ok: true, state: output.state, reused: output.reused }, null, 2));
+  } else if (command === 'lifecycle' && subject === 'start') {
+    const output = await harness.startLifecyclePlan(await jsonInput('--plan'), { commandId: take('--command-id') });
+    console.log(JSON.stringify({ ok: ['started', 'closed'].includes(output.status), ...output }, null, 2));
   } else if (command === 'lifecycle' && subject === 'execute') {
-    const output = await harness.executeLifecyclePlan(await jsonInput('--plan'), { commandId: take('--command-id'), maxConcurrency: optionalNumber('--max'), maxRounds: Number(take('--max-rounds') ?? 100), forceFreshGates: !has('--no-fresh-gates') });
+    const output = await harness.executeLifecyclePlan(await jsonInput('--plan'), { commandId: take('--command-id'), maxConcurrency: optionalNumber('--max'), maxRounds: Number(take('--max-rounds') ?? 100), forceFreshGates: !has('--no-fresh-gates'), onGateProgress: progressWriter });
     console.log(JSON.stringify({ ok: output.status === 'closed', ...output }, null, 2));
   } else if (command === 'run' && subject === 'schedule') {
     const state = await harness.authorityStore.read(take('--project'), take('--run'));
     const output = await harness.dispatch(state.projectId, state.runId, { maxConcurrency: optionalNumber('--max'), runtimePluginId: take('--runtime') ?? null }, { expectedRevision: state.revision, commandId: take('--command-id') ?? newId('command') });
     console.log(JSON.stringify({ ok: true, ...output.result, revision: output.state.revision }, null, 2));
+  } else if (command === 'run' && subject === 'dispatch') {
+    const output = await harness.readDispatchPacket(take('--project'), take('--run'), take('--dispatch'));
+    console.log(JSON.stringify({ ok: true, ...output }, null, 2));
   } else if (command === 'run' && subject === 'execute') {
     const coordinator = new RunCoordinator({ harness });
     const output = await coordinator.run({ projectId: take('--project'), runId: take('--run'), runtimePluginId: take('--runtime') ?? null, maxConcurrency: optionalNumber('--max'), maxRounds: Number(take('--max-rounds') ?? 100) });
     console.log(JSON.stringify({ ok: output.status !== 'attention-required', ...output }, null, 2));
   } else if (command === 'run' && subject === 'gates') {
-    const runner = new ProjectGateRunner({ harness });
+    const runner = new ProjectGateRunner({ harness, onProgress: progressWriter });
     const output = await runner.run({ projectId: take('--project'), runId: take('--run'), scope: take('--scope') ?? 'final', forceFresh: has('--fresh'), gateIds: String(take('--ids') ?? '').split(',').filter(Boolean) });
     console.log(JSON.stringify({ ok: output.results.every(result => result.status === 'passed'), ...output }, null, 2));
   } else if (command === 'run' && subject === 'bind') {
     const state = await harness.authorityStore.read(take('--project'), take('--run'));
-    const dispatch = state.dispatches.find(item => item.dispatchId === take('--dispatch'));
-    const output = await harness.kernel.bindLease(state.projectId, state.runId, { dispatchId: dispatch.dispatchId, agentId: take('--agent'), packetDigest: dispatch.packetDigest, runtimeReceipt: await jsonFile(take('--runtime-receipt')) }, { expectedRevision: state.revision, commandId: take('--command-id') ?? newId('command') });
+    const output = await harness.bindDispatch(state.projectId, state.runId, { dispatchId: take('--dispatch'), agentId: take('--agent'), runtimeReceipt: await jsonInput('--runtime-receipt') }, { expectedRevision: state.revision, commandId: take('--command-id') ?? newId('command') });
     console.log(JSON.stringify({ ok: true, lease: output.result.lease, revision: output.state.revision }, null, 2));
   } else if (command === 'run' && subject === 'submit') {
-    const output = await harness.recordResult(take('--project'), take('--run'), take('--dispatch'), await jsonFile(take('--result')), { commandId: take('--command-id') ?? newId('command') });
+    const output = await harness.recordResult(take('--project'), take('--run'), take('--dispatch'), await jsonInput('--result'), { commandId: take('--command-id') ?? newId('command') });
     console.log(JSON.stringify({ ok: true, ...output.result, revision: output.state.revision }, null, 2));
   } else if (command === 'run' && subject === 'heartbeat') {
     const state = await harness.authorityStore.read(take('--project'), take('--run'));

@@ -11,9 +11,10 @@ const temporary = await mkdtemp(resolve(scratch, 'run-'));
 const project = resolve(temporary, 'agent-harness');
 const processTemporary = resolve(project, '.tmp', 'parent-process');
 const run = (args, { cwd = project, environment = {} } = {}) => new Promise((resolveRun, reject) => {
+  process.stderr.write(`[process:start] node ${args.join(' ')}\n`);
   const child = spawn(process.execPath, args, { cwd, env: { ...process.env, ...temporaryEnvironment(processTemporary), ...environment }, windowsHide: true, stdio: 'inherit' });
-  child.on('error', reject);
-  child.on('close', code => code === 0 ? resolveRun() : reject(new Error(`clean-room command failed with exit code ${code}`)));
+  child.on('error', error => { process.stderr.write(`[process:error] ${error.message}\n`); reject(error); });
+  child.on('close', (code, signal) => { process.stderr.write(`[process:finish] exit=${code ?? 'null'} signal=${signal ?? 'none'}\n`); code === 0 && !signal ? resolveRun() : reject(new Error(`clean-room command failed with ${signal ?? `exit code ${code}`}`)); });
 });
 try {
   await mkdir(project, { recursive: true });
