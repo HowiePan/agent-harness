@@ -22,6 +22,7 @@ import { captureWorkspace, diffWorkspaceSnapshots } from '../workspace-snapshot.
 import { resolveProjectWorkspace } from '../workspace-identity.mjs';
 import { assertHarnessWritePath, harnessControlRoot } from '../write-boundary.mjs';
 import { RunCoordinator } from '../coordinator/run-coordinator.mjs';
+import { AUTO_CONCURRENCY, AUTO_CONCURRENCY_LIMIT, resolveConcurrencyLimit } from '../concurrency.mjs';
 import { ProjectGateRunner } from '../gates/project-gate-runner.mjs';
 
 export const defaultDataRoot = (controlRoot = harnessControlRoot()) => resolve(controlRoot, '.agent-harness-data');
@@ -116,7 +117,7 @@ export const createHarness = async ({ controlRoot: controlRootInput, dataRoot: d
       return plan;
     },
 
-    async executeLifecyclePlan(planInput, { commandId, maxConcurrency = 1, maxRounds = 100, forceFreshGates = true } = {}) {
+    async executeLifecyclePlan(planInput, { commandId, maxConcurrency, maxRounds = 100, forceFreshGates = true } = {}) {
       assert(commandId, 'COMMAND_ID_REQUIRED', 'Lifecycle execution requires a command ID.');
       const plan = validateLifecycleCommandPlan(planInput);
       const project = await projectRegistry.get(plan.project.id);
@@ -191,17 +192,21 @@ export const createHarness = async ({ controlRoot: controlRootInput, dataRoot: d
       const project = await projectRegistry.get(projectId);
       const workspaceRoot = state.metadata?.workspace?.root ?? project.workspace.root;
       const runtimePluginId = input.runtimePluginId ?? project.policy?.defaultRuntimePlugin ?? null;
+      let runtimeManifest = null;
       if (runtimePluginId) {
         assert((project.policy?.runtimePlugins ?? [runtimePluginId]).includes(runtimePluginId), 'PROJECT_RUNTIME_DENIED', `Runtime ${runtimePluginId} is not allowed by Project ${projectId}.`);
-        pluginHost.get(runtimePluginId, 'agent-runtime');
+        runtimeManifest = pluginHost.get(runtimePluginId, 'agent-runtime').manifest;
       }
+      const configuredLimit = resolveConcurrencyLimit(project.policy?.maxConcurrency, project.policy?.maxConcurrency === AUTO_CONCURRENCY ? AUTO_CONCURRENCY_LIMIT : 1);
+      const requestedLimit = resolveConcurrencyLimit(input.maxConcurrency, configuredLimit);
+      const schedulingLimit = runtimeManifest?.capabilities.includes('workspace-shared') ? 1 : requestedLimit;
       const snapshot = await captureWorkspace(workspaceRoot, { excluded: project.workspace.excluded ?? [] });
       assert(snapshot.digest === state.sourceDigest, 'WORKSPACE_SOURCE_DRIFT', 'Workspace changed outside a committed Feature result.', { authoritySourceDigest: state.sourceDigest, workspaceSourceDigest: snapshot.digest });
       const snapshotEvidence = await evidenceStore.put(snapshot, { mediaType: 'application/json', projectId, runId, epoch: state.epoch, generation: state.generation, sourceDigest: state.sourceDigest, artifactDigest: state.artifactDigest, policyDigest: state.policyDigest, pluginSetDigest: state.pluginSetDigest, labels: ['workspace-snapshot'] });
-      const scheduledInput = { ...input, runtimePluginId, sourceSnapshotRef: snapshotEvidence.ref };
+      const scheduledInput = { ...input, maxConcurrency: schedulingLimit, runtimePluginId, sourceSnapshotRef: snapshotEvidence.ref };
       if (input.candidateFeatureIds) return kernel.schedule(projectId, runId, scheduledInput, command);
       const activeFeatureIds = [...new Set([...state.leases.filter(lease => ['requested', 'active'].includes(lease.status)).map(lease => lease.featureId), ...state.dispatches.filter(dispatch => ['requested', 'assigned'].includes(dispatch.status)).map(dispatch => dispatch.featureId)])];
-      const strategy = await pluginHost.invoke(input.schedulerPluginId ?? manifests.scheduler.id, 'select', { revision: state.revision, features: state.features, activeFeatureIds, limit: Number(input.maxConcurrency ?? 1), deniedFeatureIds: [] });
+      const strategy = await pluginHost.invoke(input.schedulerPluginId ?? manifests.scheduler.id, 'select', { revision: state.revision, features: state.features, activeFeatureIds, limit: schedulingLimit, deniedFeatureIds: [] });
       const executionByFeatureId = {};
       const modelRouterPluginId = input.modelRouterPluginId ?? project.policy?.modelRouterPlugin ?? null;
       const toolBrokerPluginId = input.toolBrokerPluginId ?? project.policy?.toolBrokerPlugin ?? null;

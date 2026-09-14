@@ -1,0 +1,77 @@
+{
+  "protocolVersion": "1.0",
+  "projectAlias": "engine",
+  "project": {
+    "projectId": "cardworld-engine",
+    "profileId": "engine-delivery",
+    "extensionId": "cardworld-engine-profile"
+  },
+  "observedAt": "2026-09-14T14:27:51.000Z",
+  "summary": "V3.8.4 quality run is blocked because the Codex Runtime rejects uniqueItems in changedFiles schema",
+  "severity": "P1",
+  "environment": {
+    "harnessVersion": "1.0.0",
+    "runtimePlugin": "codex-cli-runtime",
+    "qualityTarget": "V3.8.4"
+  },
+  "expected": {
+    "behavior": "The bound quality lifecycle should start the reviewer Runtime and proceed to scoped quality checks.",
+    "contract": "The structured output schema should be accepted by the configured Runtime provider."
+  },
+  "actual": {
+    "status": "blocked",
+    "failureClass": "runtime-contract",
+    "failureCode": "CODEX_OUTPUT_SCHEMA_INVALID",
+    "message": "Invalid schema for response_format codex_output_schema: uniqueItems is not permitted under properties.changedFiles.",
+    "changedFiles": [],
+    "gatesExecuted": false
+  },
+  "reproduction": {
+    "steps": [
+      "Invoke the bound command h:engine quality V3.8.4.",
+      "Allow the lifecycle plan to start the cardworld-engine quality Run with the engine-delivery Profile and codex-cli-runtime.",
+      "Observe that Runtime startup fails while validating the structured output schema before the quality Feature executes.",
+      "Observe the stable failure code CODEX_OUTPUT_SCHEMA_INVALID and the message that uniqueItems is not permitted in changedFiles."
+    ]
+  },
+  "conversation": {
+    "source": "current-thread",
+    "excerpts": [
+      {
+        "role": "user",
+        "text": "User invoked h:engine quality V3.8.4."
+      },
+      {
+        "role": "tool",
+        "text": "Run status: all-remaining-blocked; feature quality/V3.8.4 is blocked; no findings or gates were recorded."
+      },
+      {
+        "role": "tool",
+        "text": "CODEX_OUTPUT_SCHEMA_INVALID: Invalid schema for response_format codex_output_schema. In context properties.changedFiles, uniqueItems is not permitted."
+      },
+      {
+        "role": "assistant",
+        "text": "The blocker is in the external Harness Runtime contract, not in CardWorld source code; the workspace has no code changes."
+      }
+    ]
+  },
+  "missingEvidence": [
+    "No compatible Runtime provider or upstream fix was available in this thread.",
+    "No quality Gate evidence exists because Runtime startup failed before Feature execution."
+  ],
+  "correlation": {
+    "category": "runtime-contract",
+    "failureCode": "CODEX_OUTPUT_SCHEMA_INVALID",
+    "scope": "cardworld-engine quality V3.8.4 via codex-cli-runtime"
+  },
+  "sanitization": {
+    "confirmed": true,
+    "removed": [
+      "Credentials, authorization material, and secret-like values.",
+      "Temporary process identifiers and unrelated Harness bootstrap details.",
+      "Unrelated repository context not needed to reproduce the Runtime contract failure."
+    ]
+  },
+  "incidentFingerprint": "9672882c746691ae2fc4b1c73d2ab7ea34f2851c973e93ca3486055a2b752ef1",
+  "intakeDigest": "f16b3ebb0898e770062fa6d217179a805c63920d199a72318845b7293344595a"
+}

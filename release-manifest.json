@@ -207,8 +207,8 @@
     },
     {
       "path": "integrations/codex/agent-harness-codex/.codex-plugin/plugin.json",
-      "sha256": "fe71fa406df352af26ecb5fb512837b043fad3c29a66a085d4fb14128d658479",
-      "size": 1114
+      "sha256": "54a8cad71ea6ae58b30e2ede12931ee555b2e2849f171ea7cb4907bf457bb18e",
+      "size": 1136
     },
     {
       "path": "integrations/codex/agent-harness-codex/hooks/hooks.json",
@@ -327,8 +327,8 @@
     },
     {
       "path": "schemas/codex-runtime-result.schema.json",
-      "sha256": "8ae1ab37891a72866c73ef8e3b9627aa76dd7b16e4542f6da009ae35f922f8fb",
-      "size": 2344
+      "sha256": "5457e7c710d778d6b4083a47bc84ee2badb0006280eac642335d2142408de9f7",
+      "size": 4155
     },
     {
       "path": "schemas/command.schema.json",
@@ -432,8 +432,8 @@
     },
     {
       "path": "schemas/result.schema.json",
-      "sha256": "5819308059ab44769cb713a32529bc92fe292c9c510a40e8f7621aeb044034b3",
-      "size": 1549
+      "sha256": "f6acb488fb8805f27ad3c16029a91645a56080fbda6c0bd3c9dc1718169269a2",
+      "size": 3263
     },
     {
       "path": "scripts/check-context-budget.mjs",
@@ -447,8 +447,8 @@
     },
     {
       "path": "src/app/harness.mjs",
-      "sha256": "f45a1495d38ee8cddbd6bb103981c4fde1452910228d3de0c3a882398f8f02f2",
-      "size": 23747
+      "sha256": "b2611b721eafd2af775276aac3835933f06d1106ed7720d892c4ad7e5130fcf9",
+      "size": 24296
     },
     {
       "path": "src/bootstrap.mjs",
@@ -462,13 +462,18 @@
     },
     {
       "path": "src/cli.mjs",
-      "sha256": "a3af03fdba88cf4ad100714f817edfb3494059333cfe6f5ecf80c501b7e05ffb",
-      "size": 28117
+      "sha256": "3b58cdd88d0f6ad5aa0536d82da3e443e223e7652df5499b5fff574e18ce13ff",
+      "size": 28240
+    },
+    {
+      "path": "src/concurrency.mjs",
+      "sha256": "e2ead7d8b452d1f5f91054fe1549d5117fda342968f01c7b25abdcad741f83ae",
+      "size": 717
     },
     {
       "path": "src/consumers/cardworld-engine.mjs",
-      "sha256": "81066e0d058667ebb3278d09a742bcd0b8464ed29a241f4e942cb08f53d79ed0",
-      "size": 10589
+      "sha256": "ad8ee2b02186f1839a131b3f81b48daad680074acc6b50a1c740aa17f302b0c5",
+      "size": 11187
     },
     {
       "path": "src/consumers/index.mjs",
@@ -482,8 +487,8 @@
     },
     {
       "path": "src/coordinator/run-coordinator.mjs",
-      "sha256": "1ee0df5e2465d2a1e57eea97ac347f211696e46d94138423da00055d66c95709",
-      "size": 6715
+      "sha256": "3124aa3244bd8e6c8c8b6d48b3b6212324aa6b0a27e3827ab237d0f55150f0f1",
+      "size": 6883
     },
     {
       "path": "src/errors.mjs",
@@ -567,13 +572,13 @@
     },
     {
       "path": "src/kernel/kernel.mjs",
-      "sha256": "0c48fe3c676932c5d062560b84179df0d85c9ef1d67c27a5d193fc36c36675ee",
-      "size": 35136
+      "sha256": "c3a715c4a40b6e96dd5ad70f0e51edf1afcaff80ac6b34db639a41ef036067e6",
+      "size": 36823
     },
     {
       "path": "src/kernel/quality.mjs",
-      "sha256": "c38c748f8459ae45b4b79b4cd134ce2360dcee7bf3b8f5708f0797e1853a5a84",
-      "size": 1169
+      "sha256": "4be6051db8d7339cc571a207dec64bfd81d5e61c3e9a5c43f610ae22ea58ccec",
+      "size": 1494
     },
     {
       "path": "src/kernel/receipts.mjs",
@@ -702,8 +707,8 @@
     },
     {
       "path": "src/plugins/runtime/codex-cli-runtime.mjs",
-      "sha256": "687a6625e9ba0020a72566ed08dd477145220f4ff92645db46a3259e4e419d08",
-      "size": 17290
+      "sha256": "c6f9b5e94ca5eaace046dfcd9c5efb764bfb1bcc39ca99377f492591525fdbc4",
+      "size": 18674
     },
     {
       "path": "src/plugins/runtime/codex-runtime.mjs",
@@ -747,8 +752,8 @@
     },
     {
       "path": "src/profiles/engine-delivery.mjs",
-      "sha256": "58e5e2f96b09c868ed12dbfc7ba4ad1fa4177265edf6933ae064634529fdf335",
-      "size": 2741
+      "sha256": "36de3cbf50888299387f47fe26dfb9a36b49ce140b53ac05d956c6bf4742881a",
+      "size": 6522
     },
     {
       "path": "src/profiles/feature-delivery.mjs",
@@ -861,7 +866,7 @@
       "size": 3735
     }
   ],
-  "packageDigest": "bc6b310666b2586137aea2cfc8e3ea16b25502ccdf0b790980db4bab2a949444",
+  "packageDigest": "66b2a30925587ccaa123c36438feae1c3b88ba46a31d8751e54a2309828a8392",
   "metadataFiles": [
     "release-manifest.json",
     "sbom.spdx.json"

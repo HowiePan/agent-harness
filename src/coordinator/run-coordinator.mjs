@@ -1,5 +1,6 @@
 import { newId } from '../canonical.mjs';
 import { assert } from '../errors.mjs';
+import { AUTO_CONCURRENCY, AUTO_CONCURRENCY_LIMIT, resolveConcurrencyLimit } from '../concurrency.mjs';
 
 const parseLastJsonObject = text => {
   const lines = String(text ?? '').split(/\r?\n/).filter(Boolean);
@@ -28,14 +29,14 @@ export class RunCoordinator {
     this.id = id;
   }
 
-  async tick({ projectId, runId, runtimePluginId, maxConcurrency = 1 }) {
+  async tick({ projectId, runId, runtimePluginId, maxConcurrency } = {}) {
     const project = await this.harness.projectRegistry.get(projectId);
     const selectedRuntime = runtimePluginId ?? project.policy?.defaultRuntimePlugin;
     assert(selectedRuntime, 'DEFAULT_RUNTIME_REQUIRED', `Project ${projectId} requires a default Runtime or an explicit runtimePluginId.`);
     assert((project.policy?.runtimePlugins ?? []).includes(selectedRuntime), 'PROJECT_RUNTIME_DENIED', `Runtime ${selectedRuntime} is not allowed by Project ${projectId}.`);
     const runtime = this.harness.pluginHost.get(selectedRuntime, 'agent-runtime');
-    const configuredLimit = Math.max(1, Number(project.policy?.maxConcurrency ?? maxConcurrency));
-    const requestedLimit = Math.max(1, Math.min(Number(maxConcurrency), configuredLimit));
+    const configuredLimit = resolveConcurrencyLimit(project.policy?.maxConcurrency, project.policy?.maxConcurrency === AUTO_CONCURRENCY ? AUTO_CONCURRENCY_LIMIT : 1);
+    const requestedLimit = resolveConcurrencyLimit(maxConcurrency, configuredLimit);
     const physicalLimit = runtime.manifest.capabilities.includes('workspace-shared') ? 1 : requestedLimit;
     let state = await this.harness.authorityStore.read(projectId, runId);
     const orphaned = state.leases.filter(lease => lease.status === 'active');
@@ -82,7 +83,7 @@ export class RunCoordinator {
     return { status: 'progressed', runtimePluginId: selectedRuntime, physicalLimit, committed, state };
   }
 
-  async run({ projectId, runId, runtimePluginId, maxConcurrency = 1, maxRounds = 100 }) {
+  async run({ projectId, runId, runtimePluginId, maxConcurrency, maxRounds = 100 } = {}) {
     const rounds = [];
     for (let round = 1; round <= maxRounds; round += 1) {
       const result = await this.tick({ projectId, runId, runtimePluginId, maxConcurrency });

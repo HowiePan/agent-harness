@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { dirname, resolve } from 'node:path';
 import { access, mkdir, readFile, writeFile } from 'node:fs/promises';
-import { createCodexCliRuntime, resolveCodexExecutionPolicy, validateCodexStructuredOutputSchema } from '../src/plugins/runtime/codex-cli-runtime.mjs';
+import { adaptCodexStructuredOutputSchema, createCodexCliRuntime, resolveCodexExecutionPolicy, validateCodexStructuredOutputSchema } from '../src/plugins/runtime/codex-cli-runtime.mjs';
 import { businessResultFromRuntime } from '../src/coordinator/run-coordinator.mjs';
 import { makeFixture } from './test-support.mjs';
 
@@ -28,6 +28,15 @@ test('Codex Runtime output Schema is strict and every object property is require
   assert.throws(() => validateCodexStructuredOutputSchema({ ...schema, $defs: { loose: { type: 'object', properties: { value: { type: 'string' } }, required: [], additionalProperties: true } } }), error => error.code === 'CODEX_OUTPUT_SCHEMA_INVALID');
 });
 
+test('Codex provider schema adaptation removes unsupported uniqueness keywords without changing the source schema', async () => {
+  const schema = JSON.parse(await readFile(resolve('schemas/codex-runtime-result.schema.json'), 'utf8'));
+  const adapted = adaptCodexStructuredOutputSchema(schema);
+  assert.equal(schema.properties.changedFiles.uniqueItems, true);
+  assert.equal(adapted.properties.changedFiles.uniqueItems, undefined);
+  assert.equal(adapted.properties.findings.items.properties.evidence.uniqueItems, undefined);
+  assert.equal(adapted.properties.changedFiles.items.type, 'string');
+});
+
 test('Codex CLI Runtime rejects an invalid output Schema before spawning a process', async t => {
   const fixture = await makeFixture({ policy: { runtimePlugins: ['codex-cli-runtime'], defaultRuntimePlugin: 'codex-cli-runtime' } });
   t.after(() => fixture.cleanup());
@@ -51,6 +60,9 @@ test('Codex CLI Runtime uses non-interactive structured output and records trans
   assert.equal(waited.payload.status, 'completed');
   assert.equal(waited.payload.result.status, 'completed');
   assert.equal(waited.payload.threadId, 'probe-thread');
+  const providerSchemaPath = waited.payload.events[0].args[waited.payload.events[0].args.indexOf('--output-schema') + 1];
+  const providerSchema = JSON.parse(await readFile(providerSchemaPath, 'utf8'));
+  assert.equal(providerSchema.properties.changedFiles.uniqueItems, undefined);
   assert.ok(waited.payload.events[0].temp.startsWith(fixture.dataRoot));
   assert(waited.payload.events[0].args.includes('--approve-for-me'));
   assert.equal(waited.payload.events[0].args.includes('--sandbox'), false);

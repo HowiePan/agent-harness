@@ -70,6 +70,19 @@ export const validateCodexStructuredOutputSchema = schema => {
   return schema;
 };
 
+/**
+ * Adapt the authoritative schema to the narrower schema dialect accepted by
+ * Codex Structured Outputs. Uniqueness remains enforced by Harness after the
+ * Runtime returns its result; the provider only needs the shape constraints.
+ */
+export const adaptCodexStructuredOutputSchema = schema => {
+  if (Array.isArray(schema)) return schema.map(adaptCodexStructuredOutputSchema);
+  if (!schema || typeof schema !== 'object') return schema;
+  return Object.fromEntries(Object.entries(schema)
+    .filter(([key]) => key !== 'uniqueItems')
+    .map(([key, value]) => [key, adaptCodexStructuredOutputSchema(value)]));
+};
+
 export const resolveCodexExecutionPolicy = (config = {}) => {
   const sandbox = config.sandbox ?? 'workspace-write';
   assert(sandboxValues.has(sandbox), 'CODEX_SANDBOX_INVALID', `Unsupported Codex sandbox: ${sandbox}`);
@@ -86,7 +99,7 @@ export const resolveCodexExecutionPolicy = (config = {}) => {
 
 export const buildCodexPrompt = packet => `You are an execution Runtime controlled by Agent Harness.
 
-Complete exactly the supplied Feature inside the current workspace. Treat the Feature allowedPaths and forbiddenPaths as hard boundaries. Do not edit Harness Authority, Evidence, Dispatch, Lease, or Receipt data. Feature steps are ordered and share one logical attempt.
+Complete exactly the supplied Feature inside the current workspace. Treat the Feature allowedPaths and forbiddenPaths as hard boundaries. Do not edit Harness Authority, Evidence, Dispatch, Lease, or Receipt data. Feature steps are ordered and share one logical attempt. For quality review Findings, report the affectedPaths, symbols, contracts, generatedOutputs, and conflictKeys needed to safely schedule independent repair Features. For normal development work, report followUpFeatures when the work decomposes into independent scoped tasks; each item must include its ID, acceptance, allowedPaths, forbiddenPaths, dependsOn, symbols, contracts, generatedOutputs, and conflictKeys.
 
 Return only the structured business result required by the provided JSON Schema. Include an accurate changedFiles array using workspace-relative forward-slash paths. If the Feature cannot be completed, return status "blocked" or "failed" with a stable failureClass and blocker summary. Do not claim completion without running the Feature acceptance checks.
 
@@ -145,7 +158,8 @@ export const createCodexCliRuntime = ({
     let schema;
     try { schema = JSON.parse(await readFile(resolve(schemaPath), 'utf8')); }
     catch (error) { assert(false, 'CODEX_OUTPUT_SCHEMA_INVALID', `Codex Runtime output Schema could not be loaded: ${error.message}`, { cause: error.code ?? 'SCHEMA_READ_FAILED' }); }
-    return validateCodexStructuredOutputSchema(schema);
+    const validatedSchema = validateCodexStructuredOutputSchema(schema);
+    return { source: validatedSchema, provider: adaptCodexStructuredOutputSchema(validatedSchema) };
   };
   return {
     async spawn(packet) {
@@ -154,7 +168,7 @@ export const createCodexCliRuntime = ({
       assert((project.policy?.runtimePlugins ?? [manifest.id]).includes(manifest.id), 'PROJECT_RUNTIME_DENIED', `Project ${project.id} does not allow ${manifest.id}.`);
       const executionPolicy = resolveCodexExecutionPolicy(config);
       const { sandbox, approvalMode } = executionPolicy;
-      const outputSchema = await loadOutputSchema();
+      const { source: outputSchema, provider: providerOutputSchema } = await loadOutputSchema();
       const agentId = newId('codex-agent');
       const outputSession = createManagedOutputSession({ root: resolve(controlledRuntimeRoot, 'runtime', 'codex-cli'), controlRoot, operationId: agentId, declarations: config.outputs ?? manifest.execution?.outputs ?? CODEX_OUTPUTS });
       const directory = outputSession.operationRoot;
@@ -163,11 +177,13 @@ export const createCodexCliRuntime = ({
       try {
         const managedOutputs = await outputSession.prepare();
         const processTemporary = outputSession.paths.temporary;
+        const providerSchemaPath = resolve(processTemporary, 'codex-output-schema.json');
+        await writeFile(providerSchemaPath, `${JSON.stringify(providerOutputSchema)}\n`, 'utf8');
         workspaceContext = workspaceProvider ? await workspaceProvider.prepare({ project, packet, agentId, runtimeDirectory: directory }) : null;
         const executionRoot = workspaceContext?.workspaceRoot ?? packet.workspace?.root ?? project.workspace.root;
         const lastMessagePath = resolve(outputSession.paths.debug, 'result.json');
         const eventsPath = resolve(outputSession.paths.debug, 'events.jsonl');
-        const args = [...(config.executableArgs ?? executableArgs), 'exec', '--json', '--color', 'never', ...executionPolicy.cliArgs, '--cd', project.workspace.root, '--output-schema', resolve(schemaPath), '--output-last-message', lastMessagePath];
+        const args = [...(config.executableArgs ?? executableArgs), 'exec', '--json', '--color', 'never', ...executionPolicy.cliArgs, '--cd', project.workspace.root, '--output-schema', providerSchemaPath, '--output-last-message', lastMessagePath];
         if (config.ephemeral !== false) args.push('--ephemeral');
         const routedModel = packet.execution?.modelRoute?.route?.model ?? config.model;
         if (routedModel) args.push('--model', String(routedModel));

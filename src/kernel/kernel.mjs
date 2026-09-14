@@ -209,6 +209,26 @@ export class HarnessKernel {
         feature.state = attempt.exhausted ? 'failed-budget' : 'blocked';
         feature.blocker = structuredClone(input.result.blocker ?? { kind: input.result.failureClass ?? 'execution', summary: input.result.summary ?? 'Feature blocked.' });
       }
+      const repairFindingId = feature.metadata?.repairFindingId;
+      if (input.result.status === 'completed' && repairFindingId) {
+        const finding = state.findings.find(item => item.id === repairFindingId);
+        assert(finding?.status === 'open', 'REPAIR_FINDING_NOT_OPEN', `Repair Feature is not bound to an open Finding: ${repairFindingId}`);
+        assert(submission.evidenceRefs.length > 0, 'FINDING_RESOLUTION_EVIDENCE_REQUIRED', 'A completed repair Feature requires resolution Evidence.');
+        finding.status = 'resolved';
+        finding.resolution = { status: 'fixed', summary: input.result.summary };
+        finding.resolutionEvidenceRefs = [...submission.evidenceRefs];
+        finding.resolvedAt = this.now();
+        event(state, 'finding.resolved', { id: finding.id, repairFeatureId: feature.id, evidenceRefs: submission.evidenceRefs }, this.now);
+      }
+      const followUps = typeof profile.createFollowUpFeatures === 'function'
+        ? profile.createFollowUpFeatures({ state: structuredClone(state), feature: structuredClone(feature), findings: structuredClone(findings), result: structuredClone(input.result) })
+        : [];
+      if (followUps.length) {
+        const existingIds = new Set(state.features.map(item => item.id));
+        const normalized = validateWorkGraph([...state.features, ...followUps]);
+        state.features.push(...normalized.filter(item => !existingIds.has(item.id)));
+        for (const followUp of normalized.filter(item => !existingIds.has(item.id))) event(state, 'feature.follow-up-created', { featureId: followUp.id, sourceFeatureId: feature.id, findingId: followUp.metadata?.findingId ?? null }, this.now);
+      }
       event(state, 'submission.committed', { submissionId: submission.submissionId, featureId: feature.id, status: feature.state }, this.now);
       state.status = deriveStatus(state, profile);
       return { submission, findings, featureState: feature.state, runStatus: state.status };

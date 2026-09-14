@@ -6,6 +6,7 @@ import { engineDeliveryProfile } from '../profiles/engine-delivery.mjs';
 import { defineExtensionPack } from '../extensions/contract.mjs';
 import { defineCommandManifest } from '../extensions/command-contract.mjs';
 import { validateWorkGraph } from '../kernel/work-graph.mjs';
+import { AUTO_CONCURRENCY } from '../concurrency.mjs';
 
 export const CARDWORLD_FINAL_GATE_IDS = Object.freeze([
   'context-budget',
@@ -58,18 +59,19 @@ const defaultContextBudgetCommand = () => [process.execPath, resolve(packageRoot
 const gate = (id, command, cwd, extra = {}) => ({ id, scope: 'final', required: true, forceFresh: true, command, cwd, ...extra });
 const powershell = process.platform === 'win32' ? 'powershell' : 'pwsh';
 const cardWorldTask = (task, ...args) => [powershell, '-NoProfile', '-File', 'scripts/cardworld.ps1', '-Task', task, ...args];
+const actionStage = Object.freeze({ full: 'requirement-intake', requirements: 'requirement-intake', plan: 'version-planning', implement: 'implementation', scope: 'scope-resolution', quality: 'quality', docs: 'docs-closeout', review: 'user-code-review', deliver: 'docs-closeout' });
 
 export const createCardWorldProjectDescriptor = ({
   id = 'cardworld-engine',
   harness,
   workspaceRoot,
   remote,
-  runtimePluginId = 'codex-cli-runtime',
+  runtimePluginId = 'codex-isolated-runtime',
   runtimeExtension,
   extensions = [],
   model,
   contextBudgetCommand = defaultContextBudgetCommand(),
-  maxConcurrency = 1,
+  maxConcurrency = AUTO_CONCURRENCY,
 } = {}) => {
   assert(workspaceRoot && isAbsolute(workspaceRoot), 'CARDWORLD_WORKSPACE_REQUIRED', 'CardWorld descriptor requires an absolute workspaceRoot.');
   const workspace = { root: workspaceRoot, rootSelector: 'git-worktree', excluded: ['.git', '.cardworld-local', 'card_world_engine/target', 'card_world_engine/pkg', 'node_modules'] };
@@ -77,7 +79,7 @@ export const createCardWorldProjectDescriptor = ({
   const runtimeConfig = { sandbox: 'workspace-write', ephemeral: true, approveForMe: true };
   if (model) runtimeConfig.model = model;
   const selectedRuntimeExtension = runtimeExtension === undefined
-    ? (runtimePluginId === 'codex-cli-runtime' ? { id: 'codex-runtime', version: '1.0.0' } : null)
+    ? (['codex-cli-runtime', 'codex-isolated-runtime'].includes(runtimePluginId) ? { id: 'codex-runtime', version: '1.0.0' } : null)
     : runtimeExtension;
   return {
     id,
@@ -166,13 +168,15 @@ export const createCardWorldLifecyclePlan = ({ intent, project, runId }) => {
       ? [
           `Review the complete ${intent.target} implementation against the authoritative version documents and current workspace state.`,
           'Run the relevant focused checks and record evidence for every quality conclusion.',
-          ...(readOnly ? [] : ['Repair actionable P0-P3 findings within the allowed paths, then re-run affected checks.']),
+          ...(readOnly ? [] : ['For every actionable P0-P3 finding, report affectedPaths, symbols, contracts, generatedOutputs, and conflictKeys so independent repairs can be scheduled safely.']),
           'Return a complete structured result with accurate changedFiles and any unresolved blockers.',
         ]
-      : [`Execute the declared ${intent.action} scope for ${intent.target} and return structured evidence.`],
+      : [
+          `Execute the declared ${intent.action} scope for ${intent.target} and return structured evidence.`,
+          'If the work naturally decomposes into independent tasks, return followUpFeatures with one scoped item per task so the Harness can schedule non-conflicting work in parallel.',
+        ],
     steps: quality ? [
       { id: 'review', title: `Review ${intent.target} implementation, tests, contracts, and release-boundary evidence.` },
-      ...(readOnly ? [] : [{ id: 'repair', title: 'Repair actionable quality findings and verify each repair with focused checks.' }]),
       { id: 'report', title: 'Report the final disposition and remaining blockers.' },
     ] : [{ id: 'execute', title: `Execute ${intent.action} for ${intent.target}.` }],
     dependsOn: [],
@@ -180,7 +184,7 @@ export const createCardWorldLifecyclePlan = ({ intent, project, runId }) => {
     forbiddenPaths: ['.git', '.agent-harness-data', '.cardworld-local', 'F:/agent-harness'],
     conflictKeys: [`${intent.target}-${intent.action}`],
     gatePlan: gateIds,
-    metadata: { scope: intent.scope, sourcePolicy: intent.sourcePolicy ?? 'review-and-repair', stage: quality ? 'quality' : intent.action, target: intent.target, version: intent.target },
+    metadata: { scope: intent.scope, sourcePolicy: intent.sourcePolicy ?? 'review-and-repair', stage: quality ? 'quality' : actionStage[intent.action], target: intent.target, version: intent.target, allowDynamicDecomposition: !quality && !readOnly },
   };
   return {
     run: { runId, profileId: 'engine-delivery', profileConfig, features: [feature], runtimePluginId: project.policy?.defaultRuntimePlugin },

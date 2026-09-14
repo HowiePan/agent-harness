@@ -3,7 +3,7 @@
   "$id": "https://agent-harness.local/schemas/codex-runtime-result.schema.json",
   "title": "Codex CLI Runtime Business Result",
   "type": "object",
-  "required": ["status", "summary", "checkpoints", "made", "notMade", "changedFiles", "observations", "findings", "failureClass", "blocker"],
+  "required": ["status", "summary", "checkpoints", "made", "notMade", "changedFiles", "observations", "findings", "followUpFeatures", "failureClass", "blocker"],
   "properties": {
     "status": { "type": "string", "enum": ["completed", "blocked", "failed"] },
     "summary": { "type": "string", "minLength": 1 },
@@ -29,12 +29,36 @@
       "type": "array",
       "items": {
         "type": "object",
-        "required": ["id", "severity", "summary", "evidence"],
+        "required": ["id", "severity", "summary", "evidence", "affectedPaths", "symbols", "contracts", "generatedOutputs", "conflictKeys"],
         "properties": {
           "id": { "type": "string", "minLength": 1 },
           "severity": { "type": "string", "enum": ["P0", "P1", "P2", "P3"] },
           "summary": { "type": "string", "minLength": 1 },
-          "evidence": { "type": "array", "uniqueItems": true, "items": { "type": "string", "minLength": 1 } }
+          "evidence": { "type": "array", "uniqueItems": true, "items": { "type": "string", "minLength": 1 } },
+          "affectedPaths": { "type": "array", "uniqueItems": true, "items": { "type": "string", "minLength": 1 } },
+          "symbols": { "type": "array", "uniqueItems": true, "items": { "type": "string", "minLength": 1 } },
+          "contracts": { "type": "array", "uniqueItems": true, "items": { "type": "string", "minLength": 1 } },
+          "generatedOutputs": { "type": "array", "uniqueItems": true, "items": { "type": "string", "minLength": 1 } },
+          "conflictKeys": { "type": "array", "uniqueItems": true, "items": { "type": "string", "minLength": 1 } }
+        },
+        "additionalProperties": false
+      }
+    },
+    "followUpFeatures": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "acceptance", "allowedPaths", "forbiddenPaths", "dependsOn", "symbols", "contracts", "generatedOutputs", "conflictKeys"],
+        "properties": {
+          "id": { "type": "string", "minLength": 1 },
+          "acceptance": { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1 } },
+          "allowedPaths": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+          "forbiddenPaths": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+          "dependsOn": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+          "symbols": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+          "contracts": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+          "generatedOutputs": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+          "conflictKeys": { "type": "array", "items": { "type": "string", "minLength": 1 } }
         },
         "additionalProperties": false
       }

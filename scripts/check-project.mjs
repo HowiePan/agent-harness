@@ -118,7 +118,8 @@ const license = await readFile(resolve(root, 'LICENSE'), 'utf8');
 if (!license.startsWith('Copyright (c) 2026 Agent Harness contributors. All rights reserved.\n') || !license.includes('No license is\ngranted')) errors.push('LICENSE does not match the owner-approved all-rights-reserved notice');
 const codexPluginRoot = resolve(root, 'integrations', 'codex', 'agent-harness-codex');
 const codexPlugin = JSON.parse(await readFile(resolve(codexPluginRoot, '.codex-plugin', 'plugin.json'), 'utf8'));
-if (codexPlugin.name !== 'agent-harness-codex' || codexPlugin.version !== packageJson.version || codexPlugin.skills !== './skills/') errors.push('Codex integration plugin manifest is not bound to this Harness release');
+const codexPluginVersionBound = codexPlugin.version === packageJson.version || codexPlugin.version?.startsWith(`${packageJson.version}+codex.`);
+if (codexPlugin.name !== 'agent-harness-codex' || !codexPluginVersionBound || codexPlugin.skills !== './skills/') errors.push('Codex integration plugin manifest is not bound to this Harness release');
 const skillsRoot = resolve(codexPluginRoot, 'skills');
 for (const name of await readdir(skillsRoot)) {
   const skill = await readFile(resolve(skillsRoot, name, 'SKILL.md'), 'utf8');

@@ -25,6 +25,10 @@ const take = name => {
 };
 const has = name => argv.includes(name);
 const takeAll = name => argv.flatMap((value, index) => value === name && argv[index + 1] ? String(argv[index + 1]).split(',') : []).filter(Boolean);
+const optionalNumber = name => {
+  const value = take(name);
+  return value === undefined ? undefined : Number(value);
+};
 const jsonFile = async name => JSON.parse(await readFile(resolve(name), 'utf8'));
 const jsonInput = async name => {
   const source = take(name);
@@ -53,8 +57,8 @@ agent-harness project list
 agent-harness features compile --extension <module> --input <json>
 agent-harness run start --project <id> --run <id> --profile <id> --features <json> [--config <json>] [--execution-workspace <absolute-path>]
 agent-harness run status --project <id> --run <id>
-agent-harness run schedule --project <id> --run <id> [--max <n>] [--runtime <plugin-id>]
-agent-harness run execute --project <id> --run <id> [--max <n>] [--runtime <plugin-id>] [--max-rounds <n>]
+agent-harness run schedule --project <id> --run <id> [--max <n|auto>] [--runtime <plugin-id>]
+agent-harness run execute --project <id> --run <id> [--max <n|auto>] [--runtime <plugin-id>] [--max-rounds <n>]
 agent-harness run gates --project <id> --run <id> --scope <feature|stable|final> [--fresh] [--ids <id,id>]
 agent-harness run bind --project <id> --run <id> --dispatch <id> --agent <id> --runtime-receipt <json>
 agent-harness run submit --project <id> --run <id> --dispatch <id> --result <json>
@@ -270,15 +274,15 @@ if (command === 'features' && subject === 'compile') {
     const output = await harness.startRun(input, { commandId: take('--command-id') ?? newId('command') });
     console.log(JSON.stringify({ ok: true, state: output.state, reused: output.reused }, null, 2));
   } else if (command === 'lifecycle' && subject === 'execute') {
-    const output = await harness.executeLifecyclePlan(await jsonInput('--plan'), { commandId: take('--command-id'), maxConcurrency: Number(take('--max') ?? 1), maxRounds: Number(take('--max-rounds') ?? 100), forceFreshGates: !has('--no-fresh-gates') });
+    const output = await harness.executeLifecyclePlan(await jsonInput('--plan'), { commandId: take('--command-id'), maxConcurrency: optionalNumber('--max'), maxRounds: Number(take('--max-rounds') ?? 100), forceFreshGates: !has('--no-fresh-gates') });
     console.log(JSON.stringify({ ok: output.status === 'closed', ...output }, null, 2));
   } else if (command === 'run' && subject === 'schedule') {
     const state = await harness.authorityStore.read(take('--project'), take('--run'));
-    const output = await harness.dispatch(state.projectId, state.runId, { maxConcurrency: Number(take('--max') ?? 1), runtimePluginId: take('--runtime') ?? null }, { expectedRevision: state.revision, commandId: take('--command-id') ?? newId('command') });
+    const output = await harness.dispatch(state.projectId, state.runId, { maxConcurrency: optionalNumber('--max'), runtimePluginId: take('--runtime') ?? null }, { expectedRevision: state.revision, commandId: take('--command-id') ?? newId('command') });
     console.log(JSON.stringify({ ok: true, ...output.result, revision: output.state.revision }, null, 2));
   } else if (command === 'run' && subject === 'execute') {
     const coordinator = new RunCoordinator({ harness });
-    const output = await coordinator.run({ projectId: take('--project'), runId: take('--run'), runtimePluginId: take('--runtime') ?? null, maxConcurrency: Number(take('--max') ?? 1), maxRounds: Number(take('--max-rounds') ?? 100) });
+    const output = await coordinator.run({ projectId: take('--project'), runId: take('--run'), runtimePluginId: take('--runtime') ?? null, maxConcurrency: optionalNumber('--max'), maxRounds: Number(take('--max-rounds') ?? 100) });
     console.log(JSON.stringify({ ok: output.status !== 'attention-required', ...output }, null, 2));
   } else if (command === 'run' && subject === 'gates') {
     const runner = new ProjectGateRunner({ harness });

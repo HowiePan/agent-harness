@@ -3,6 +3,7 @@ import test from 'node:test';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { buildDispatchPacket } from '../src/kernel/kernel.mjs';
+import { RunCoordinator } from '../src/coordinator/run-coordinator.mjs';
 import { command, dispatchAndBind, feature, makeFixture, recordResult, startRun } from './test-support.mjs';
 
 test('engine profile keeps canonical requirement single-line before implementation fan-out', async t => {
@@ -70,6 +71,45 @@ test('review findings returned by a Runtime are atomically opened with submissio
   assert.deepEqual(output.state.findings[0].evidence, ['src/example.rs:10']);
   assert.deepEqual(output.state.findings[0].evidenceRefs, output.result.submission.evidenceRefs);
   assert.equal(output.state.status, 'closure-blocked');
+});
+
+test('quality findings become independently schedulable repair Features', async t => {
+  const fixture = await makeFixture({ profiles: ['engine-delivery'], policy: { runtimePlugins: ['test-runtime'], defaultRuntimePlugin: 'test-runtime', maxConcurrency: 'auto' } });
+  t.after(() => fixture.cleanup());
+  const review = feature('quality/full-sweep', { stage: 'quality', sourcePolicy: 'review-and-repair' }, { ownerRole: 'reviewer', allowedPaths: ['src', 'tests'] });
+  await startRun(fixture, { profileId: 'engine-delivery', profileConfig: { requireCanonicalDecision: false, requireUserCodeReview: false }, features: [review] });
+  const bound = await dispatchAndBind(fixture, 'run');
+  const findings = [
+    ['P1-1', 'P1', 'src/a.rs'], ['P1-2', 'P1', 'src/b.rs'], ['P1-3', 'P1', 'src/c.rs'],
+    ['P1-4', 'P1', 'src/d.rs'], ['P2-1', 'P2', 'tests/a.rs'], ['P2-2', 'P2', 'tests/b.rs'],
+  ].map(([id, severity, affectedPath]) => ({ id, severity, summary: `${id} needs repair`, evidence: [`${affectedPath}:1`], affectedPaths: [affectedPath] }));
+  const reviewed = await recordResult(fixture, 'run', bound.dispatch, { status: 'completed', summary: 'review found six actionable findings', changedFiles: [], findings });
+  assert.equal(reviewed.state.features.filter(item => item.metadata.stage === 'quality-repair').length, 6);
+  assert.equal(reviewed.state.findings.filter(item => item.status === 'open').length, 6);
+  const tick = await new RunCoordinator({ harness: fixture.harness }).tick({ projectId: fixture.projectId, runId: 'run' });
+  assert.equal(tick.committed.length, 6);
+  assert.equal(tick.state.features.filter(item => item.metadata.stage === 'quality-repair').every(item => item.state === 'completed'), true);
+  assert.equal(tick.state.findings.every(item => item.status === 'resolved'), true);
+});
+
+test('normal development plans become independently schedulable follow-up Features', async t => {
+  const fixture = await makeFixture({ profiles: ['engine-delivery'], policy: { runtimePlugins: ['test-runtime'], defaultRuntimePlugin: 'test-runtime', maxConcurrency: 'auto' } });
+  t.after(() => fixture.cleanup());
+  const planner = feature('implementation/plan', { stage: 'implementation', sourcePolicy: 'review-and-repair', allowDynamicDecomposition: true }, { allowedPaths: ['src'] });
+  await startRun(fixture, { profileId: 'engine-delivery', profileConfig: { requireCanonicalDecision: false, requireUserCodeReview: false }, features: [planner] });
+  const bound = await dispatchAndBind(fixture, 'run');
+  const planned = await recordResult(fixture, 'run', bound.dispatch, {
+    status: 'completed', summary: 'implementation plan decomposed', changedFiles: [], findings: [],
+    followUpFeatures: [
+      { id: 'parser', acceptance: ['parser implementation passes'], allowedPaths: ['src/parser'], forbiddenPaths: [], dependsOn: [], symbols: [], contracts: [], generatedOutputs: [], conflictKeys: [] },
+      { id: 'router', acceptance: ['router implementation passes'], allowedPaths: ['src/router'], forbiddenPaths: [], dependsOn: [], symbols: [], contracts: [], generatedOutputs: [], conflictKeys: [] },
+      { id: 'storage', acceptance: ['storage implementation passes'], allowedPaths: ['src/storage'], forbiddenPaths: [], dependsOn: [], symbols: [], contracts: [], generatedOutputs: [], conflictKeys: [] },
+    ],
+  });
+  assert.equal(planned.state.features.filter(item => item.metadata.dynamicParentId === 'implementation/plan').length, 3);
+  const tick = await new RunCoordinator({ harness: fixture.harness }).tick({ projectId: fixture.projectId, runId: 'run' });
+  assert.equal(tick.committed.length, 3);
+  assert.equal(tick.state.features.filter(item => item.metadata.dynamicParentId === 'implementation/plan').every(item => item.state === 'completed'), true);
 });
 
 test('Dispatch packet keeps the Gate snapshot captured at scheduling time', () => {

@@ -32,3 +32,25 @@ test('Coordinator binds a replaceable Model Router decision into the immutable D
   assert.equal(observed.route.model, 'model-a');
   assert.equal(result.state.dispatches[0].execution.modelRoute.route.provider, 'replaceable');
 });
+
+test('Coordinator auto mode schedules all currently eligible isolated Features', async t => {
+  const manifest = { id: 'auto-isolated-runtime', kind: 'agent-runtime', version: '1.0.0', capabilities: ['spawn', 'wait', 'send', 'heartbeat', 'interrupt', 'workspace-isolated'], permissions: [] };
+  const fixture = await makeFixture({ policy: { runtimePlugins: [manifest.id], defaultRuntimePlugin: manifest.id, maxConcurrency: 'auto' } });
+  t.after(() => fixture.cleanup());
+  fixture.harness.registerPlugin(manifest, createInMemoryRuntime({ manifest, handler: async packet => ({ status: 'completed', summary: `completed:${packet.feature.id}`, changedFiles: [] }) }));
+  await startRun(fixture, { features: [feature('one'), feature('two'), feature('three')] });
+  const result = await new RunCoordinator({ harness: fixture.harness }).run({ projectId: fixture.projectId, runId: 'run' });
+  assert.equal(result.status, 'idle');
+  assert.equal(result.rounds[0].committed.length, 3);
+});
+
+test('Coordinator keeps shared workspaces serial even in auto mode', async t => {
+  const manifest = { id: 'auto-shared-runtime', kind: 'agent-runtime', version: '1.0.0', capabilities: ['spawn', 'wait', 'send', 'heartbeat', 'interrupt', 'workspace-shared'], permissions: [] };
+  const fixture = await makeFixture({ policy: { runtimePlugins: [manifest.id], defaultRuntimePlugin: manifest.id, maxConcurrency: 'auto' } });
+  t.after(() => fixture.cleanup());
+  fixture.harness.registerPlugin(manifest, createInMemoryRuntime({ manifest, handler: async packet => ({ status: 'completed', summary: `completed:${packet.feature.id}`, changedFiles: [] }) }));
+  await startRun(fixture, { features: [feature('one'), feature('two')] });
+  const result = await new RunCoordinator({ harness: fixture.harness }).tick({ projectId: fixture.projectId, runId: 'run' });
+  assert.equal(result.physicalLimit, 1);
+  assert.equal(result.committed.length, 1);
+});

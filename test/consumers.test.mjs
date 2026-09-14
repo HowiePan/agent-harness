@@ -22,8 +22,9 @@ test('CardWorld consumer compiles one canonical requirement and project-owned de
   ]);
   assert.equal(descriptor.gateRecipes.find(gate => gate.id === 'rust-tests-all-targets').command.at(-1), '--all-targets');
   assert.deepEqual(descriptor.extensions.map(extension => extension.id), ['cardworld-engine-profile', 'codex-runtime']);
-  assert.equal(descriptor.policy.defaultRuntimePlugin, 'codex-cli-runtime');
-  assert.deepEqual(descriptor.policy.runtimeConfigs['codex-cli-runtime'], { sandbox: 'workspace-write', ephemeral: true, approveForMe: true });
+  assert.equal(descriptor.policy.defaultRuntimePlugin, 'codex-isolated-runtime');
+  assert.equal(descriptor.policy.maxConcurrency, 'auto');
+  assert.deepEqual(descriptor.policy.runtimeConfigs['codex-isolated-runtime'], { sandbox: 'workspace-write', ephemeral: true, approveForMe: true });
   const graph = compileCardWorldFeatureGraph({
     requirement: { id: 'v-next', acceptance: ['requirement is singular and approved'] },
     features: [
