@@ -6,6 +6,7 @@ import { digestJson } from '../src/canonical.mjs';
 import { assertSchemaDefinition, validateJsonSchema } from '../src/json-schema.mjs';
 import { createCardWorldProjectDescriptor } from '../src/consumers/cardworld-engine.mjs';
 import { createTabletopCollectionProjectDescriptor } from '../src/consumers/tabletop-collection.mjs';
+import { validateReleaseVersionContract } from './release-version-contract.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const packageJson = JSON.parse(await readFile(resolve(root, 'package.json'), 'utf8'));
@@ -118,8 +119,8 @@ const license = await readFile(resolve(root, 'LICENSE'), 'utf8');
 if (!license.startsWith('Copyright (c) 2026 Agent Harness contributors. All rights reserved.\n') || !license.includes('No license is\ngranted')) errors.push('LICENSE does not match the owner-approved all-rights-reserved notice');
 const codexPluginRoot = resolve(root, 'integrations', 'codex', 'agent-harness-codex');
 const codexPlugin = JSON.parse(await readFile(resolve(codexPluginRoot, '.codex-plugin', 'plugin.json'), 'utf8'));
-const codexPluginVersionBound = codexPlugin.version === packageJson.version || codexPlugin.version?.startsWith(`${packageJson.version}+codex.`);
-if (codexPlugin.name !== 'agent-harness-codex' || !codexPluginVersionBound || codexPlugin.skills !== './skills/') errors.push('Codex integration plugin manifest is not bound to this Harness release');
+errors.push(...validateReleaseVersionContract({ packageJson, codexPlugin }));
+if (codexPlugin.name !== 'agent-harness-codex' || codexPlugin.skills !== './skills/') errors.push('Codex integration plugin manifest is not bound to this Harness release');
 const skillsRoot = resolve(codexPluginRoot, 'skills');
 for (const name of await readdir(skillsRoot)) {
   const skill = await readFile(resolve(skillsRoot, name, 'SKILL.md'), 'utf8');

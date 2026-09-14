@@ -68,7 +68,7 @@ codex plugin marketplace add .
 codex plugin add agent-harness-codex@agent-harness-local
 ```
 
-本机绑定固定写入仓库内、被 Git 忽略的 `integrations/codex/agent-harness-codex/.plugin-data/bindings.json`，安装时复制到 Codex 的受管 `PLUGIN_DATA`；不维护用户目录下的第二份插件源码。重新安装同一开发版本时，先执行 `codex plugin remove agent-harness-codex@agent-harness-local`，再执行上面的 `plugin add`。安装或重装后应新建任务，使 Codex 在任务启动边界重新加载 Skill 与 Hook；旧任务历史仍可读取，但不保证热加载新插件能力。
+本机绑定固定写入仓库内、被 Git 忽略的 `integrations/codex/agent-harness-codex/.plugin-data/bindings.json`，安装时复制到 Codex 的受管 `PLUGIN_DATA`；不维护用户目录下的第二份插件源码。Codex 插件 manifest 的版本必须与 Harness 发布版本逐字相等，V1.0.0 固定为 `1.0.0`；禁止使用通用插件开发流程的 `+codex.<cachebuster>` 后缀。重新安装同一开发版本时，先执行 `codex plugin remove agent-harness-codex@agent-harness-local` 清除本地缓存，再执行上面的 `plugin add`，不得通过修改版本规避缓存。安装或重装后应新建任务，使 Codex 在任务启动边界重新加载 Skill 与 Hook；旧任务历史仍可读取，但不保证热加载新插件能力。
 
 ## 日常运行
 

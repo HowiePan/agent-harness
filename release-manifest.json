@@ -122,8 +122,8 @@
     },
     {
       "path": "docs/operations.md",
-      "sha256": "e8c05cb2fba365c16e67f1455ff52af65143daf10bbb9fdfae8801f73d0f44d6",
-      "size": 17859
+      "sha256": "c48a74700ba09d04b38c1ba97143345fa6f5ab0b994621c41339e5b0c673d3bf",
+      "size": 18092
     },
     {
       "path": "docs/operator-contract.md",
@@ -207,8 +207,8 @@
     },
     {
       "path": "integrations/codex/agent-harness-codex/.codex-plugin/plugin.json",
-      "sha256": "54a8cad71ea6ae58b30e2ede12931ee555b2e2849f171ea7cb4907bf457bb18e",
-      "size": 1136
+      "sha256": "fe71fa406df352af26ecb5fb512837b043fad3c29a66a085d4fb14128d658479",
+      "size": 1114
     },
     {
       "path": "integrations/codex/agent-harness-codex/hooks/hooks.json",
@@ -866,7 +866,7 @@
       "size": 3735
     }
   ],
-  "packageDigest": "66b2a30925587ccaa123c36438feae1c3b88ba46a31d8751e54a2309828a8392",
+  "packageDigest": "1321b185d6f7f1cf8a966b10550a36f28c8a789daa62e4de38451ce4e643c6ae",
   "metadataFiles": [
     "release-manifest.json",
     "sbom.spdx.json"

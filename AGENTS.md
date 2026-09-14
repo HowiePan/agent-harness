@@ -46,4 +46,5 @@
 - 正式开发必须在独立仓库或可独立发布的项目边界内进行。
 - 不使用正在开发的 Agent Harness 调度自身，直至独立 Canary 和用户批准。
 - Git commit、tag、发布和旧文件清理由用户决定。
+- `agent-harness-codex` 的 `.codex-plugin/plugin.json` 版本必须与 `package.json` 逐字相等；V1.0.0 固定为 `1.0.0`，禁止运行通用 `update_plugin_cachebuster.py` 或生成 `+codex.*` 后缀。同版本重装必须先 `codex plugin remove` 清缓存，再 `codex plugin add`。
 - 面向用户的规划、迁移和验收报告使用中文。
