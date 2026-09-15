@@ -4,14 +4,15 @@ import { digestJson, withoutKeys } from '../canonical.mjs';
 import { assert } from '../errors.mjs';
 import { safeSegment } from '../paths.mjs';
 import { atomicWriteJson, readJson, withDirectoryLock } from '../kernel/atomic-io.mjs';
-import { assertHarnessWritePath } from '../write-boundary.mjs';
+import { assertHarnessWritePath, harnessControlRoot } from '../write-boundary.mjs';
 import { assertProjectDescriptorInput, assertProjectDescriptorRecord } from './project-contract.mjs';
 import { resolveActiveRegistryRoot } from './active-generation.mjs';
 import { activeReleaseFile } from './active-generation.mjs';
 
 export class ProjectRegistry {
   constructor({ root, controlRoot, now = () => new Date().toISOString(), strictIdentity = true }) {
-    this.root = assertHarnessWritePath(root, 'Project Registry root', controlRoot);
+    this.controlRoot = harnessControlRoot(controlRoot);
+    this.root = assertHarnessWritePath(root, 'Project Registry root', this.controlRoot);
     this.legacyDirectory = resolve(this.root, 'registry', 'projects');
     this.now = now;
     this.strictIdentity = strictIdentity;

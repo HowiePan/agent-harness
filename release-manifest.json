@@ -867,8 +867,8 @@
     },
     {
       "path": "src/registry/project-registry.mjs",
-      "sha256": "528a2b4e9aa191f4a9d41eb141fe48e6332219454236119b225bfc6d4a15951a",
-      "size": 8961
+      "sha256": "dd0e69f41a45f4bb822bc76d033a3cd3b8257b91cd8d3f7761909b41939a73e6",
+      "size": 9042
     },
     {
       "path": "src/release-identity.mjs",
@@ -906,7 +906,7 @@
       "size": 3735
     }
   ],
-  "packageDigest": "a514e3b8223777c41b8094b8d2e50d0f703061d4acaaeade6a35857a6227201e",
+  "packageDigest": "6a17c74df8aba3001326c8f52964cd816a4848094e468954e83ab7792b17ca6a",
   "metadataFiles": [
     "release-manifest.json",
     "sbom.spdx.json"
