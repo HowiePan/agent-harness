@@ -77,6 +77,17 @@ codex plugin add agent-harness-codex@agent-harness-local
 
 本机绑定固定写入仓库内、被 Git 忽略的 `integrations/codex/agent-harness-codex/.plugin-data/bindings.json`，安装时复制到 Codex 的受管 `PLUGIN_DATA`；不维护用户目录下的第二份插件源码。Codex 插件 manifest 的版本必须与 Harness 发布版本逐字相等，V1.0.0 固定为 `1.0.0`；禁止使用通用插件开发流程的 `+codex.<cachebuster>` 后缀。重新安装同一开发版本时，先执行 `codex plugin remove agent-harness-codex@agent-harness-local` 清除本地缓存，再执行上面的 `plugin add`，不得通过修改版本规避缓存。安装或重装后应新建任务，使 Codex 在任务启动边界重新加载 Skill 与 Hook；旧任务历史仍可读取，但不保证热加载新插件能力。
 
+代码、release manifest 与 SBOM 已更新并提交后，优先使用仓库固化的一键流程，避免手工漏掉验证、打包或缓存清理：
+
+```powershell
+npm run release:plugin:check
+npm run release:plugin
+```
+
+`release:plugin:check` 只做只读预检；`release:plugin` 取得排他锁后，要求干净且 HEAD 不变的提交，先校验本机 `bindings.json` 的控制根、现存入口、受管 dataRoot 和项目绑定，并确保整个流程中绑定摘要不变；随后依次执行项目检查、全量测试、clean-room、打包 dry-run、残留检查和 Release Candidate 构建，再检查或登记本地 marketplace。已有同名插件时必须完成并验证 `remove` 后才允许 `add`，最后重新读取 Codex 插件状态，核对版本、启用状态、策略和绝对源码路径。所有子进程均同步等待退出，不启动 `codex exec` 或任何后台 Agent CLI。成功或失败回执写入 `.agent-harness-data/release-workflows/<run-id>/`；失败后可根据回执修复并重跑同一命令。进程被强制终止而留下锁文件时，必须先确认没有发布流程在运行，再只删除回执目录中的 `.local-plugin-release.lock`。
+
+该命令只完成本地候选构建和本地 Codex 插件安装，不改写绑定中的 Runtime 入口，也不执行 Git commit/tag/push、npm 远端发布、签名、真实 cutover、业务仓操作或旧内容删除。需要轮换 Runtime 时，先按发布激活 Gate 完成 `activation-apply`，再用其 `runtimeEntrypoint` 重建绑定，最后运行本命令；安装成功后仍须新建任务验证插件加载边界。
+
 ## 日常运行
 
 ### 对话式命令面

@@ -32,8 +32,8 @@
     },
     {
       "path": "docs/acceptance/v1.0.0.md",
-      "sha256": "2d29ca96e9a2e4afc3b7cfb9807b47881177e77023514a7ebd093813124a4967",
-      "size": 10314
+      "sha256": "5b3eb9e170456e7da3c29b7a45b62641a5bc18141e73a0c5ca0f878962a836fd",
+      "size": 11161
     },
     {
       "path": "docs/architecture.md",
@@ -122,8 +122,8 @@
     },
     {
       "path": "docs/operations.md",
-      "sha256": "705db4929da341ce3c358b70628fc4490ee9642020df3e4e531f777508e4b1dc",
-      "size": 22513
+      "sha256": "63fe0becac6d3ba47fe44f20f0e04bc5c83877b29c4efcf915ac5bfebfec042f",
+      "size": 24143
     },
     {
       "path": "docs/operator-contract.md",
@@ -277,8 +277,8 @@
     },
     {
       "path": "package.json",
-      "sha256": "42b248d6209e0544dd50be74c659580217b3602601009c5445ca42681df872f3",
-      "size": 2510
+      "sha256": "865afde3256909843af3da12bbd7237ceea3d56ac20f3db7f6d25381b47e8b8d",
+      "size": 2646
     },
     {
       "path": "plugins/codex-cli-runtime.plugin.json",
@@ -317,8 +317,8 @@
     },
     {
       "path": "README.md",
-      "sha256": "b8a9d91d8d02773fa03232a6f2848a6cd1d3b03755746c7548789e2a58a2c8f4",
-      "size": 9224
+      "sha256": "510f4290b6202788cb3d87be7b38a2ed4bbd985083fff55d9079a2241184fe58",
+      "size": 9585
     },
     {
       "path": "schemas/authority.schema.json",
@@ -926,7 +926,7 @@
       "size": 3735
     }
   ],
-  "packageDigest": "4022dd84f91ae544ac165c37d852fead9508c53132d507d58ff7dba70b560367",
+  "packageDigest": "39ea67a8c2a5bc52c984580a20e1162ebfb912e11b5d2acedc2c6e04b20ced0d",
   "metadataFiles": [
     "release-manifest.json",
     "sbom.spdx.json"

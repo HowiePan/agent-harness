@@ -63,6 +63,8 @@
     "build:release-metadata": "node scripts/build-release-metadata.mjs",
     "build:release-candidate": "node scripts/build-release-candidate.mjs",
     "pack:dry-run": "node scripts/pack-dry-run.mjs",
+    "release:plugin:check": "node scripts/release-plugin.mjs --check",
+    "release:plugin": "node scripts/release-plugin.mjs --apply",
     "prepack": "node scripts/check-project.mjs"
   }
 }

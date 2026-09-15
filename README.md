@@ -77,7 +77,10 @@ Hook 只把符合语法的输入转换成 Command Intent，不直接启动流程
 npm test
 npm run check
 npm run build:release-candidate
+npm run release:plugin:check
+# 确认预检后，一键构建候选并清缓存重装本地 Codex 插件
+npm run release:plugin
 node bin/agent-harness.mjs doctor --data-root .tmp/doctor
 ```
 
-`build:release-candidate` 只接受干净提交，生成真实 tarball、隔离安装探针与内容寻址 Release Candidate Receipt。`doctor` 只报告安装、Registry 与逐项目静态就绪，不再把它们误称为可执行；具体动作必须先生成短 TTL、绑定 Plan/Project/Release 的 `ExecutionReadinessReport`。`project list` 与 `run status` 同样不加载 Extension 代码。首次投产使用零写入 `bootstrap plan` 和经批准、可恢复的 `bootstrap apply`。CLI 的所有改变状态命令都要求 `--command-id`；完整命令见 [运维手册](docs/operations.md)。
+`build:release-candidate` 只接受干净提交，生成真实 tarball、隔离安装探针与内容寻址 Release Candidate Receipt。`release:plugin` 在完整验证和候选构建后，固定执行本地 marketplace 检查、同版本插件 remove/add 缓存清理与安装后状态核对；它不执行远端发布、Git 操作、真实切换或任何 Agent CLI。`doctor` 只报告安装、Registry 与逐项目静态就绪，不再把它们误称为可执行；具体动作必须先生成短 TTL、绑定 Plan/Project/Release 的 `ExecutionReadinessReport`。`project list` 与 `run status` 同样不加载 Extension 代码。首次投产使用零写入 `bootstrap plan` 和经批准、可恢复的 `bootstrap apply`。CLI 的所有改变状态命令都要求 `--command-id`；完整命令见 [运维手册](docs/operations.md)。
