@@ -6,7 +6,7 @@
 
 The adapter only parses the envelope. It never starts a Run. Resolution is performed in this order:
 
-1. Codex supplies `PLUGIN_ROOT` and writable `PLUGIN_DATA` to the plugin Hook;
+1. Codex normally supplies `PLUGIN_ROOT` and writable `PLUGIN_DATA` to the plugin Hook; if a restarted Hook omits them from the child environment, the router may use only its own module directory as a bounded fallback (it never scans parent directories or the filesystem);
 2. the Hook reads the exact Harness and per-project bindings from `PLUGIN_DATA/bindings.json` (the install source may seed `.plugin-data/bindings.json`), selects the explicit alias, and validates the current directory either as that project's configured root or as a linked worktree with the same Git common-directory identity;
 3. the command's explicit project alias selects one project ID, Profile ID, and Extension ID;
 4. the bound standalone Project Registry provides that exact Project Descriptor;

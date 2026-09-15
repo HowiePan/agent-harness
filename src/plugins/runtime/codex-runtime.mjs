@@ -1,4 +1,5 @@
 import { createCallbackRuntime } from './callback-runtime.mjs';
+import { createVisibleHostAdapter, isVisibleHostAdapter } from './visible-host-adapter.mjs';
 
 export const CODEX_RUNTIME_MANIFEST = Object.freeze({
   id: 'codex-conversation-runtime',
@@ -17,4 +18,17 @@ const missingHostAdapter = () => {
   return { spawn: unavailable, wait: unavailable, send: unavailable, heartbeat: unavailable, interrupt: unavailable };
 };
 
-export const createCodexRuntime = adapter => createCallbackRuntime({ manifest: CODEX_RUNTIME_MANIFEST, adapter: adapter ?? missingHostAdapter() });
+export const createCodexVisibleHostAdapter = host => createVisibleHostAdapter({ ...host, provider: 'codex-host' });
+
+export const createCodexRuntime = adapter => {
+  const resolved = isVisibleHostAdapter(adapter)
+    ? adapter
+    : adapter?.inspectVisibleAgent
+      ? createCodexVisibleHostAdapter(adapter)
+      : adapter?.verifyVisibleLease || adapter?.heartbeatVisibleAgent
+        ? (() => { throw Object.assign(new Error('Codex conversation Runtime requires a host adapter created by createCodexVisibleHostAdapter().'), { code: 'VISIBLE_AGENT_HOST_ADAPTER_REQUIRED' }); })()
+        : adapter?.spawn
+          ? adapter
+          : missingHostAdapter();
+  return createCallbackRuntime({ manifest: CODEX_RUNTIME_MANIFEST, adapter: resolved });
+};

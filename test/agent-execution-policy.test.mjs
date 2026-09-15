@@ -3,6 +3,7 @@ import test from 'node:test';
 import { extensionPack as codexRuntimeExtension } from '../src/extensions/codex-runtime.mjs';
 import { RunCoordinator } from '../src/coordinator/run-coordinator.mjs';
 import { assertAgentRuntimeCompatible, assertRuntimeTransportReceipt } from '../src/plugins/runtime/execution-policy.mjs';
+import { createVisibleHostAdapter } from '../src/plugins/runtime/visible-host-adapter.mjs';
 import { validatePluginManifest } from '../src/plugins/contracts.mjs';
 import { command, feature, makeFixture, startRun } from './test-support.mjs';
 
@@ -29,11 +30,68 @@ test('conversation-visible projects reject headless Runtime selection and requir
   assert.throws(() => assertRuntimeTransportReceipt({ project, manifest: visibleManifest, receipt: { runtimePluginId: visibleManifest.id } }), error => error.code === 'USER_VISIBLE_RUNTIME_RECEIPT_REQUIRED');
   assert.throws(() => assertRuntimeTransportReceipt({ project, manifest: visibleManifest, receipt: { runtimePluginId: visibleManifest.id, agentId: 'agent-1', dispatchId: 'dispatch-1', packetDigest: 'a'.repeat(64), visibility: { mode: 'user-visible', surface: 'codex-task', inspectRef: 'task-123' } } }), error => error.code === 'USER_VISIBLE_RUNTIME_PROMPT_RECEIPT_REQUIRED');
   assert.deepEqual(assertRuntimeTransportReceipt({ project, manifest: visibleManifest, receipt: { runtimePluginId: visibleManifest.id, agentId: 'agent-1', dispatchId: 'dispatch-1', packetDigest: 'a'.repeat(64), prompt, visibility: { mode: 'user-visible', surface: 'codex-task', inspectRef: 'task-123' } } }).mode, 'conversation-visible');
+  assert.throws(() => assertRuntimeTransportReceipt({ project, manifest: visibleManifest, receipt: { runtimePluginId: visibleManifest.id, agentId: 'agent-1', dispatchId: 'dispatch-1', packetDigest: 'a'.repeat(64), prompt: { ...prompt, packetDigest: 'c'.repeat(64) }, visibility: { mode: 'user-visible', surface: 'codex-task', inspectRef: 'task-123' } } }), error => error.code === 'USER_VISIBLE_RUNTIME_PROMPT_PACKET_MISMATCH');
+});
+
+test('visible host adapter binds inspection and heartbeat to the exact Lease identities', async t => {
+  const observations = [];
+  const adapter = createVisibleHostAdapter({
+    provider: 'test-codex-host',
+    inspectVisibleAgent: async input => {
+      observations.push(input);
+      return {
+        verified: true,
+        status: 'running',
+        assertionId: `assertion-${observations.length}`,
+        observedAt: new Date().toISOString(),
+        agentId: input.agentId,
+        dispatchId: input.dispatchId,
+        packetDigest: input.packetDigest,
+        promptDigest: input.promptDigest,
+        visibility: { mode: 'user-visible', surface: input.surface, inspectRef: input.inspectRef },
+      };
+    },
+  });
+  const fixture = await makeFixture({ extensions: [codexRuntimeExtension], agentAdapter: adapter, policy: { agentExecutionMode: 'conversation-visible', runtimePlugins: ['codex-conversation-runtime'], defaultRuntimePlugin: 'codex-conversation-runtime', maxConcurrency: 'auto' } });
+  t.after(() => fixture.cleanup());
+  await startRun(fixture, { features: [feature('visible-heartbeat')] });
+  const scheduled = await fixture.harness.dispatch(fixture.projectId, 'run', { maxConcurrency: 1, runtimePluginId: 'codex-conversation-runtime' }, command(await fixture.harness.authorityStore.read(fixture.projectId, 'run')));
+  const dispatch = scheduled.result.dispatches[0];
+  const packet = await fixture.harness.readDispatchPacket(fixture.projectId, 'run', dispatch.dispatchId);
+  const bound = await fixture.harness.bindDispatch(fixture.projectId, 'run', {
+    dispatchId: dispatch.dispatchId,
+    agentId: 'visible-agent',
+    runtimeReceipt: { runtimePluginId: 'codex-conversation-runtime', agentId: 'visible-agent', dispatchId: dispatch.dispatchId, packetDigest: dispatch.packetDigest, prompt: { contractVersion: packet.prompt.contractVersion, codecPluginId: packet.prompt.codecPluginId, codecPluginVersion: packet.prompt.codecPluginVersion, packetDigest: packet.prompt.packetDigest, promptDigest: packet.prompt.promptDigest }, visibility: { mode: 'user-visible', surface: 'codex-task', inspectRef: 'task-visible-heartbeat' } },
+  }, command(scheduled.state));
+  const heartbeat = await fixture.harness.recordHeartbeat(fixture.projectId, 'run', { leaseId: bound.result.lease.leaseId, dispatchId: dispatch.dispatchId, agentId: 'visible-agent', progress: 'reviewing' }, command(bound.state));
+  assert.equal(heartbeat.result.leaseId, bound.result.lease.leaseId);
+  assert.equal((await fixture.harness.authorityStore.read(fixture.projectId, 'run')).leases[0].heartbeatCount, 1);
+  assert.equal(observations.length, 2);
+  assert.equal(observations[1].inspectRef, 'task-visible-heartbeat');
+  await assert.rejects(() => fixture.harness.kernel.heartbeat(fixture.projectId, 'run', { leaseId: bound.result.lease.leaseId, agentId: 'visible-agent' }, command(heartbeat.state)), error => error.code === 'DIRECT_HEARTBEAT_DENIED');
+});
+
+test('visible host adapter rejects an unverifiable or mismatched native observation', async () => {
+  const adapter = createVisibleHostAdapter({ inspectVisibleAgent: async input => ({ verified: true, status: 'running', assertionId: 'assertion-1', observedAt: new Date().toISOString(), agentId: input.agentId, dispatchId: input.dispatchId, packetDigest: input.packetDigest, promptDigest: 'f'.repeat(64), visibility: { mode: 'user-visible', surface: input.surface, inspectRef: input.inspectRef } }) });
+  await assert.rejects(() => adapter.verifyVisibleLease({ agentId: 'agent-1', dispatch: { dispatchId: 'dispatch-1', packetDigest: 'a'.repeat(64) }, prompt: { promptDigest: 'b'.repeat(64) }, runtimeReceipt: { visibility: { surface: 'codex-task', inspectRef: 'task-1' } } }), error => error.code === 'VISIBLE_AGENT_HOST_PROMPT_MISMATCH');
 });
 
 test('host-orchestrated visible Runtime schedules work but never falls back to a CLI process', async t => {
   const runtime = 'codex-conversation-runtime';
-  const agentAdapter = { verifyVisibleLease: async ({ agentId, dispatch, prompt }) => ({ verified: true, provider: 'test-host', assertionId: 'attestation-1', agentId, dispatchId: dispatch.dispatchId, packetDigest: dispatch.packetDigest, promptDigest: prompt.promptDigest }) };
+  const agentAdapter = createVisibleHostAdapter({
+    provider: 'test-host',
+    inspectVisibleAgent: async input => ({
+      verified: true,
+      status: 'running',
+      assertionId: 'attestation-1',
+      observedAt: new Date().toISOString(),
+      agentId: input.agentId,
+      dispatchId: input.dispatchId,
+      packetDigest: input.packetDigest,
+      promptDigest: input.promptDigest,
+      visibility: { mode: 'user-visible', surface: input.surface, inspectRef: input.inspectRef },
+    }),
+  });
   const fixture = await makeFixture({ extensions: [codexRuntimeExtension], agentAdapter, policy: { agentExecutionMode: 'conversation-visible', runtimePlugins: [runtime], defaultRuntimePlugin: runtime, maxConcurrency: 'auto' } });
   t.after(() => fixture.cleanup());
   await startRun(fixture, { features: [feature('visible-review')] });
@@ -59,4 +117,38 @@ test('host-orchestrated visible Runtime schedules work but never falls back to a
   assert.equal(bound.result.lease.agentId, 'visible-agent');
   assert.equal(bound.result.lease.runtimeReceipt.hostAttestation.verified, true);
   await assert.rejects(() => fixture.harness.recordResult(fixture.projectId, 'run', dispatch.dispatchId, { status: 'completed', summary: 'done' }, { commandId: command().commandId }), error => error.code === 'VISIBLE_AGENT_HEARTBEAT_REQUIRED');
+});
+
+test('Harness rejects unwrapped visible host callbacks instead of trusting a custom attestor', async () => {
+  await assert.rejects(
+    () => makeFixture({ extensions: [codexRuntimeExtension], agentAdapter: { verifyVisibleLease: async () => ({ verified: true }) } }),
+    error => error.code === 'VISIBLE_AGENT_HOST_ADAPTER_REQUIRED',
+  );
+});
+
+test('visible Lease binding rejects stale host observations', async t => {
+  const adapter = createVisibleHostAdapter({
+    inspectVisibleAgent: async input => ({
+      verified: true,
+      status: 'running',
+      assertionId: 'stale-attestation',
+      observedAt: new Date(Date.now() - 10_000).toISOString(),
+      agentId: input.agentId,
+      dispatchId: input.dispatchId,
+      packetDigest: input.packetDigest,
+      promptDigest: input.promptDigest,
+      visibility: { mode: 'user-visible', surface: input.surface, inspectRef: input.inspectRef },
+    }),
+  });
+  const fixture = await makeFixture({ extensions: [codexRuntimeExtension], agentAdapter: adapter, policy: { agentExecutionMode: 'conversation-visible', runtimePlugins: ['codex-conversation-runtime'], defaultRuntimePlugin: 'codex-conversation-runtime', visibleHeartbeatTimeoutMs: 1_000 } });
+  t.after(() => fixture.cleanup());
+  await startRun(fixture, { features: [feature('stale-visible-agent')] });
+  const scheduled = await fixture.harness.dispatch(fixture.projectId, 'run', { maxConcurrency: 1, runtimePluginId: 'codex-conversation-runtime' }, command(await fixture.harness.authorityStore.read(fixture.projectId, 'run')));
+  const dispatch = scheduled.result.dispatches[0];
+  const packet = await fixture.harness.readDispatchPacket(fixture.projectId, 'run', dispatch.dispatchId);
+  const prompt = { contractVersion: packet.prompt.contractVersion, codecPluginId: packet.prompt.codecPluginId, codecPluginVersion: packet.prompt.codecPluginVersion, packetDigest: packet.prompt.packetDigest, promptDigest: packet.prompt.promptDigest };
+  await assert.rejects(
+    () => fixture.harness.bindDispatch(fixture.projectId, 'run', { dispatchId: dispatch.dispatchId, agentId: 'stale-agent', runtimeReceipt: { runtimePluginId: 'codex-conversation-runtime', agentId: 'stale-agent', dispatchId: dispatch.dispatchId, packetDigest: dispatch.packetDigest, prompt, visibility: { mode: 'user-visible', surface: 'codex-task', inspectRef: 'stale-task' } } }, command(scheduled.state)),
+    error => error.code === 'VISIBLE_AGENT_HOST_OBSERVATION_STALE',
+  );
 });

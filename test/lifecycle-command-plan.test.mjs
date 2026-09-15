@@ -42,11 +42,13 @@ test('lifecycle planning deterministically composes quality/full without convers
   assert.equal(first.stopCondition.type, 'quality-run-complete');
   assert.deepEqual(first.protectedOperations.includes('hard-recovery'), true);
   const started = await harness.startLifecyclePlan(first, { commandId: 'visible-lifecycle' });
-  assert.equal(started.status, 'started');
+  assert.equal(started.status, 'attention-required');
+  assert.equal(started.reason, 'visible-agent-host-adapter-unavailable');
   assert.equal(started.runtimePolicy.mode, 'conversation-visible');
+  assert.equal(started.state, null);
   const blockedCoordinator = await harness.executeLifecyclePlan(first, { commandId: 'visible-lifecycle-execute' });
   assert.equal(blockedCoordinator.status, 'attention-required');
-  assert.equal(blockedCoordinator.reason, 'user-visible-runtime-requires-host-orchestration');
+  assert.equal(blockedCoordinator.reason, 'visible-agent-host-adapter-unavailable');
 });
 
 test('release activation stages a complete generation and switches the active pointer once', async t => {

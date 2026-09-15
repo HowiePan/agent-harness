@@ -1,0 +1,70 @@
+{
+  "protocolVersion": "1.0",
+  "projectAlias": "engine",
+  "project": {
+    "projectId": "cardworld-engine",
+    "profileId": "engine-delivery",
+    "extensionId": "cardworld-engine-profile"
+  },
+  "observedAt": "2026-09-15T03:11:12.6830263Z",
+  "summary": "V3.8.4 quality lifecycle stopped because the conversation-visible host adapter was unavailable.",
+  "severity": "unclassified",
+  "environment": {
+    "workspaceRoot": "F:\\CardWorld",
+    "executionWorkspaceRoot": "F:\\CardWorld",
+    "harnessControlRoot": "F:\\agent-harness",
+    "runId": "v3.8.4-quality-c5643b23dce7f865",
+    "runRevision": 1,
+    "planDigest": "1cafbdba31fd10405bb4409335721cd73c0e4a68408b12b177b7039b8553702a"
+  },
+  "expected": "The conversation-visible lifecycle should create an observable child Agent, bind it through a trusted host adapter, record a fresh heartbeat, and continue the quality run.",
+  "actual": "The lifecycle plan started successfully, but the current session exposed no createCodexVisibleHostAdapter inspectVisibleAgent capability. No Dispatch was scheduled, no Lease was bound, and no Gate ran.",
+  "reproduction": {
+    "steps": [
+      "Submit h:engine quality V3.8.4 in the CardWorld workspace.",
+      "Complete Harness readiness checks and lifecycle planning.",
+      "Start the conversation-visible lifecycle.",
+      "Attempt to continue with visible Dispatch scheduling and trusted host observation."
+    ]
+  },
+  "conversation": {
+    "source": "current-thread",
+    "excerpts": [
+      {
+        "role": "user",
+        "text": "h:engine quality V3.8.4"
+      },
+      {
+        "role": "tool",
+        "text": "Harness readiness passed for project cardworld-engine, Profile engine-delivery, and Extension cardworld-engine-profile; lifecycleReady was true."
+      },
+      {
+        "role": "tool",
+        "text": "Lifecycle start returned status started for run v3.8.4-quality-c5643b23dce7f865 with runtime mode conversation-visible."
+      },
+      {
+        "role": "assistant",
+        "text": "The run was stopped as attention-required because the current session lacked a verifiable Codex visible-child host adapter; no Dispatch, Lease, or Gate was executed."
+      }
+    ]
+  },
+  "missingEvidence": [
+    "Native host inspectVisibleAgent observation and attestation",
+    "Dispatch packet and generated prompt, because scheduling did not occur",
+    "Gate execution output and final quality disposition"
+  ],
+  "correlation": {
+    "category": "lifecycle",
+    "failureCode": "VISIBLE_AGENT_HOST_REQUIRED",
+    "scope": "cardworld-engine quality V3.8.4 conversation-visible dispatch"
+  },
+  "sanitization": {
+    "confirmed": true,
+    "removed": [
+      "unrelated conversation content",
+      "credentials and access tokens"
+    ]
+  },
+  "incidentFingerprint": "70bd929c07dc99cc995ae325167e42acd7c79679cd0a68fc3604b5ca1dcb0815",
+  "intakeDigest": "68116284f352852f823f761ff567a5e013f4dc55085be7ecc1eb7f514ce9141c"
+}

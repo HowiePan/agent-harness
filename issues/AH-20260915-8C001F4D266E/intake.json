@@ -1,0 +1,67 @@
+{
+  "protocolVersion": "1.0",
+  "projectAlias": "engine",
+  "project": {
+    "projectId": "cardworld-engine",
+    "profileId": "engine-delivery",
+    "extensionId": "cardworld-engine-profile"
+  },
+  "observedAt": "2026-09-15T04:01:07.8473128Z",
+  "summary": "V3.8.4 quality lifecycle cannot start because the visible Agent host adapter is unavailable.",
+  "severity": "P1",
+  "environment": {
+    "harnessVersion": "1.0.0",
+    "executionMode": "conversation-visible",
+    "target": "V3.8.4"
+  },
+  "expected": {
+    "outcome": "The approved quality lifecycle should start and expose a trusted visible-Agent delegation path."
+  },
+  "actual": {
+    "status": "attention-required",
+    "failureCode": "visible-agent-host-adapter-unavailable",
+    "runCreated": false,
+    "gatesExecuted": false
+  },
+  "reproduction": {
+    "steps": [
+      "Resolve the bound engine project and approve the required bootstrap repair.",
+      "Resolve h:engine quality V3.8.4 with the full quality preset.",
+      "Invoke lifecycle start for the generated quality plan.",
+      "Observe attention-required: visible-agent-host-adapter-unavailable before Run creation."
+    ]
+  },
+  "conversation": {
+    "source": "current-thread",
+    "excerpts": [
+      {
+        "role": "user",
+        "text": "User requested h:engine quality V3.8.4 and later approved the reviewed Harness bootstrap repair."
+      },
+      {
+        "role": "tool",
+        "text": "The lifecycle plan resolved successfully for quality/V3.8.4 with conversation-visible runtime, but lifecycle start returned attention-required: visible-agent-host-adapter-unavailable; no Run was created."
+      }
+    ]
+  },
+  "missingEvidence": [
+    "Trusted host adapter attestation for Agent, Dispatch, packet, and prompt identity.",
+    "Dispatch, Lease, heartbeat, and structured quality result records.",
+    "Final Gate evidence and quality findings."
+  ],
+  "correlation": {
+    "category": "lifecycle-start",
+    "failureCode": "VISIBLE_AGENT_HOST_ADAPTER_UNAVAILABLE",
+    "scope": "quality/V3.8.4"
+  },
+  "sanitization": {
+    "confirmed": true,
+    "removed": [
+      "User-specific filesystem paths",
+      "Command IDs and nonessential plan digests",
+      "Unrelated conversation content"
+    ]
+  },
+  "incidentFingerprint": "b9c934a2efbfa929867b663ba8c77df9e10d67390b07933d4057b6e177e5bcb9",
+  "intakeDigest": "8c001f4d266ea2c7b9148aa60435711f8f02ca6267ead8b6cf93b11ccc5dbb94"
+}

@@ -45,7 +45,7 @@ export const createBootstrapPlan = async (input, { controlRoot: controlRootInput
   const extensionRegistry = new ExtensionRegistry({ controlRoot, dataRoot });
   const extensionState = await extensionRegistry.list();
   const projectRegistry = new ProjectRegistry({ controlRoot, root: dataRoot });
-  const existingProject = (await projectRegistry.list()).find(project => project.id === request.binding.projectId) ?? null;
+  const existingProjectRevision = await projectRegistry.getPersistedRevision(request.binding.projectId);
   const extensions = [];
   for (const requested of request.extensions) {
     const artifact = await inspectExtensionArtifact(requested.module, { controlRoot, requireArtifactManifest: true });
@@ -63,7 +63,7 @@ export const createBootstrapPlan = async (input, { controlRoot: controlRootInput
     controlRoot,
     dataRoot,
     expectedExtensionRevision: extensionState.revision,
-    expectedProjectRevision: existingProject?.revision ?? 0,
+    expectedProjectRevision: existingProjectRevision,
     extensions,
   };
   return { ...body, planDigest: digestJson(body) };

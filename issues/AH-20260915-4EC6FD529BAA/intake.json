@@ -1,0 +1,61 @@
+{
+  "protocolVersion": "1.0",
+  "projectAlias": "engine",
+  "project": {
+    "projectId": "cardworld-engine",
+    "profileId": "engine-delivery",
+    "extensionId": "cardworld-engine-profile"
+  },
+  "observedAt": "2026-09-15T02:25:01.4731569Z",
+  "summary": "conversation-visible 生命周期无法完成可信 Agent Lease 绑定，阻塞 Harness 正式收口",
+  "severity": "P1",
+  "expected": "宿主创建可见子 Agent 后，应提供绑定 Agent、Dispatch、Packet、Prompt 摘要及可检查任务引用的 Runtime Receipt，并由可信适配器完成 Lease 证明。",
+  "actual": "质量子 Agent 已完成审查，但当前宿主仅提供 Agent 标识与结果，未提供 Harness 可验证的可信宿主 attestation；绑定阶段按策略停止。",
+  "reproduction": {
+    "steps": [
+      "在 engine 项目上执行 quality V3.8.4。",
+      "Harness 以 conversation-visible 模式启动 Run、创建 Dispatch，并生成确定性子 Agent 指令。",
+      "宿主创建可见子 Agent 后尝试绑定 Lease。",
+      "绑定因缺少可信宿主证明适配器而返回 attention-required，未能继续 heartbeat、提交结果和正式收口。"
+    ]
+  },
+  "conversation": {
+    "source": "current-thread",
+    "excerpts": [
+      {
+        "role": "user",
+        "text": "用户询问：需要支持可信可见 Agent attestation 后才能完成正式 Harness 收口，是否需要修改 agent-harness。"
+      },
+      {
+        "role": "assistant",
+        "text": "当前 Harness 核心已有 verifyVisibleLease 契约，但 CLI/宿主没有注入可用的 agentAdapter；仅有 Agent 标识不能替代可信 Receipt 或 attestation。"
+      },
+      {
+        "role": "tool",
+        "text": "实际质量流程在 Lease 绑定前停止，原因是 VISIBLE_AGENT_HOST_ATTESTOR_REQUIRED；未提交伪造回执，未运行阻塞式 lifecycle execute。"
+      }
+    ]
+  },
+  "missingEvidence": [
+    "Codex 宿主侧 verifyVisibleLease 实现或等价可信适配器接口",
+    "绑定 Agent、Dispatch、Packet 摘要和 Prompt 摘要的 Runtime Receipt",
+    "可检查的宿主任务引用及其观察状态",
+    "Lease 绑定后的新鲜 heartbeat 回执"
+  ],
+  "correlation": {
+    "category": "integration-incident",
+    "failureCode": "VISIBLE_AGENT_HOST_ATTESTOR_REQUIRED",
+    "scope": "conversation-visible lease binding"
+  },
+  "sanitization": {
+    "confirmed": true,
+    "removed": [
+      "绝对文件路径",
+      "Run/Dispatch/Agent 标识",
+      "摘要值",
+      "可能的宿主内部标识"
+    ]
+  },
+  "incidentFingerprint": "a7bfec109edcad3a2dfc139f0ce8ea320e9f2fcf857acba1f1a5dcb792ce48e0",
+  "intakeDigest": "4ec6fd529baa3d9f8d906c4bd8a0ecc8cdff7f629ec6121ada775676f5a274ce"
+}

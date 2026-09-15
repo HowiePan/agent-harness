@@ -4,7 +4,7 @@ import { access, mkdtemp, mkdir, readFile, readdir, rm, writeFile } from 'node:f
 import { tmpdir } from 'node:os';
 import { dirname, resolve } from 'node:path';
 import { configureBindings } from '../integrations/codex/agent-harness-codex/scripts/configure-bindings.mjs';
-import { hookResponse, parsePseudoCommand } from '../integrations/codex/agent-harness-codex/hooks/pseudo-command-router.mjs';
+import { hookResponse, loadBindings, parsePseudoCommand } from '../integrations/codex/agent-harness-codex/hooks/pseudo-command-router.mjs';
 import { resolveCommandIntent } from '../src/extensions/command-contract.mjs';
 import { cardWorldCommandManifest, tabletopCollectionCommandManifest } from '../src/consumers/index.mjs';
 
@@ -107,6 +107,39 @@ test('binding configuration makes project selection and Harness location determi
     assert.match(reportContext, /"projectId":"cardworld-engine"/);
     assert.match(reportContext, /"executionWorkspaceRoot"/);
     assert.equal(reportContext.length <= 1800, true);
+  } finally {
+    await rm(fixture, { recursive: true, force: true });
+  }
+});
+
+test('router recovers its exact install-root binding when a restarted Hook omits runtime environment variables', async () => {
+  const fixture = await createTemporaryFixture('agent-harness-runtime-binding-');
+  try {
+    const pluginInstallRoot = resolve(fixture, 'plugin');
+    const bindingRoot = resolve(pluginInstallRoot, '.plugin-data');
+    const controlRoot = resolve(fixture, 'harness');
+    const workspaceRoot = resolve(fixture, 'workspace');
+    await Promise.all([
+      mkdir(bindingRoot, { recursive: true }),
+      mkdir(controlRoot, { recursive: true }),
+      mkdir(workspaceRoot, { recursive: true }),
+    ]);
+    await writeFile(resolve(controlRoot, 'agent-harness.mjs'), '', 'utf8');
+    await writeFile(resolve(bindingRoot, 'bindings.json'), `${JSON.stringify({
+      protocolVersion: '1.0',
+      harness: {
+        controlRoot,
+        entrypoint: resolve(controlRoot, 'agent-harness.mjs'),
+        dataRoot: resolve(controlRoot, 'data'),
+      },
+      projects: {
+        engine: { projectId: 'cardworld-engine', profileId: 'engine-delivery', extensionId: 'cardworld-engine-profile', workspaceRoot },
+      },
+    })}\n`, 'utf8');
+    const bindings = await loadBindings({ pluginData: '', pluginRoot: resolve(fixture, 'stale-plugin-root'), fallbackPluginRoot: pluginInstallRoot });
+    assert.equal(bindings.source, resolve(bindingRoot, 'bindings.json'));
+    const output = await hookResponse({ prompt: 'h:where', cwd: workspaceRoot }, { pluginData: '', pluginRoot: '', fallbackPluginRoot: pluginInstallRoot });
+    assert.match(output.hookSpecificOutput.additionalContext, /cardworld-engine/);
   } finally {
     await rm(fixture, { recursive: true, force: true });
   }

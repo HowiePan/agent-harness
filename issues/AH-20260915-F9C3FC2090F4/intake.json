@@ -1,0 +1,71 @@
+{
+  "protocolVersion": "1.0",
+  "projectAlias": "engine",
+  "project": {
+    "projectId": "cardworld-engine",
+    "profileId": "engine-delivery",
+    "extensionId": "cardworld-engine-profile"
+  },
+  "observedAt": "2026-09-15T01:16:01.3889729Z",
+  "summary": "V3.8.4 quality command blocked by invalid Project Descriptor and extension artifact digest mismatch",
+  "severity": "P1",
+  "environment": {
+    "controlRoot": "F:\\agent-harness",
+    "executionWorkspaceRoot": "F:\\CardWorld",
+    "command": "h:engine quality V3.8.4"
+  },
+  "expected": "The bound Harness should pass project-scoped readiness and produce a lifecycle quality plan for V3.8.4.",
+  "actual": {
+    "readiness": "PROJECT_DESCRIPTOR_RECORD_INVALID",
+    "missingPolicyFields": [
+      "policy.agentExecutionMode",
+      "policy.promptCodecPlugin"
+    ],
+    "planning": "EXTENSION_ARTIFACT_DIGEST_MISMATCH",
+    "expectedDigest": "1321b185d6f7f1cf8a966b10550a36f28c8a789daa62e4de38451ce4e643c6ae",
+    "actualDigest": "e730c6d90b7f717bd57194aaad7c05eed8383e1d9a538301864339451ea92ac9",
+    "resolvedPath": "F:\\agent-harness\\src\\consumers\\cardworld-engine.mjs",
+    "outcome": "No lifecycle plan, Run, or Gate was started."
+  },
+  "reproduction": {
+    "steps": [
+      "Run the bound Agent Harness doctor command for project engine.",
+      "Run the bound lifecycle plan for action quality and target V3.8.4.",
+      "Observe PROJECT_DESCRIPTOR_RECORD_INVALID during readiness and EXTENSION_ARTIFACT_DIGEST_MISMATCH during plan resolution."
+    ]
+  },
+  "conversation": {
+    "source": "current-thread",
+    "excerpts": [
+      {
+        "role": "user",
+        "text": "h:engine quality V3.8.4"
+      },
+      {
+        "role": "tool",
+        "text": "doctor/project readiness failed with PROJECT_DESCRIPTOR_RECORD_INVALID: missing policy.agentExecutionMode and policy.promptCodecPlugin."
+      },
+      {
+        "role": "tool",
+        "text": "lifecycle plan failed with EXTENSION_ARTIFACT_DIGEST_MISMATCH: expected 1321b185d6f7f1cf8a966b10550a36f28c8a789daa62e4de38451ce4e643c6ae, actual e730c6d90b7f717bd57194aaad7c05eed8383e1d9a538301864339451ea92ac9, resolved path F:\\agent-harness\\src\\consumers\\cardworld-engine.mjs."
+      }
+    ]
+  },
+  "missingEvidence": [
+    "No successful lifecycle plan or Run identifier was produced.",
+    "No Gate output was produced because execution did not start."
+  ],
+  "correlation": {
+    "category": "harness-readiness",
+    "failureCode": "PROJECT_DESCRIPTOR_RECORD_INVALID;EXTENSION_ARTIFACT_DIGEST_MISMATCH",
+    "scope": "cardworld-engine / engine-delivery / cardworld-engine-profile / quality V3.8.4"
+  },
+  "sanitization": {
+    "confirmed": true,
+    "removed": [
+      "Irrelevant conversation context and non-diagnostic metadata omitted."
+    ]
+  },
+  "incidentFingerprint": "0e8fde9269694ebc42679e1dd588990095e8be1de96c89147c8198bb3117f05c",
+  "intakeDigest": "f9c3fc2090f4bc6a1f1bfffc90c96d953831b27262f58a67e5b6199a5c88266c"
+}

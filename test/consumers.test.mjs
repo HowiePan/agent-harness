@@ -24,6 +24,7 @@ test('CardWorld consumer compiles one canonical requirement and project-owned de
   assert.deepEqual(descriptor.extensions.map(extension => extension.id), ['cardworld-engine-profile', 'codex-runtime']);
   assert.equal(descriptor.policy.agentExecutionMode, 'conversation-visible');
   assert.equal(descriptor.policy.defaultRuntimePlugin, 'codex-conversation-runtime');
+  assert.equal(descriptor.policy.promptCodecPlugin, 'reference-agent-prompt-codec');
   assert.equal(descriptor.policy.maxConcurrency, 'auto');
   assert.deepEqual(descriptor.policy.runtimeConfigs['codex-conversation-runtime'], {});
   const graph = compileCardWorldFeatureGraph({
@@ -46,6 +47,7 @@ test('Collection consumer keeps ten game lanes, Feature dependencies, and one sh
   assert.equal(descriptor.policy.maxConcurrency, 10);
   assert.equal(descriptor.policy.agentExecutionMode, 'conversation-visible');
   assert.equal(descriptor.policy.defaultRuntimePlugin, 'codex-conversation-runtime');
+  assert.equal(descriptor.policy.promptCodecPlugin, 'reference-agent-prompt-codec');
   assert.deepEqual(descriptor.policy.runtimeConfigs['codex-conversation-runtime'], {});
   const games = Array.from({ length: 10 }, (_, index) => ({
     id: `game-${index + 1}`,

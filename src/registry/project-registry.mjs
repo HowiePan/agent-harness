@@ -80,6 +80,18 @@ export class ProjectRegistry {
     return descriptor;
   }
 
+  // Bootstrap is the explicit, approved replacement path for descriptors that
+  // no longer satisfy the current record contract. Keep normal reads strict;
+  // this method only exposes the revision needed for optimistic replacement.
+  async getPersistedRevision(id) {
+    const descriptor = await readJson(await this.file(id), null);
+    if (descriptor === null) return 0;
+    assert(descriptor && typeof descriptor === 'object' && !Array.isArray(descriptor), 'PROJECT_DESCRIPTOR_UNRECOVERABLE', 'Persisted Project Descriptor is not an object.');
+    assert(descriptor.id === id, 'PROJECT_DESCRIPTOR_ID_MISMATCH', 'Persisted Project Descriptor ID does not match its file.');
+    assert(Number.isInteger(descriptor.revision) && descriptor.revision >= 1, 'PROJECT_DESCRIPTOR_REVISION_INVALID', 'Persisted Project Descriptor revision is invalid.');
+    return descriptor.revision;
+  }
+
   async list() {
     let names;
     try { names = await readdir(await this.directoryPath()); }

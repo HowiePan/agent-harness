@@ -137,8 +137,8 @@
     },
     {
       "path": "docs/plugin-sdk.md",
-      "sha256": "310ddb8aee9aa4d9a4a4e7877a85e9d30cde4989af2be37505be8e8b659eb5c8",
-      "size": 7500
+      "sha256": "52e3c3cf65d6cdf83cd551a61b417b2b0c4c8b0acf4410f4f5a21625ec19a004",
+      "size": 7688
     },
     {
       "path": "docs/post-extraction-register.md",
@@ -217,13 +217,18 @@
     },
     {
       "path": "integrations/codex/agent-harness-codex/hooks/pseudo-command-router.mjs",
-      "sha256": "0b0798a563eeb1e37510977387cb9c153bbc2c5b65d46d2e12413c8fc278551b",
-      "size": 12212
+      "sha256": "46ba7933246b5b10ec43c41c1624b7f47c58d4eb7416a0e43408ce645b6ece84",
+      "size": 12734
     },
     {
       "path": "integrations/codex/agent-harness-codex/references/pseudo-command-contract.md",
-      "sha256": "9598b4bb9b17f02f8785fa0a7ac6a871ad8a243ab22835a500e4535c757c9e2b",
-      "size": 5934
+      "sha256": "8d004237c97f777db96cb8284a57f1fa8368bf0559400ce04788988935c5d8ec",
+      "size": 6128
+    },
+    {
+      "path": "integrations/codex/agent-harness-codex/references/visible-host-adapter-contract.md",
+      "sha256": "7d16588085201e121cbb38b839e9a9b1307e4fea169d6663db89166964312d41",
+      "size": 1166
     },
     {
       "path": "integrations/codex/agent-harness-codex/scripts/configure-bindings.mjs",
@@ -247,8 +252,8 @@
     },
     {
       "path": "integrations/codex/agent-harness-codex/skills/agent-harness-extension-author/SKILL.md",
-      "sha256": "72630f90b63fd5eec8a5e422f19351ce0739cccf4f6b782e887d1c63ef7ac1ff",
-      "size": 4392
+      "sha256": "acb052dd40a511e508a252687306bc0c370e11b5e35a040df36fe68b3bbbe476",
+      "size": 4536
     },
     {
       "path": "integrations/codex/agent-harness-codex/skills/agent-harness-operator/agents/openai.yaml",
@@ -262,8 +267,8 @@
     },
     {
       "path": "integrations/codex/agent-harness-codex/skills/agent-harness-operator/SKILL.md",
-      "sha256": "d0bf944e64e38b36fdea667b8dd02a0ca8b8651f0924cc586950c02896647b20",
-      "size": 5227
+      "sha256": "3c7e20ad8847e52bcd3eef5c94cfdfe6e4e9d4210292f6ea70e4d1cc5b999f0d",
+      "size": 5506
     },
     {
       "path": "LICENSE",
@@ -447,13 +452,13 @@
     },
     {
       "path": "src/app/harness.mjs",
-      "sha256": "b2117d28353932ea88e972d2c047415a836a0c52e90ad6d69df1ea8fbcda1edc",
-      "size": 37381
+      "sha256": "c735b5c1f1adc4409f84eb0fdbe559c8169ed4be011c9859004c5baa7ee89e65",
+      "size": 41455
     },
     {
       "path": "src/bootstrap.mjs",
-      "sha256": "60b9bb6140d9a4366c2964e8f8ffe7a3ab2c67c409c468cdfa08bbb52d620d09",
-      "size": 11444
+      "sha256": "b9116c2de5f4d3d24f6d1cb616c05824ed9ad8b9f8fe222a2d2905cca580a802",
+      "size": 11418
     },
     {
       "path": "src/canonical.mjs",
@@ -462,8 +467,8 @@
     },
     {
       "path": "src/cli.mjs",
-      "sha256": "09bcc9ef71813eb08c180ba9a4b02cdfa3db3a90056debfc6197434ac317f75d",
-      "size": 29280
+      "sha256": "5db8ebc5aeaf245e068f453d15947b1b427a4f6dde2dccc848f27b1185f10e9a",
+      "size": 29421
     },
     {
       "path": "src/concurrency.mjs",
@@ -497,8 +502,8 @@
     },
     {
       "path": "src/extensions/codex-runtime.mjs",
-      "sha256": "42a6eed835803715bac2a3ca1d3acf72ea8c3a72e42d5fdc0e0ecb5f6c00c574",
-      "size": 1343
+      "sha256": "1af50eb0064be1fb12e552bc8e41d8800d280bed2213a91324c8a9b10b3a198e",
+      "size": 1474
     },
     {
       "path": "src/extensions/command-contract.mjs",
@@ -572,8 +577,8 @@
     },
     {
       "path": "src/kernel/kernel.mjs",
-      "sha256": "12563495b53acbe3bf78dc451aff4ce80eb062318d63c95d6c679b64e3e50645",
-      "size": 40739
+      "sha256": "453a7f30456b1eafe00ad76c60e6663109200db2fed780d68011512b3af20614",
+      "size": 41549
     },
     {
       "path": "src/kernel/quality.mjs",
@@ -672,8 +677,8 @@
     },
     {
       "path": "src/plugins/index.mjs",
-      "sha256": "fe58104cf0c8f5a4aaeeb03cd7d26099e92eee88c0621a1e519fadf4e7866e9f",
-      "size": 1506
+      "sha256": "8371db293c6acab4f173e29a61d76a4b1cb5dbf64a2314605b3e547344dd1281",
+      "size": 1638
     },
     {
       "path": "src/plugins/loader.mjs",
@@ -717,13 +722,13 @@
     },
     {
       "path": "src/plugins/runtime/codex-runtime.mjs",
-      "sha256": "af9683ce6cbbdc96ae01cf627cca4fb5e648f4b373c4c74c374d544820b7b39f",
-      "size": 937
+      "sha256": "f2b89a5f6c6d1a765c31996e076767a8d51f74371d67df617060e843c094068e",
+      "size": 1635
     },
     {
       "path": "src/plugins/runtime/execution-policy.mjs",
-      "sha256": "f9ad85a3aee702fba25c2171600ba1b7a710f819b89a676bf36d7b008a843818",
-      "size": 4104
+      "sha256": "1e480c5926d16ab88fe09ecca17d8e36036d6f825374eaffe62f0c4abe0619de",
+      "size": 4311
     },
     {
       "path": "src/plugins/runtime/in-memory-runtime.mjs",
@@ -739,6 +744,11 @@
       "path": "src/plugins/runtime/process-runtime.mjs",
       "sha256": "5d0f1ac6f05769a0206e78cf70547f74fed6c4bf2eafa061c200c2eca3aeb5f6",
       "size": 6017
+    },
+    {
+      "path": "src/plugins/runtime/visible-host-adapter.mjs",
+      "sha256": "f2e3d5ae315aa9c6ea96748db93ac752ee82c8749a38e255d4ec5c6b947af125",
+      "size": 6925
     },
     {
       "path": "src/plugins/scheduler/conflict-scheduler.mjs",
@@ -842,8 +852,8 @@
     },
     {
       "path": "src/registry/project-registry.mjs",
-      "sha256": "b24b67f353252ebc2c7d87e5a69f7d0e833bd49c94a6e1af2e43966c63f6467d",
-      "size": 8076
+      "sha256": "528a2b4e9aa191f4a9d41eb141fe48e6332219454236119b225bfc6d4a15951a",
+      "size": 8961
     },
     {
       "path": "src/release-identity.mjs",
@@ -876,7 +886,7 @@
       "size": 3735
     }
   ],
-  "packageDigest": "e730c6d90b7f717bd57194aaad7c05eed8383e1d9a538301864339451ea92ac9",
+  "packageDigest": "2dbbac6f5498cb418c2788b6bd04af7e25cbb6d20f147eb159f139de0b8cc0f9",
   "metadataFiles": [
     "release-manifest.json",
     "sbom.spdx.json"

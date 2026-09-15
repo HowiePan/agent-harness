@@ -1,11 +1,12 @@
 import { lstat, readFile, realpath } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
-import { isAbsolute, relative, resolve } from 'node:path';
+import { dirname, isAbsolute, relative, resolve } from 'node:path';
 import process from 'node:process';
 import { fileURLToPath } from 'node:url';
 
 const tokenPattern = /^[a-z][a-z0-9-]{0,31}$/;
 const commandPattern = /^h:([^\s]+)(?:\s+(.+))?$/;
+const modulePluginRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
 const inside = (parent, child) => {
   const path = relative(resolve(parent), resolve(child));
@@ -102,10 +103,15 @@ const validateBindings = async (input, source) => {
   });
 };
 
-export const loadBindings = async ({ pluginData = process.env.PLUGIN_DATA, pluginRoot = process.env.PLUGIN_ROOT } = {}) => {
+export const loadBindings = async ({ pluginData = process.env.PLUGIN_DATA, pluginRoot = process.env.PLUGIN_ROOT, fallbackPluginRoot = modulePluginRoot } = {}) => {
+  // Codex normally injects both variables. After a desktop restart, some Hook
+  // launches have resolved the command path but omitted the variables from the
+  // child environment. Derive only this module's own install root as a bounded
+  // fallback; never scan parent directories or search the filesystem.
+  const pluginRoots = [...new Set([pluginRoot, fallbackPluginRoot].filter(Boolean))];
   const candidates = [
     ...(pluginData ? [resolve(pluginData, 'bindings.json')] : []),
-    ...(pluginRoot ? [resolve(pluginRoot, '.plugin-data', 'bindings.json')] : []),
+    ...pluginRoots.map(root => resolve(root, '.plugin-data', 'bindings.json')),
   ];
   for (const file of [...new Set(candidates)]) {
     try { return await validateBindings(JSON.parse(await readFile(file, 'utf8')), file); }

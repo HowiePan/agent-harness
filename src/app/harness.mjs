@@ -26,6 +26,7 @@ import { RunCoordinator } from '../coordinator/run-coordinator.mjs';
 import { AUTO_CONCURRENCY, AUTO_CONCURRENCY_LIMIT, resolveConcurrencyLimit } from '../concurrency.mjs';
 import { ProjectGateRunner } from '../gates/project-gate-runner.mjs';
 import { assertAgentRuntimeCompatible, assertRuntimeTransportReceipt } from '../plugins/runtime/execution-policy.mjs';
+import { assertFreshVisibleObservation, createVisibleHostAdapter, isVisibleHostAdapter } from '../plugins/runtime/visible-host-adapter.mjs';
 
 export const defaultDataRoot = (controlRoot = harnessControlRoot()) => resolve(controlRoot, '.agent-harness-data');
 
@@ -49,6 +50,15 @@ export const createHarness = async ({ controlRoot: controlRootInput, dataRoot: d
   const authorityStore = new AuthorityStore({ root: controlledDataRoot, controlRoot, now });
   if (initializeStorage) await authorityStore.init();
   const evidenceStore = new EvidenceStore({ root: authorityStore.root, controlRoot, now });
+  const trustedAgentAdapter = agentAdapter === null || agentAdapter === undefined
+    ? null
+    : isVisibleHostAdapter(agentAdapter)
+      ? agentAdapter
+      : typeof agentAdapter.inspectVisibleAgent === 'function'
+        ? createVisibleHostAdapter(agentAdapter)
+        : typeof agentAdapter.verifyVisibleLease === 'function' || typeof agentAdapter.heartbeatVisibleAgent === 'function'
+          ? assert(false, 'VISIBLE_AGENT_HOST_ADAPTER_REQUIRED', 'Visible Agent host callbacks must be wrapped by createVisibleHostAdapter().')
+          : agentAdapter;
   const profileRegistry = new ProfileRegistry([featureDeliveryProfile, ...extraProfiles]);
   const pluginHost = new PluginHost({ allowedPermissions: allowedPluginPermissions });
   pluginHost.register(manifests.scheduler, createConflictScheduler({ manifest: manifests.scheduler }));
@@ -60,7 +70,7 @@ export const createHarness = async ({ controlRoot: controlRootInput, dataRoot: d
   const extensionSet = await installExtensionPacks(extensions, {
     profileRegistry,
     pluginHost,
-    factoryContext: { controlRoot, dataRoot: authorityStore.root, resolveProject: projectId => projectRegistry.get(projectId), now, agentAdapter },
+    factoryContext: { controlRoot, dataRoot: authorityStore.root, resolveProject: projectId => projectRegistry.get(projectId), now, agentAdapter: trustedAgentAdapter },
     requireVerifiedArtifacts: strictProjectIdentity,
   });
   const kernel = new HarnessKernel({ authorityStore, evidenceStore, profiles: profileRegistry, now, id });
@@ -68,7 +78,7 @@ export const createHarness = async ({ controlRoot: controlRootInput, dataRoot: d
   const extensionPacks = new Map(extensions.map(extension => [extension.id, extension]));
   const publicKernel = new Proxy(kernel, {
     get(target, property) {
-      if (property === 'bindLease') return async () => assert(false, 'DIRECT_LEASE_BIND_DENIED', 'Lease binding must use the policy-aware Harness bindDispatch API.');
+      if (['bindLease', 'heartbeat'].includes(property)) return async () => assert(false, property === 'heartbeat' ? 'DIRECT_HEARTBEAT_DENIED' : 'DIRECT_LEASE_BIND_DENIED', property === 'heartbeat' ? 'Heartbeat must use the policy-aware Harness recordHeartbeat API.' : 'Lease binding must use the policy-aware Harness bindDispatch API.');
       const value = Reflect.get(target, property, target);
       return typeof value === 'function' ? value.bind(target) : value;
     },
@@ -170,6 +180,9 @@ export const createHarness = async ({ controlRoot: controlRootInput, dataRoot: d
       const runtimeManifest = pluginHost.get(plan.run.runtimePluginId, 'agent-runtime').manifest;
       const runtimePolicy = assertAgentRuntimeCompatible({ project, manifest: runtimeManifest });
       const existing = await authorityStore.read(plan.project.id, plan.run.runId, { required: false });
+      if (runtimePolicy.hostOrchestrated && !isVisibleHostAdapter(trustedAgentAdapter)) {
+        return { status: 'attention-required', reason: 'visible-agent-host-adapter-unavailable', planDigest: plan.planDigest, plan, runtimePolicy, state: existing };
+      }
       let state = existing;
       if (!state) {
         const started = await api.startRun({
@@ -193,6 +206,7 @@ export const createHarness = async ({ controlRoot: controlRootInput, dataRoot: d
     async executeLifecyclePlan(planInput, { commandId, maxConcurrency, maxRounds = 100, forceFreshGates = true, onGateProgress = null } = {}) {
       assert(commandId, 'COMMAND_ID_REQUIRED', 'Lifecycle execution requires a command ID.');
       const started = await api.startLifecyclePlan(planInput, { commandId });
+      if (started.status === 'attention-required') return started;
       const { plan, runtimePolicy } = started;
       let { state } = started;
       if (state.status === 'closed') return { status: 'closed', planDigest: plan.planDigest, state };
@@ -355,13 +369,34 @@ export const createHarness = async ({ controlRoot: controlRootInput, dataRoot: d
         assert(runtimeReceipt.packetDigest === dispatch.packetDigest, 'PACKET_DIGEST_MISMATCH', 'Runtime Receipt does not match the immutable Dispatch packet.');
         assert(runtimeReceipt.prompt?.codecPluginId === prompt.codecPluginId && runtimeReceipt.prompt?.codecPluginVersion === prompt.codecPluginVersion && runtimeReceipt.prompt?.contractVersion === prompt.contractVersion, 'AGENT_PROMPT_RECEIPT_IDENTITY_MISMATCH', 'Visible Runtime Receipt does not match the generated Prompt Contract identity.');
         assert(runtimeReceipt.prompt?.packetDigest === prompt.packetDigest && runtimeReceipt.prompt?.promptDigest === prompt.promptDigest, 'AGENT_PROMPT_RECEIPT_DIGEST_MISMATCH', 'Visible Runtime Receipt is not bound to the exact generated Prompt and Dispatch packet.');
-        assert(typeof agentAdapter?.verifyVisibleLease === 'function', 'VISIBLE_AGENT_HOST_ATTESTOR_REQUIRED', 'Conversation-visible Lease binding requires a trusted host adapter that can verify the visible child Agent.');
-        const attestation = await agentAdapter.verifyVisibleLease({ project: structuredClone(project), dispatch: structuredClone(dispatch), prompt: structuredClone(prompt), agentId: input.agentId, runtimeReceipt: structuredClone(runtimeReceipt) });
+        assert(typeof trustedAgentAdapter?.verifyVisibleLease === 'function', 'VISIBLE_AGENT_HOST_ATTESTOR_REQUIRED', 'Conversation-visible Lease binding requires a trusted host adapter that can verify the visible child Agent.');
+        const attestation = await trustedAgentAdapter.verifyVisibleLease({ project: structuredClone(project), dispatch: structuredClone(dispatch), prompt: structuredClone(prompt), agentId: input.agentId, runtimeReceipt: structuredClone(runtimeReceipt) });
         assert(attestation?.verified === true, 'VISIBLE_AGENT_HOST_ATTESTATION_REJECTED', 'The interactive host did not verify the visible child Agent Lease.');
+        assert(typeof attestation.provider === 'string' && attestation.provider.length > 0 && typeof attestation.assertionId === 'string' && attestation.assertionId.length > 0 && typeof attestation.observedAt === 'string' && !Number.isNaN(Date.parse(attestation.observedAt)), 'VISIBLE_AGENT_HOST_ATTESTATION_INVALID', 'Trusted host attestation must include provider, assertion ID, and observation timestamp.');
         assert(attestation.agentId === input.agentId && attestation.dispatchId === dispatch.dispatchId && attestation.packetDigest === dispatch.packetDigest && attestation.promptDigest === prompt.promptDigest, 'VISIBLE_AGENT_HOST_ATTESTATION_MISMATCH', 'Host attestation is not bound to this Agent, Dispatch, packet, and generated Prompt.');
+        assertFreshVisibleObservation(attestation, { now: kernel.now, timeoutMs: Number(project.policy?.visibleHeartbeatTimeoutMs ?? 120000) });
         runtimeReceipt.hostAttestation = { ...structuredClone(attestation), verified: true };
       }
       return kernel.bindLease(projectId, runId, { dispatchId: dispatch.dispatchId, agentId: input.agentId, packetDigest: dispatch.packetDigest, runtimeReceipt }, command);
+    },
+
+    async recordHeartbeat(projectId, runId, input, command) {
+      const state = await authorityStore.read(projectId, runId);
+      assert(state.revision === command.expectedRevision, 'REVISION_CONFLICT', 'Authority revision changed before Runtime heartbeat.', { expected: command.expectedRevision, actual: state.revision });
+      const dispatch = state.dispatches.find(item => item.dispatchId === input.dispatchId);
+      const lease = state.leases.find(item => item.leaseId === input.leaseId && item.status === 'active');
+      assert(dispatch && lease && lease.dispatchId === dispatch.dispatchId, 'ACTIVE_LEASE_REQUIRED', 'Heartbeat requires an active Dispatch Lease.');
+      assert(input.agentId === lease.agentId, 'LEASE_IDENTITY_MISMATCH', 'Heartbeat identity does not match the active Lease.');
+      const project = await projectRegistry.get(projectId);
+      if (dispatch.execution?.runtime?.mode === 'conversation-visible') {
+        const { prompt } = await compileDispatchPrompt(state, dispatch);
+        assert(typeof trustedAgentAdapter?.heartbeatVisibleAgent === 'function', 'VISIBLE_AGENT_HOST_HEARTBEAT_REQUIRED', 'Conversation-visible heartbeat requires a trusted host observation adapter.');
+        const observation = await trustedAgentAdapter.heartbeatVisibleAgent({ project: structuredClone(project), dispatch: structuredClone(dispatch), prompt: structuredClone(prompt), agentId: input.agentId, runtimeReceipt: structuredClone(lease.runtimeReceipt) });
+        assert(observation?.verified === true, 'VISIBLE_AGENT_HOST_HEARTBEAT_REJECTED', 'The interactive host did not verify the visible Agent heartbeat.');
+        assert(observation.agentId === input.agentId && observation.dispatchId === dispatch.dispatchId && observation.packetDigest === dispatch.packetDigest && observation.promptDigest === prompt.promptDigest, 'VISIBLE_AGENT_HOST_HEARTBEAT_MISMATCH', 'Visible Agent heartbeat is not bound to this Agent, Dispatch, packet, and Prompt.');
+        assertFreshVisibleObservation(observation, { now: kernel.now, timeoutMs: Number(project.policy?.visibleHeartbeatTimeoutMs ?? 120000) });
+      }
+      return kernel.heartbeat(projectId, runId, { leaseId: input.leaseId, agentId: input.agentId, progress: input.progress ?? null }, command);
     },
 
     async recordResult(projectId, runId, dispatchId, result, { commandId, evidenceMetadata = {}, runtimeEvidence = null }) {

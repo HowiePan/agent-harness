@@ -35,6 +35,7 @@ export const assertRuntimeTransportReceipt = ({ project, manifest, receipt }) =>
     assert(typeof receipt.dispatchId === 'string' && receipt.dispatchId.length > 0, 'USER_VISIBLE_RUNTIME_DISPATCH_ID_REQUIRED', 'A user-visible Runtime Receipt must bind the Dispatch identity.');
     assert(/^[a-f0-9]{64}$/.test(receipt.packetDigest ?? ''), 'USER_VISIBLE_RUNTIME_PACKET_DIGEST_REQUIRED', 'A user-visible Runtime Receipt must bind the immutable Dispatch packet digest.');
     assert(receipt.prompt && /^[a-f0-9]{64}$/.test(receipt.prompt.promptDigest ?? '') && /^[a-f0-9]{64}$/.test(receipt.prompt.packetDigest ?? ''), 'USER_VISIBLE_RUNTIME_PROMPT_RECEIPT_REQUIRED', 'A user-visible Runtime Receipt must bind the exact generated Agent Prompt and Dispatch packet.');
+    assert(receipt.prompt.packetDigest === receipt.packetDigest, 'USER_VISIBLE_RUNTIME_PROMPT_PACKET_MISMATCH', 'A user-visible Runtime Receipt Prompt must bind the same immutable Dispatch packet digest.');
     assert(typeof receipt.prompt.codecPluginId === 'string' && /^\d+\.\d+\.\d+$/.test(receipt.prompt.codecPluginVersion ?? '') && typeof receipt.prompt.contractVersion === 'string', 'USER_VISIBLE_RUNTIME_PROMPT_IDENTITY_REQUIRED', 'A user-visible Runtime Receipt must bind the Prompt Codec and Prompt Contract identities.');
   }
   return policy;

@@ -3,6 +3,8 @@ import { CODEX_CLI_RUNTIME_MANIFEST, CODEX_ISOLATED_RUNTIME_MANIFEST, createCode
 import { CODEX_RUNTIME_MANIFEST, createCodexRuntime } from '../plugins/runtime/codex-runtime.mjs';
 import { createIsolatedWorkspaceProvider } from '../plugins/runtime/isolated-workspace.mjs';
 
+export { CODEX_RUNTIME_MANIFEST, createCodexRuntime, createCodexVisibleHostAdapter } from '../plugins/runtime/codex-runtime.mjs';
+
 export const extensionPack = defineExtensionPack({
   id: 'codex-runtime',
   version: '1.0.0',

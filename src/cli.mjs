@@ -307,7 +307,10 @@ if (command === 'features' && subject === 'compile') {
     console.log(JSON.stringify({ ok: true, ...output.result, revision: output.state.revision }, null, 2));
   } else if (command === 'run' && subject === 'heartbeat') {
     const state = await harness.authorityStore.read(take('--project'), take('--run'));
-    const output = await harness.kernel.heartbeat(state.projectId, state.runId, { leaseId: take('--lease'), agentId: take('--agent'), progress: take('--progress') ?? null }, { expectedRevision: state.revision, commandId: take('--command-id') ?? newId('command') });
+    const leaseId = take('--lease');
+    const agentId = take('--agent');
+    const lease = state.leases.find(item => item.leaseId === leaseId);
+    const output = await harness.recordHeartbeat(state.projectId, state.runId, { leaseId, dispatchId: lease?.dispatchId, agentId, progress: take('--progress') ?? null }, { expectedRevision: state.revision, commandId: take('--command-id') ?? newId('command') });
     console.log(JSON.stringify({ ok: true, ...output.result, revision: output.state.revision }, null, 2));
   } else if (command === 'run' && subject === 'decision') {
     const state = await harness.authorityStore.read(take('--project'), take('--run'));
