@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { assert } from '../errors.mjs';
+import { EXECUTION_CLASSES, assertExecutionClass } from '../execution-boundary.mjs';
 import { validateJsonSchema } from '../json-schema.mjs';
 import { resolveLifecycleExecutionPolicy } from '../plugins/runtime/execution-policy.mjs';
 
@@ -25,6 +26,7 @@ export const assertProjectDescriptorInput = (input, { strictIdentity = true } = 
   }
   assert(Array.isArray(input.gateRecipes ?? []), 'PROJECT_GATE_RECIPES_INVALID', 'Project Descriptor gateRecipes must be an array.');
   assert((input.gateRecipes ?? []).every(value => value && typeof value === 'object' && !Array.isArray(value)), 'PROJECT_GATE_RECIPES_INVALID', 'Every Project gate recipe must be an object.');
+  for (const recipe of input.gateRecipes ?? []) assertExecutionClass(recipe.executionClass, EXECUTION_CLASSES.DETERMINISTIC_PROCESS, { code: 'GATE_EXECUTION_CLASS_INVALID', subject: `Gate Recipe ${recipe.id ?? '<unknown>'}` });
   assert(Array.isArray(input.artifactProviders ?? []), 'PROJECT_ARTIFACT_PROVIDERS_INVALID', 'Project Descriptor artifactProviders must be an array.');
   assert((input.artifactProviders ?? []).every(value => typeof value === 'string'), 'PROJECT_ARTIFACT_PROVIDERS_INVALID', 'Every Project artifact provider must be a string ID.');
   if (strictIdentity) {

@@ -58,7 +58,7 @@ export const tabletopCollectionCommandManifest = defineCommandManifest({
   },
 });
 
-const pnpmGate = (id, script, timeoutMs = 900000) => ({ id, scope: 'final', required: true, forceFresh: true, command: ['pnpm', script], cwd: '.', timeoutMs });
+const pnpmGate = (id, script, timeoutMs = 900000) => ({ id, executionClass: 'deterministic-process', scope: 'final', required: true, forceFresh: true, command: ['pnpm', script], cwd: '.', timeoutMs });
 
 export const createTabletopCollectionProjectDescriptor = ({
   id = 'tabletop-collection',
@@ -209,6 +209,7 @@ export const createTabletopCollectionLifecyclePlan = ({ intent, project, runId, 
   };
   const makeFeature = ({ action, gameId, dependsOn = [], readOnly = false, qualityReview = false }) => ({
     id: `${action}/${intent.target}/${gameId}`,
+    executionClass: 'agent-reasoning',
     kind: action,
     ownerRole: qualityReview || action === 'review' ? 'reviewer' : action === 'accept' ? 'user-acceptance' : 'operator',
     logicalRoot: `${action}:${intent.target}:${gameId}`,
@@ -258,6 +259,11 @@ export const extensionPack = defineExtensionPack({
   version: '1.0.0',
   profiles: [collectionBatchProfile],
   commandManifest: tabletopCollectionCommandManifest,
+  operationManifest: {
+    createProjectDescriptor: { executionClass: 'pure-planner' },
+    compileFeatureGraph: { executionClass: 'pure-planner' },
+    createLifecyclePlan: { executionClass: 'pure-planner' },
+  },
   operations: {
     createProjectDescriptor: createTabletopCollectionProjectDescriptor,
     compileFeatureGraph: compileTabletopCollectionFeatureGraph,

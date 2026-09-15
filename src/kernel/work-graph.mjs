@@ -1,4 +1,5 @@
 import { assert } from '../errors.mjs';
+import { EXECUTION_CLASSES, assertExecutionClass } from '../execution-boundary.mjs';
 import { slash } from '../paths.mjs';
 
 const unique = values => [...new Set(values ?? [])];
@@ -6,6 +7,7 @@ const list = value => unique(Array.isArray(value) ? value.map(String) : []);
 
 export const normalizeFeature = feature => ({
   id: String(feature.id ?? ''),
+  executionClass: String(feature.executionClass ?? ''),
   kind: String(feature.kind ?? 'implementation'),
   ownerRole: String(feature.ownerRole ?? 'worker'),
   logicalRoot: String(feature.logicalRoot ?? feature.id ?? ''),
@@ -33,6 +35,7 @@ export const validateWorkGraph = features => {
   const normalized = features.map(normalizeFeature);
   const ids = new Set();
   for (const feature of normalized) {
+    assertExecutionClass(feature.executionClass, EXECUTION_CLASSES.AGENT_REASONING, { code: 'FEATURE_EXECUTION_CLASS_INVALID', subject: `Feature ${feature.id || '<unknown>'}` });
     assert(/^[A-Za-z0-9][A-Za-z0-9._:/-]{0,255}$/.test(feature.id), 'FEATURE_ID_INVALID', `Invalid Feature ID: ${feature.id}`);
     assert(!ids.has(feature.id), 'FEATURE_ID_DUPLICATE', `Duplicate Feature ID: ${feature.id}`);
     assert(feature.acceptance.length > 0, 'FEATURE_ACCEPTANCE_REQUIRED', `Feature ${feature.id} requires acceptance criteria.`);

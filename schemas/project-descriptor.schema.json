@@ -58,6 +58,16 @@
         "preserveSupersededRuns": { "const": true }
       },
       "additionalProperties": false
+    },
+    "gateRecipe": {
+      "type": "object",
+      "required": ["id", "executionClass", "command"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "executionClass": { "const": "deterministic-process" },
+        "command": { "type": "array", "minItems": 1, "items": { "type": "string" } }
+      },
+      "additionalProperties": true
     }
   },
   "required": ["protocolVersion", "id", "harness", "workspace", "profiles", "policy", "revision", "updatedAt", "commands", "descriptorDigest"],
@@ -106,7 +116,7 @@
       },
       "additionalProperties": true
     },
-    "gateRecipes": { "type": "array", "items": { "type": "object" } },
+    "gateRecipes": { "type": "array", "items": { "$ref": "#/$defs/gateRecipe" } },
     "artifactProviders": { "type": "array", "items": { "type": "string" } },
     "revision": { "type": "integer", "minimum": 1 },
     "updatedAt": { "type": "string", "format": "date-time" },

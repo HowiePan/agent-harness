@@ -3,6 +3,7 @@ export { applyBootstrapPlan, createBootstrapPlan, validateBootstrapRequest, veri
 export { inspectLifecycleReadiness, readRunStatus } from './readiness.mjs';
 export { activateHarnessInstallationRuntime, initializeHarnessInstallation } from './installation.mjs';
 export { loadReleaseIdentity, verifyReleaseManifest } from './release-identity.mjs';
+export { EXECUTION_CLASSES, EXTENSION_OPERATION_CLASSES, assertExecutionClass } from './execution-boundary.mjs';
 export * from './canonical.mjs';
 export * from './errors.mjs';
 export * from './extensions/index.mjs';

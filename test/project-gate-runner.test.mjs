@@ -5,7 +5,7 @@ import { ProjectGateRunner } from '../src/index.mjs';
 import { makeFixture, startRun } from './test-support.mjs';
 
 test('Project Gate Runner executes Descriptor recipes, records Evidence, and reuses only success', async t => {
-  const fixture = await makeFixture({ gateRecipes: [{ id: 'probe-final', scope: 'final', command: [process.execPath, resolve('test/fixtures/gate-probe.mjs')] }] });
+  const fixture = await makeFixture({ gateRecipes: [{ id: 'probe-final', executionClass: 'deterministic-process', scope: 'final', command: [process.execPath, resolve('test/fixtures/gate-probe.mjs')] }] });
   t.after(() => fixture.cleanup());
   const started = await startRun(fixture);
   assert.deepEqual(started.profile.config.requiredFinalGates, ['probe-final']);

@@ -156,13 +156,13 @@ const results = [];
 results.push(await executeCanary({
   descriptor: await harness.projectRegistry.get('cardworld-engine-clean-start'),
   profileId: 'engine-delivery',
-  feature: { id: 'cutover/cardworld-verification', kind: 'verification', ownerRole: 'operator', logicalRoot: 'cutover:cardworld', laneId: 'cutover', acceptance: ['The installed candidate completes a no-write CardWorld canary.'], dependsOn: [], allowedPaths: [], metadata: { stage: 'canonical-requirement' } },
+  feature: { id: 'cutover/cardworld-verification', executionClass: 'agent-reasoning', kind: 'verification', ownerRole: 'operator', logicalRoot: 'cutover:cardworld', laneId: 'cutover', acceptance: ['The installed candidate completes a no-write CardWorld canary.'], dependsOn: [], allowedPaths: [], metadata: { stage: 'canonical-requirement' } },
   profileConfig: { requireCanonicalDecision: false, requireUserCodeReview: false, requiredFinalGates: [] },
 }));
 results.push(await executeCanary({
   descriptor: await harness.projectRegistry.get('tabletop-collection-clean-start'),
   profileId: 'collection-batch',
-  feature: { id: 'cutover/collection-verification', kind: 'verification', ownerRole: 'operator', logicalRoot: 'cutover:collection', laneId: 'cutover', acceptance: ['The installed candidate completes a no-write Collection canary.'], dependsOn: [], allowedPaths: [], metadata: { batchId: 'clean-start', gameId: 'cutover-canary', ruleStatus: 'rule-ready' } },
+  feature: { id: 'cutover/collection-verification', executionClass: 'agent-reasoning', kind: 'verification', ownerRole: 'operator', logicalRoot: 'cutover:collection', laneId: 'cutover', acceptance: ['The installed candidate completes a no-write Collection canary.'], dependsOn: [], allowedPaths: [], metadata: { batchId: 'clean-start', gameId: 'cutover-canary', ruleStatus: 'rule-ready' } },
   profileConfig: { activeBatch: 'clean-start', batches: [{ id: 'clean-start', order: 1, status: 'active' }], requireRuleReady: false, requireHarnessAcceptance: false, requireIndependentReview: false, requireUserGameAcceptance: false, requireBatchCloseDecision: false, requiredFinalGates: [] },
   preDispatchDecisions: ['batch:clean-start:launched'],
 }));

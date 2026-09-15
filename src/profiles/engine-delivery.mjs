@@ -57,6 +57,7 @@ export const engineDeliveryProfile = Object.freeze({
       const dependencies = [...new Set([feature.id, ...(item.dependsOn ?? []).map(dependency => `${feature.id}/${dependency}`)])];
       return {
         id,
+        executionClass: 'agent-reasoning',
         kind: 'development-follow-up',
         ownerRole: item.ownerRole ?? feature.ownerRole,
         logicalRoot: `${feature.logicalRoot}:${item.id}`,

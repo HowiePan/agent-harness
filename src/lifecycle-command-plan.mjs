@@ -5,8 +5,11 @@ import { assertJsonSchema } from './json-schema.mjs';
 import { safeSegment } from './paths.mjs';
 import { resolveLifecycleExecutionPolicy } from './plugins/runtime/execution-policy.mjs';
 import { validateLifecycleExecutionGrant } from './execution-authorization.mjs';
+import { validateWorkGraph } from './kernel/work-graph.mjs';
 
 const schema = JSON.parse(readFileSync(new URL('../schemas/lifecycle-command-plan.schema.json', import.meta.url), 'utf8'));
+const featureSchema = JSON.parse(readFileSync(new URL('../schemas/feature.schema.json', import.meta.url), 'utf8'));
+const schemas = new Map([['feature.schema.json', featureSchema]]);
 
 const slug = value => String(value).toLowerCase().replace(/[^a-z0-9._-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 48) || 'target';
 
@@ -24,9 +27,10 @@ export const deriveLogicalTaskKey = ({ projectId, intent, executionWorkspaceRoot
 });
 
 export const validateLifecycleCommandPlan = input => {
-  assertJsonSchema(input, schema, { code: 'LIFECYCLE_PLAN_INVALID', label: 'Lifecycle Command Plan' });
+  assertJsonSchema(input, schema, { schemas, code: 'LIFECYCLE_PLAN_INVALID', label: 'Lifecycle Command Plan' });
   assert(input.planDigest === lifecyclePlanDigest(input), 'LIFECYCLE_PLAN_DIGEST_MISMATCH', 'Lifecycle Command Plan digest does not match its contents.');
   assert(typeof input.run.profileId === 'string' && input.run.profileId.length > 0, 'LIFECYCLE_PLAN_PROFILE_INVALID', 'Lifecycle Command Plan profile is invalid.');
+  validateWorkGraph(input.run.features);
   assert(input.protectedOperations.every(operation => typeof operation === 'string' && operation.length > 0), 'LIFECYCLE_PLAN_PROTECTED_OPERATION_INVALID', 'Lifecycle Command Plan protected operations are invalid.');
   if (input.run.executionGrant !== null) validateLifecycleExecutionGrant(input.run.executionGrant);
   assert(input.run.agentExecutionMode === 'headless' || input.run.executionGrant === null, 'VISIBLE_EXECUTION_GRANT_FORBIDDEN', 'Conversation-visible execution must not carry a headless execution grant.');
@@ -55,6 +59,7 @@ export const createLifecycleCommandPlan = ({ intent, project, extension, release
   const compiled = compiler({ intent: structuredClone(intent), project: structuredClone(project), extension: compilerExtension, runId: provisionalRunId, sourceDigest, executionWorkspaceRoot });
   assert(compiled?.run?.profileId === intent.profileId, 'LIFECYCLE_PLAN_PROFILE_MISMATCH', 'Plan compiler returned a Profile different from the Command Manifest.');
   assert(Array.isArray(compiled.run.features) && compiled.run.features.length > 0, 'LIFECYCLE_PLAN_FEATURES_REQUIRED', 'Plan compiler must return at least one Feature.');
+  const features = validateWorkGraph(compiled.run.features);
   const executionPolicy = resolveLifecycleExecutionPolicy({ project, action: intent.action });
   assert(compiled.run.runtimePluginId === undefined || compiled.run.runtimePluginId === executionPolicy.runtimePluginId, 'LIFECYCLE_COMPILER_RUNTIME_OVERRIDE_DENIED', 'Plan compiler cannot override the Runtime selected by the Project action execution policy.');
   assert(compiled.run.agentExecutionMode === undefined || compiled.run.agentExecutionMode === executionPolicy.mode, 'LIFECYCLE_COMPILER_EXECUTION_MODE_OVERRIDE_DENIED', 'Plan compiler cannot override the Agent execution mode selected by the Project action execution policy.');
@@ -66,7 +71,7 @@ export const createLifecycleCommandPlan = ({ intent, project, extension, release
     sourceDigest,
     executionWorkspaceRoot,
     executionPolicy,
-    run: withoutKeys(compiled.run, ['runId']),
+    run: { ...withoutKeys(compiled.run, ['runId', 'features']), features },
     stopCondition: compiled.stopCondition ?? { type: 'run-ready-to-close' },
     protectedOperations: [...new Set(compiled.protectedOperations ?? [])].sort(),
   });
@@ -84,7 +89,7 @@ export const createLifecycleCommandPlan = ({ intent, project, extension, release
       runId,
       profileId: compiled.run.profileId,
       profileConfig: structuredClone(compiled.run.profileConfig ?? {}),
-      features: structuredClone(compiled.run.features),
+      features,
       sourceDigest,
       artifactDigest: releaseIdentity.artifactDigest,
       executionWorkspaceRoot,

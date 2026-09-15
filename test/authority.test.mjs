@@ -52,7 +52,7 @@ test('Project Registry updates are idempotent and high-impact changes require Au
   await assert.rejects(() => fixture.harness.projectRegistry.register({ id: 'registry-project', workspace: current.workspace, profiles: ['engine-delivery'], policy: current.policy }, { expectedRevision: same.revision, commandId: 'high-impact' }), error => error.code === 'PROJECT_AUTHORITY_DECISION_REQUIRED');
   const approved = await fixture.harness.projectRegistry.register({ id: 'registry-project', workspace: current.workspace, profiles: ['engine-delivery'], policy: current.policy }, { expectedRevision: same.revision, commandId: 'high-impact', authorityDecision: { id: 'user-change', actor: 'user', decision: 'approved' } });
   assert.deepEqual(approved.profiles, ['engine-delivery']);
-  await assert.rejects(() => fixture.harness.projectRegistry.register({ id: 'registry-project', workspace: approved.workspace, profiles: approved.profiles, policy: approved.policy, gateRecipes: [{ id: 'new-final', command: ['node', '--version'], scope: 'final' }] }, { expectedRevision: approved.revision, commandId: 'gate-change' }), error => error.code === 'PROJECT_AUTHORITY_DECISION_REQUIRED');
+  await assert.rejects(() => fixture.harness.projectRegistry.register({ id: 'registry-project', workspace: approved.workspace, profiles: approved.profiles, policy: approved.policy, gateRecipes: [{ id: 'new-final', executionClass: 'deterministic-process', command: ['node', '--version'], scope: 'final' }] }, { expectedRevision: approved.revision, commandId: 'gate-change' }), error => error.code === 'PROJECT_AUTHORITY_DECISION_REQUIRED');
 });
 
 test('Project Registry requires an exact, expiring Decision for headless policy changes', async t => {

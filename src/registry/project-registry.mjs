@@ -118,12 +118,26 @@ export class ProjectRegistry {
   // no longer satisfy the current record contract. Keep normal reads strict;
   // this method only exposes the revision needed for optimistic replacement.
   async getPersistedRevision(id) {
-    const descriptor = await readJson(await this.file(id), null);
+    const descriptor = await this.getPersistedForReplacement(id);
     if (descriptor === null) return 0;
+    return descriptor.revision;
+  }
+
+  async getPersistedForReplacement(id) {
+    const descriptor = await readJson(await this.file(id), null);
+    if (descriptor === null) return null;
     assert(descriptor && typeof descriptor === 'object' && !Array.isArray(descriptor), 'PROJECT_DESCRIPTOR_UNRECOVERABLE', 'Persisted Project Descriptor is not an object.');
     assert(descriptor.id === id, 'PROJECT_DESCRIPTOR_ID_MISMATCH', 'Persisted Project Descriptor ID does not match its file.');
     assert(Number.isInteger(descriptor.revision) && descriptor.revision >= 1, 'PROJECT_DESCRIPTOR_REVISION_INVALID', 'Persisted Project Descriptor revision is invalid.');
-    return descriptor.revision;
+    assert(descriptor.descriptorDigest === digestJson(withoutKeys(descriptor, ['descriptorDigest'])), 'PROJECT_DESCRIPTOR_DIGEST_MISMATCH', 'Project Descriptor digest mismatch.');
+    return descriptor;
+  }
+
+  async listPersistedForReplacement() {
+    let names;
+    try { names = await readdir(await this.directoryPath()); }
+    catch (error) { if (error.code === 'ENOENT') return []; throw error; }
+    return Promise.all(names.filter(name => name.endsWith('.json')).sort().map(name => this.getPersistedForReplacement(name.slice(0, -5))));
   }
 
   async list() {

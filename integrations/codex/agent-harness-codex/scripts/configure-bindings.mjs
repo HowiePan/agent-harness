@@ -3,6 +3,7 @@ import { isAbsolute, relative, resolve } from 'node:path';
 import process from 'node:process';
 import { fileURLToPath } from 'node:url';
 import { resolveGitWorkspaceIdentity } from '../hooks/pseudo-command-router.mjs';
+import { validateActiveReleaseBinding } from '../lib/active-release-binding.mjs';
 
 const parseArguments = input => {
   const args = [...input];
@@ -57,6 +58,8 @@ export const configureBindings = async input => {
   const projectSpecs = input.projectSpecs ?? [];
   if (!inside(controlRoot, entrypoint) || !inside(controlRoot, dataRoot)) throw new Error('entrypoint and dataRoot must stay inside controlRoot.');
   await Promise.all([access(controlRoot), access(entrypoint)]);
+  const activeRelease = await validateActiveReleaseBinding({ controlRoot, dataRoot, entrypoint, verifyAllFiles: true });
+  const release = { version: activeRelease.version, artifactDigest: activeRelease.artifactDigest, generationId: activeRelease.generationId, pointerDigest: activeRelease.pointerDigest };
 
   const projects = {};
   for (const spec of projectSpecs) {
@@ -73,7 +76,7 @@ export const configureBindings = async input => {
   const target = resolve(directory, 'bindings.json');
   const temporary = resolve(directory, `bindings.${process.pid}.tmp`);
   await mkdir(directory, { recursive: true });
-  const document = { protocolVersion: '1.0', harness: { controlRoot, entrypoint, dataRoot }, projects };
+  const document = { protocolVersion: '1.0', harness: { controlRoot, entrypoint, dataRoot, release }, projects };
   await writeFile(temporary, `${JSON.stringify(document, null, 2)}\n`, { encoding: 'utf8', flag: 'wx' });
   try {
     await rename(temporary, target);

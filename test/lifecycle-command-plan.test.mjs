@@ -14,6 +14,7 @@ import { activeReleaseFile } from '../src/registry/active-generation.mjs';
 import { harnessTemporaryRoot } from '../src/write-boundary.mjs';
 import { createTestExecutionAuthorizationAdapter } from './test-support.mjs';
 import { projectExecutionPolicyDecisionContext } from '../src/registry/project-registry.mjs';
+import { digestJson, withoutKeys } from '../src/canonical.mjs';
 
 const releaseIdentity = { version: '1.0.0', artifactDigest: 'a'.repeat(64), verified: true };
 
@@ -156,7 +157,7 @@ test('lifecycle planning automatically resolves an inactive incompatible logical
     runId: 'historical-quality-run',
     profileId: 'engine-delivery',
     profileConfig: { requireCanonicalDecision: false, requireUserCodeReview: false, requireFinalQualityReview: true },
-    features: [{ id: 'quality/old', acceptance: ['review'], dependsOn: [], allowedPaths: [], metadata: { stage: 'quality', qualityReview: true, qualityRoot: 'engine:V3.8.4', sourcePolicy: 'review-and-repair' } }],
+    features: [{ id: 'quality/old', executionClass: 'agent-reasoning', acceptance: ['review'], dependsOn: [], allowedPaths: [], metadata: { stage: 'quality', qualityReview: true, qualityRoot: 'engine:V3.8.4', sourcePolicy: 'review-and-repair' } }],
     metadata: { commandIntent: { action: 'quality', target: 'V3.8.4' } },
     executionAuthorizationEvidence: { explicitUnattended: true },
   }, { commandId: 'start-historical-quality' });
@@ -192,6 +193,12 @@ test('release activation stages a complete generation and switches the active po
   const descriptor = createCardWorldProjectDescriptor({ workspaceRoot, harness: { version: release.version, artifactDigest: release.artifactDigest } });
   descriptor.extensions = descriptor.extensions.map(item => ({ ...item, digest: item.id === extension.id ? extension.digest : runtime.digest }));
   await projects.register(descriptor, { expectedRevision: 0, commandId: 'activation-project' });
+  const descriptorFile = resolve(dataRoot, 'registry', 'projects', `${descriptor.id}.json`);
+  const legacyDescriptor = JSON.parse(await readFile(descriptorFile, 'utf8'));
+  legacyDescriptor.policy.actionExecution = { quality: { agentExecutionMode: 'headless', runtimePluginId: 'codex-cli-runtime', authorization: { actor: 'legacy', decision: 'approved' } } };
+  for (const recipe of legacyDescriptor.gateRecipes) delete recipe.executionClass;
+  legacyDescriptor.descriptorDigest = digestJson(withoutKeys(legacyDescriptor, ['descriptorDigest']));
+  await writeFile(descriptorFile, `${JSON.stringify(legacyDescriptor)}\n`, 'utf8');
   const nextDescriptor = structuredClone(descriptor);
   nextDescriptor.policy.visibleHeartbeatTimeoutMs = 60000;
   const descriptorWithGrant = structuredClone(nextDescriptor);
@@ -205,6 +212,10 @@ test('release activation stages a complete generation and switches the active po
   await assert.rejects(
     () => createReleaseActivationPlan({ controlRoot, dataRoot, releaseIdentity: release, projectDescriptors: [descriptorWithLegacyApproval] }),
     error => error.code === 'LEGACY_DESCRIPTOR_AUTHORIZATION_FORBIDDEN',
+  );
+  await assert.rejects(
+    () => createReleaseActivationPlan({ controlRoot, dataRoot, releaseIdentity: release }),
+    error => error.code === 'RELEASE_ACTIVATION_PROJECT_REPLACEMENT_REQUIRED',
   );
   const plan = await createReleaseActivationPlan({ controlRoot, dataRoot, releaseIdentity: release, projectDescriptors: [nextDescriptor], now: () => '2026-09-14T13:00:00.000Z' });
   const alternativeDescriptor = structuredClone(nextDescriptor);

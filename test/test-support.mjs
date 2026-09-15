@@ -72,7 +72,7 @@ export const makeFixture = async ({ projectId = 'project', profiles = ['feature-
   }
 };
 
-export const feature = (id, metadata = {}, extra = {}) => ({ id, acceptance: [`${id} accepted`], dependsOn: [], allowedPaths: [`work/${id}`], metadata, ...extra });
+export const feature = (id, metadata = {}, extra = {}) => ({ id, executionClass: 'agent-reasoning', acceptance: [`${id} accepted`], dependsOn: [], allowedPaths: [`work/${id}`], metadata, ...extra });
 
 export const startRun = async (fixture, { runId = 'run', profileId = 'feature-delivery', features = [feature('one')], profileConfig = {}, artifactDigest = null } = {}) => {
   const output = await fixture.harness.startRun({ projectId: fixture.projectId, runId, profileId, features, profileConfig, artifactDigest, executionAuthorizationEvidence: { explicitUnattended: true } }, command());

@@ -31,6 +31,7 @@ test('a failed final Gate returns attention and a fresh retry closes the same qu
   descriptor.extensions = descriptor.extensions.map(item => ({ ...item, digest: engine.digest }));
   descriptor.gateRecipes = [{
     id: 'quality-gate',
+    executionClass: 'deterministic-process',
     scope: 'final',
     required: true,
     forceFresh: true,

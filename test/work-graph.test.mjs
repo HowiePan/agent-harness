@@ -22,3 +22,14 @@ test('scheduler is fair across lanes while honoring conflicts', () => {
   ]);
   assert.deepEqual(scheduleFeatures({ features, limit: 3 }).map(item => item.id), ['a1', 'b1', 'a2']);
 });
+
+test('new work nodes fail closed unless explicitly classified as Agent reasoning', () => {
+  assert.throws(
+    () => validateWorkGraph([{ id: 'undeclared', acceptance: ['done'], dependsOn: [], allowedPaths: [] }]),
+    error => error?.code === 'FEATURE_EXECUTION_CLASS_INVALID',
+  );
+  assert.throws(
+    () => validateWorkGraph([feature('process-smuggled-as-feature', {}, { executionClass: 'deterministic-process' })]),
+    error => error?.code === 'FEATURE_EXECUTION_CLASS_INVALID',
+  );
+});

@@ -11,6 +11,7 @@ Operator Contract 是工具无关的 Harness 协调规范。Codex Skill、未来
 - `start`、`resume` 或调度返回首批 Dispatch 后，Operator 必须持续消费全部 Dispatch、Lease、Runtime 结果、Gate、Decision 和 Receipt，直到 Run 关闭、失败或需要用户权限。
 - 单个 Agent 完成不等于 Run 完成。
 - Feature 是调度单元；Feature 内 Step 串行，不同 Feature 由依赖、冲突、lane、逻辑配额和物理容量共同决定并行。
+- Feature 必须显式分类为 `agent-reasoning`，Gate Recipe 必须显式分类为 `deterministic-process`；二者不能互相承载。Authority control 只由 Core 的版本化命令路径执行。缺失或错配分类在 Run/进程创建前失败。
 
 ## 扩展解析
 

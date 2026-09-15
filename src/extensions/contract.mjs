@@ -6,6 +6,7 @@ import { digestJson, sha256 } from '../canonical.mjs';
 import { assert } from '../errors.mjs';
 import { assertInside, assertNoLinkPath } from '../paths.mjs';
 import { defineCommandManifest } from './command-contract.mjs';
+import { EXTENSION_OPERATION_CLASSES } from '../execution-boundary.mjs';
 
 const semanticVersion = /^\d+\.\d+\.\d+$/;
 const verifiedArtifactPacks = new WeakSet();
@@ -13,14 +14,24 @@ const verifiedArtifactPacks = new WeakSet();
 export const defineExtensionPack = input => {
   assert(input?.id && /^[a-z0-9][a-z0-9.-]+$/.test(input.id), 'EXTENSION_ID_INVALID', 'Extension Pack requires a stable lowercase ID.');
   assert(semanticVersion.test(input.version ?? ''), 'EXTENSION_VERSION_INVALID', `Extension Pack ${input.id} requires a semantic version.`);
+  const operations = { ...(input.operations ?? {}) };
+  const operationManifest = Object.fromEntries(Object.entries(input.operationManifest ?? {}).map(([name, declaration]) => [name, Object.freeze(structuredClone(declaration))]));
+  const operationNames = Object.keys(operations).sort();
+  const declaredOperationNames = Object.keys(operationManifest).sort();
+  assert(operationNames.length === declaredOperationNames.length && operationNames.every((name, index) => name === declaredOperationNames[index]), 'EXTENSION_OPERATION_MANIFEST_MISMATCH', `Extension Pack ${input.id} operationManifest must declare exactly every operation.`, { operations: operationNames, declaredOperations: declaredOperationNames });
+  for (const [name, declaration] of Object.entries(operationManifest)) {
+    assert(/^[a-z][A-Za-z0-9]{0,63}$/.test(name), 'EXTENSION_OPERATION_ID_INVALID', `Extension Pack ${input.id} contains an invalid operation ID: ${name}`);
+    assert(declaration?.executionClass === EXTENSION_OPERATION_CLASSES.PURE_PLANNER, 'EXTENSION_OPERATION_CLASS_INVALID', `Extension Pack ${input.id} operation ${name} must be a pure planner.`, { actual: declaration?.executionClass ?? null });
+  }
   const pack = {
     id: input.id,
     version: input.version,
     ...(input.digest ? { digest: input.digest } : {}),
-    profiles: [...(input.profiles ?? [])],
-    plugins: [...(input.plugins ?? [])],
-    recoveryImporters: [...(input.recoveryImporters ?? [])],
-    operations: { ...(input.operations ?? {}) },
+    profiles: Object.freeze([...(input.profiles ?? [])]),
+    plugins: Object.freeze([...(input.plugins ?? [])]),
+    recoveryImporters: Object.freeze([...(input.recoveryImporters ?? [])]),
+    operations: Object.freeze(operations),
+    operationManifest: Object.freeze(operationManifest),
     ...(input.commandManifest ? { commandManifest: defineCommandManifest(input.commandManifest) } : {}),
   };
   assert(!pack.digest || /^[a-f0-9]{64}$/.test(pack.digest), 'EXTENSION_DIGEST_INVALID', `Extension Pack ${pack.id} digest must be SHA-256.`);

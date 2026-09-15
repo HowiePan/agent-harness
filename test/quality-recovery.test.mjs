@@ -172,8 +172,8 @@ test('live hard recovery is idempotent for one stable command ID and rejects cha
 test('artifact rebase invalidates only the declared impact set', async t => {
   const fixture = await makeFixture(); t.after(() => fixture.cleanup());
   await startRun(fixture, { artifactDigest: 'artifact-a', features: [
-    { id: 'affected', acceptance: ['accepted'], dependsOn: [], allowedPaths: ['a'], metadata: {} },
-    { id: 'unaffected', acceptance: ['accepted'], dependsOn: [], allowedPaths: ['b'], metadata: {} },
+    { id: 'affected', executionClass: 'agent-reasoning', acceptance: ['accepted'], dependsOn: [], allowedPaths: ['a'], metadata: {} },
+    { id: 'unaffected', executionClass: 'agent-reasoning', acceptance: ['accepted'], dependsOn: [], allowedPaths: ['b'], metadata: {} },
   ] });
   let first = await dispatchAndBind(fixture, 'run', { maxConcurrency: 2, index: 0 });
   let result = await recordResult(fixture, 'run', first.dispatch);

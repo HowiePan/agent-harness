@@ -1,0 +1,67 @@
+{
+  "protocolVersion": "1.0",
+  "projectAlias": "engine",
+  "project": {
+    "projectId": "cardworld-engine",
+    "profileId": "engine-delivery",
+    "extensionId": "cardworld-engine-profile"
+  },
+  "observedAt": "2026-09-15T11:32:07.7225983Z",
+  "summary": "Interactive quality command selected a headless CLI Agent instead of a visible child Agent",
+  "severity": "P1",
+  "environment": {
+    "command": "h:engine quality V3.8.4",
+    "workspace": "F:\\CardWorld",
+    "runtime": "codex-cli-runtime",
+    "executionMode": "headless"
+  },
+  "expected": {
+    "executionMode": "conversation-visible",
+    "behavior": "Use the host lifecycle Coordinator to create and observe a visible child Agent for an interactive command."
+  },
+  "actual": {
+    "executionMode": "headless",
+    "runtime": "codex-cli-runtime",
+    "userVisible": false,
+    "behavior": "The quality Run launched a process-backed CLI Agent."
+  },
+  "reproduction": {
+    "steps": [
+      "Run h:engine quality V3.8.4 in an interactive Codex task.",
+      "Inspect the resolved lifecycle plan and Run runtime policy.",
+      "Observe that the Run uses headless mode and codex-cli-runtime rather than a visible child Agent."
+    ]
+  },
+  "conversation": {
+    "source": "current-thread",
+    "excerpts": [
+      {
+        "role": "user",
+        "text": "为什么质量 Run 会运行后台CLI？不是应该开子Agent吗？"
+      },
+      {
+        "role": "assistant",
+        "text": "The recorded quality policy selected headless mode with codex-cli-runtime and userVisible false, so the Harness launched a process-backed CLI Agent instead of a visible child Agent. For an interactive task, the expected mode is conversation-visible."
+      }
+    ]
+  },
+  "missingEvidence": [
+    "The original host command-scoped grant payload was not available in this thread.",
+    "No host-level visible-agent adapter trace was available."
+  ],
+  "correlation": {
+    "category": "execution-mode-boundary",
+    "failureCode": "HEADLESS_MODE_SELECTED_FOR_INTERACTIVE_COMMAND",
+    "scope": "engine:quality:V3.8.4"
+  },
+  "sanitization": {
+    "confirmed": true,
+    "removed": [
+      "Absolute control-root and runtime filesystem paths",
+      "Process IDs, agent IDs, lease IDs, packet digests, and unrelated Authority records",
+      "Personal account or host-identifying details"
+    ]
+  },
+  "incidentFingerprint": "9164f7696dde4eba06966f12c94ba8b2aecfc545aa0948ff2249329888079e05",
+  "intakeDigest": "43658be83791b0553b4cadd026295ab8f015053e5b3996a70d1c856b70ea4949"
+}

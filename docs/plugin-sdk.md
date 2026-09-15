@@ -51,4 +51,6 @@ Runtime 必须准确声明工作区能力：`workspace-shared` 会被参考 Coor
 
 Extension Pack 使用 `defineExtensionPack()` 声明稳定 ID、SemVer、Profiles、plugin factories、`commandManifest`、recovery importers 与 operations。命令清单通过 `defineCommandManifest()` 校验，使用 `resolveCommandIntent()` 解析动作别名、默认预设和参数化 selector。外部模块默认导出 `extensionPack`。可安装制品必须在根目录提供 `agent-harness-extension.json`，列出入口及全部运行时文件；依赖必须打包进该根并进入清单，禁止依赖未固定的外部 bare package。Harness 发布包可复用 `release-manifest.json`。`extension register` 只接受控制根内、无 symlink/junction 穿越的入口，并在执行代码前核验完整清单摘要。`--extension <module>` 只保留为显式的一次性装载入口，不维护消费者名称分支。详细作者约束随 Codex 插件发布在 `integrations/codex/agent-harness-codex/skills/agent-harness-extension-author/`。
 
+每个 Extension operation 还必须在 `operationManifest` 中逐项且精确声明 `executionClass: pure-planner`；operations 与 manifest 的 key 集合必须完全相等，并在装载后冻结。Extension operation 只能编译 Descriptor、Feature Graph 或 Lifecycle Plan Intent，不得启动进程或修改 Authority。新增 Agent 工作必须生成显式 `agent-reasoning` Feature；新增确定性检查必须进入显式 `deterministic-process` Gate Recipe。任何未分类、错分类或运行期追加的 operation 都拒绝装载。
+
 Legacy Importer 必须是只读且确定性的：只接受明确的 `legacyRoot`，返回满足 `migration-manifest.schema.json` 的严格 assessment，不返回未声明字段，也不跟随链接。创建 Capsule 时 Harness 会把 assessment 的逻辑根规范化为 `payload`，并要求 Importer 的 ID、版本、source digest 和文件数与受管 staging 完全一致；Importer 不得把源码、执行内容或私有运行状态带入自身插件状态。

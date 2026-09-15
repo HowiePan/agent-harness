@@ -42,6 +42,7 @@
     ".agents/",
     "integrations/codex/agent-harness-codex/.codex-plugin/",
     "integrations/codex/agent-harness-codex/hooks/",
+    "integrations/codex/agent-harness-codex/lib/",
     "integrations/codex/agent-harness-codex/references/",
     "integrations/codex/agent-harness-codex/scripts/",
     "integrations/codex/agent-harness-codex/skills/",

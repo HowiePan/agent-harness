@@ -17,6 +17,7 @@ const repairsForFindings = ({ feature, findings }) => findings.map(finding => {
   const affectedPaths = finding.affectedPaths?.length ? finding.affectedPaths : [];
   return {
     id: `quality-repair-${suffix}`,
+    executionClass: 'agent-reasoning',
     kind: 'quality-repair',
     ownerRole: 'worker',
     logicalRoot: `finding:${finding.id}`,
@@ -63,6 +64,7 @@ const nextRecheck = ({ state, feature }) => {
   if (state.features.some(item => item.id === id)) return [];
   return [{
     id,
+    executionClass: 'agent-reasoning',
     kind: 'quality-recheck',
     ownerRole: 'reviewer',
     logicalRoot: `${root}:recheck:${reviewRound}`,

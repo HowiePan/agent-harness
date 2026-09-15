@@ -56,7 +56,7 @@ export const cardWorldCommandManifest = defineCommandManifest({
 const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const defaultContextBudgetCommand = () => [process.execPath, resolve(packageRoot, 'scripts', 'check-context-budget.mjs')];
 
-const gate = (id, command, cwd, extra = {}) => ({ id, scope: 'final', required: true, forceFresh: true, command, cwd, ...extra });
+const gate = (id, command, cwd, extra = {}) => ({ id, executionClass: 'deterministic-process', scope: 'final', required: true, forceFresh: true, command, cwd, ...extra });
 const powershell = process.platform === 'win32' ? 'powershell' : 'pwsh';
 const cardWorldTask = (task, ...args) => [powershell, '-NoProfile', '-File', 'scripts/cardworld.ps1', '-Task', task, ...args];
 const actionStage = Object.freeze({ requirements: 'requirement-intake', plan: 'version-planning', implement: 'implementation', scope: 'scope-resolution', quality: 'quality', docs: 'docs-closeout', review: 'user-code-review', deliver: 'delivery-receipt' });
@@ -133,6 +133,7 @@ export const compileCardWorldFeatureGraph = ({ requirement, features = [] } = {}
   const canonicalId = `requirement/${requirement.id}`;
   const canonical = {
     id: canonicalId,
+    executionClass: 'agent-reasoning',
     kind: 'canonical-requirement',
     ownerRole: 'planner',
     logicalRoot: `requirement:${requirement.id}`,
@@ -177,6 +178,7 @@ const actionPaths = Object.freeze({
 
 const makeEngineFeature = ({ action, target, stage, dependsOn = [], allowedPaths, sourcePolicy = 'write', ownerRole = 'operator', qualityReview = false, sourceDigest }) => ({
   id: `${action}/${target}`,
+  executionClass: 'agent-reasoning',
   kind: action,
   ownerRole,
   logicalRoot: `${action}:${target}`,
@@ -278,6 +280,11 @@ export const extensionPack = defineExtensionPack({
   version: '1.0.0',
   profiles: [engineDeliveryProfile],
   commandManifest: cardWorldCommandManifest,
+  operationManifest: {
+    createProjectDescriptor: { executionClass: 'pure-planner' },
+    compileFeatureGraph: { executionClass: 'pure-planner' },
+    createLifecyclePlan: { executionClass: 'pure-planner' },
+  },
   operations: {
     createProjectDescriptor: createCardWorldProjectDescriptor,
     compileFeatureGraph: compileCardWorldFeatureGraph,

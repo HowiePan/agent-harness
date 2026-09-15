@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { dirname, isAbsolute, relative, resolve } from 'node:path';
 import process from 'node:process';
 import { fileURLToPath } from 'node:url';
+import { validateActiveReleaseBinding } from '../lib/active-release-binding.mjs';
 
 const tokenPattern = /^[a-z][a-z0-9-]{0,31}$/;
 const commandPattern = /^h:([^\s]+)(?:\s+(.+))?$/;
@@ -78,6 +79,8 @@ const validateBindings = async (input, source) => {
   if (!harness || !isAbsolute(harness.controlRoot ?? '') || !isAbsolute(harness.entrypoint ?? '') || !isAbsolute(harness.dataRoot ?? '')) throw new Error(`绑定文件必须声明绝对 controlRoot、entrypoint 和 dataRoot：${source}`);
   if (!inside(harness.controlRoot, harness.entrypoint) || !inside(harness.controlRoot, harness.dataRoot)) throw new Error(`entrypoint 和 dataRoot 必须位于 controlRoot 内：${source}`);
   if (!input.projects || typeof input.projects !== 'object' || Array.isArray(input.projects) || Object.keys(input.projects).length === 0) throw new Error(`绑定文件至少需要一个项目别名：${source}`);
+  const activeRelease = await validateActiveReleaseBinding({ controlRoot: harness.controlRoot, dataRoot: harness.dataRoot, entrypoint: harness.entrypoint, declaredRelease: harness.release });
+  const release = { version: activeRelease.version, artifactDigest: activeRelease.artifactDigest, generationId: activeRelease.generationId, pointerDigest: activeRelease.pointerDigest };
   const projects = {};
   for (const [alias, project] of Object.entries(input.projects)) {
     if (!tokenPattern.test(alias) || !project?.projectId || !project.profileId || !project.extensionId) throw new Error(`项目绑定无效：${alias}`);
@@ -94,7 +97,7 @@ const validateBindings = async (input, source) => {
   return Object.freeze({
     protocolVersion: '1.0',
     source,
-    harness: Object.freeze({ controlRoot: resolve(harness.controlRoot), entrypoint: resolve(harness.entrypoint), dataRoot: resolve(harness.dataRoot) }),
+    harness: Object.freeze({ controlRoot: resolve(harness.controlRoot), entrypoint: resolve(harness.entrypoint), dataRoot: resolve(harness.dataRoot), release }),
     projects: Object.freeze(projects),
   });
 };

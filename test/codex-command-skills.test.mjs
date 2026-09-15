@@ -7,6 +7,7 @@ import { configureBindings } from '../integrations/codex/agent-harness-codex/scr
 import { hookResponse, loadBindings, parsePseudoCommand } from '../integrations/codex/agent-harness-codex/hooks/pseudo-command-router.mjs';
 import { resolveCommandIntent } from '../src/extensions/command-contract.mjs';
 import { cardWorldCommandManifest, tabletopCollectionCommandManifest } from '../src/consumers/index.mjs';
+import { digestJson, sha256 } from '../src/canonical.mjs';
 
 const pluginRoot = resolve('integrations', 'codex', 'agent-harness-codex');
 const skillsRoot = resolve(pluginRoot, 'skills');
@@ -14,6 +15,31 @@ const skillsRoot = resolve(pluginRoot, 'skills');
 const createTemporaryFixture = async prefix => {
   await mkdir(tmpdir(), { recursive: true });
   return mkdtemp(resolve(tmpdir(), prefix));
+};
+
+const createActiveReleaseFixture = async controlRoot => {
+  const dataRoot = resolve(controlRoot, 'data');
+  const runtimeRelative = 'runtime';
+  const runtimeRoot = resolve(controlRoot, runtimeRelative);
+  const entryRelative = 'bin/agent-harness.mjs';
+  const entrypoint = resolve(runtimeRoot, entryRelative);
+  const entryBytes = Buffer.from('// fixture runtime\n');
+  const files = [{ path: entryRelative, sha256: sha256(entryBytes), size: entryBytes.length }];
+  const packageDigest = digestJson(files);
+  const generationId = 'g-fixture';
+  await Promise.all([
+    mkdir(resolve(runtimeRoot, 'bin'), { recursive: true }),
+    mkdir(resolve(dataRoot, 'registry', 'generations', generationId, 'projects'), { recursive: true }),
+  ]);
+  await Promise.all([
+    writeFile(entrypoint, entryBytes),
+    writeFile(resolve(runtimeRoot, 'release-manifest.json'), `${JSON.stringify({ protocolVersion: '1.0', version: '1.0.0', files, packageDigest })}\n`, 'utf8'),
+    writeFile(resolve(dataRoot, 'registry', 'generations', generationId, 'extensions.json'), '{}\n', 'utf8'),
+  ]);
+  const pointer = { protocolVersion: '1.0', kind: 'active-release', generationId, release: { version: '1.0.0', artifactDigest: packageDigest, verified: true }, runtimeRoot: runtimeRelative, runtimeEntrypoint: `${runtimeRelative}/${entryRelative}` };
+  pointer.pointerDigest = digestJson(pointer);
+  await writeFile(resolve(dataRoot, 'registry', 'active-release.json'), `${JSON.stringify(pointer)}\n`, 'utf8');
+  return { dataRoot, entrypoint, release: { version: '1.0.0', artifactDigest: packageDigest, generationId, pointerDigest: pointer.pointerDigest } };
 };
 
 test('Codex plugin exposes one explicit-project pseudo-command router', async () => {
@@ -60,19 +86,18 @@ test('binding configuration makes project selection and Harness location determi
     const installedPlugin = resolve(fixture, 'plugin');
     const controlRoot = resolve(fixture, 'harness');
     const workspaceRoot = resolve(fixture, 'CardWorld');
-    const entrypoint = resolve(controlRoot, 'bin', 'agent-harness.mjs');
+    const active = await createActiveReleaseFixture(controlRoot);
+    const entrypoint = active.entrypoint;
     await Promise.all([
-      mkdir(resolve(controlRoot, 'bin'), { recursive: true }),
       mkdir(workspaceRoot, { recursive: true }),
       mkdir(installedPlugin, { recursive: true }),
     ]);
-    await writeFile(entrypoint, '', 'utf8');
     const configured = await configureBindings({
       pluginRoot: installedPlugin,
       controlRoot,
       workspaceRoot,
-      entrypoint: 'bin/agent-harness.mjs',
-      dataRoot: '.agent-harness-data',
+      entrypoint: 'runtime/bin/agent-harness.mjs',
+      dataRoot: 'data',
       projectSpecs: [
         'engine|cardworld-engine|engine-delivery|cardworld-engine-profile',
         'collection|tabletop-collection|collection-batch|tabletop-collection-profile',
@@ -124,13 +149,14 @@ test('router recovers its exact install-root binding when a restarted Hook omits
       mkdir(controlRoot, { recursive: true }),
       mkdir(workspaceRoot, { recursive: true }),
     ]);
-    await writeFile(resolve(controlRoot, 'agent-harness.mjs'), '', 'utf8');
+    const active = await createActiveReleaseFixture(controlRoot);
     await writeFile(resolve(bindingRoot, 'bindings.json'), `${JSON.stringify({
       protocolVersion: '1.0',
       harness: {
         controlRoot,
-        entrypoint: resolve(controlRoot, 'agent-harness.mjs'),
-        dataRoot: resolve(controlRoot, 'data'),
+        entrypoint: active.entrypoint,
+        dataRoot: active.dataRoot,
+        release: active.release,
       },
       projects: {
         engine: { projectId: 'cardworld-engine', profileId: 'engine-delivery', extensionId: 'cardworld-engine-profile', workspaceRoot },
@@ -143,6 +169,29 @@ test('router recovers its exact install-root binding when a restarted Hook omits
   } finally {
     await rm(fixture, { recursive: true, force: true });
   }
+});
+
+test('router fails closed when the active release pointer changes after binding', async t => {
+  const fixture = await createTemporaryFixture('agent-harness-binding-drift-');
+  t.after(() => rm(fixture, { recursive: true, force: true }));
+  const installedPlugin = resolve(fixture, 'plugin');
+  const controlRoot = resolve(fixture, 'harness');
+  const workspaceRoot = resolve(fixture, 'workspace');
+  await Promise.all([mkdir(installedPlugin, { recursive: true }), mkdir(workspaceRoot, { recursive: true })]);
+  const active = await createActiveReleaseFixture(controlRoot);
+  await configureBindings({ pluginRoot: installedPlugin, controlRoot, workspaceRoot, entrypoint: 'runtime/bin/agent-harness.mjs', dataRoot: 'data', projectSpecs: ['engine|cardworld-engine|engine-delivery|cardworld-engine-profile'] });
+  const pointerFile = resolve(active.dataRoot, 'registry', 'active-release.json');
+  const pointer = JSON.parse(await readFile(pointerFile, 'utf8'));
+  pointer.generationId = 'g-next';
+  delete pointer.pointerDigest;
+  pointer.pointerDigest = digestJson(pointer);
+  const generationRoot = resolve(active.dataRoot, 'registry', 'generations', pointer.generationId);
+  await mkdir(resolve(generationRoot, 'projects'), { recursive: true });
+  await writeFile(resolve(generationRoot, 'extensions.json'), '{}\n', 'utf8');
+  await writeFile(pointerFile, `${JSON.stringify(pointer)}\n`, 'utf8');
+  const response = await hookResponse({ prompt: 'h:engine quality V3.8.4', cwd: workspaceRoot }, { pluginRoot: installedPlugin });
+  assert.match(response.hookSpecificOutput.additionalContext, /绑定不可用/);
+  assert.match(response.hookSpecificOutput.additionalContext, /不得启动或修改任何 Harness 状态/);
 });
 
 test('binding accepts only linked worktrees with the configured Git common directory', async t => {
@@ -162,8 +211,8 @@ test('binding accepts only linked worktrees with the configured Git common direc
     mkdir(linkedWorktree, { recursive: true }),
     mkdir(resolve(unrelatedWorkspace, '.git'), { recursive: true }),
   ]);
+  const active = await createActiveReleaseFixture(controlRoot);
   await Promise.all([
-    writeFile(resolve(controlRoot, 'agent-harness.mjs'), '', 'utf8'),
     writeFile(resolve(gitDirectory, 'commondir'), '../..\n', 'utf8'),
     writeFile(resolve(linkedWorktree, '.git'), `gitdir: ${gitDirectory}\n`, 'utf8'),
   ]);
@@ -171,7 +220,7 @@ test('binding accepts only linked worktrees with the configured Git common direc
     pluginRoot: localPluginRoot,
     controlRoot,
     workspaceRoot: repositoryRoot,
-    entrypoint: 'agent-harness.mjs',
+    entrypoint: 'runtime/bin/agent-harness.mjs',
     dataRoot: 'data',
     projectSpecs: ['engine|cardworld-engine|engine-delivery|cardworld-engine-profile'],
   });
@@ -191,11 +240,11 @@ test('each project alias can bind and validate an independent workspace', async 
   const engineRoot = resolve(fixture, 'CardWorld');
   const collectionRoot = resolve(fixture, 'tabletop-collection');
   await Promise.all([mkdir(pluginRoot, { recursive: true }), mkdir(controlRoot, { recursive: true }), mkdir(engineRoot, { recursive: true }), mkdir(collectionRoot, { recursive: true })]);
-  await writeFile(resolve(controlRoot, 'agent-harness.mjs'), '', 'utf8');
+  await createActiveReleaseFixture(controlRoot);
   const configured = await configureBindings({
     pluginRoot,
     controlRoot,
-    entrypoint: 'agent-harness.mjs',
+    entrypoint: 'runtime/bin/agent-harness.mjs',
     dataRoot: 'data',
     projectSpecs: [
       `engine|cardworld-engine|engine-delivery|cardworld-engine-profile|${engineRoot}`,

@@ -36,9 +36,9 @@ test('CardWorld consumer compiles one canonical requirement and project-owned de
   const graph = compileCardWorldFeatureGraph({
     requirement: { id: 'v-next', acceptance: ['requirement is singular and approved'] },
     features: [
-      { id: 'plan', stage: 'version-planning', acceptance: ['plan accepted'], allowedPaths: ['docs/versions'] },
-      { id: 'implementation/a', stage: 'implementation', acceptance: ['tests pass'], allowedPaths: ['card_world_engine/src/a.rs'], dependsOn: ['plan'] },
-      { id: 'implementation/b', stage: 'implementation', acceptance: ['tests pass'], allowedPaths: ['card_world_engine/src/b.rs'], dependsOn: ['plan'] },
+      { id: 'plan', executionClass: 'agent-reasoning', stage: 'version-planning', acceptance: ['plan accepted'], allowedPaths: ['docs/versions'] },
+      { id: 'implementation/a', executionClass: 'agent-reasoning', stage: 'implementation', acceptance: ['tests pass'], allowedPaths: ['card_world_engine/src/a.rs'], dependsOn: ['plan'] },
+      { id: 'implementation/b', executionClass: 'agent-reasoning', stage: 'implementation', acceptance: ['tests pass'], allowedPaths: ['card_world_engine/src/b.rs'], dependsOn: ['plan'] },
     ],
   });
   assert.equal(graph.filter(feature => feature.metadata.canonical).length, 1);
@@ -100,12 +100,12 @@ test('Collection consumer keeps ten game lanes, Feature dependencies, and one sh
   assert.deepEqual(descriptor.policy.runtimeConfigs['codex-conversation-runtime'], {});
   const games = Array.from({ length: 10 }, (_, index) => ({
     id: `game-${index + 1}`,
-    features: [{ id: 'implementation', acceptance: ['game accepted'], allowedPaths: [`packages/games/game-${index + 1}`], metadata: index === 0 ? { capabilityUses: ['shared-ui'] } : {} }],
+    features: [{ id: 'implementation', executionClass: 'agent-reasoning', acceptance: ['game accepted'], allowedPaths: [`packages/games/game-${index + 1}`], metadata: index === 0 ? { capabilityUses: ['shared-ui'] } : {} }],
   }));
   const graph = compileTabletopCollectionFeatureGraph({
     batchId: 'B1',
     games,
-    sharedCapabilities: [{ key: 'shared-ui', feature: { id: 'shared/ui', acceptance: ['shared UI accepted'], allowedPaths: ['packages/shared/ui'] } }],
+    sharedCapabilities: [{ key: 'shared-ui', feature: { id: 'shared/ui', executionClass: 'agent-reasoning', acceptance: ['shared UI accepted'], allowedPaths: ['packages/shared/ui'] } }],
   });
   assert.equal(new Set(graph.filter(feature => feature.metadata.gameId).map(feature => feature.laneId)).size, 10);
   assert.equal(graph.filter(feature => feature.metadata.capabilityOwner).length, 1);
@@ -113,7 +113,7 @@ test('Collection consumer keeps ten game lanes, Feature dependencies, and one sh
 });
 
 test('Collection consumer rejects an eleventh logical game', () => {
-  assert.throws(() => compileTabletopCollectionFeatureGraph({ batchId: 'B1', games: Array.from({ length: 11 }, (_, index) => ({ id: `g${index}`, features: [{ id: 'work', acceptance: ['done'], allowedPaths: [`g/${index}`] }] })) }), error => error.code === 'LOGICAL_GAME_LIMIT_EXCEEDED');
+  assert.throws(() => compileTabletopCollectionFeatureGraph({ batchId: 'B1', games: Array.from({ length: 11 }, (_, index) => ({ id: `g${index}`, features: [{ id: 'work', executionClass: 'agent-reasoning', acceptance: ['done'], allowedPaths: [`g/${index}`] }] })) }), error => error.code === 'LOGICAL_GAME_LIMIT_EXCEEDED');
 });
 
 test('consumer descriptors do not retain Codex when another Runtime is selected', () => {

@@ -56,6 +56,22 @@ test('Extension Pack rejects duplicates and invalid plugin factories', async () 
   assert.throws(() => defineExtensionPack({ id: 'invalid-pack', version: '1.0.0', plugins: [{ manifest: {} }] }), error => error.code === 'EXTENSION_PLUGIN_INVALID');
 });
 
+test('Extension operations require an exact pure-planner manifest', () => {
+  const operation = () => ({ type: 'intent' });
+  assert.throws(
+    () => defineExtensionPack({ id: 'undeclared-operation', version: '1.0.0', operations: { plan: operation } }),
+    error => error?.code === 'EXTENSION_OPERATION_MANIFEST_MISMATCH',
+  );
+  assert.throws(
+    () => defineExtensionPack({ id: 'process-operation', version: '1.0.0', operationManifest: { plan: { executionClass: 'deterministic-process' } }, operations: { plan: operation } }),
+    error => error?.code === 'EXTENSION_OPERATION_CLASS_INVALID',
+  );
+  const pack = defineExtensionPack({ id: 'planner-operation', version: '1.0.0', operationManifest: { plan: { executionClass: 'pure-planner' } }, operations: { plan: operation } });
+  assert.equal(pack.operations.plan, operation);
+  assert.throws(() => { pack.operations.execute = operation; }, TypeError);
+  assert.throws(() => { pack.operationManifest.plan.executionClass = 'deterministic-process'; }, TypeError);
+});
+
 test('Extension plugin factories cannot receive Authority stores', async t => {
   let received;
   const manifest = { id: 'restricted-context-scheduler', kind: 'scheduler', version: '1.0.0', capabilities: [], permissions: [] };

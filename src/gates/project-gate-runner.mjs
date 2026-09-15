@@ -1,5 +1,6 @@
 import { digestJson, newId } from '../canonical.mjs';
 import { assert } from '../errors.mjs';
+import { EXECUTION_CLASSES, assertExecutionClass } from '../execution-boundary.mjs';
 import { GateCache } from '../kernel/gate-cache.mjs';
 import { PluginHost } from '../plugins/host.mjs';
 import { createProcessGateExecutor } from '../plugins/gate/process-gate.mjs';
@@ -13,6 +14,7 @@ const manifest = Object.freeze({ id: 'project-process-gates', kind: 'gate-execut
 
 const validateRecipe = recipe => {
   assert(recipe?.id && Array.isArray(recipe.command) && recipe.command.length > 0, 'GATE_RECIPE_INVALID', 'Gate Recipe requires an id and non-empty command array.');
+  assertExecutionClass(recipe.executionClass, EXECUTION_CLASSES.DETERMINISTIC_PROCESS, { code: 'GATE_EXECUTION_CLASS_INVALID', subject: `Gate Recipe ${recipe.id}` });
   return { scope: 'feature', required: true, ...structuredClone(recipe), command: recipe.command.map(String) };
 };
 

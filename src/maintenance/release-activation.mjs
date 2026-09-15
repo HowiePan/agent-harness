@@ -6,7 +6,7 @@ import { inspectExtensionArtifact } from '../extensions/contract.mjs';
 import { ExtensionRegistry } from '../extensions/registry.mjs';
 import { atomicWriteJson, readJson, withDirectoryLock } from '../kernel/atomic-io.mjs';
 import { ProjectRegistry } from '../registry/project-registry.mjs';
-import { assertProjectDescriptorInput, projectDescriptorInput } from '../registry/project-contract.mjs';
+import { assertProjectDescriptorInput, assertProjectDescriptorRecord, projectDescriptorInput } from '../registry/project-contract.mjs';
 import { activeReleaseFile, readActiveRelease } from '../registry/active-generation.mjs';
 import { assertHarnessWritePath, harnessControlRoot } from '../write-boundary.mjs';
 import { safeSegment } from '../paths.mjs';
@@ -46,7 +46,7 @@ export const createReleaseActivationPlan = async ({ controlRoot: controlRootInpu
   const extensionRegistry = new ExtensionRegistry({ controlRoot, dataRoot });
   const projectRegistry = new ProjectRegistry({ root: dataRoot, controlRoot });
   const currentExtensions = await extensionRegistry.list();
-  const currentProjects = await projectRegistry.list();
+  const currentProjects = await projectRegistry.listPersistedForReplacement();
   const requestedIds = [...new Set(projectIds)];
   assert(requestedIds.length === projectIds.length, 'RELEASE_ACTIVATION_PROJECT_DUPLICATE', 'Release activation Project selection contains duplicate IDs.');
   const descriptorById = new Map();
@@ -59,6 +59,12 @@ export const createReleaseActivationPlan = async ({ controlRoot: controlRootInpu
   assert(selected.length === (requestedIds.length || currentProjects.length), 'RELEASE_ACTIVATION_PROJECT_NOT_FOUND', 'Release activation requested an unknown Project.');
   const selectedIds = new Set(selected.map(project => project.id));
   for (const id of descriptorById.keys()) assert(selectedIds.has(id), 'RELEASE_ACTIVATION_PROJECT_DESCRIPTOR_NOT_SELECTED', `Release activation descriptor targets unselected or unknown Project ${id}.`);
+  for (const current of currentProjects) {
+    try { assertProjectDescriptorRecord(current); }
+    catch (error) {
+      assert(selectedIds.has(current.id) && descriptorById.has(current.id), 'RELEASE_ACTIVATION_PROJECT_REPLACEMENT_REQUIRED', `Project ${current.id} does not satisfy the candidate Descriptor contract and requires an explicit replacement in this activation plan.`, { projectId: current.id, causeCode: error.code, causeDetails: error.details });
+    }
+  }
   const extensions = [];
   for (const current of currentExtensions.extensions) {
     const artifact = await inspectExtensionArtifact(resolve(controlRoot, current.entry), { controlRoot, expectedDigest: undefined, requireArtifactManifest: true });
@@ -128,12 +134,13 @@ export const applyReleaseActivationPlan = async (planInput, { controlRoot: contr
       await atomicWriteJson(receiptFile, recovered, { root: dataRoot });
       return { receipt: recovered, runtimeRoot, runtimeEntrypoint: resolve(runtimeRoot, plan.runtime.entrypoint), reused: true };
     }
+    assert((activePointer?.generationId ?? null) === (plan.currentGenerationId ?? null), 'RELEASE_ACTIVATION_GENERATION_CONFLICT', 'Active release generation changed after the activation plan was created.', { expectedGenerationId: plan.currentGenerationId ?? null, actualGenerationId: activePointer?.generationId ?? null });
     assert(activePointer?.generationId !== plan.generationId, 'RELEASE_ACTIVATION_ALREADY_ACTIVE', 'The requested release generation is already active.');
     const extensionRegistry = new ExtensionRegistry({ controlRoot, dataRoot });
     const projectRegistry = new ProjectRegistry({ root: dataRoot, controlRoot });
     const currentExtensions = await extensionRegistry.list();
     assert(currentExtensions.revision === plan.expectedExtensionRevision, 'RELEASE_ACTIVATION_EXTENSION_REVISION_CONFLICT', 'Extension Registry changed after the activation plan was created.');
-    const currentProjects = await projectRegistry.list();
+    const currentProjects = await projectRegistry.listPersistedForReplacement();
     for (const expected of plan.projects) {
       const current = currentProjects.find(project => project.id === expected.id);
       assert(current?.revision === expected.expectedRevision && current.descriptorDigest === expected.expectedDescriptorDigest, 'RELEASE_ACTIVATION_PROJECT_REVISION_CONFLICT', `Project ${expected.id} changed after the activation plan was created.`);

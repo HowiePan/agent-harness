@@ -3,9 +3,10 @@
   "$id": "https://agent-harness.local/schemas/feature.schema.json",
   "title": "Agent Harness Feature",
   "type": "object",
-  "required": ["id", "acceptance", "dependsOn", "allowedPaths"],
+  "required": ["id", "executionClass", "acceptance", "dependsOn", "allowedPaths"],
   "properties": {
     "id": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]{0,255}$" },
+    "executionClass": { "const": "agent-reasoning" },
     "kind": { "type": "string" },
     "ownerRole": { "type": "string" },
     "logicalRoot": { "type": "string" },

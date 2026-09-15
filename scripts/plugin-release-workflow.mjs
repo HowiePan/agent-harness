@@ -7,6 +7,7 @@ import { assert } from '../src/errors.mjs';
 import { verifyReleaseCandidateReceipt } from '../src/maintenance/release-receipt.mjs';
 import { assertNoLinkPath } from '../src/paths.mjs';
 import { verifyReleaseManifest } from '../src/release-identity.mjs';
+import { readActiveRelease, resolveActiveRegistryRoot, resolveActiveRuntimeRoot } from '../src/registry/active-generation.mjs';
 import { assertHarnessWritePath } from '../src/write-boundary.mjs';
 import { parseLastJsonDocument } from './parse-json-output.mjs';
 import { validateReleaseVersionContract } from './release-version-contract.mjs';
@@ -164,7 +165,29 @@ export const createPluginMutationPlan = ({ marketplaceConfigured, pluginInstalle
   return Object.freeze(plan.map(step => Object.freeze(step)));
 };
 
-export const validatePluginBindings = async ({ root, config, bindings }) => {
+const loadActiveReleaseBinding = async ({ root, dataRoot }) => {
+  const pointer = await readActiveRelease(dataRoot, root);
+  assert(pointer, 'LOCAL_RELEASE_ACTIVE_RELEASE_MISSING', 'Codex plugin bindings require an active release pointer. Activate an exact runtime and Registry generation before installing the plugin.');
+  const [runtimeRoot, registryRoot] = await Promise.all([
+    resolveActiveRuntimeRoot(dataRoot, root),
+    resolveActiveRegistryRoot(dataRoot, root),
+  ]);
+  const releaseIdentity = await verifyReleaseManifest({ root: runtimeRoot });
+  assert(pointer.release?.version === releaseIdentity.version && pointer.release?.artifactDigest === releaseIdentity.artifactDigest && pointer.release?.verified === true, 'LOCAL_RELEASE_ACTIVE_POINTER_IDENTITY_MISMATCH', 'Active release pointer does not match the verified runtime artifact.', { pointerRelease: pointer.release, runtimeRelease: releaseIdentity });
+  const entrypoint = assertNoLinkPath(root, resolve(root, pointer.runtimeEntrypoint ?? ''), 'active Harness runtime entrypoint');
+  assert(comparablePath(entrypoint) === comparablePath(resolve(runtimeRoot, 'bin', 'agent-harness.mjs')), 'LOCAL_RELEASE_ACTIVE_ENTRYPOINT_MISMATCH', 'Active release runtimeEntrypoint does not match its verified runtime root.', { entrypoint, runtimeRoot });
+  return Object.freeze({
+    version: releaseIdentity.version,
+    packageDigest: releaseIdentity.artifactDigest,
+    generationId: pointer.generationId,
+    pointerDigest: pointer.pointerDigest,
+    runtimeRoot,
+    registryRoot,
+    entrypoint,
+  });
+};
+
+export const validatePluginBindings = async ({ root, config, bindings, activeReleaseLoader = loadActiveReleaseBinding }) => {
   assert(bindings?.protocolVersion === '1.0' && bindings.harness && bindings.projects, 'LOCAL_RELEASE_BINDINGS_INVALID', 'Codex plugin bindings must use protocolVersion 1.0 and contain harness/projects objects.');
   const { controlRoot, entrypoint: entrypointInput, dataRoot: dataRootInput } = bindings.harness;
   assert(typeof controlRoot === 'string' && comparablePath(controlRoot) === comparablePath(root), 'LOCAL_RELEASE_BINDING_CONTROL_ROOT_MISMATCH', 'Codex plugin binding controlRoot must match the release repository root.', { controlRoot, root });
@@ -173,6 +196,10 @@ export const validatePluginBindings = async ({ root, config, bindings }) => {
   const dataRoot = assertNoLinkPath(root, resolve(dataRootInput), 'Codex plugin Harness data root');
   assert(comparablePath(dataRoot) === comparablePath(resolve(root, '.agent-harness-data')), 'LOCAL_RELEASE_BINDING_DATA_ROOT_MISMATCH', 'Codex plugin dataRoot must be the managed Agent Harness data root.');
   assert((await stat(entrypoint)).isFile(), 'LOCAL_RELEASE_BINDING_ENTRYPOINT_INVALID', 'Codex plugin Harness entrypoint must be an existing file.');
+  const activeRelease = await activeReleaseLoader({ root, dataRoot });
+  assert(comparablePath(entrypoint) === comparablePath(activeRelease.entrypoint), 'LOCAL_RELEASE_BINDING_ENTRYPOINT_STALE', 'Codex plugin binding entrypoint is not the active verified runtime entrypoint.', { bindingEntrypoint: entrypoint, activeEntrypoint: activeRelease.entrypoint });
+  const declaredRelease = bindings.harness.release;
+  assert(declaredRelease?.version === activeRelease.version && declaredRelease?.artifactDigest === activeRelease.packageDigest && declaredRelease?.generationId === activeRelease.generationId && declaredRelease?.pointerDigest === activeRelease.pointerDigest, 'LOCAL_RELEASE_BINDING_RELEASE_STALE', 'Codex plugin binding release identity does not match the active release pointer.', { declaredRelease, activeRelease });
   const projectEntries = Object.entries(bindings.projects);
   assert(projectEntries.length > 0, 'LOCAL_RELEASE_BINDINGS_INVALID', 'Codex plugin bindings require at least one project alias.');
   for (const [alias, project] of projectEntries) {
@@ -187,6 +214,7 @@ export const validatePluginBindings = async ({ root, config, bindings }) => {
     controlRoot: resolve(controlRoot),
     entrypoint,
     dataRoot,
+    release: activeRelease,
     projectAliases: projectEntries.map(([alias]) => alias).sort(),
   });
 };
@@ -195,6 +223,14 @@ const loadPluginBindings = async ({ root, config }) => {
   const bindingFile = assertNoLinkPath(root, resolve(config.pluginRoot, '.plugin-data', 'bindings.json'), 'Codex plugin bindings');
   assert(existsSync(bindingFile), 'LOCAL_RELEASE_BINDINGS_MISSING', `Codex plugin bindings are missing: ${bindingFile}. Run configure-bindings before release.`);
   return validatePluginBindings({ root, config, bindings: await readJson(bindingFile) });
+};
+
+export const loadInstalledPluginBindings = async ({ root, config, codexHome = process.env.CODEX_HOME || (process.env.USERPROFILE ? resolve(process.env.USERPROFILE, '.codex') : null) }) => {
+  assert(codexHome && isAbsolute(codexHome), 'LOCAL_RELEASE_CODEX_HOME_REQUIRED', 'Installed plugin binding verification requires an exact absolute CODEX_HOME.');
+  const bindingFile = resolve(codexHome, 'plugins', 'cache', config.marketplaceName, config.pluginName, config.version, '.plugin-data', 'bindings.json');
+  assert(existsSync(bindingFile), 'LOCAL_RELEASE_INSTALLED_BINDINGS_MISSING', `Installed Codex plugin bindings are missing: ${bindingFile}`);
+  const validated = await validatePluginBindings({ root, config, bindings: await readJson(bindingFile) });
+  return Object.freeze({ ...validated, bindingFile });
 };
 
 const sourceSnapshot = async ({ runner, root }) => {
@@ -257,7 +293,7 @@ const acquireReleaseLock = async ({ root, source, startedAt }) => {
   return Object.freeze({ file, release: () => rm(file, { force: true }) });
 };
 
-export const runLocalPluginRelease = async ({ root: rootInput, mode, npmCli, runner: runnerInput = undefined, bindingsLoader = loadPluginBindings, clock = () => new Date() }) => {
+export const runLocalPluginRelease = async ({ root: rootInput, mode, npmCli, runner: runnerInput = undefined, bindingsLoader = loadPluginBindings, installedBindingsLoader = loadInstalledPluginBindings, clock = () => new Date() }) => {
   const root = resolve(rootInput);
   assert(['check', 'apply'].includes(mode), 'LOCAL_RELEASE_MODE_INVALID', 'Local release workflow mode must be check or apply.');
   assert(Number(process.versions.node.split('.')[0]) >= 22, 'LOCAL_RELEASE_NODE_UNSUPPORTED', 'Local release workflow requires Node.js 22 or newer.');
@@ -268,6 +304,7 @@ export const runLocalPluginRelease = async ({ root: rootInput, mode, npmCli, run
   const releaseIdentity = await verifyReleaseManifest({ root });
   assert(releaseIdentity.version === config.version, 'LOCAL_RELEASE_MANIFEST_VERSION_MISMATCH', 'Release manifest version does not match package.json.');
   const bindings = await bindingsLoader({ root, config });
+  assert(bindings.release?.packageDigest === releaseIdentity.artifactDigest, 'LOCAL_RELEASE_ACTIVE_RUNTIME_STALE', 'The active bound runtime does not match the source release artifact. Build and explicitly activate the exact candidate before reinstalling the plugin.', { sourcePackageDigest: releaseIdentity.artifactDigest, activePackageDigest: bindings.release?.packageDigest ?? null });
 
   const marketplaceList = await runner('codex', ['plugin', 'marketplace', 'list', '--json'], { json: true });
   let marketplaceState = inspectMarketplaceConfiguration({ payload: marketplaceList.json, marketplaceName: config.marketplaceName, root });
@@ -275,6 +312,11 @@ export const runLocalPluginRelease = async ({ root: rootInput, mode, npmCli, run
   if (marketplaceState.configured) {
     const pluginList = await runner('codex', ['plugin', 'list', '--marketplace', config.marketplaceName, '--available', '--json'], { json: true });
     pluginState = inspectPluginInstallation({ payload: pluginList.json, config });
+  }
+  let installedBindings = null;
+  if (mode === 'check' && pluginState.installed) {
+    installedBindings = await installedBindingsLoader({ root, config });
+    assert(installedBindings.digest === bindings.digest, 'LOCAL_RELEASE_INSTALLED_BINDINGS_STALE', 'Installed Codex plugin bindings do not match the verified source binding.', { sourceBindingDigest: bindings.digest, installedBindingDigest: installedBindings.digest, installedBindingFile: installedBindings.bindingFile });
   }
   const mutationPlan = createPluginMutationPlan({ marketplaceConfigured: marketplaceState.configured, pluginInstalled: pluginState.installed, config });
   const common = {
@@ -286,6 +328,7 @@ export const runLocalPluginRelease = async ({ root: rootInput, mode, npmCli, run
     release: { version: config.version, packageDigest: releaseIdentity.artifactDigest },
     plugin: { id: config.pluginId, source: config.pluginRoot },
     bindings,
+    installedBindings,
     mutationPlan,
   };
   if (mode === 'check') return Object.freeze({ ok: true, ...common, marketplaceConfigured: marketplaceState.configured, pluginInstalled: pluginState.installed });
@@ -319,6 +362,7 @@ export const runLocalPluginRelease = async ({ root: rootInput, mode, npmCli, run
     await assertSourceUnchanged({ runner, root, expectedCommit: source.commit });
     const currentBindings = await bindingsLoader({ root, config });
     assert(currentBindings.digest === bindings.digest, 'LOCAL_RELEASE_BINDINGS_CHANGED', 'Codex plugin bindings changed while the release workflow was running. Restart from preflight.');
+    assert(currentBindings.release?.packageDigest === candidate.packageDigest, 'LOCAL_RELEASE_ACTIVE_RUNTIME_STALE', 'The active bound runtime does not match the verified Release Candidate. Activate that exact candidate before changing the plugin installation.', { candidatePackageDigest: candidate.packageDigest, activePackageDigest: currentBindings.release?.packageDigest ?? null });
 
     const liveMarketplaceList = await runner('codex', ['plugin', 'marketplace', 'list', '--json'], { json: true });
     marketplaceState = inspectMarketplaceConfiguration({ payload: liveMarketplaceList.json, marketplaceName: config.marketplaceName, root });
@@ -349,11 +393,13 @@ export const runLocalPluginRelease = async ({ root: rootInput, mode, npmCli, run
     const verifyStartedAt = clock().toISOString();
     const finalList = await runner('codex', ['plugin', 'list', '--marketplace', config.marketplaceName, '--available', '--json'], { json: true });
     const installed = inspectPluginInstallation({ payload: finalList.json, config, requireInstalled: true });
-    steps.push({ id: 'plugin-verify', status: 'passed', startedAt: verifyStartedAt, completedAt: clock().toISOString(), installedVersion: installed.version, enabled: installed.enabled, source: installed.source });
+    installedBindings = await installedBindingsLoader({ root, config });
+    assert(installedBindings.digest === currentBindings.digest, 'LOCAL_RELEASE_INSTALLED_BINDINGS_STALE', 'Reinstalled Codex plugin bindings do not match the verified source binding.', { sourceBindingDigest: currentBindings.digest, installedBindingDigest: installedBindings.digest, installedBindingFile: installedBindings.bindingFile });
+    steps.push({ id: 'plugin-verify', status: 'passed', startedAt: verifyStartedAt, completedAt: clock().toISOString(), installedVersion: installed.version, enabled: installed.enabled, source: installed.source, bindingDigest: installedBindings.digest, bindingFile: installedBindings.bindingFile });
     await assertSourceUnchanged({ runner, root, expectedCommit: source.commit });
 
     const completedAt = clock().toISOString();
-    const value = { ...common, runId, status: 'completed', startedAt, completedAt, candidate, removedExistingInstallation: removed, steps };
+    const value = { ...common, installedBindings, runId, status: 'completed', startedAt, completedAt, candidate, removedExistingInstallation: removed, steps };
     const receipt = await writeWorkflowReceipt({ root, runId, value });
     return Object.freeze({ ok: true, ...value, receipt });
   } catch (error) {
