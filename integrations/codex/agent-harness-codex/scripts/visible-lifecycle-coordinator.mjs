@@ -31,7 +31,11 @@ const main = async () => {
   const extensions = await extensionRegistry.loadInstalled();
   const stdio = createStdioHostExchange();
   try {
-    const host = createCodexCollaborationHostAdapter({ exchange: stdio.exchange });
+    const host = createCodexCollaborationHostAdapter({
+      exchange: stdio.exchange,
+      controlRoot: intent.harness.controlRoot,
+      dataRoot: intent.harness.dataRoot,
+    });
     const harness = await createHarness({
       controlRoot: intent.harness.controlRoot,
       dataRoot: intent.harness.dataRoot,

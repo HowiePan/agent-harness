@@ -1,30 +1,30 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { once } from 'node:events';
+import { mkdir, mkdtemp, rm } from 'node:fs/promises';
+import { resolve } from 'node:path';
 import { PassThrough } from 'node:stream';
 import { createCodexCollaborationHostAdapter } from '../integrations/codex/agent-harness-codex/lib/codex-collaboration-host-adapter.mjs';
 import { createStdioHostExchange } from '../integrations/codex/agent-harness-codex/lib/stdio-host-exchange.mjs';
 import { createVisibleLifecycleIntent, decodeVisibleLifecycleIntent, encodeVisibleLifecycleIntent, validateVisibleLifecycleIntent } from '../integrations/codex/agent-harness-codex/lib/visible-lifecycle-intent.mjs';
 import { digestJson } from '../src/canonical.mjs';
+import { harnessTemporaryRoot } from '../src/write-boundary.mjs';
 
 const businessResult = {
   status: 'completed',
   summary: 'Visible Agent completed the bounded review.',
   checkpoints: [{ id: 'review', status: 'passed', summary: 'Review completed.', evidence: ['src/example.mjs:1'] }],
-  made: [],
-  notMade: [],
-  changedFiles: [],
-  observations: [],
-  findings: [],
-  followUpFeatures: [],
-  failureClass: null,
-  blocker: null,
+  made: [], notMade: [], changedFiles: [], observations: [], findings: [], followUpFeatures: [], failureClass: null, blocker: null,
 };
 
-test('Codex collaboration adapter preserves the exact generated prompt and re-observes the native child task', async () => {
+const setup = async (t, { spawnResult = { agent_id: 'provider-agent-1', nickname: 'Ada' }, interruptStops = true } = {}) => {
+  const controlRoot = resolve(process.cwd());
+  const parent = resolve(harnessTemporaryRoot(), 'codex-visible-host-bridge');
+  await mkdir(parent, { recursive: true });
+  const root = await mkdtemp(resolve(parent, 'case-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const tasks = new Map();
   const requests = [];
-  let canonicalTask;
-  let status = 'running';
   const exchange = async request => {
     requests.push(structuredClone(request));
     const unsigned = structuredClone(request);
@@ -34,53 +34,100 @@ test('Codex collaboration adapter preserves the exact generated prompt and re-ob
       assert.equal(request.tool, 'collaboration.spawn_agent');
       assert.equal(request.arguments.fork_turns, 'none');
       assert.equal(request.arguments.message, 'exact prompt\nwith newline');
-      canonicalTask = `/root/${request.arguments.task_name}`;
-      return { task_name: canonicalTask };
+      tasks.set(`/root/${request.arguments.task_name}`, 'running');
+      return structuredClone(spawnResult);
     }
     if (request.operation === 'wait') return { message: 'Agent completed.', timed_out: false };
+    if (request.operation === 'interrupt') {
+      assert.equal(request.tool, 'collaboration.interrupt_agent');
+      if (interruptStops && tasks.has(request.arguments.target)) tasks.set(request.arguments.target, 'idle');
+      return { agent_name: request.arguments.target, previous_status: 'running' };
+    }
     assert.equal(request.tool, 'collaboration.list_agents');
-    assert.equal(request.arguments.path_prefix, canonicalTask);
-    return { agents: [{ agent_name: canonicalTask, agent_status: status === 'completed' ? { completed: JSON.stringify(businessResult) } : status }] };
+    assert.deepEqual(request.arguments, {});
+    return { agents: [...tasks].map(([agent_name, agent_status]) => ({ agent_name, agent_status })) };
   };
-  const host = createCodexCollaborationHostAdapter({ exchange, sessionId: 'session-fixture', now: () => '2026-09-15T00:00:00.000Z', waitTimeoutMs: 1000 });
-  const spawned = await host.adapter.spawn({ dispatchId: 'dispatch-1', packetDigest: 'a'.repeat(64), promptDigest: 'b'.repeat(64), prompt: 'exact prompt\nwith newline' });
+  const create = (sessionId = 'session-fixture') => createCodexCollaborationHostAdapter({ exchange, controlRoot, dataRoot: resolve(root, 'data'), sessionId, now: () => '2026-09-15T00:00:00.000Z', waitTimeoutMs: 1000 });
+  return { root, tasks, requests, exchange, create };
+};
+
+const spawnInput = { projectId: 'engine', runId: 'run-1', dispatchId: 'dispatch-1', packetDigest: 'a'.repeat(64), promptDigest: 'b'.repeat(64), prompt: 'exact prompt\nwith newline' };
+
+test('Codex collaboration adapter binds the real native envelope, canonical task, Lease, wait, and result', async t => {
+  const fixture = await setup(t);
+  const host = fixture.create();
+  const reconciled = await host.adapter.reconcile({ activeEffectIds: [] });
+  assert.equal(reconciled.ready, true);
+  const spawned = await host.adapter.spawn(spawnInput);
+  assert.match(spawned.agentId, /^\/root\/ah_/);
+  assert.equal(spawned.receipt.providerAgentId, 'provider-agent-1');
+  assert.equal(spawned.receipt.nickname, 'Ada');
   const runtimeReceipt = { visibility: spawned.visibility, hostSpawnReceipt: spawned.receipt };
   const observation = await host.adapter.verifyVisibleLease({ dispatch: { dispatchId: 'dispatch-1', packetDigest: 'a'.repeat(64) }, prompt: { promptDigest: 'b'.repeat(64) }, agentId: spawned.agentId, runtimeReceipt });
   assert.equal(observation.verified, true);
-  assert.equal(observation.agentId, canonicalTask);
-  status = 'completed';
-  const waited = await host.adapter.wait({ agentId: canonicalTask, dispatchId: 'dispatch-1', visibility: spawned.visibility });
+  await host.adapter.confirm({ ...spawnInput, agentId: spawned.agentId, runtimeReceipt });
+  fixture.tasks.set(spawned.agentId, { completed: JSON.stringify(businessResult) });
+  const waited = await host.adapter.wait({ agentId: spawned.agentId, dispatchId: 'dispatch-1', runtimeReceipt });
   assert.equal(waited.status, 'completed');
-  const transported = await host.adapter.result({ agentId: canonicalTask, dispatchId: 'dispatch-1', visibility: spawned.visibility });
+  const transported = await host.adapter.result({ agentId: spawned.agentId, dispatchId: 'dispatch-1', runtimeReceipt });
   assert.deepEqual(transported.result, businessResult);
   assert.equal(transported.runtimeEvidence.verificationReceipts.length, 1);
-  assert.deepEqual(requests.map(request => request.operation), ['spawn', 'inspect', 'wait', 'inspect', 'inspect']);
+  assert.equal((await host.journal.read(spawned.receipt.effectId)).state, 'settled');
+  assert.deepEqual(fixture.requests.map(request => request.operation), ['inspect', 'spawn', 'inspect', 'inspect', 'wait', 'inspect', 'inspect']);
 });
 
-test('Codex collaboration adapter rejects a forged or cross-Dispatch spawn Receipt before attestation', async () => {
-  let canonicalTask;
-  const exchange = async request => {
-    if (request.operation === 'spawn') {
-      canonicalTask = `/root/${request.arguments.task_name}`;
-      return { task_name: canonicalTask };
-    }
-    return { agents: [{ agent_name: canonicalTask, agent_status: 'running' }] };
-  };
-  const host = createCodexCollaborationHostAdapter({ exchange, sessionId: 'session-fixture', now: () => '2026-09-15T00:00:00.000Z' });
-  const spawned = await host.adapter.spawn({ dispatchId: 'dispatch-1', packetDigest: 'a'.repeat(64), promptDigest: 'b'.repeat(64), prompt: 'prompt' });
+test('legacy task_name spawn envelope fails closed and the spawned Agent is interrupted before return', async t => {
+  const fixture = await setup(t, { spawnResult: { task_name: '/root/legacy-task' } });
+  const host = fixture.create();
+  await assert.rejects(() => host.adapter.spawn(spawnInput), error => error.code === 'CODEX_COLLABORATION_SPAWN_RESULT_INVALID' && error.details?.containment?.disposition === 'interrupted');
+  assert.equal(fixture.requests.filter(request => request.operation === 'interrupt').length, 1);
+  assert.equal((await host.journal.list())[0].state, 'contained');
+});
+
+test('preflight reconciliation contains a crash-window Agent before any later spawn', async t => {
+  const fixture = await setup(t);
+  const first = fixture.create('crashed-session');
+  const taskName = 'ah_crash_window_fixture';
+  const requestBody = { protocolVersion: '1.0', kind: 'codex-visible-host-request', sessionId: 'crashed-session', requestId: 'host_request_crash', operation: 'spawn', tool: 'collaboration.spawn_agent', arguments: { task_name: taskName, fork_turns: 'none', message: 'prompt' }, binding: { projectId: 'engine', runId: 'run-1', dispatchId: 'dispatch-crash', packetDigest: 'c'.repeat(64), promptDigest: 'd'.repeat(64) }, createdAt: '2026-09-15T00:00:00.000Z' };
+  const request = { ...requestBody, requestDigest: digestJson(requestBody) };
+  await first.journal.prepare({ request, taskName, binding: request.binding });
+  fixture.tasks.set(`/root/${taskName}`, 'running');
+  const restarted = fixture.create('restarted-session');
+  const reconciled = await restarted.adapter.reconcile({ activeEffectIds: [] });
+  assert.equal(reconciled.ready, true);
+  assert.equal(fixture.tasks.get(`/root/${taskName}`), 'idle');
+  assert.equal((await restarted.journal.unresolved()).length, 0);
+  assert.equal(fixture.requests.filter(item => item.operation === 'interrupt').length, 1);
+});
+
+test('unverified containment blocks preflight and leaves the Host Effect unresolved', async t => {
+  const fixture = await setup(t, { interruptStops: false });
+  const host = fixture.create();
+  const taskName = 'ah_uncontained_fixture';
+  const requestBody = { protocolVersion: '1.0', kind: 'codex-visible-host-request', sessionId: 'session-fixture', requestId: 'host_request_uncontained', operation: 'spawn', tool: 'collaboration.spawn_agent', arguments: { task_name: taskName, fork_turns: 'none', message: 'prompt' }, binding: { projectId: 'engine', runId: 'run-1', dispatchId: 'dispatch-uncontained', packetDigest: 'e'.repeat(64), promptDigest: 'f'.repeat(64) }, createdAt: '2026-09-15T00:00:00.000Z' };
+  const request = { ...requestBody, requestDigest: digestJson(requestBody) };
+  await host.journal.prepare({ request, taskName, binding: request.binding });
+  fixture.tasks.set(`/root/${taskName}`, 'running');
+  const reconciled = await host.adapter.reconcile({ activeEffectIds: [] });
+  assert.equal(reconciled.ready, false);
+  assert.equal(reconciled.issues[0].code, 'CODEX_COLLABORATION_CONTAINMENT_UNVERIFIED');
+  assert.equal((await host.journal.unresolved()).length, 1);
+});
+
+test('Codex collaboration adapter rejects a forged cross-Dispatch spawn Receipt before attestation', async t => {
+  const fixture = await setup(t);
+  const host = fixture.create();
+  const spawned = await host.adapter.spawn(spawnInput);
   const forged = structuredClone(spawned.receipt);
   forged.dispatchId = 'dispatch-2';
-  await assert.rejects(
-    () => host.adapter.verifyVisibleLease({ dispatch: { dispatchId: 'dispatch-1', packetDigest: 'a'.repeat(64) }, prompt: { promptDigest: 'b'.repeat(64) }, agentId: spawned.agentId, runtimeReceipt: { visibility: spawned.visibility, hostSpawnReceipt: forged } }),
-    error => error.code === 'CODEX_COLLABORATION_SPAWN_RECEIPT_DIGEST_MISMATCH',
-  );
+  await assert.rejects(() => host.adapter.verifyVisibleLease({ dispatch: { dispatchId: 'dispatch-1', packetDigest: 'a'.repeat(64) }, prompt: { promptDigest: 'b'.repeat(64) }, agentId: spawned.agentId, runtimeReceipt: { visibility: spawned.visibility, hostSpawnReceipt: forged } }), error => error.code === 'CODEX_COLLABORATION_SPAWN_RECEIPT_DIGEST_MISMATCH');
 });
 
 test('stdio Host exchange accepts only the exact pending request envelope', async () => {
   const input = new PassThrough();
   const output = new PassThrough();
   const transport = createStdioHostExchange({ input, output });
-  const request = { protocolVersion: '1.0', kind: 'codex-visible-host-request', sessionId: 'session', requestId: 'request', requestDigest: 'a'.repeat(64), operation: 'inspect', tool: 'collaboration.list_agents', arguments: { path_prefix: '/root/task' }, binding: null, createdAt: '2026-09-15T00:00:00.000Z' };
+  const request = { protocolVersion: '1.0', kind: 'codex-visible-host-request', sessionId: 'session', requestId: 'request', requestDigest: 'a'.repeat(64), operation: 'inspect', tool: 'collaboration.list_agents', arguments: {}, binding: null, createdAt: '2026-09-15T00:00:00.000Z' };
   const pending = transport.exchange(request);
   const [bytes] = await once(output, 'data');
   assert.deepEqual(JSON.parse(bytes.toString()), request);

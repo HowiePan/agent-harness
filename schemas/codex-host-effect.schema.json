@@ -1,0 +1,65 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-harness.local/schemas/codex-host-effect.schema.json",
+  "title": "Codex Collaboration Host Effect Journal Entry",
+  "type": "object",
+  "required": ["protocolVersion", "kind", "effectId", "revision", "state", "contract", "sessionId", "requestId", "requestDigest", "operation", "tool", "taskName", "binding", "commands", "createdAt", "updatedAt", "effectDigest"],
+  "properties": {
+    "protocolVersion": { "const": "1.0" },
+    "kind": { "const": "codex-collaboration-host-effect" },
+    "effectId": { "type": "string", "pattern": "^codex_host_effect_[a-f0-9]{24}$" },
+    "revision": { "type": "integer", "minimum": 1 },
+    "state": { "enum": ["spawn-requested", "spawn-responded", "agent-observed", "lease-bound", "settled", "contained"] },
+    "contract": {
+      "type": "object",
+      "required": ["id", "version", "digest"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "version": { "type": "string", "pattern": "^\\d+\\.\\d+\\.\\d+$" },
+        "digest": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+      },
+      "additionalProperties": false
+    },
+    "sessionId": { "type": "string", "minLength": 1 },
+    "requestId": { "type": "string", "minLength": 1 },
+    "requestDigest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "operation": { "const": "spawn" },
+    "tool": { "const": "collaboration.spawn_agent" },
+    "taskName": { "type": "string", "minLength": 1 },
+    "binding": {
+      "type": "object",
+      "required": ["projectId", "runId", "dispatchId", "packetDigest", "promptDigest"],
+      "properties": {
+        "projectId": { "type": "string", "minLength": 1 },
+        "runId": { "type": "string", "minLength": 1 },
+        "dispatchId": { "type": "string", "minLength": 1 },
+        "packetDigest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "promptDigest": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+      },
+      "additionalProperties": false
+    },
+    "nativeResult": { "type": ["object", "null"] },
+    "providerAgentId": { "type": ["string", "null"] },
+    "nickname": { "type": ["string", "null"] },
+    "canonicalAgentName": { "type": ["string", "null"] },
+    "outcome": { "type": ["object", "null"] },
+    "commands": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "required": ["commandId", "payloadDigest", "revision", "committedAt"],
+        "properties": {
+          "commandId": { "type": "string", "minLength": 1 },
+          "payloadDigest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+          "revision": { "type": "integer", "minimum": 1 },
+          "committedAt": { "type": "string", "format": "date-time" }
+        },
+        "additionalProperties": true
+      }
+    },
+    "createdAt": { "type": "string", "format": "date-time" },
+    "updatedAt": { "type": "string", "format": "date-time" },
+    "effectDigest": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+  },
+  "additionalProperties": false
+}

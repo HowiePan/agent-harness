@@ -1,0 +1,79 @@
+{
+  "protocolVersion": "1.0",
+  "projectAlias": "engine",
+  "project": {
+    "projectId": "cardworld-engine",
+    "profileId": "engine-delivery",
+    "extensionId": "cardworld-engine-profile"
+  },
+  "observedAt": "2026-09-15T14:10:20.5380660Z",
+  "summary": "conversation-visible 生命周期在首次 Dispatch 启动时因宿主协作工具返回契约不兼容而失败。",
+  "severity": "P1",
+  "environment": {
+    "harnessRelease": "1.0.0",
+    "projectId": "cardworld-engine",
+    "executionMode": "conversation-visible",
+    "workspaceMatch": "bound-root"
+  },
+  "expected": {
+    "spawnResult": {
+      "requiredKeys": [
+        "task_name"
+      ],
+      "canonicalIdentity": "Harness-generated ah_* task name"
+    },
+    "visibleHost": "collaboration.spawn_agent/list_agents/wait_agent adapter contract"
+  },
+  "actual": {
+    "failureCode": "CODEX_COLLABORATION_SPAWN_RESULT_INVALID",
+    "observed": "Coordinator rejected the native spawn result envelope before Lease binding.",
+    "exposedSpawnShape": {
+      "keys": [
+        "agent_id",
+        "nickname"
+      ]
+    }
+  },
+  "reproduction": {
+    "steps": [
+      "运行 h:engine quality V3.8.4。",
+      "Coordinator 完成 executionReady=true 的 preflight 并发出 conversation-visible spawn 请求。",
+      "通过当前宿主暴露的通用子智能体工具执行 spawn_agent，并将其结果原样回传。",
+      "Coordinator 报告 CODEX_COLLABORATION_SPAWN_RESULT_INVALID，生命周期在首次 Dispatch 处停止。"
+    ]
+  },
+  "conversation": {
+    "source": "current-thread",
+    "excerpts": [
+      {
+        "role": "user",
+        "text": "我还有一个关注的点，就是为什么协议会不兼容，这不兼容那我觉得后续所有流程都跑步下去了"
+      },
+      {
+        "role": "tool",
+        "text": "Coordinator returned CODEX_COLLABORATION_SPAWN_RESULT_INVALID: Codex collaboration spawn_agent result has an invalid envelope."
+      },
+      {
+        "role": "assistant",
+        "text": "当前宿主暴露的通用 collaboration 工具返回 agent_id/nickname，而 Harness adapter 要求 task_name；这会阻塞需要 conversation-visible 子智能体的生命周期。"
+      }
+    ]
+  },
+  "missingEvidence": [
+    "宿主未提供与 Harness visible-host adapter 对应的 collaboration 工具 manifest/version。",
+    "未取得能够证明 spawn/list/wait/result 四项回调实际契约一致的 preflight handshake 证据。"
+  ],
+  "correlation": {
+    "category": "host-integration",
+    "failureCode": "CODEX_COLLABORATION_SPAWN_RESULT_INVALID",
+    "scope": "conversation-visible lifecycle dispatch"
+  },
+  "sanitization": {
+    "confirmed": true,
+    "removed": [
+      "未写入具体 agent UUID、session/request ID、dispatch digest 或完整本地运行路径。"
+    ]
+  },
+  "incidentFingerprint": "605cad36c045c671d814e1add2d90fb81d52155c1673278ff21298937e9142ca",
+  "intakeDigest": "5323cea6386f37a2a9714dbf48091f4d75fd0821bf99e9186eb125bc0a597a1d"
+}

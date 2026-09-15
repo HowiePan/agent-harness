@@ -36,29 +36,65 @@ const finding = {
   conflictKeys: ['fixture-readme'],
 };
 
-const createHost = ({ workspace, failFirstWait = false, repeatFindingOnce = false }) => {
+const createHost = ({ workspace, failFirstWait = false, failFirstInspect = false, failFirstConfirm = false, repeatFindingOnce = false }) => {
   const agents = new Map();
+  const stats = { spawnCount: 0, containCount: 0 };
   let sequence = 0;
   let shouldFailWait = failFirstWait;
+  let shouldFailInspect = failFirstInspect;
+  let shouldFailConfirm = failFirstConfirm;
   let shouldRepeatFinding = repeatFindingOnce;
   const adapter = createVisibleHostAdapter({
     provider: 'quality-e2e-host',
-    inspectVisibleAgent: async expected => ({
-      verified: true,
-      status: 'running',
-      assertionId: `assertion:${expected.agentId}`,
+    adapterVersion: '1.1.0',
+    reconcileVisibleHostEffects: async () => ({
+      ready: true,
+      provider: 'quality-e2e-host',
+      adapterVersion: '1.1.0',
+      contract: { id: 'quality-e2e-native', version: '1.0.0', digest: 'd'.repeat(64) },
+      assertionId: 'quality-e2e-reconciliation',
       observedAt: new Date().toISOString(),
-      agentId: expected.agentId,
-      dispatchId: expected.dispatchId,
-      packetDigest: expected.packetDigest,
-      promptDigest: expected.promptDigest,
-      visibility: { mode: 'user-visible', surface: expected.surface, inspectRef: expected.inspectRef },
+      reconciled: [],
+      issues: [],
     }),
+    inspectVisibleAgent: async expected => {
+      if (shouldFailInspect) {
+        shouldFailInspect = false;
+        const error = new Error('simulated attestation failure after spawn');
+        error.code = 'SIMULATED_ATTESTATION_FAILURE';
+        throw error;
+      }
+      return {
+        verified: true,
+        status: 'running',
+        assertionId: `assertion:${expected.agentId}`,
+        observedAt: new Date().toISOString(),
+        agentId: expected.agentId,
+        dispatchId: expected.dispatchId,
+        packetDigest: expected.packetDigest,
+        promptDigest: expected.promptDigest,
+        visibility: { mode: 'user-visible', surface: expected.surface, inspectRef: expected.inspectRef },
+      };
+    },
     spawnVisibleAgent: async input => {
+      stats.spawnCount += 1;
       const agentId = `visible-e2e-${++sequence}`;
       const visibility = { mode: 'user-visible', surface: 'codex-task', inspectRef: `task:${agentId}` };
       agents.set(agentId, { ...structuredClone(input), visibility, repaired: false });
       return { agentId, visibility, receipt: { operation: 'spawn', agentId } };
+    },
+    confirmVisibleLease: async input => {
+      if (shouldFailConfirm) {
+        shouldFailConfirm = false;
+        const error = new Error('simulated coordinator crash after Authority Lease commit');
+        error.code = 'SIMULATED_CONFIRMATION_FAILURE';
+        throw error;
+      }
+      return { confirmed: true, agentId: input.agentId };
+    },
+    containVisibleAgent: async input => {
+      stats.containCount += 1;
+      return { contained: agents.delete(input.agentId), agentId: input.agentId };
     },
     waitVisibleAgent: async input => {
       if (shouldFailWait) {
@@ -97,10 +133,10 @@ const createHost = ({ workspace, failFirstWait = false, repeatFindingOnce = fals
       return { result: result({ summary: 'Post-repair full re-review is clean.', checkpoint: 'recheck' }), receipt: { operation: 'result', stage } };
     },
   });
-  return { adapter, agents };
+  return { adapter, agents, stats };
 };
 
-const setup = async ({ failFirstWait = false, repeatFindingOnce = false } = {}) => {
+const setup = async ({ failFirstWait = false, failFirstInspect = false, failFirstConfirm = false, repeatFindingOnce = false } = {}) => {
   const controlRoot = resolve(process.cwd());
   const parent = resolve(harnessTemporaryRoot(), 'quality-lifecycle-e2e');
   await mkdir(parent, { recursive: true });
@@ -111,7 +147,7 @@ const setup = async ({ failFirstWait = false, repeatFindingOnce = false } = {}) 
   await writeFile(resolve(workspace, 'README.md'), '# Quality fixture\n', 'utf8');
   const engine = await loadExtensionPack('./src/consumers/cardworld-engine.mjs', { cwd: controlRoot, controlRoot });
   const runtime = await loadExtensionPack('./src/extensions/codex-runtime.mjs', { cwd: controlRoot, controlRoot });
-  const host = createHost({ workspace, failFirstWait, repeatFindingOnce });
+  const host = createHost({ workspace, failFirstWait, failFirstInspect, failFirstConfirm, repeatFindingOnce });
   const create = () => createHarness({ controlRoot, dataRoot, releaseIdentity, strictProjectIdentity: false, extensions: [engine, runtime], agentAdapter: host.adapter });
   const harness = await create();
   const descriptor = createCardWorldProjectDescriptor({ workspaceRoot: workspace, harness: releaseIdentity });
@@ -163,6 +199,39 @@ test('visible quality lifecycle resumes an attested active Lease after coordinat
   assert.equal(resumedPreflight.checks.find(check => check.id === 'active-leases').details.observations.length, 1);
   const completed = await restartedHarness.executeVisibleLifecyclePlan(fixture.plan, { commandId: 'quality-after-restart', preflightReport: resumedPreflight, maxConcurrency: 1 });
   assertClosedQualityLoop(completed.state);
+});
+
+test('spawn-before-bind failure contains the prior Agent and never opens the next Agent', async t => {
+  const fixture = await setup({ failFirstInspect: true });
+  t.after(() => rm(fixture.root, { recursive: true, force: true }));
+  const preflight = await fixture.harness.createExecutionReadinessReport(fixture.plan);
+  await assert.rejects(
+    () => fixture.harness.executeVisibleLifecyclePlan(fixture.plan, { commandId: 'quality-bind-failure', preflightReport: preflight, maxConcurrency: 10 }),
+    error => error.code === 'SIMULATED_ATTESTATION_FAILURE',
+  );
+  assert.equal(fixture.host.stats.spawnCount, 1);
+  assert.equal(fixture.host.stats.containCount, 1);
+  assert.equal(fixture.host.agents.size, 0);
+  const state = await fixture.harness.authorityStore.read(fixture.plan.project.id, fixture.plan.run.runId);
+  assert.equal(state.leases.filter(lease => lease.status === 'active').length, 0);
+  assert.equal(state.dispatches.filter(dispatch => dispatch.status === 'requested').length, 1);
+});
+
+test('post-bind confirmation failure preserves the active Lease for reattachment without interrupting its Agent', async t => {
+  const fixture = await setup({ failFirstConfirm: true });
+  t.after(() => rm(fixture.root, { recursive: true, force: true }));
+  const preflight = await fixture.harness.createExecutionReadinessReport(fixture.plan);
+  await assert.rejects(
+    () => fixture.harness.executeVisibleLifecyclePlan(fixture.plan, { commandId: 'quality-confirm-failure', preflightReport: preflight, maxConcurrency: 1 }),
+    error => error.code === 'SIMULATED_CONFIRMATION_FAILURE' && error.details?.leaseBound === true,
+  );
+  assert.equal(fixture.host.stats.spawnCount, 1);
+  assert.equal(fixture.host.stats.containCount, 0);
+  const interrupted = await fixture.harness.authorityStore.read(fixture.plan.project.id, fixture.plan.run.runId);
+  assert.equal(interrupted.leases.filter(lease => lease.status === 'active').length, 1);
+  const restarted = await fixture.create();
+  const resumedPreflight = await restarted.createExecutionReadinessReport(fixture.plan);
+  assert.equal(resumedPreflight.executionReady, true);
 });
 
 test('a finding repeated by re-review is reopened, repaired in a new round, and reviewed again', async t => {

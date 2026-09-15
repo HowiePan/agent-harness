@@ -6,7 +6,7 @@ Operator Contract 是工具无关的 Harness 协调规范。Codex Skill、未来
 
 - Authority 是唯一流程状态；对话、模型记忆、进程输出与报表都是非权威输入。
 - 每个 Project 必须显式选择 Prompt Codec，每个 Dispatch 固定 Codec/Contract 版本；Codec 从不可变 Packet 确定性生成完整 Prompt，Operator 只能原样传给子 Agent，不能临时组织、摘要、改写或增删。
-- 交互式 Agent 执行必须选择同时声明 `user-visible` 与 `host-orchestrated` 的 `conversation-visible` Runtime，并通过可信宿主证明把每个 Dispatch/Packet 摘要和 Prompt 摘要绑定到当前宿主创建的可见子 Agent；任务引用、状态与新鲜 heartbeat 可检查，Prompt 生成或宿主不可用时禁止回退到即兴 Prompt、CLI/隐藏进程。Headless 不能推断：Descriptor allow-policy、版本化 deny-wins 用户约束与宿主从原始 CI/无人值守请求签发的 command-scoped Grant 必须同时通过，Descriptor 或通用批准不能充当 Grant。
+- 交互式 Agent 执行必须选择同时声明 `user-visible` 与 `host-orchestrated` 的 `conversation-visible` Runtime，并通过可信宿主证明把每个 Dispatch/Packet 摘要和 Prompt 摘要绑定到当前宿主创建的可见子 Agent；任务引用、状态与新鲜 heartbeat 可检查。spawn 必须先记 Host Effect，再解析 provider identity 与 canonical visible identity；未绑定 Lease 的失败 Agent 必须收容并验证，未完成收容或 Host Contract 不兼容时禁止下一次 spawn，已绑定 Lease 的 Agent 必须重附着。Prompt 生成或宿主不可用时禁止回退到即兴 Prompt、CLI/隐藏进程。Headless 不能推断：Descriptor allow-policy、版本化 deny-wins 用户约束与宿主从原始 CI/无人值守请求签发的 command-scoped Grant 必须同时通过，Descriptor 或通用批准不能充当 Grant。
 - 所有写命令绑定 expected revision 和唯一 command ID。
 - `start`、`resume` 或调度返回首批 Dispatch 后，Operator 必须持续消费全部 Dispatch、Lease、Runtime 结果、Gate、Decision 和 Receipt，直到 Run 关闭、失败或需要用户权限。
 - 单个 Agent 完成不等于 Run 完成。

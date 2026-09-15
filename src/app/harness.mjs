@@ -257,11 +257,28 @@ export const createHarness = async ({ controlRoot: controlRootInput, dataRoot: d
           add('user-constraint', true, { constraints: executionConstraints, requiredFor: 'headless-only' });
           add('command-grant', true, { kind: 'interactive-command', additionalApprovalRequired: false });
         }
-        if (runtimePolicy?.hostOrchestrated) {
-          const ready = isVisibleHostAdapter(trustedAgentAdapter) && ['inspect', 'spawn', 'wait', 'result'].every(capability => trustedAgentAdapter.capabilities?.[capability] === true);
-          add('visible-host', ready, isVisibleHostAdapter(trustedAgentAdapter) ? { provider: trustedAgentAdapter.provider, adapterVersion: trustedAgentAdapter.adapterVersion, capabilities: trustedAgentAdapter.capabilities } : {}, ready ? [] : [{ code: 'VISIBLE_AGENT_HOST_COORDINATOR_UNAVAILABLE', message: 'Conversation-visible execution requires an injected trusted Host Adapter with inspect, spawn, wait, and structured-result capabilities.' }]);
-        } else add('visible-host', true, { required: false });
         const activeLeases = lineageResolution.action === 'reattach' ? existingState?.leases.filter(lease => lease.status === 'active') ?? [] : [];
+        if (runtimePolicy?.hostOrchestrated) {
+          const requiredCapabilities = ['inspect', 'spawn', 'wait', 'result', 'reconcile', 'confirm', 'contain'];
+          const ready = isVisibleHostAdapter(trustedAgentAdapter) && requiredCapabilities.every(capability => trustedAgentAdapter.capabilities?.[capability] === true);
+          add('visible-host', ready, isVisibleHostAdapter(trustedAgentAdapter) ? { provider: trustedAgentAdapter.provider, adapterVersion: trustedAgentAdapter.adapterVersion, capabilities: trustedAgentAdapter.capabilities, requiredCapabilities } : { requiredCapabilities }, ready ? [] : [{ code: 'VISIBLE_AGENT_HOST_COORDINATOR_UNAVAILABLE', message: 'Conversation-visible execution requires an injected trusted Host Adapter with inspect, spawn, wait, structured-result, reconciliation, Lease confirmation, and containment capabilities.' }]);
+          if (ready) {
+            try {
+              const reconciliation = await trustedAgentAdapter.reconcile({
+                projectId: plan.project.id,
+                planDigest: plan.planDigest,
+                activeEffectIds: activeLeases.map(lease => lease.runtimeReceipt?.hostSpawnReceipt?.effectId).filter(Boolean),
+              });
+              assert(reconciliation?.ready === true, 'VISIBLE_AGENT_HOST_RECONCILIATION_FAILED', 'Visible Host Effect reconciliation did not reach a safe state.', { issues: reconciliation?.issues ?? [] });
+              assert(typeof reconciliation.provider === 'string' && typeof reconciliation.adapterVersion === 'string' && typeof reconciliation.assertionId === 'string' && typeof reconciliation.observedAt === 'string' && !Number.isNaN(Date.parse(reconciliation.observedAt)), 'VISIBLE_AGENT_HOST_CONTRACT_INVALID', 'Visible Host reconciliation must return a versioned, observable Host Contract assertion.');
+              assert(reconciliation.contract?.id && /^\d+\.\d+\.\d+$/.test(reconciliation.contract?.version ?? '') && /^[a-f0-9]{64}$/.test(reconciliation.contract?.digest ?? ''), 'VISIBLE_AGENT_HOST_CONTRACT_INVALID', 'Visible Host reconciliation must bind an exact native Host Contract identity.');
+              add('visible-host-contract', true, reconciliation);
+            } catch (error) { add('visible-host-contract', false, {}, issues(error)); }
+          } else add('visible-host-contract', false, {}, [{ code: 'VISIBLE_AGENT_HOST_CONTRACT_UNAVAILABLE', message: 'Visible Host Contract reconciliation cannot run without the complete coordinator capability set.' }]);
+        } else {
+          add('visible-host', true, { required: false });
+          add('visible-host-contract', true, { required: false });
+        }
         if (!activeLeases.length) add('active-leases', true, { count: 0 });
         else if (!runtimePolicy?.hostOrchestrated || !isVisibleHostAdapter(trustedAgentAdapter)) {
           add('active-leases', false, { count: activeLeases.length }, [{ code: 'ACTIVE_LEASE_RESUME_UNAVAILABLE', message: 'Active Leases require their original trusted host coordinator before execution can resume.' }]);
@@ -451,7 +468,7 @@ export const createHarness = async ({ controlRoot: controlRootInput, dataRoot: d
       if (started.status === 'attention-required' || started.status === 'closed') return started;
       const { plan, runtimePolicy } = started;
       assert(runtimePolicy.hostOrchestrated, 'VISIBLE_LIFECYCLE_RUNTIME_REQUIRED', 'Visible lifecycle execution requires a host-orchestrated Runtime.');
-      assert(isVisibleHostAdapter(trustedAgentAdapter) && ['spawn', 'wait', 'result'].every(capability => trustedAgentAdapter.capabilities?.[capability]), 'VISIBLE_AGENT_HOST_COORDINATOR_UNAVAILABLE', 'Visible lifecycle execution requires a complete trusted Host Coordinator adapter.');
+      assert(isVisibleHostAdapter(trustedAgentAdapter) && ['spawn', 'wait', 'result', 'reconcile', 'confirm', 'contain'].every(capability => trustedAgentAdapter.capabilities?.[capability]), 'VISIBLE_AGENT_HOST_COORDINATOR_UNAVAILABLE', 'Visible lifecycle execution requires a complete trusted Host Coordinator adapter.');
       const project = await projectRegistry.get(plan.project.id);
       const runtimeManifest = pluginHost.get(plan.run.runtimePluginId, 'agent-runtime').manifest;
       const configuredLimit = resolveConcurrencyLimit(project.policy?.maxConcurrency, project.policy?.maxConcurrency === AUTO_CONCURRENCY ? AUTO_CONCURRENCY_LIMIT : 1);
@@ -473,27 +490,40 @@ export const createHarness = async ({ controlRoot: controlRootInput, dataRoot: d
           }
           for (const dispatch of requested.slice(0, physicalLimit)) {
             const compiled = await api.readDispatchPacket(plan.project.id, activeRunId, dispatch.dispatchId);
-            const spawned = await trustedAgentAdapter.spawn({
-              projectId: plan.project.id,
-              runId: activeRunId,
-              dispatchId: dispatch.dispatchId,
-              packetDigest: dispatch.packetDigest,
-              promptDigest: compiled.prompt.promptDigest,
-              prompt: compiled.prompt.text,
-              packet: structuredClone(compiled.packet),
-            });
-            assert(spawned?.agentId && spawned.visibility?.mode === 'user-visible' && spawned.visibility.surface && spawned.visibility.inspectRef, 'VISIBLE_AGENT_HOST_SPAWN_RECEIPT_INVALID', 'Host spawn must return an Agent identity and inspectable user-visible task reference.');
-            state = await authorityStore.read(plan.project.id, activeRunId);
-            const runtimeReceipt = {
-              runtimePluginId: plan.run.runtimePluginId,
-              agentId: spawned.agentId,
-              dispatchId: dispatch.dispatchId,
-              packetDigest: dispatch.packetDigest,
-              prompt: { contractVersion: compiled.prompt.contractVersion, codecPluginId: compiled.prompt.codecPluginId, codecPluginVersion: compiled.prompt.codecPluginVersion, packetDigest: compiled.prompt.packetDigest, promptDigest: compiled.prompt.promptDigest },
-              visibility: structuredClone(spawned.visibility),
-              hostSpawnReceipt: structuredClone(spawned.receipt ?? null),
-            };
-            await api.bindDispatch(plan.project.id, activeRunId, { dispatchId: dispatch.dispatchId, agentId: spawned.agentId, runtimeReceipt }, { expectedRevision: state.revision, commandId: `${commandId}.bind.${dispatch.dispatchId}` });
+            let spawned = null;
+            let runtimeReceipt = null;
+            try {
+              spawned = await trustedAgentAdapter.spawn({
+                projectId: plan.project.id,
+                runId: activeRunId,
+                dispatchId: dispatch.dispatchId,
+                packetDigest: dispatch.packetDigest,
+                promptDigest: compiled.prompt.promptDigest,
+                prompt: compiled.prompt.text,
+                packet: structuredClone(compiled.packet),
+              });
+              assert(spawned?.agentId && spawned.visibility?.mode === 'user-visible' && spawned.visibility.surface && spawned.visibility.inspectRef, 'VISIBLE_AGENT_HOST_SPAWN_RECEIPT_INVALID', 'Host spawn must return an Agent identity and inspectable user-visible task reference.');
+              state = await authorityStore.read(plan.project.id, activeRunId);
+              runtimeReceipt = {
+                runtimePluginId: plan.run.runtimePluginId,
+                agentId: spawned.agentId,
+                dispatchId: dispatch.dispatchId,
+                packetDigest: dispatch.packetDigest,
+                prompt: { contractVersion: compiled.prompt.contractVersion, codecPluginId: compiled.prompt.codecPluginId, codecPluginVersion: compiled.prompt.codecPluginVersion, packetDigest: compiled.prompt.packetDigest, promptDigest: compiled.prompt.promptDigest },
+                visibility: structuredClone(spawned.visibility),
+                hostSpawnReceipt: structuredClone(spawned.receipt ?? null),
+              };
+              await api.bindDispatch(plan.project.id, activeRunId, { dispatchId: dispatch.dispatchId, agentId: spawned.agentId, runtimeReceipt }, { expectedRevision: state.revision, commandId: `${commandId}.bind.${dispatch.dispatchId}` });
+            } catch (error) {
+              if (spawned && error.details?.leaseBound !== true) {
+                try {
+                  await trustedAgentAdapter.contain({ agentId: spawned.agentId, dispatchId: dispatch.dispatchId, runtimeReceipt, hostSpawnReceipt: spawned.receipt ?? null, reason: error.code ?? 'lease-bind-failed' });
+                } catch (containmentError) {
+                  error.details = { ...(error.details ?? {}), containmentError: { code: containmentError.code ?? 'VISIBLE_AGENT_HOST_CONTAINMENT_FAILED', message: containmentError.message } };
+                }
+              }
+              throw error;
+            }
           }
         }
         state = await authorityStore.read(plan.project.id, activeRunId);
@@ -505,12 +535,12 @@ export const createHarness = async ({ controlRoot: controlRootInput, dataRoot: d
         }
         for (const lease of leases) {
           const dispatch = state.dispatches.find(item => item.dispatchId === lease.dispatchId);
-          const waited = await trustedAgentAdapter.wait({ agentId: lease.agentId, dispatchId: lease.dispatchId, visibility: structuredClone(lease.runtimeReceipt.visibility) });
+          const waited = await trustedAgentAdapter.wait({ agentId: lease.agentId, dispatchId: lease.dispatchId, visibility: structuredClone(lease.runtimeReceipt.visibility), runtimeReceipt: structuredClone(lease.runtimeReceipt) });
           state = await authorityStore.read(plan.project.id, activeRunId);
           const heartbeat = await api.recordHeartbeat(plan.project.id, activeRunId, { leaseId: lease.leaseId, dispatchId: lease.dispatchId, agentId: lease.agentId, progress: waited?.progress ?? waited?.status ?? 'completed' }, { expectedRevision: state.revision, commandId: `${commandId}.heartbeat.${lease.dispatchId}.${state.revision}` });
           state = heartbeat.state;
           if (!['completed', 'failed', 'blocked'].includes(waited?.status)) continue;
-          const transported = await trustedAgentAdapter.result({ agentId: lease.agentId, dispatchId: lease.dispatchId, visibility: structuredClone(lease.runtimeReceipt.visibility) });
+          const transported = await trustedAgentAdapter.result({ agentId: lease.agentId, dispatchId: lease.dispatchId, visibility: structuredClone(lease.runtimeReceipt.visibility), runtimeReceipt: structuredClone(lease.runtimeReceipt) });
           assert(transported?.result, 'VISIBLE_AGENT_STRUCTURED_RESULT_REQUIRED', 'Host result transport must return a structured Agent result.');
           const submitted = await api.recordResult(plan.project.id, activeRunId, dispatch.dispatchId, transported.result, { commandId: `${commandId}.submit.${dispatch.dispatchId}`, runtimeEvidence: { ...(transported.runtimeEvidence ?? {}), hostWaitReceipt: waited?.receipt ?? null, hostResultReceipt: transported.receipt ?? null } });
           state = submitted.state;
@@ -722,7 +752,24 @@ export const createHarness = async ({ controlRoot: controlRootInput, dataRoot: d
         assertFreshVisibleObservation(attestation, { now: kernel.now, timeoutMs: Number(project.policy?.visibleHeartbeatTimeoutMs ?? 120000) });
         runtimeReceipt.hostAttestation = { ...structuredClone(attestation), verified: true };
       }
-      return kernel.bindLease(projectId, runId, { dispatchId: dispatch.dispatchId, agentId: input.agentId, packetDigest: dispatch.packetDigest, runtimeReceipt }, command);
+      const bound = await kernel.bindLease(projectId, runId, { dispatchId: dispatch.dispatchId, agentId: input.agentId, packetDigest: dispatch.packetDigest, runtimeReceipt }, command);
+      if (runtimePolicy.mode === 'conversation-visible' && trustedAgentAdapter?.capabilities?.confirm === true) {
+        try {
+          await trustedAgentAdapter.confirm({
+            projectId,
+            runId,
+            dispatchId: dispatch.dispatchId,
+            packetDigest: dispatch.packetDigest,
+            promptDigest: runtimeReceipt.prompt.promptDigest,
+            agentId: input.agentId,
+            runtimeReceipt: structuredClone(bound.result.lease.runtimeReceipt),
+          });
+        } catch (error) {
+          error.details = { ...(error.details ?? {}), leaseBound: true, leaseId: bound.result.lease.leaseId, dispatchId: dispatch.dispatchId };
+          throw error;
+        }
+      }
+      return bound;
     },
 
     async recordHeartbeat(projectId, runId, input, command) {

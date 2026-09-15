@@ -46,7 +46,7 @@ export const assertFreshVisibleObservation = (observation, { now = () => new Dat
  * accepted as proof until every identity, digest, visibility, and inspection field is
  * checked here.
  */
-export const createVisibleHostAdapter = ({ inspectVisibleAgent, spawnVisibleAgent, waitVisibleAgent, readVisibleResult, sendVisibleAgent, interruptVisibleAgent, provider = 'interactive-host', adapterVersion = '1.0.0' } = {}) => {
+export const createVisibleHostAdapter = ({ inspectVisibleAgent, spawnVisibleAgent, waitVisibleAgent, readVisibleResult, reconcileVisibleHostEffects, confirmVisibleLease, containVisibleAgent, sendVisibleAgent, interruptVisibleAgent, provider = 'interactive-host', adapterVersion = '1.0.0' } = {}) => {
   assert(typeof inspectVisibleAgent === 'function', 'VISIBLE_AGENT_HOST_INSPECTOR_REQUIRED', 'A visible host adapter requires the native host inspectVisibleAgent capability.');
   assert(typeof provider === 'string' && provider.length > 0, 'VISIBLE_AGENT_HOST_PROVIDER_REQUIRED', 'A visible host adapter requires a provider identity.');
   assert(semanticVersion.test(adapterVersion), 'VISIBLE_AGENT_HOST_ADAPTER_VERSION_INVALID', 'A visible host adapter requires a semantic adapter version.');
@@ -76,6 +76,9 @@ export const createVisibleHostAdapter = ({ inspectVisibleAgent, spawnVisibleAgen
       spawn: typeof spawnVisibleAgent === 'function',
       wait: typeof waitVisibleAgent === 'function',
       result: typeof readVisibleResult === 'function',
+      reconcile: typeof reconcileVisibleHostEffects === 'function',
+      confirm: typeof confirmVisibleLease === 'function',
+      contain: typeof containVisibleAgent === 'function',
       send: typeof sendVisibleAgent === 'function',
       interrupt: typeof interruptVisibleAgent === 'function',
     }),
@@ -114,6 +117,9 @@ export const createVisibleHostAdapter = ({ inspectVisibleAgent, spawnVisibleAgen
     spawn: typeof spawnVisibleAgent === 'function' ? spawnVisibleAgent : unsupported('spawn'),
     wait: typeof waitVisibleAgent === 'function' ? waitVisibleAgent : unsupported('wait'),
     result: typeof readVisibleResult === 'function' ? readVisibleResult : unsupported('result'),
+    reconcile: typeof reconcileVisibleHostEffects === 'function' ? reconcileVisibleHostEffects : unsupported('reconcile'),
+    confirm: typeof confirmVisibleLease === 'function' ? confirmVisibleLease : unsupported('confirm'),
+    contain: typeof containVisibleAgent === 'function' ? containVisibleAgent : unsupported('contain'),
     send: typeof sendVisibleAgent === 'function' ? sendVisibleAgent : unsupported('send'),
     heartbeat: unsupported('heartbeat'),
     interrupt: typeof interruptVisibleAgent === 'function' ? interruptVisibleAgent : unsupported('interrupt'),

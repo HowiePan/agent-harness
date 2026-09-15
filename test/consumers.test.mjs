@@ -3,12 +3,15 @@ import test from 'node:test';
 import {
   CARDWORLD_FINAL_GATE_IDS,
   COLLECTION_FINAL_GATE_IDS,
+  cardWorldCommandManifest,
   compileCardWorldFeatureGraph,
   compileTabletopCollectionFeatureGraph,
   createCardWorldLifecyclePlan,
   createCardWorldProjectDescriptor,
   createTabletopCollectionProjectDescriptor,
+  tabletopCollectionCommandManifest,
 } from '../src/consumers/index.mjs';
+import { resolveLifecycleExecutionPolicy } from '../src/plugins/runtime/execution-policy.mjs';
 
 test('CardWorld consumer compiles one canonical requirement and project-owned delivery Features', () => {
   const descriptor = createCardWorldProjectDescriptor({ workspaceRoot: process.cwd(), remote: 'https://github.com/HowiePan/CardWorld.git' });
@@ -129,4 +132,21 @@ test('consumer descriptors do not retain Codex when another Runtime is selected'
   assert.deepEqual(mixed.extensions.map(extension => extension.id), ['cardworld-engine-profile', 'codex-headless-runtime']);
   const explicit = createTabletopCollectionProjectDescriptor({ workspaceRoot: process.cwd(), runtimePluginId: 'another-runtime', agentExecutionMode: 'headless', runtimeExtension: { id: 'another-runtime-pack', version: '2.0.0', digest: 'a'.repeat(64) } });
   assert.deepEqual(explicit.extensions.map(extension => extension.id), ['tabletop-collection-profile', 'another-runtime-pack']);
+});
+
+test('every Engine and Collection state-changing action shares the conversation-visible Host Contract path by default', () => {
+  const cases = [
+    [createCardWorldProjectDescriptor({ workspaceRoot: process.cwd() }), cardWorldCommandManifest],
+    [createTabletopCollectionProjectDescriptor({ workspaceRoot: process.cwd() }), tabletopCollectionCommandManifest],
+  ];
+  for (const [project, manifest] of cases) {
+    const stateChangingActions = Object.entries(manifest.actions)
+      .filter(([, action]) => Object.values(action.presets).some(preset => preset.stateChanging))
+      .map(([action]) => action);
+    assert(stateChangingActions.length > 0);
+    for (const action of stateChangingActions) {
+      const policy = resolveLifecycleExecutionPolicy({ project, action });
+      assert.deepEqual({ mode: policy.mode, runtimePluginId: policy.runtimePluginId }, { mode: 'conversation-visible', runtimePluginId: 'codex-conversation-runtime' }, `${project.id}/${action}`);
+    }
+  }
 });

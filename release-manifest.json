@@ -37,8 +37,8 @@
     },
     {
       "path": "docs/architecture.md",
-      "sha256": "ca6e6b104e2bae0b04d711457554981ca0f79fbac6bd9eedca013881c6c75b89",
-      "size": 16017
+      "sha256": "24a9995592aa1e1f6522578c1b11d7862db5880e4a62af86754023f03c22b7e9",
+      "size": 16267
     },
     {
       "path": "docs/audits/g0/capability-difference-matrix.md",
@@ -127,8 +127,8 @@
     },
     {
       "path": "docs/operator-contract.md",
-      "sha256": "f1c0a67e055b0839c0b5f5216d4699fcca4bbd2cfe48a3a02eb16a0bc80a211b",
-      "size": 5573
+      "sha256": "6e8ac62c179eb807f3b92a0310eb4b1e1f0381133588f1fb5161821aff81f9a8",
+      "size": 5836
     },
     {
       "path": "docs/path-policy.md",
@@ -137,8 +137,8 @@
     },
     {
       "path": "docs/plugin-sdk.md",
-      "sha256": "5294e5311af9244684bce21589e37a55d30c61d068752bb9991b86ebd342a611",
-      "size": 8919
+      "sha256": "2d8e1e6dec165009ad77886e6208bb4cedc80662b544c4d1ff8cce34dddf5294",
+      "size": 9061
     },
     {
       "path": "docs/post-extraction-register.md",
@@ -227,8 +227,13 @@
     },
     {
       "path": "integrations/codex/agent-harness-codex/lib/codex-collaboration-host-adapter.mjs",
-      "sha256": "bc66f5da11160fa4c1eeabff2d687e7c9f00dddde543d68a3781c141c9574f13",
-      "size": 11545
+      "sha256": "4fa35ae7b1ada10337b819afb2d5a3768da4ddc9f40241b9de3c12273c1f32e8",
+      "size": 22302
+    },
+    {
+      "path": "integrations/codex/agent-harness-codex/lib/codex-host-effect-journal.mjs",
+      "sha256": "68287e151b362a1c5f4e4357d918abbabe82436057529919d8f12237731f4af0",
+      "size": 6687
     },
     {
       "path": "integrations/codex/agent-harness-codex/lib/stdio-host-exchange.mjs",
@@ -247,8 +252,8 @@
     },
     {
       "path": "integrations/codex/agent-harness-codex/references/visible-host-adapter-contract.md",
-      "sha256": "85cdcd7aea7c343a96fc48965a821715a23e48309ddcd7358d29eb6611084956",
-      "size": 3030
+      "sha256": "5e65ba4a8aa032ed2a1f71f9428dbaaa73550fd9869533a12906334ed265e87f",
+      "size": 4577
     },
     {
       "path": "integrations/codex/agent-harness-codex/scripts/configure-bindings.mjs",
@@ -257,8 +262,8 @@
     },
     {
       "path": "integrations/codex/agent-harness-codex/scripts/visible-lifecycle-coordinator.mjs",
-      "sha256": "8675d1cfa234269b6106088126b3fa56675d75ec9713cd80fa0ba14657a7ade8",
-      "size": 4283
+      "sha256": "6d327d40e52291ff1bee9506aa5729c6b3d3479b549abbb8100f1f5f24738b6b",
+      "size": 4382
     },
     {
       "path": "integrations/codex/agent-harness-codex/skills/agent-harness-command/agents/openai.yaml",
@@ -267,8 +272,8 @@
     },
     {
       "path": "integrations/codex/agent-harness-codex/skills/agent-harness-command/SKILL.md",
-      "sha256": "b5dc0e9e32a076c5c4f39755efcc41a6742b42a0363ce383c73ddd3af98728b0",
-      "size": 9137
+      "sha256": "646c85567f15dcf5a389152dbe705afb11abcea0be604ccd6abed749cb3e7194",
+      "size": 9684
     },
     {
       "path": "integrations/codex/agent-harness-codex/skills/agent-harness-extension-author/references/extension-contract.md",
@@ -354,6 +359,11 @@
       "path": "schemas/bootstrap-request.schema.json",
       "sha256": "56ac3804be7a42136e22f21cb567ca85f4abf01f660db19fd81f4141f31753b8",
       "size": 1679
+    },
+    {
+      "path": "schemas/codex-host-effect.schema.json",
+      "sha256": "f0e13f82c44a9b4fd2f1a1f995745e3d354c191de9e3e75b6a1788a9f71d9804",
+      "size": 3071
     },
     {
       "path": "schemas/codex-runtime-result.schema.json",
@@ -507,8 +517,8 @@
     },
     {
       "path": "src/app/harness.mjs",
-      "sha256": "0aeec096adeb4581eb5783137b1865a2baa423882dae02f5e68fc5d175f7ce0e",
-      "size": 77250
+      "sha256": "3ab08a4cd182bee1ff8c245c43bbbecf404c57a249180db37af1868ee80b1047",
+      "size": 80826
     },
     {
       "path": "src/bootstrap.mjs",
@@ -827,8 +837,8 @@
     },
     {
       "path": "src/plugins/runtime/visible-host-adapter.mjs",
-      "sha256": "23f4a2569effc57eb9e4244bbf6ee1e12bd0c37e01be2fe463bf750fc9bf1a16",
-      "size": 7858
+      "sha256": "157807dc7e6e6c96117de03558c2de84fe725fd9f4057365c3fcb5cd9c7109aa",
+      "size": 8442
     },
     {
       "path": "src/plugins/scheduler/conflict-scheduler.mjs",
@@ -981,7 +991,7 @@
       "size": 3735
     }
   ],
-  "packageDigest": "dd8c1c2b1f46b221fd70ec335e1b8e9aadc7fb218f3452f9960b383811a87425",
+  "packageDigest": "fb82bfa2767dada8eeaf1279b6df197be4bbeef619a97f5cab67ac1024bab5b2",
   "metadataFiles": [
     "release-manifest.json",
     "sbom.spdx.json"
