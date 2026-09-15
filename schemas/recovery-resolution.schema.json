@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-harness.local/schemas/recovery-resolution.schema.json",
+  "title": "Agent Harness Recovery Resolution Receipt",
+  "type": "object",
+  "required": ["protocolVersion", "kind", "authorityBasis", "projectId", "runId", "verificationRef", "authorityEpoch", "authorityGeneration", "expectedRevision", "targetEpoch", "action", "reasonCode", "effectClasses", "createdAt", "expiresAt", "receiptDigest"],
+  "properties": {
+    "protocolVersion": { "const": "1.0" },
+    "kind": { "const": "recovery-resolution" },
+    "authorityBasis": { "enum": ["lifecycle-policy", "explicit-recover-command"] },
+    "projectId": { "type": "string", "minLength": 1 },
+    "runId": { "type": "string", "minLength": 1 },
+    "logicalTaskKey": { "type": ["string", "null"] },
+    "planDigest": { "type": ["string", "null"] },
+    "verificationRef": { "type": "string", "minLength": 1 },
+    "authorityEpoch": { "type": "integer", "minimum": 1 },
+    "authorityGeneration": { "type": "integer", "minimum": 1 },
+    "expectedRevision": { "type": "integer", "minimum": 1 },
+    "targetEpoch": { "type": "integer", "minimum": 2 },
+    "action": { "const": "hard-recovery" },
+    "reasonCode": { "type": "string", "minLength": 1 },
+    "effectClasses": { "type": "array", "uniqueItems": true, "items": { "enum": ["authority-epoch-transition", "transport-invalidation", "completion-revalidation", "rollback-snapshot"] } },
+    "createdAt": { "type": "string", "format": "date-time" },
+    "expiresAt": { "type": "string", "format": "date-time" },
+    "receiptDigest": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+  },
+  "additionalProperties": false
+}

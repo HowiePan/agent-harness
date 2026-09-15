@@ -17,8 +17,8 @@
     },
     {
       "path": "CONTRIBUTING.md",
-      "sha256": "31162afa71930639c2b5c52a5e9e6378c3b3004180f8330cb474278ffc1e6ca9",
-      "size": 1126
+      "sha256": "1702d167205c6c9e4f62689545a896957b5ddee7e336f766029300dd5238f042",
+      "size": 1325
     },
     {
       "path": "docs/acceptance/evidence/cutover-source-dispositions.json",
@@ -32,8 +32,8 @@
     },
     {
       "path": "docs/acceptance/v1.0.0.md",
-      "sha256": "5b3eb9e170456e7da3c29b7a45b62641a5bc18141e73a0c5ca0f878962a836fd",
-      "size": 11161
+      "sha256": "081792d9537cb9141df250489b4712c600fc5786c968fb89caa193f11c3560fb",
+      "size": 12193
     },
     {
       "path": "docs/architecture.md",
@@ -117,18 +117,18 @@
     },
     {
       "path": "docs/migration-gates.md",
-      "sha256": "5ba8bae57584f9ed47d6a8cd541f91c42ace6a4c5463b8470b563e8a35d86452",
-      "size": 3388
+      "sha256": "f549295f4899a00c9d0ef811c5f9ed275bac1e5bc2392341ca42acaed162a34d",
+      "size": 3372
     },
     {
       "path": "docs/operations.md",
-      "sha256": "63fe0becac6d3ba47fe44f20f0e04bc5c83877b29c4efcf915ac5bfebfec042f",
-      "size": 24143
+      "sha256": "3c9d00611d3943436be08d38d506024cfd6840056585a922156431b307f96b8a",
+      "size": 24108
     },
     {
       "path": "docs/operator-contract.md",
-      "sha256": "85022c806f2d1325c6c2a45cc72dc52cb4d4b7be0ee7edc5be1f8240126f2df5",
-      "size": 4556
+      "sha256": "82859bba10419bd3a2efab31f1df75f47ec88f9b0ae0e01c7124f906835a21e7",
+      "size": 5317
     },
     {
       "path": "docs/path-policy.md",
@@ -142,8 +142,8 @@
     },
     {
       "path": "docs/post-extraction-register.md",
-      "sha256": "e695c55b2ddb1c180cb2d2cdd5897be91953a264cc80f81fb3e5d5ae04beecec",
-      "size": 10900
+      "sha256": "491f66303b905e06a908933f13598683d78b53a256dda0bd806f1d09027807a0",
+      "size": 11008
     },
     {
       "path": "docs/profiles.md",
@@ -157,13 +157,13 @@
     },
     {
       "path": "docs/protocol.md",
-      "sha256": "5a68f74b36a52659fa9948c8f3a5f5bedd5fbc8f3d2256f7d38712c1b5f1f10a",
-      "size": 2720
+      "sha256": "1147cfbf2d41c3b310b83a197532564ffd7b375a6363f6e330904e2b3a4ab143",
+      "size": 3115
     },
     {
       "path": "docs/recovery.md",
-      "sha256": "9f73c033ea5bcfa95c5992b9a03291a4568ba3b4a1266c570521f8c6aa179e84",
-      "size": 3169
+      "sha256": "164ea0f07f7263b3ed59da69b487497e872f5e6c650078b90090cb40dea25be9",
+      "size": 3424
     },
     {
       "path": "docs/recovery/cardworld-t1-t2-dry-run.md",
@@ -222,8 +222,8 @@
     },
     {
       "path": "integrations/codex/agent-harness-codex/references/pseudo-command-contract.md",
-      "sha256": "300cacc82e1e1cfd32d76b23f504611aa45aa23f335d4207617568b6a811dcde",
-      "size": 6614
+      "sha256": "fae0d7351263f3476a5ecfac5abba4f89f591ad3481cd6947cf919e4e0b1469e",
+      "size": 6815
     },
     {
       "path": "integrations/codex/agent-harness-codex/references/visible-host-adapter-contract.md",
@@ -242,13 +242,13 @@
     },
     {
       "path": "integrations/codex/agent-harness-codex/skills/agent-harness-command/SKILL.md",
-      "sha256": "8df9fc83b4f7556949d0444bcc2e061d672009354aa5b6e817d7fc1cde1080dc",
-      "size": 7402
+      "sha256": "0e4029ba972d0d4844392d3275f7c9a2c33cfad0bc8fabb6922f1e402e4ded86",
+      "size": 8079
     },
     {
       "path": "integrations/codex/agent-harness-codex/skills/agent-harness-extension-author/references/extension-contract.md",
-      "sha256": "63de883f7a8893ce89f91b2cbd8effe3eee2852d9a9d5f9db599c81fb0c108c9",
-      "size": 5178
+      "sha256": "035f41a446dc01b0c22abac6f62721d13e5368d706fbc454c0b882fb611a147a",
+      "size": 5541
     },
     {
       "path": "integrations/codex/agent-harness-codex/skills/agent-harness-extension-author/SKILL.md",
@@ -262,13 +262,13 @@
     },
     {
       "path": "integrations/codex/agent-harness-codex/skills/agent-harness-operator/references/operation-contract.md",
-      "sha256": "dfcb69b15b7cb92750e6329131efc5b0ce21fc1cf7e685c904b720de51647ea7",
-      "size": 5081
+      "sha256": "85694a1d0cc6dadc3328395d310a65add5c28a0044a5ca4402ffdfa816bd1e1d",
+      "size": 5612
     },
     {
       "path": "integrations/codex/agent-harness-codex/skills/agent-harness-operator/SKILL.md",
-      "sha256": "0ec5505c3de975a3d0e46b2153c2180abe3800c50992273b55bc89424d81fca5",
-      "size": 5975
+      "sha256": "2591b2419a330cd7117f6c2c615df0e99b4945e23b613926b5d28542fd10da29",
+      "size": 6643
     },
     {
       "path": "LICENSE",
@@ -317,8 +317,8 @@
     },
     {
       "path": "README.md",
-      "sha256": "510f4290b6202788cb3d87be7b38a2ed4bbd985083fff55d9079a2241184fe58",
-      "size": 9585
+      "sha256": "6f61e5449866e9b20e05f378fdab2ef304693a6602d5e96476483e44988afd82",
+      "size": 9761
     },
     {
       "path": "schemas/authority.schema.json",
@@ -352,8 +352,8 @@
     },
     {
       "path": "schemas/execution-readiness-report.schema.json",
-      "sha256": "fe50b1f29e03bf8a661edb284ada0642570d75c59e0c1c7dfe350613b04063fa",
-      "size": 2687
+      "sha256": "dc62193f9d5136e33cd718eb3efec021d1a6696bfdbe864a12f15d4a302014fc",
+      "size": 2818
     },
     {
       "path": "schemas/extension-artifact.schema.json",
@@ -397,13 +397,13 @@
     },
     {
       "path": "schemas/legacy-source-disposition.schema.json",
-      "sha256": "e722e05b5e4efc60c3cd682f41afb53fcadae97c3e9f79f4f9c18b178997bdd0",
-      "size": 2583
+      "sha256": "106a3c7ae01f4e04db53bc8abf9034515b29c9f752866f8b2a2bc4484723fbd9",
+      "size": 2761
     },
     {
       "path": "schemas/lifecycle-command-plan.schema.json",
-      "sha256": "34dd4bbcec146de6aff85c863f986e89e024330ef42adc76654f2d984cab33c4",
-      "size": 3801
+      "sha256": "2d26d292ded26605701339f0e5a7bcbf45e259f144d157516654b5483f6ca081",
+      "size": 3141
     },
     {
       "path": "schemas/lifecycle-execution-grant.schema.json",
@@ -422,18 +422,23 @@
     },
     {
       "path": "schemas/project-descriptor-input.schema.json",
-      "sha256": "8db09e45b326696b3302fc30cf7aa073c35c51d6f0f376cbbb91d8f8d6f6add6",
-      "size": 2985
+      "sha256": "bc1971a87140622efd89ef07c93f114a697fee633a5cfb6f87a347d2316b94ce",
+      "size": 3536
     },
     {
       "path": "schemas/project-descriptor.schema.json",
-      "sha256": "97941f939ee1d2b1af7983e350b73aa8a3cb88c7183e85d940f974e3b2af4815",
-      "size": 4314
+      "sha256": "0f8ebbdd76f8790465e55c2008ad670606a70da4cd1843044bf94619a8700db4",
+      "size": 4865
     },
     {
       "path": "schemas/recovery-capsule.schema.json",
       "sha256": "7e67a3a85137635e795cb7919041ce0d2895a94d384e05662790d2838378209c",
       "size": 1715
+    },
+    {
+      "path": "schemas/recovery-resolution.schema.json",
+      "sha256": "4a47690f695deba89e4441c8d5d364a38e60249854ea24d94c4883100aa535ee",
+      "size": 1709
     },
     {
       "path": "schemas/recovery-verification.schema.json",
@@ -449,6 +454,16 @@
       "path": "schemas/result.schema.json",
       "sha256": "504947fffd6a4639478697d804cfb67140f21fb17ee3aa7ce6b6157b88a5ca50",
       "size": 3825
+    },
+    {
+      "path": "schemas/run-lineage-resolution.schema.json",
+      "sha256": "cd23d7789eccada24d23b2529bf2f5935e8d3a99528d661ad454b3483b9f0ac6",
+      "size": 2948
+    },
+    {
+      "path": "schemas/run-lineage.schema.json",
+      "sha256": "3369bf0fc269e30ccfddb7e929003520b1641c978ce66ccba4ab8e5ac0b63d9b",
+      "size": 2702
     },
     {
       "path": "schemas/user-execution-constraints.schema.json",
@@ -467,8 +482,8 @@
     },
     {
       "path": "src/app/harness.mjs",
-      "sha256": "e895766c991896977790dfdd56d884105bed2ab9c868faa4dada082b4ac63964",
-      "size": 73489
+      "sha256": "0aeec096adeb4581eb5783137b1865a2baa423882dae02f5e68fc5d175f7ce0e",
+      "size": 77250
     },
     {
       "path": "src/bootstrap.mjs",
@@ -482,8 +497,8 @@
     },
     {
       "path": "src/cli.mjs",
-      "sha256": "3a27a175c5ddb42783ca03b34733d03a5865fbb88274aa9443c8faf6202e0f54",
-      "size": 29455
+      "sha256": "d1139ac3d1b44d637b228dcd1a38d94d5ffd3481f8ee6bf9fd8aa9147b3eefd3",
+      "size": 29760
     },
     {
       "path": "src/concurrency.mjs",
@@ -492,8 +507,8 @@
     },
     {
       "path": "src/consumers/cardworld-engine.mjs",
-      "sha256": "f39a5f53c799011f40660138b64ddb39d05ad0fb3b064b1fe3a38721cba79e50",
-      "size": 17027
+      "sha256": "4d8fce76e5821d89967845d7bafe2220eceef4b0cd86d86a1702ae14e44b5174",
+      "size": 17329
     },
     {
       "path": "src/consumers/index.mjs",
@@ -502,8 +517,8 @@
     },
     {
       "path": "src/consumers/tabletop-collection.mjs",
-      "sha256": "50114025145b9a3ea2beba4218368e42994e39aef3b236c2e347961e3c4f7f19",
-      "size": 15458
+      "sha256": "4acb479320d83ad48f9ed2ecb1a6f1472a338ea651235933d83fa3e1c8c8054d",
+      "size": 15760
     },
     {
       "path": "src/coordinator/run-coordinator.mjs",
@@ -522,8 +537,8 @@
     },
     {
       "path": "src/execution-readiness.mjs",
-      "sha256": "9ac24942fbfcd259fb7be30c415cf4da2233227137e393ea46262a7d11d6cc21",
-      "size": 2280
+      "sha256": "4d9cc8d8d2f3cf89c45521461e49cb8db1b904ed244effc92d969266e9ea543a",
+      "size": 2878
     },
     {
       "path": "src/extensions/codex-headless-runtime.mjs",
@@ -567,8 +582,8 @@
     },
     {
       "path": "src/index.mjs",
-      "sha256": "b640ae6270a801874d0084326aa768dfbf8a52ede8cf4d7826bd268424ad5cb4",
-      "size": 2519
+      "sha256": "d675c0489be98403bb7169e9bd50875362113e8257f637d2ade7ee701025d3e1",
+      "size": 2742
     },
     {
       "path": "src/installation.mjs",
@@ -607,8 +622,8 @@
     },
     {
       "path": "src/kernel/kernel.mjs",
-      "sha256": "0beb7dc1ace854e90aab11349dd1040df3f9dd8947f7780259d7dd22241ee749",
-      "size": 43546
+      "sha256": "7c135126292d46af765be8588c0b695228d9c27e6eb94b2175587a35e462334a",
+      "size": 44336
     },
     {
       "path": "src/kernel/quality.mjs",
@@ -627,8 +642,13 @@
     },
     {
       "path": "src/lifecycle-command-plan.mjs",
-      "sha256": "5d1cac67e646e7cdc188b163fab08ef8f8a452fe3583825173402eb75d2daf42",
-      "size": 6650
+      "sha256": "12603289add069c303a4f5c602640335720e5ffa4669aedf59619098f13c9584",
+      "size": 7899
+    },
+    {
+      "path": "src/lineage.mjs",
+      "sha256": "3bfa8c88057cc64c1f20636c4cb2fcf25eef676f22f4b8effb41572aa5cee45d",
+      "size": 11121
     },
     {
       "path": "src/maintenance/defect-bundle.mjs",
@@ -832,8 +852,8 @@
     },
     {
       "path": "src/recovery/authorization.mjs",
-      "sha256": "9e96fa12ce11696e9068a25167140335a58f8f42a64d2f1a815fc6f0ad18b5be",
-      "size": 1488
+      "sha256": "8a99a29f33aeddca097fdb92b435e663b05f7acb52077acc56f4f8a5cd9e63c7",
+      "size": 1520
     },
     {
       "path": "src/recovery/capsule.mjs",
@@ -852,13 +872,13 @@
     },
     {
       "path": "src/recovery/coordinator.mjs",
-      "sha256": "27c041b2dc0e52df4bb404a4e9263a35e078f75e19482f262f04b502c5efc7bb",
-      "size": 8229
+      "sha256": "992d1b1126609173ebbf7c82b07ee3fb9d8587421225368acb8ba6c3422be7f3",
+      "size": 11550
     },
     {
       "path": "src/recovery/index.mjs",
-      "sha256": "7d96e0fc7781385cc334c97e643eba47cedeef22eeeb0d737038c2d30febc6fe",
-      "size": 289
+      "sha256": "218f27595b8c599980989d4d6d5651ed21d811a95b33ebc4f7f3122219203050",
+      "size": 453
     },
     {
       "path": "src/recovery/inventory.mjs",
@@ -866,9 +886,14 @@
       "size": 1716
     },
     {
+      "path": "src/recovery/resolution.mjs",
+      "sha256": "0f24e0aa9aa579a37e695e1deb6144faca87f372ce25f3cbee4905a718d65606",
+      "size": 3811
+    },
+    {
       "path": "src/recovery/source-disposition.mjs",
-      "sha256": "6cb50cf196f3b8abb8e9fe59963dc29bc20cb4ad5ad8e6041e2f91d2b1af8e8f",
-      "size": 4522
+      "sha256": "a7498538b29e3385c80f5634112f836c4f0f5c5fda197cc3fba2129162671379",
+      "size": 5114
     },
     {
       "path": "src/recovery/verification.mjs",
@@ -926,7 +951,7 @@
       "size": 3735
     }
   ],
-  "packageDigest": "39ea67a8c2a5bc52c984580a20e1162ebfb912e11b5d2acedc2c6e04b20ced0d",
+  "packageDigest": "749eccb5dd627ee528932e6aab607bce846303ae009b15756f2fcacad10c04f0",
   "metadataFiles": [
     "release-manifest.json",
     "sbom.spdx.json"

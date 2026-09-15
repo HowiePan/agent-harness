@@ -3,10 +3,11 @@
   "$id": "https://agent-harness.local/schemas/lifecycle-command-plan.schema.json",
   "title": "Agent Harness Lifecycle Command Plan",
   "type": "object",
-  "required": ["protocolVersion", "kind", "intent", "project", "extension", "harness", "authority", "run", "stopCondition", "protectedOperations", "planDigest"],
+  "required": ["protocolVersion", "kind", "logicalTaskKey", "intent", "project", "extension", "harness", "run", "stopCondition", "protectedOperations", "planDigest"],
   "properties": {
     "protocolVersion": { "const": "1.0" },
     "kind": { "const": "lifecycle-command-plan" },
+    "logicalTaskKey": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
     "intent": { "type": "object" },
     "project": {
       "type": "object",
@@ -35,28 +36,6 @@
       "properties": {
         "version": { "type": "string", "pattern": "^\\d+\\.\\d+\\.\\d+$" },
         "artifactDigest": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
-      },
-      "additionalProperties": false
-    },
-    "authority": {
-      "type": "object",
-      "required": ["expectedRevision"],
-      "properties": {
-        "expectedRevision": { "type": "integer", "minimum": 0 },
-        "existingRunId": { "type": ["string", "null"] },
-        "activeRunConflicts": {
-          "type": "array",
-          "items": {
-            "type": "object",
-            "required": ["runId", "revision", "status"],
-            "properties": {
-              "runId": { "type": "string", "minLength": 1 },
-              "revision": { "type": "integer", "minimum": 1 },
-              "status": { "type": "string", "minLength": 1 }
-            },
-            "additionalProperties": false
-          }
-        }
       },
       "additionalProperties": false
     },

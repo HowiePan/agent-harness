@@ -14,5 +14,4 @@ Use `schemas/defect-bundle.schema.json` for defects discovered by a consumer. Re
 
 V1.0.0 remains one delivery scope until first publication; candidate builds are identified by commit and release-manifest digest. Published artifacts are immutable. Compatible fixes after publication use a patch version.
 
-Real cutover, live hard recovery, publication, destructive migration, Recovery Capsule removal, and deletion of any legacy Harness require separate owner approval.
-
+Real cutover, publication, privilege expansion, irreversible external migration, Recovery Capsule removal, and deletion of any legacy Harness require separate owner approval. Reattach, ordinary resume, verified hard recovery inside the standalone control root, and audit-preserving Run replacement are selected by Core policy and do not require a second approval.

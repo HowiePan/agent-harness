@@ -1,17 +1,30 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { sealExecutionReadinessReport, verifyExecutionReadinessReport } from '../src/execution-readiness.mjs';
+import { runLineageResolutionDigest } from '../src/lineage.mjs';
 
 const plan = {
   planDigest: 'a'.repeat(64),
+  logicalTaskKey: 'd'.repeat(64),
   project: { id: 'project', revision: 2, descriptorDigest: 'b'.repeat(64) },
   harness: { version: '1.0.0', artifactDigest: 'c'.repeat(64) },
+  run: { runId: 'planned-run' },
 };
+
+const lineageBody = {
+  protocolVersion: '1.0', kind: 'run-lineage-resolution', projectId: plan.project.id,
+  logicalTaskKey: plan.logicalTaskKey, planDigest: plan.planDigest, plannedRunId: plan.run.runId,
+  selectedRunId: plan.run.runId, lineageRevision: 0, activeLineageRunId: null,
+  action: 'start', reasonCode: 'NO_EXISTING_LOGICAL_RUN', candidates: [], expectedRevisions: {},
+  createdAt: '2026-09-15T00:00:00.000Z', expiresAt: '2026-09-15T00:01:00.000Z',
+};
+const lineageResolution = { ...lineageBody, resolutionDigest: runLineageResolutionDigest(lineageBody) };
 
 const report = executionReady => sealExecutionReadinessReport({
   protocolVersion: '1.0',
   kind: 'execution-readiness-report',
   planDigest: plan.planDigest,
+  lineageResolution,
   project: plan.project,
   release: { ...plan.harness, active: true, runtimeRoot: 'runtimes/1.0.0/candidate' },
   checks: [{ id: 'all', ready: executionReady, details: {}, issues: executionReady ? [] : [{ code: 'BLOCKED', message: 'blocked' }] }],

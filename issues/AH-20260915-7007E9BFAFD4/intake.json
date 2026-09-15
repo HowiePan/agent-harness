@@ -1,0 +1,61 @@
+{
+  "protocolVersion": "1.0",
+  "projectAlias": "engine",
+  "project": {
+    "projectId": "cardworld-engine",
+    "profileId": "engine-delivery",
+    "extensionId": "cardworld-engine-profile"
+  },
+  "observedAt": "2026-09-15T10:04:24.0299783Z",
+  "summary": "Quality lifecycle exposes resumable Run lineage choice to the user instead of resolving it internally.",
+  "severity": "P2",
+  "environment": {
+    "harnessVersion": "1.0.0",
+    "action": "quality",
+    "target": "V3.8.4",
+    "preset": "full",
+    "executionMode": "headless"
+  },
+  "expected": "The Harness should internally reuse a safe resumable Run when the target, source snapshot, and lifecycle intent match; user intervention should be reserved for genuinely protected or ambiguous operations.",
+  "actual": "The quality command stopped at preflight with ACTIVE_LOGICAL_RUN_CONFLICT and required the user to choose between resuming the existing Run and creating a replacement Run, even though the existing Run was ready, had no submissions or findings, and had no active lease.",
+  "reproduction": {
+    "steps": [
+      "Submit the bound command h:engine quality V3.8.4.",
+      "Allow the Harness to resolve the quality/full intent and run action-scoped preflight.",
+      "Observe that a ready Run with the same target and source snapshot is reported as a conflict.",
+      "Observe that the adapter asks the user to authorize resume versus replacement instead of applying an internal lineage policy."
+    ]
+  },
+  "conversation": {
+    "source": "current-thread",
+    "excerpts": [
+      {
+        "role": "user",
+        "text": "首先，我觉得恢复既有 Run还是新建 Run 应该是你在执行过程中就能判断出来的。其次，我启动了harness后，这种决策不应该交由我来判断以及授权，我觉得这个应该是Harness的一个内部行为，不应该由我来介入"
+      },
+      {
+        "role": "tool",
+        "text": "Action-scoped preflight reported ACTIVE_LOGICAL_RUN_CONFLICT for an existing ready quality Run; all other readiness checks, including the atomic control-root write probe, were ready."
+      }
+    ]
+  },
+  "missingEvidence": [
+    "No upstream Harness issue tracker reference was provided.",
+    "No implementation patch or maintainer decision about resumable lineage policy is attached."
+  ],
+  "correlation": {
+    "category": "lifecycle-policy",
+    "failureCode": "ACTIVE_LOGICAL_RUN_CONFLICT",
+    "scope": "quality action resumable-Run selection and automatic lineage handling"
+  },
+  "sanitization": {
+    "confirmed": true,
+    "removed": [
+      "Local filesystem paths and control/data root locations",
+      "Run, lease, process, command, artifact, authority, and snapshot identifiers",
+      "Host-specific metadata and unneeded raw tool output"
+    ]
+  },
+  "incidentFingerprint": "9c37074d3d1439df36925146a452843b6edff3007f601cbda5a75456f3ce0b02",
+  "intakeDigest": "7007e9bfafd446ffe882b9cae9b8ec014b4a5aa163c483301686b5ad30535f57"
+}

@@ -18,8 +18,9 @@ export { captureWorkspace, diffWorkspaceSnapshots } from './workspace-snapshot.m
 export { resolveGitWorkspaceIdentity, resolveProjectWorkspace } from './workspace-identity.mjs';
 export { RunCoordinator, businessResultFromRuntime } from './coordinator/run-coordinator.mjs';
 export { inspectProjectGateCapabilities, ProjectGateRunner } from './gates/project-gate-runner.mjs';
-export { createLifecycleCommandPlan, deriveLifecycleRunId, lifecyclePlanDigest, validateLifecycleCommandPlan } from './lifecycle-command-plan.mjs';
+export { createLifecycleCommandPlan, deriveLifecycleRunId, deriveLogicalTaskKey, lifecyclePlanDigest, validateLifecycleCommandPlan } from './lifecycle-command-plan.mjs';
 export { sealExecutionReadinessReport, verifyExecutionReadinessReport } from './execution-readiness.mjs';
+export { RunLineageStore, resolveRunLineage, runLineageAuthorityDigest, runLineageResolutionDigest, validateRunLineage, validateRunLineageResolution, verifyRunLineageResolution } from './lineage.mjs';
 export {
   DEFAULT_EXECUTION_CONSTRAINTS,
   buildExecutionGrantContext,

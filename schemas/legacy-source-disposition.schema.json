@@ -3,7 +3,7 @@
   "$id": "https://agent-harness.local/schemas/legacy-source-disposition.schema.json",
   "title": "Agent Harness Legacy Source Disposition Receipt",
   "type": "object",
-  "required": ["protocolVersion", "kind", "commandId", "expectedRevision", "requestDigest", "projectId", "legacyRoot", "importer", "observation", "decision", "consequences", "observedAt", "receiptDigest"],
+  "required": ["protocolVersion", "kind", "commandId", "expectedRevision", "requestDigest", "projectId", "legacyRoot", "importer", "observation", "consequences", "observedAt", "receiptDigest"],
   "properties": {
     "protocolVersion": { "const": "1.0" },
     "kind": { "const": "legacy-source-unavailable" },
@@ -22,6 +22,7 @@
       "additionalProperties": false
     },
     "observation": { "const": "absent" },
+    "authorityBasis": { "enum": ["verified-source-observation", "legacy-owner-acknowledgement"] },
     "decision": {
       "type": "object",
       "required": ["id", "actor", "decision", "action", "context"],
@@ -57,5 +58,9 @@
     "observedAt": { "type": "string", "format": "date-time" },
     "receiptDigest": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
   },
+  "anyOf": [
+    { "required": ["authorityBasis"] },
+    { "required": ["decision"] }
+  ],
   "additionalProperties": false
 }

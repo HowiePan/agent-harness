@@ -75,7 +75,7 @@ agent-harness run finding-open --project <id> --run <id> --finding <json>
 agent-harness run finding-resolve --project <id> --run <id> --resolution <json>
 agent-harness run reopen --project <id> --run <id> --feature <id> --reason <text>
 agent-harness run artifact-rebase --project <id> --run <id> --artifact-digest <digest> --features <id,id> --decision-id <id>
-agent-harness run recover --project <id> --run <id> --mode <ordinary-resume|hard-recovery> [--capsule-verification <evidence-ref>] [--decision-id <id>] [--expected-revision <n>] [--command-id <id>] [--dispositions <json>] [--verified-evidence <json>]
+agent-harness run recover --project <id> --run <id> [--mode <auto|ordinary-resume|hard-recovery>] [--capsule-verification <evidence-ref>] [--resolution-ref <evidence-ref>] [--expected-revision <n>] [--command-id <id>] [--dispositions <json>] [--verified-evidence <json>]
 agent-harness run recovery-rollback --project <id> --run <id> --snapshot-ref <evidence-ref>
 agent-harness run close --project <id> --run <id>
 agent-harness run supersede --project <id> --run <id> --replacement-run <id> --plan-digest <digest> [--reason <text>]
@@ -89,7 +89,7 @@ agent-harness recovery assess --extension <module> --importer <id> --legacy-root
 agent-harness recovery plan --importer <id> --legacy-root <path> --project <id> --run <id>
 agent-harness recovery capsule-create --extension <module> --importer <id> --legacy-root <path> --capsule <id> --command-id <id>
 agent-harness recovery capsule-verify --capsule-root <path> --project <id> --run <id> [--verification-ttl-ms <n>]
-agent-harness recovery source-unavailable --extension <module> --importer <id> --legacy-root <path> --project <id> --decision <json> --expected-revision 0 --command-id <id>
+agent-harness recovery source-unavailable --extension <module> --importer <id> --legacy-root <path> --project <id> --expected-revision 0 --command-id <id> [--decision <legacy-json>]
 agent-harness defect validate --input <json>
 agent-harness issue record --input <json|-> --command-id <id>
 agent-harness issue status --issue <id>
@@ -344,9 +344,11 @@ if (command === 'features' && subject === 'compile') {
     console.log(JSON.stringify({ ok: true, ...output.result, revision: output.state.revision }, null, 2));
   } else if (command === 'run' && subject === 'recover') {
     const state = await harness.authorityStore.read(take('--project'), take('--run'));
-    const mode = take('--mode');
+    const verificationRef = take('--capsule-verification');
+    const requestedMode = take('--mode') ?? 'auto';
+    const mode = requestedMode === 'auto' ? (verificationRef ? 'hard-recovery' : 'ordinary-resume') : requestedMode;
     const output = mode === 'hard-recovery'
-      ? await harness.recovery.hardRecover({ projectId: state.projectId, runId: state.runId, verificationRef: take('--capsule-verification'), decisionId: take('--decision-id'), dispositions: take('--dispositions') ? await jsonFile(take('--dispositions')) : {}, verifiedEvidenceRefs: take('--verified-evidence') ? await jsonFile(take('--verified-evidence')) : {} }, { expectedRevision: Number(take('--expected-revision')), commandId: take('--command-id') })
+      ? await harness.recovery.hardRecover({ projectId: state.projectId, runId: state.runId, verificationRef, resolutionRef: take('--resolution-ref'), dispositions: take('--dispositions') ? await jsonFile(take('--dispositions')) : {}, verifiedEvidenceRefs: take('--verified-evidence') ? await jsonFile(take('--verified-evidence')) : {} }, { expectedRevision: Number(take('--expected-revision') ?? state.revision), commandId: take('--command-id') ?? newId('command') })
       : await harness.kernel.recover(state.projectId, state.runId, { mode }, { expectedRevision: state.revision, commandId: take('--command-id') ?? newId('command') });
         console.log(JSON.stringify({ ok: true, ...output.result, revision: output.state.revision }, null, 2));
   } else if (command === 'run' && subject === 'recovery-rollback') {
@@ -378,7 +380,8 @@ if (command === 'features' && subject === 'compile') {
     const capsule = await harness.recovery.verifyCapsule(resolve(take('--capsule-root')), { projectId: take('--project'), runId: take('--run'), ttlMs: take('--verification-ttl-ms') ? Number(take('--verification-ttl-ms')) : undefined });
     console.log(JSON.stringify({ ok: true, capsule }, null, 2));
   } else if (command === 'recovery' && subject === 'source-unavailable') {
-    const output = await harness.recovery.recordUnavailableSource({ importerId: take('--importer'), projectId: take('--project'), legacyRoot: resolve(take('--legacy-root')), decision: await jsonFile(take('--decision')) }, { expectedRevision: Number(take('--expected-revision')), commandId: take('--command-id') });
+    const decisionPath = take('--decision');
+    const output = await harness.recovery.recordUnavailableSource({ importerId: take('--importer'), projectId: take('--project'), legacyRoot: resolve(take('--legacy-root')), ...(decisionPath ? { decision: await jsonFile(decisionPath) } : {}) }, { expectedRevision: Number(take('--expected-revision')), commandId: take('--command-id') });
     console.log(JSON.stringify({ ok: true, ...output }, null, 2));
   } else {
     help();

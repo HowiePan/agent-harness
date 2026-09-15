@@ -12,7 +12,7 @@ V1.0.0 将“仓库抽离就绪”“发布候选就绪”和“生产切换就�
 | 代码收口 | G5 Cleanroom | 只复制 `agent-harness`，旧业务 Harness 不可访问；全量测试、打包安装、路径和残留检查通过 |
 | 抽离后修复 | RCV Recovery 完整性 | 修复一致性快照、完整验证、Capsule 绑定、Authority Decision、链接拒绝和负向测试 |
 | 迁移执行 | G6 上游发布与维护闭环 | 配置独立远端、许可证、CI、签名与不可变发布，并完成 Card World 发起的 PUB-008 跨仓缺陷修复演练和 Collection 回归 Canary |
-| 迁移执行 | G7 现场迁移 | 旧状态存在时生成真实 Recovery Capsule、隔离恢复并演练 rollback；旧状态已不可用时保持 hard recovery 阻断，并由所有者明确决定是否接受内容寻址的 clean-start disposition |
+| 迁移执行 | G7 现场迁移 | 旧状态存在时生成真实 Recovery Capsule、隔离恢复并演练 rollback；旧状态已不可用时保持 hard recovery 阻断，由 Harness 封存内容寻址的 clean-start-only disposition |
 | 迁移执行 | G8 切换与删除资格 | 业务入口切换后验证旧源码不可用仍可运行；删除动作必须由用户另行明确批准 |
 
 G0-G5 全部通过只能标记为 **Repository Extraction Ready**，即允许把源码提交到独立仓库。RCV 与 G6 完成后才是 **Release Candidate Ready**；G7 完成并获得用户批准后才是 **Production Cutover Ready**。G8 只验证删除资格，不自动删除。旧 Harness 的删除、移动、归档或清理始终属于用户决定。

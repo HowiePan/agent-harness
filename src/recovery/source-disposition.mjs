@@ -23,6 +23,8 @@ const assertAbsent = async path => {
 export const verifyLegacySourceDisposition = input => {
   assertJsonSchema(input, schema, { code: 'LEGACY_SOURCE_DISPOSITION_SCHEMA_INVALID', label: 'Legacy Source Disposition Receipt' });
   assert(input.receiptDigest === digestJson(withoutKeys(input, ['receiptDigest'])), 'LEGACY_SOURCE_DISPOSITION_DIGEST_MISMATCH', 'Legacy Source Disposition Receipt digest mismatch.');
+  if (input.authorityBasis === 'verified-source-observation') assert(!input.decision, 'LEGACY_SOURCE_DISPOSITION_AUTHORITY_INVALID', 'Observation-authorized source disposition cannot carry a user Decision.');
+  if (input.authorityBasis === 'legacy-owner-acknowledgement') assert(input.decision, 'LEGACY_SOURCE_DISPOSITION_AUTHORITY_INVALID', 'Legacy acknowledgement authority requires its Decision.');
   return structuredClone(input);
 };
 
@@ -30,11 +32,14 @@ export const recordLegacySourceUnavailable = async ({ projectId, legacyRoot, imp
   assert(projectId && isAbsolute(legacyRoot) && importer?.id && importer?.version, 'LEGACY_SOURCE_DISPOSITION_CONTEXT_INVALID', 'Legacy source disposition requires a project, absolute legacy root, and exact importer identity.');
   assert(commandId, 'COMMAND_ID_REQUIRED', 'Legacy source disposition requires a stable command ID.');
   assert(expectedRevision === 0, 'EXPECTED_REVISION_REQUIRED', 'Legacy source disposition is append-only and requires expected revision 0.');
-  assert(decision?.id && decision.actor && decision.decision === 'acknowledged' && decision.action === 'legacy-source-unavailable-clean-start', 'LEGACY_SOURCE_DISPOSITION_DECISION_REQUIRED', 'Legacy source loss requires an explicit clean-start acknowledgement.');
-  assert(decision.context?.projectId === projectId && decision.context?.legacyRoot === legacyRoot && decision.context?.importerId === importer.id, 'LEGACY_SOURCE_DISPOSITION_DECISION_MISMATCH', 'Legacy source disposition decision does not match the project, root, and importer.');
+  if (decision) {
+    assert(decision.id && decision.actor && decision.decision === 'acknowledged' && decision.action === 'legacy-source-unavailable-clean-start', 'LEGACY_SOURCE_DISPOSITION_DECISION_INVALID', 'Legacy source disposition Decision is invalid.');
+    assert(decision.context?.projectId === projectId && decision.context?.legacyRoot === legacyRoot && decision.context?.importerId === importer.id, 'LEGACY_SOURCE_DISPOSITION_DECISION_MISMATCH', 'Legacy source disposition decision does not match the project, root, and importer.');
+  }
   await assertAbsent(legacyRoot);
   const directory = assertHarnessWritePath(resolve(dataRoot, 'migration', 'legacy-source'), 'legacy source disposition directory', controlRoot);
-  const requestDigest = digestJson({ projectId, legacyRoot, importer: { id: importer.id, version: importer.version }, decision });
+  const authorityBasis = decision ? 'legacy-owner-acknowledgement' : 'verified-source-observation';
+  const requestDigest = digestJson({ projectId, legacyRoot, importer: { id: importer.id, version: importer.version }, authorityBasis, ...(decision ? { decision } : {}) });
   const commandFile = resolve(directory, 'commands', safeSegment(commandId, 'commandId') + '.json');
   await mkdir(directory, { recursive: true });
   return withDirectoryLock(commandFile + '.lock', async () => {
@@ -55,7 +60,8 @@ export const recordLegacySourceUnavailable = async ({ projectId, legacyRoot, imp
       legacyRoot,
       importer: { id: importer.id, version: importer.version },
       observation: 'absent',
-      decision: structuredClone(decision),
+      authorityBasis,
+      ...(decision ? { decision: structuredClone(decision) } : {}),
       consequences: { recoveryCapsule: 'unavailable', liveHardRecovery: 'forbidden', legacyAuthorityImport: 'forbidden', allowedNextStep: 'new-run-clean-start' },
       observedAt: now(),
     };

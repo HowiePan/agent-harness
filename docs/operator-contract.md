@@ -16,7 +16,7 @@ Operator Contract 是工具无关的 Harness 协调规范。Codex Skill、未来
 
 默认 Harness 只装载中立 Core、Feature Profile 和参考插件。已批准的 Extension Pack 位于独立控制根，通过持久安装回执自动解析。Project Descriptor 必须精确声明 Harness 制品及所需 Extension Pack 的 ID、版本与制品摘要；任一身份缺失或不符必须在 Run 创建前失败。Runtime、模型、工具和 OS 沙箱都通过 Extension/Plugin 解析，Operator 不得写死供应商。
 
-状态变更伪命令在 Run 创建前必须生成并验证版本化 `LifecycleCommandPlan`。Plan 绑定 Command Intent、Project/Extension/Harness 身份、Authority expected revision、确定性 Run/Feature/Profile/Gate 配置、受保护操作列表和 stop condition。Extension 只能返回 Plan Intent，不能直接写 Kernel Authority；适配器和模型不得自行补齐或修改 Plan。一次显式命令授权 Plan 声明范围内的普通状态变更，发布、commit/push、权限扩张、live hard recovery、不可逆迁移、删除和 cutover 仍需单独批准。
+状态变更伪命令在 Run 创建前必须生成并验证版本化 `LifecycleCommandPlan`。Plan 只绑定不可变的 Command Intent、Project/Extension/Harness 身份、确定性 Run/Feature/Profile/Gate 配置、受保护效果列表和 stop condition；Authority revision、候选 Run 与 Lease 健康度不得进入 Plan digest。Core 另行生成有有效期的 `RunLineageResolution`，自动选择 return-closed、continue、reattach、ordinary-resume、supersede-and-start、start 或 block；跨 Authority/Epoch 的 hard recovery 则由 Recovery Coordinator 根据 Capsule verification 自动生成 `RecoveryResolutionReceipt`。Extension 只能返回 Plan Intent 和声明式恢复策略，不能直接写 Kernel Authority；适配器和模型不得自行补齐或修改 Plan，也不得要求用户选择恢复算法。一次显式命令授权 Plan 声明范围内的普通状态变更，发布、commit/push、权限扩张、不可逆迁移、旧数据删除和 external cutover 仍需单独批准。
 
 已初始化控制根的制品轮换不走 Bootstrap。发布激活先把 Registry 与 Project Descriptor 写入候选 generation，全部摘要和兼容性验证通过后再一次切换 `active-release` pointer；读路径只消费活动 generation，旧 generation 保留为审计输入。
 
@@ -26,6 +26,6 @@ Harness 数据、临时目录、调试输出、构建制品和缓存只能写入
 
 ## 权限边界
 
-真实 cutover、live hard recovery、发布、不可逆存储迁移、Legacy Capsule 销毁以及旧 Harness 删除都要求用户在动作前单独批准。迁移计划、验收通过或旧内容已不再使用，都不构成删除授权。
+真实 cutover、发布、权限扩张、不可逆外部存储迁移、Legacy Capsule 销毁以及旧 Harness 删除都要求用户在动作前单独批准。迁移计划、验收通过或旧内容已不再使用，都不构成删除授权。仅在 Standalone Control Root 内建立新 Epoch、保存回滚快照、废止旧 Transport 和强制重新验证的 hard recovery 由 Core policy 自动授权。
 
-live hard recovery 只允许走 Recovery Coordinator：先对 Capsule 执行严格完整验证并生成有有效期的内容寻址 verification Evidence，再记录 `live-hard-recovery` approved Decision。Decision 上下文必须绑定 project、run、verification ref、命令使用的 expected revision 和目标 epoch；执行命令必须提供稳定 command ID。普通 assessment JSON、缺失或过期 Decision、上下文错配和绕过 Coordinator 的 Kernel 调用一律拒绝。
+hard recovery 只允许走 Recovery Coordinator：先对 Capsule 执行严格完整验证并生成有有效期的内容寻址 verification Evidence，再由 Core 生成 `RecoveryResolutionReceipt`。Receipt 必须绑定原生命周期命令或显式 recover 命令、project、run、verification ref、expected revision、当前 generation、目标 epoch 与安全 effect classes；执行命令必须提供稳定 command ID。普通 assessment JSON、缺失或过期 Resolution、上下文错配和绕过 Coordinator 的 Kernel 调用一律拒绝。已有 `live-hard-recovery` Decision 仅作向后兼容 authority basis，不再是新流程前置条件。

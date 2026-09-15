@@ -1,0 +1,57 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-harness.local/schemas/run-lineage.schema.json",
+  "title": "Agent Harness Run Lineage Authority",
+  "type": "object",
+  "$defs": {
+    "historyEntry": {
+      "type": "object",
+      "required": ["runId", "planDigest", "supersededAt", "resolutionDigest"],
+      "properties": {
+        "runId": { "type": "string", "minLength": 1 },
+        "planDigest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "supersededAt": { "type": "string", "format": "date-time" },
+        "resolutionDigest": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+      },
+      "additionalProperties": false
+    },
+    "commandReceipt": {
+      "type": "object",
+      "required": ["commandId", "payloadDigest", "revision", "committedAt", "result"],
+      "properties": {
+        "commandId": { "type": "string", "minLength": 1 },
+        "payloadDigest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "revision": { "type": "integer", "minimum": 1 },
+        "committedAt": { "type": "string", "format": "date-time" },
+        "result": {
+          "type": "object",
+          "required": ["activeRunId", "planDigest", "resolutionDigest"],
+          "properties": {
+            "activeRunId": { "type": "string", "minLength": 1 },
+            "planDigest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+            "resolutionDigest": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "required": ["protocolVersion", "kind", "projectId", "logicalTaskKey", "revision", "activeRunId", "planDigest", "resolutionDigest", "history", "commands", "createdAt", "updatedAt", "authorityDigest"],
+  "properties": {
+    "protocolVersion": { "const": "1.0" },
+    "kind": { "const": "run-lineage" },
+    "projectId": { "type": "string", "minLength": 1 },
+    "logicalTaskKey": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "revision": { "type": "integer", "minimum": 1 },
+    "activeRunId": { "type": "string", "minLength": 1 },
+    "planDigest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "resolutionDigest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "history": { "type": "array", "items": { "$ref": "#/$defs/historyEntry" } },
+    "commands": { "type": "object", "additionalProperties": { "$ref": "#/$defs/commandReceipt" } },
+    "createdAt": { "type": "string", "format": "date-time" },
+    "updatedAt": { "type": "string", "format": "date-time" },
+    "authorityDigest": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+  },
+  "additionalProperties": false
+}

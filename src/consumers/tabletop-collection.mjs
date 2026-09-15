@@ -52,7 +52,7 @@ export const tabletopCollectionCommandManifest = defineCommandManifest({
     recover: {
       targetKind: 'run-id', defaultPreset: 'assess', presets: {
         assess: { scope: 'recovery-assessment', stateChanging: false },
-        hard: { scope: 'hard-recovery', stateChanging: true, approval: 'live-hard-recovery' },
+        hard: { scope: 'hard-recovery', stateChanging: true, replayability: 'authority-only', effectClasses: ['authority-epoch-transition', 'transport-invalidation', 'completion-revalidation', 'rollback-snapshot'] },
       },
     },
   },
@@ -110,6 +110,7 @@ export const createTabletopCollectionProjectDescriptor = ({
       runtimePlugins,
       promptCodecPlugin: 'reference-agent-prompt-codec',
       runtimeConfigs,
+      recovery: { automaticLineageResolution: true, automaticOrdinaryResume: true, automaticVerifiedHardRecovery: true, preserveSupersededRuns: true },
       maxConcurrency,
       maxLogicalGames,
       collectionBatches: structuredClone(batches),
@@ -248,7 +249,7 @@ export const createTabletopCollectionLifecyclePlan = ({ intent, project, runId, 
   return {
     run: { runId, profileId: 'collection-batch', profileConfig, features, runtimePluginId: project.policy?.defaultRuntimePlugin },
     stopCondition: { type: intent.action === 'full' ? 'collection-full-complete' : 'collection-action-complete', action: intent.action, requiresFeatureCompletion: true, requiresAllFindingsResolved: ['full', 'quality'].includes(intent.action), requiredFinalGates: gateIds },
-    protectedOperations: ['publication', 'commit', 'push', 'hard-recovery', 'deletion', 'privilege-expansion', 'cutover'],
+    protectedOperations: ['publication', 'commit', 'push', 'legacy-destruction', 'privilege-expansion', 'external-cutover', 'irreversible-migration'],
   };
 };
 

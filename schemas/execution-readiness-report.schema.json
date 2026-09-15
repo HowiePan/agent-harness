@@ -3,11 +3,12 @@
   "$id": "https://agent-harness.local/schemas/execution-readiness-report.schema.json",
   "title": "Agent Harness Execution Readiness Report",
   "type": "object",
-  "required": ["protocolVersion", "kind", "planDigest", "project", "release", "checks", "executionReady", "createdAt", "expiresAt", "reportDigest"],
+  "required": ["protocolVersion", "kind", "planDigest", "lineageResolution", "project", "release", "checks", "executionReady", "createdAt", "expiresAt", "reportDigest"],
   "properties": {
     "protocolVersion": { "const": "1.0" },
     "kind": { "const": "execution-readiness-report" },
     "planDigest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "lineageResolution": { "anyOf": [{ "$ref": "run-lineage-resolution.schema.json" }, { "type": "null" }] },
     "project": {
       "type": "object",
       "required": ["id", "revision", "descriptorDigest"],

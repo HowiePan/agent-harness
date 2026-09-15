@@ -1,0 +1,58 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-harness.local/schemas/run-lineage-resolution.schema.json",
+  "title": "Agent Harness Run Lineage Resolution",
+  "type": "object",
+  "required": ["protocolVersion", "kind", "projectId", "logicalTaskKey", "planDigest", "plannedRunId", "selectedRunId", "lineageRevision", "activeLineageRunId", "action", "reasonCode", "candidates", "expectedRevisions", "createdAt", "expiresAt", "resolutionDigest"],
+  "properties": {
+    "protocolVersion": { "const": "1.0" },
+    "kind": { "const": "run-lineage-resolution" },
+    "projectId": { "type": "string", "minLength": 1 },
+    "logicalTaskKey": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "planDigest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "plannedRunId": { "type": "string", "minLength": 1 },
+    "selectedRunId": { "type": ["string", "null"] },
+    "lineageRevision": { "type": "integer", "minimum": 0 },
+    "activeLineageRunId": { "type": ["string", "null"] },
+    "action": { "enum": ["return-closed", "continue", "reattach", "ordinary-resume", "supersede-and-start", "start", "block"] },
+    "reasonCode": { "type": "string", "minLength": 1 },
+    "candidates": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["runId", "revision", "authorityDigest", "status", "sourceDigest", "planDigest", "activeLeaseCount", "expiredLeaseCount", "activeDispatchCount", "updatedAt"],
+        "properties": {
+          "runId": { "type": "string", "minLength": 1 },
+          "revision": { "type": "integer", "minimum": 1 },
+          "authorityDigest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+          "status": { "type": "string", "minLength": 1 },
+          "sourceDigest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+          "planDigest": { "type": ["string", "null"] },
+          "activeLeaseCount": { "type": "integer", "minimum": 0 },
+          "expiredLeaseCount": { "type": "integer", "minimum": 0 },
+          "activeDispatchCount": { "type": "integer", "minimum": 0 },
+          "updatedAt": { "type": "string", "format": "date-time" }
+        },
+        "additionalProperties": false
+      }
+    },
+    "expectedRevisions": { "type": "object", "additionalProperties": { "type": "integer", "minimum": 1 } },
+    "blockers": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["code", "message"],
+        "properties": {
+          "code": { "type": "string", "minLength": 1 },
+          "message": { "type": "string", "minLength": 1 },
+          "runId": { "type": "string", "minLength": 1 }
+        },
+        "additionalProperties": false
+      }
+    },
+    "createdAt": { "type": "string", "format": "date-time" },
+    "expiresAt": { "type": "string", "format": "date-time" },
+    "resolutionDigest": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+  },
+  "additionalProperties": false
+}

@@ -4,6 +4,7 @@ import { assert, fail } from '../errors.mjs';
 import { safeSegment } from '../paths.mjs';
 import { assertHardRecoveryDecision, hardRecoveryCapability } from '../recovery/authorization.mjs';
 import { readRecoveryVerification } from '../recovery/verification.mjs';
+import { readRecoveryResolution } from '../recovery/resolution.mjs';
 import { atomicWriteJson } from './atomic-io.mjs';
 import { qualityCanClose, validateFinding } from './quality.mjs';
 import { assertArtifactRebaseDecision } from '../maintenance/upgrade-authorization.mjs';
@@ -341,6 +342,7 @@ export class HarnessKernel {
   async recover(projectId, runId, input, command, capability = null) {
     const verifiedEvidence = new Map();
     let recoveryVerification = null;
+    let recoveryResolution = null;
     if (input.rollbackSnapshotRef) {
       const rollback = await this.evidenceStore.read(input.rollbackSnapshotRef);
       assert(rollback.metadata.projectId === projectId && rollback.metadata.runId === runId, 'RECOVERY_ROLLBACK_CONTEXT_MISMATCH', 'Recovery rollback snapshot belongs to another run.');
@@ -348,6 +350,10 @@ export class HarnessKernel {
     if (input.mode === 'hard-recovery') {
       assert(capability === hardRecoveryCapability, 'RECOVERY_COORDINATOR_REQUIRED', 'Live hard recovery must use the verified Recovery Coordinator path.');
       recoveryVerification = await readRecoveryVerification(this.evidenceStore, input.recoveryVerificationRef, { projectId, runId, now: this.now });
+      if (input.recoveryResolutionRef) {
+        const current = await this.authorityStore.read(projectId, runId);
+        recoveryResolution = await readRecoveryResolution(this.evidenceStore, input.recoveryResolutionRef, { projectId, runId, state: current, verification: recoveryVerification, now: this.now });
+      }
       for (const [featureId, refs] of Object.entries(input.verifiedEvidenceRefs ?? {})) {
         const values = [];
         for (const ref of refs) values.push(await this.evidenceStore.read(ref));
@@ -359,12 +365,13 @@ export class HarnessKernel {
       if (input.mode === 'hard-recovery') {
         assert(recoveryVerification.authorityEpoch === state.epoch && recoveryVerification.authorityGeneration === state.generation && recoveryVerification.targetEpoch === state.epoch + 1, 'RECOVERY_VERIFICATION_CONTEXT_MISMATCH', 'Recovery verification Receipt does not match the current Authority epoch and generation.');
         assert(recoveryVerification.assessmentDigest === input.assessmentDigest && recoveryVerification.sourceDigest === input.sourceDigest, 'RECOVERY_VERIFICATION_CONTEXT_MISMATCH', 'Hard recovery inputs do not match the verified Capsule.');
-        assertHardRecoveryDecision(state, input.authorityDecisionId, recoveryVerification, this.now);
+        if (input.recoveryResolutionRef) assert(recoveryResolution?.expectedRevision === state.revision, 'RECOVERY_RESOLUTION_CONTEXT_MISMATCH', 'Recovery Resolution does not match current Authority revision.');
+        else assertHardRecoveryDecision(state, input.authorityDecisionId, recoveryVerification, this.now);
       }
       const archive = {
         epoch: state.epoch, generation: state.generation, authorityDigest: state.authorityDigest, status: state.status,
         archivedAt: this.now(), mode: input.mode, rollbackSnapshotRef: input.rollbackSnapshotRef ?? null,
-        ...(input.mode === 'hard-recovery' ? { commandId: command.commandId, recoveryRequestDigest: input.recoveryRequestDigest, recoveryVerificationRef: input.recoveryVerificationRef, authorityDecisionId: input.authorityDecisionId } : {}),
+        ...(input.mode === 'hard-recovery' ? { commandId: command.commandId, recoveryRequestDigest: input.recoveryRequestDigest, recoveryCallerDigest: input.recoveryCallerDigest ?? input.recoveryRequestDigest, recoveryVerificationRef: input.recoveryVerificationRef, recoveryResolutionRef: input.recoveryResolutionRef ?? null, authorityDecisionId: input.authorityDecisionId ?? null } : {}),
       };
       state.recoveryArchives.push(archive);
       state.generation += 1;

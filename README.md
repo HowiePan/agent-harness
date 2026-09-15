@@ -5,7 +5,7 @@
 
 Agent Harness 负责把需求、工作图、Agent 执行、确定性 Gate、审核、人工决定和恢复组织成可持久化、可审计、可替换执行工具的流程。业务仓默认不保存 Harness 实现、运行状态、Prompt 或 Harness 技术文档。
 
-本项目已经具备独立 Authority Kernel、Coordinator、插件宿主、持久 Extension Registry、三套 Profile、两个 Consumer Adapter、Codex Runtime Pack、Legacy Compatibility Pack、CLI/API、Conformance 与零驻留 Canary。默认 `createHarness()` 只加载中立 Feature Profile 和参考插件，不自动加载业务、供应商或 Legacy 能力。Extension 安装回执绑定完整制品清单摘要，进程重启后从独立控制根自动恢复。真实恢复与切换必须经过 Recovery Capsule、隔离 Canary、rollback 和用户审批。
+本项目已经具备独立 Authority Kernel、Coordinator、插件宿主、持久 Extension Registry、三套 Profile、两个 Consumer Adapter、Codex Runtime Pack、Legacy Compatibility Pack、CLI/API、Conformance 与零驻留 Canary。默认 `createHarness()` 只加载中立 Feature Profile 和参考插件，不自动加载业务、供应商或 Legacy 能力。Extension 安装回执绑定完整制品清单摘要，进程重启后从独立控制根自动恢复。真实恢复必须经过 Recovery Capsule、隔离验证和 rollback；最终外部切换仍须用户审批。
 
 ## 已交付能力
 
@@ -63,7 +63,7 @@ Codex 插件提供通用伪命令 Router：`h:<项目别名> <动作> <目标> [
 
 Hook 只把符合语法的输入转换成 Command Intent，不直接启动流程。`$agent-harness-command` 是显式回退入口。需求审查的多个预设和两条 Harness 的完整流程都由各自 Extension 声明，Authority/Evidence、P0-P3 阻断与批准边界仍由统一 Operator Contract 保证。完整参数见 [运维手册](docs/operations.md)。
 
-交互式 Project Descriptor 必须声明 `agentExecutionMode: conversation-visible` 和 `promptCodecPlugin`。每个 Dispatch 固定 Prompt Codec/Contract 版本，由 Codec 从不可变 Packet 确定性生成完整 Prompt；Codex 宿主只能把这段文本原样交给可见子 Agent，不能临时串联或改写。可信宿主适配器把 Agent、Dispatch、Packet 摘要、Prompt 摘要与可检查任务引用绑定后才能建立 Lease，并负责 spawn、wait、heartbeat、结构化 result transport 与重启重连。缺少任一原生能力时 action-scoped preflight 一次列出全部 blockers、`executionReady=false`，且不创建 Run；禁止即兴拼 Prompt、用原始 CLI Receipt、`codex exec` 或其他后台 Agent 进程兜底。Descriptor 的 `policy.actionExecution.<action>` 只表达允许的模式与 Runtime，不能保存或伪造用户授权。`headless` 必须同时满足可信用户约束、Descriptor allow-policy 和宿主从原始 CI/无人值守请求签发的 command-scoped `LifecycleExecutionGrant`；Grant 固定 Project、Intent、Run、Runtime、workspace 与 constraint digest，过期、跨命令/Run 重放或任一 deny 都会在创建 Run 和每次启动前拒绝。普通交互命令的原始消息一次授权 Manifest 范围内的连续生命周期，不逐步追加批准；发布、权限扩张、hard recovery、删除和 cutover 仍使用独立 Decision。质量审查本身强制只读；Finding 修复必须带非空检查点和宿主保存的验证 Receipt，修复后自动按新源码摘要进行全量只读复审。测试、构建、打包和确定性 Gate 仍可使用受管子进程，但启动前必须挂接实时观察器并显示启动、进度/输出和结束状态，且不能承载 Agent 推理。
+交互式 Project Descriptor 必须声明 `agentExecutionMode: conversation-visible` 和 `promptCodecPlugin`。每个 Dispatch 固定 Prompt Codec/Contract 版本，由 Codec 从不可变 Packet 确定性生成完整 Prompt；Codex 宿主只能把这段文本原样交给可见子 Agent，不能临时串联或改写。可信宿主适配器把 Agent、Dispatch、Packet 摘要、Prompt 摘要与可检查任务引用绑定后才能建立 Lease，并负责 spawn、wait、heartbeat、结构化 result transport 与重启重连。缺少任一原生能力时 action-scoped preflight 一次列出全部 blockers、`executionReady=false`，且不创建 Run；禁止即兴拼 Prompt、用原始 CLI Receipt、`codex exec` 或其他后台 Agent 进程兜底。Descriptor 的 `policy.actionExecution.<action>` 只表达允许的模式与 Runtime，不能保存或伪造用户授权。`headless` 必须同时满足可信用户约束、Descriptor allow-policy 和宿主从原始 CI/无人值守请求签发的 command-scoped `LifecycleExecutionGrant`；Grant 固定 Project、Intent、Run、Runtime、workspace 与 constraint digest，过期、跨命令/Run 重放或任一 deny 都会在创建 Run 和每次启动前拒绝。普通交互命令的原始消息一次授权 Manifest 范围内的连续生命周期；Run 复用、reattach、ordinary resume、经验证的 hard recovery 和无副作用 replacement 由 Core lineage policy 自动裁决，不逐步追加批准。发布、权限扩张、不可逆迁移、旧数据删除和最终 external cutover 仍使用独立 Decision。质量审查本身强制只读；Finding 修复必须带非空检查点和宿主保存的验证 Receipt，修复后自动按新源码摘要进行全量只读复审。测试、构建、打包和确定性 Gate 仍可使用受管子进程，但启动前必须挂接实时观察器并显示启动、进度/输出和结束状态，且不能承载 Agent 推理。
 
 ## 项目边界
 

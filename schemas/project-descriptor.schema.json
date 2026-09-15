@@ -47,6 +47,17 @@
         "runtimePluginId": { "type": "string", "pattern": "^[a-z0-9][a-z0-9.-]+$" }
       },
       "additionalProperties": false
+    },
+    "recoveryPolicy": {
+      "type": "object",
+      "required": ["automaticLineageResolution", "automaticOrdinaryResume", "automaticVerifiedHardRecovery", "preserveSupersededRuns"],
+      "properties": {
+        "automaticLineageResolution": { "type": "boolean" },
+        "automaticOrdinaryResume": { "type": "boolean" },
+        "automaticVerifiedHardRecovery": { "type": "boolean" },
+        "preserveSupersededRuns": { "const": true }
+      },
+      "additionalProperties": false
     }
   },
   "required": ["protocolVersion", "id", "harness", "workspace", "profiles", "policy", "revision", "updatedAt", "commands", "descriptorDigest"],
@@ -90,7 +101,8 @@
         "actionExecution": {
           "type": "object",
           "additionalProperties": { "$ref": "#/$defs/actionExecution" }
-        }
+        },
+        "recovery": { "$ref": "#/$defs/recoveryPolicy" }
       },
       "additionalProperties": true
     },

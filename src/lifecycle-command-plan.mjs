@@ -12,6 +12,17 @@ const slug = value => String(value).toLowerCase().replace(/[^a-z0-9._-]+/g, '-')
 
 export const lifecyclePlanDigest = plan => digestJson(withoutKeys(plan, ['planDigest']));
 
+export const deriveLogicalTaskKey = ({ projectId, intent, executionWorkspaceRoot, workspaceIdentity = null }) => digestJson({
+  projectId,
+  workspaceIdentity: workspaceIdentity ?? { type: 'execution-root', root: executionWorkspaceRoot },
+  profileId: intent.profileId,
+  action: intent.action,
+  target: intent.target,
+  preset: intent.preset,
+  arguments: structuredClone(intent.arguments ?? []),
+  selector: intent.selector ?? null,
+});
+
 export const validateLifecycleCommandPlan = input => {
   assertJsonSchema(input, schema, { code: 'LIFECYCLE_PLAN_INVALID', label: 'Lifecycle Command Plan' });
   assert(input.planDigest === lifecyclePlanDigest(input), 'LIFECYCLE_PLAN_DIGEST_MISMATCH', 'Lifecycle Command Plan digest does not match its contents.');
@@ -22,8 +33,8 @@ export const validateLifecycleCommandPlan = input => {
   return structuredClone(input);
 };
 
-export const deriveLifecycleRunId = ({ projectId, intent, sourceDigest, artifactDigest }) => {
-  const stable = digestJson({ projectId, intent, sourceDigest, artifactDigest });
+export const deriveLifecycleRunId = ({ projectId, intent, sourceDigest, artifactDigest, semanticDigest = null }) => {
+  const stable = digestJson({ projectId, intent, sourceDigest, artifactDigest, semanticDigest });
   return safeSegment(`${slug(intent.target)}-${slug(intent.action)}-${stable.slice(0, 16)}`, 'runId');
 };
 
@@ -31,7 +42,7 @@ export const deriveLifecycleRunId = ({ projectId, intent, sourceDigest, artifact
  * Build a plan from an Extension-owned compiler result. The compiler is pure from
  * the Authority's perspective: it may return Intent, but it cannot write state.
  */
-export const createLifecycleCommandPlan = ({ intent, project, extension, releaseIdentity, sourceDigest, executionWorkspaceRoot, executionConstraintDigest, executionGrant = null, authorityRevision = 0, existingRunId = null, activeRunConflicts = [], compiler }) => {
+export const createLifecycleCommandPlan = ({ intent, project, extension, releaseIdentity, sourceDigest, executionWorkspaceRoot, workspaceIdentity = null, executionConstraintDigest, executionGrant = null, compiler }) => {
   assert(intent?.action && intent?.target, 'COMMAND_INTENT_REQUIRED', 'Lifecycle planning requires a resolved Command Intent.');
   assert(project?.id && project.revision && project.descriptorDigest, 'LIFECYCLE_PLAN_PROJECT_INVALID', 'Lifecycle planning requires a persisted Project Descriptor identity.');
   assert(extension?.id && extension.version && extension.digest && extension.commandManifest, 'LIFECYCLE_PLAN_EXTENSION_INVALID', 'Lifecycle planning requires a verified Extension Pack.');
@@ -39,22 +50,36 @@ export const createLifecycleCommandPlan = ({ intent, project, extension, release
   assert(/^[a-f0-9]{64}$/.test(sourceDigest ?? ''), 'LIFECYCLE_PLAN_SOURCE_DIGEST_REQUIRED', 'Lifecycle planning requires a source snapshot digest.');
   assert(/^[a-f0-9]{64}$/.test(executionConstraintDigest ?? ''), 'EXECUTION_CONSTRAINT_DIGEST_REQUIRED', 'Lifecycle planning requires the trusted execution constraint digest.');
   assert(typeof compiler === 'function', 'COMMAND_PLAN_COMPILER_MISSING', `Extension ${extension.id} does not provide a lifecycle plan compiler.`);
-  const runId = deriveLifecycleRunId({ projectId: project.id, intent, sourceDigest, artifactDigest: releaseIdentity.artifactDigest });
+  const provisionalRunId = deriveLifecycleRunId({ projectId: project.id, intent, sourceDigest, artifactDigest: releaseIdentity.artifactDigest });
   const compilerExtension = { id: extension.id, version: extension.version, digest: extension.digest, commandManifest: structuredClone(extension.commandManifest) };
-  const compiled = compiler({ intent: structuredClone(intent), project: structuredClone(project), extension: compilerExtension, runId, sourceDigest, executionWorkspaceRoot });
+  const compiled = compiler({ intent: structuredClone(intent), project: structuredClone(project), extension: compilerExtension, runId: provisionalRunId, sourceDigest, executionWorkspaceRoot });
   assert(compiled?.run?.profileId === intent.profileId, 'LIFECYCLE_PLAN_PROFILE_MISMATCH', 'Plan compiler returned a Profile different from the Command Manifest.');
   assert(Array.isArray(compiled.run.features) && compiled.run.features.length > 0, 'LIFECYCLE_PLAN_FEATURES_REQUIRED', 'Plan compiler must return at least one Feature.');
   const executionPolicy = resolveLifecycleExecutionPolicy({ project, action: intent.action });
   assert(compiled.run.runtimePluginId === undefined || compiled.run.runtimePluginId === executionPolicy.runtimePluginId, 'LIFECYCLE_COMPILER_RUNTIME_OVERRIDE_DENIED', 'Plan compiler cannot override the Runtime selected by the Project action execution policy.');
   assert(compiled.run.agentExecutionMode === undefined || compiled.run.agentExecutionMode === executionPolicy.mode, 'LIFECYCLE_COMPILER_EXECUTION_MODE_OVERRIDE_DENIED', 'Plan compiler cannot override the Agent execution mode selected by the Project action execution policy.');
+  const semanticDigest = digestJson({
+    intent,
+    project: { id: project.id, revision: project.revision, descriptorDigest: project.descriptorDigest },
+    extension: { id: extension.id, version: extension.version, digest: extension.digest },
+    harness: { version: releaseIdentity.version, artifactDigest: releaseIdentity.artifactDigest },
+    sourceDigest,
+    executionWorkspaceRoot,
+    executionPolicy,
+    run: withoutKeys(compiled.run, ['runId']),
+    stopCondition: compiled.stopCondition ?? { type: 'run-ready-to-close' },
+    protectedOperations: [...new Set(compiled.protectedOperations ?? [])].sort(),
+  });
+  const runId = deriveLifecycleRunId({ projectId: project.id, intent, sourceDigest, artifactDigest: releaseIdentity.artifactDigest, semanticDigest });
+  const logicalTaskKey = deriveLogicalTaskKey({ projectId: project.id, intent, executionWorkspaceRoot, workspaceIdentity });
   const body = {
     protocolVersion: '1.0',
     kind: 'lifecycle-command-plan',
+    logicalTaskKey,
     intent: structuredClone(intent),
     project: { id: project.id, revision: project.revision, descriptorDigest: project.descriptorDigest },
     extension: { id: extension.id, version: extension.version, digest: extension.digest, manifestId: extension.commandManifest.id },
     harness: { version: releaseIdentity.version, artifactDigest: releaseIdentity.artifactDigest },
-    authority: { expectedRevision: Number(authorityRevision), existingRunId, activeRunConflicts: structuredClone(activeRunConflicts) },
     run: {
       runId,
       profileId: compiled.run.profileId,

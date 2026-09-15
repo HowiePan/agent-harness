@@ -47,7 +47,7 @@ export const cardWorldCommandManifest = defineCommandManifest({
     recover: {
       targetKind: 'run-id', defaultPreset: 'assess', presets: {
         assess: { scope: 'recovery-assessment', stateChanging: false },
-        hard: { scope: 'hard-recovery', stateChanging: true, approval: 'live-hard-recovery' },
+        hard: { scope: 'hard-recovery', stateChanging: true, replayability: 'authority-only', effectClasses: ['authority-epoch-transition', 'transport-invalidation', 'completion-revalidation', 'rollback-snapshot'] },
       },
     },
   },
@@ -114,6 +114,7 @@ export const createCardWorldProjectDescriptor = ({
       promptCodecPlugin: 'reference-agent-prompt-codec',
       runtimeConfigs,
       ...(Object.keys(actionExecution).length ? { actionExecution: structuredClone(actionExecution) } : {}),
+      recovery: { automaticLineageResolution: true, automaticOrdinaryResume: true, automaticVerifiedHardRecovery: true, preserveSupersededRuns: true },
       maxConcurrency,
     },
     gateRecipes: [
@@ -268,7 +269,7 @@ export const createCardWorldLifecyclePlan = ({ intent, project, runId, sourceDig
   return {
     run: { runId, profileId: 'engine-delivery', profileConfig, features },
     stopCondition: { type: quality ? 'quality-run-complete' : full ? 'engine-full-complete' : 'engine-action-complete', action: intent.action, requiresFeatureCompletion: true, requiresAllFindingsResolved: full || quality || intent.action === 'deliver', requiredFinalGates: gateIds },
-    protectedOperations: ['publication', 'commit', 'push', 'hard-recovery', 'deletion', 'privilege-expansion', 'cutover'],
+    protectedOperations: ['publication', 'commit', 'push', 'legacy-destruction', 'privilege-expansion', 'external-cutover', 'irreversible-migration'],
   };
 };
 

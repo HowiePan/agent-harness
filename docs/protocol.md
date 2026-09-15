@@ -37,8 +37,9 @@ Dispatch 固定创建时的 source digest。Result 必须提供该输入摘要�
 
 ## 恢复
 
+- Core 以稳定 `logicalTaskKey` 维护唯一 active Run；不可变 Plan 与易变 `RunLineageResolution` 分离。进程重启、Run 复用、reattach、ordinary resume、hard recovery 和保留审计的 replacement 由版本化策略自动选择，用户不负责选择恢复机制。
 - ordinary resume：保留 epoch 和逻辑预算，废止旧 Transport/Lease。
-- hard recovery：以旧事实为只读输入建立新 epoch/generation；旧 Lease、Packet、Agent 身份和状态字符串不升级为 Authority。
+- hard recovery：只有验证过的 Capsule 和 Core `RecoveryResolutionReceipt` 才能触发；以旧事实为只读输入建立新 epoch/generation，保存 rollback snapshot，旧 Lease、Packet、Agent 身份和状态字符串不升级为 Authority。
 - artifact rebase：根据 Artifact 身份与影响集使相关 Feature 失效并重新验证，不全局无差别重跑。
 
 兼容性以 Schema、Plugin API major、Profile version 和 Recovery Manifest 共同判断；不兼容输入必须显式迁移，禁止静默降级。

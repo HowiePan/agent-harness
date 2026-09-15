@@ -42,7 +42,8 @@ test('lifecycle planning deterministically composes quality/full without convers
   assert.equal(first.run.features[0].metadata.stage, 'quality');
   assert.equal(first.run.runtimePluginId, 'codex-conversation-runtime');
   assert.equal(first.stopCondition.type, 'quality-run-complete');
-  assert.deepEqual(first.protectedOperations.includes('hard-recovery'), true);
+  assert.equal(first.protectedOperations.includes('hard-recovery'), false);
+  assert.equal(first.protectedOperations.includes('external-cutover'), true);
   const preflight = await harness.createExecutionReadinessReport(first);
   assert.equal(preflight.executionReady, false);
   assert.equal(preflight.checks.find(check => check.id === 'visible-host').issues[0].code, 'VISIBLE_AGENT_HOST_COORDINATOR_UNAVAILABLE');
@@ -88,14 +89,51 @@ test('headless quality requires one trusted command grant while other Engine act
   const preflight = await harness.createExecutionReadinessReport(authorizedQuality);
   assert.equal(preflight.executionReady, true);
   assert.deepEqual(preflight.checks.find(check => check.id === 'visible-host').details, { required: false });
+  const started = await harness.startLifecyclePlan(authorizedQuality, { commandId: 'headless-lineage-start', preflightReport: preflight });
+  assert.equal(started.status, 'started');
+  assert.equal(started.reused, false);
+  const retried = await harness.startLifecyclePlan(authorizedQuality, { commandId: 'headless-lineage-start', preflightReport: preflight });
+  assert.equal(retried.reused, true);
+  assert.equal(retried.state.runId, started.state.runId);
+  const replanned = await harness.createLifecyclePlan({ projectId: descriptor.id, action: 'quality', target: 'V3.8.4', arguments: ['full'], extensionId: extension.id, executionWorkspaceRoot: workspaceRoot, executionAuthorizationEvidence: { explicitUnattended: true } });
+  assert.equal(replanned.planDigest, authorizedQuality.planDigest);
+  assert.equal(replanned.run.runId, authorizedQuality.run.runId);
+  const resumePreflight = await harness.createExecutionReadinessReport(replanned);
+  assert.equal(resumePreflight.checks.find(check => check.id === 'run-lineage').details.resolution.action, 'continue');
+  const observedChange = await harness.kernel.recordDecision(descriptor.id, started.state.runId, { id: 'non-protected-observation', actor: 'test', decision: 'recorded' }, { expectedRevision: started.state.revision, commandId: 'record-lineage-observation' });
+  assert.equal(observedChange.state.revision, started.state.revision + 1);
+  const internallyResolved = await harness.startLifecyclePlan(replanned, { commandId: 'headless-lineage-re-resolve', preflightReport: resumePreflight });
+  assert.equal(internallyResolved.lineageResolution.action, 'continue');
+  const scheduled = await harness.dispatch(descriptor.id, started.state.runId, { maxConcurrency: 1, runtimePluginId: 'codex-cli-runtime' }, { expectedRevision: internallyResolved.state.revision, commandId: 'headless-lineage-schedule' });
+  assert.equal(scheduled.result.dispatches.length, 1);
+  const recoveryPreflight = await harness.createExecutionReadinessReport(replanned);
+  assert.equal(recoveryPreflight.checks.find(check => check.id === 'run-lineage').details.resolution.action, 'ordinary-resume');
+  const resumed = await harness.startLifecyclePlan(replanned, { commandId: 'headless-lineage-resume', preflightReport: recoveryPreflight });
+  assert.equal(resumed.state.generation, scheduled.state.generation + 1);
+  assert.equal(resumed.state.dispatches[0].status, 'superseded');
+  await writeFile(resolve(workspaceRoot, 'README.md'), 'changed fixture\n', 'utf8');
+  const changedSourcePlan = await harness.createLifecyclePlan({ projectId: descriptor.id, action: 'quality', target: 'V3.8.4', arguments: ['full'], extensionId: extension.id, executionWorkspaceRoot: workspaceRoot, executionAuthorizationEvidence: { explicitUnattended: true } });
+  const changedSourcePreflight = await harness.createExecutionReadinessReport(changedSourcePlan);
+  await assert.rejects(
+    () => harness.startLifecyclePlan(changedSourcePlan, { commandId: 'headless-lineage-start', preflightReport: changedSourcePreflight }),
+    error => error.code === 'COMMAND_ID_REUSED',
+  );
+  const replacement = await harness.startLifecyclePlan(changedSourcePlan, { commandId: 'headless-lineage-replace', preflightReport: changedSourcePreflight });
+  assert.equal(replacement.state.runId, changedSourcePlan.run.runId);
+  const superseded = await harness.authorityStore.read(descriptor.id, authorizedQuality.run.runId);
+  assert.equal(superseded.status, 'superseded');
+  await assert.rejects(
+    () => harness.dispatch(descriptor.id, superseded.runId, { maxConcurrency: 1, runtimePluginId: 'codex-cli-runtime' }, { expectedRevision: superseded.revision, commandId: 'superseded-lineage-schedule' }),
+    error => error.code === 'RUN_LINEAGE_NOT_ACTIVE',
+  );
   const changedConstraintHarness = await createHarness({ controlRoot, dataRoot, releaseIdentity, strictProjectIdentity: false, extensions: [extension, runtimeExtension, headlessExtension], executionAuthorizationAdapter: createTestExecutionAuthorizationAdapter({ revision: 2, decisionLineage: 'test-user-explicit-policy-v2' }), allowedPluginPermissions: ['state.write', 'agent.conversation', 'process.spawn', 'workspace.read', 'workspace.write', 'gate.execute', 'artifact.read'] });
   const staleConstraintPreflight = await changedConstraintHarness.createExecutionReadinessReport(authorizedQuality);
   assert.equal(staleConstraintPreflight.executionReady, false);
   assert.equal(staleConstraintPreflight.checks.find(check => check.id === 'command-grant').issues[0].code, 'EXECUTION_CONSTRAINT_STALE');
-  assert.equal(await harness.authorityStore.read(descriptor.id, authorizedQuality.run.runId, { required: false }), null);
+  assert.equal((await harness.authorityStore.read(descriptor.id, authorizedQuality.run.runId)).runId, authorizedQuality.run.runId);
 });
 
-test('lifecycle planning reports every conflicting active logical Run before start', async t => {
+test('lifecycle planning automatically resolves an inactive incompatible logical Run', async t => {
   const controlRoot = resolve(process.cwd());
   const tempParent = resolve(harnessTemporaryRoot(), 'lifecycle-command-tests');
   await mkdir(tempParent, { recursive: true });
@@ -107,11 +145,12 @@ test('lifecycle planning reports every conflicting active logical Run before sta
   t.after(() => rm(root, { recursive: true, force: true }));
   const extension = await loadExtensionPack('./src/consumers/cardworld-engine.mjs', { cwd: controlRoot, controlRoot });
   const runtimeExtension = await loadExtensionPack('./src/extensions/codex-runtime.mjs', { cwd: controlRoot, controlRoot });
-  const harness = await createHarness({ controlRoot, dataRoot, releaseIdentity, strictProjectIdentity: false, extensions: [extension, runtimeExtension] });
-  const descriptor = createCardWorldProjectDescriptor({ workspaceRoot, harness: releaseIdentity });
+  const headlessExtension = await loadExtensionPack('./src/extensions/codex-headless-runtime.mjs', { cwd: controlRoot, controlRoot });
+  const harness = await createHarness({ controlRoot, dataRoot, releaseIdentity, strictProjectIdentity: false, extensions: [extension, runtimeExtension, headlessExtension], executionAuthorizationAdapter: createTestExecutionAuthorizationAdapter(), allowedPluginPermissions: ['state.write', 'agent.conversation', 'process.spawn', 'workspace.read', 'workspace.write', 'gate.execute', 'artifact.read'] });
+  const descriptor = createCardWorldProjectDescriptor({ workspaceRoot, harness: releaseIdentity, runtimePluginIds: ['codex-conversation-runtime', 'codex-cli-runtime'], actionExecution: { quality: { agentExecutionMode: 'headless', runtimePluginId: 'codex-cli-runtime' } } });
   descriptor.gateRecipes = [];
-  descriptor.extensions = descriptor.extensions.map(item => ({ ...item, digest: item.id === extension.id ? extension.digest : runtimeExtension.digest }));
-  await harness.projectRegistry.register(descriptor, { expectedRevision: 0, commandId: 'conflict-project-register' });
+  descriptor.extensions = descriptor.extensions.map(item => ({ ...item, digest: item.id === extension.id ? extension.digest : item.id === runtimeExtension.id ? runtimeExtension.digest : headlessExtension.digest }));
+  await harness.projectRegistry.register(descriptor, { expectedRevision: 0, commandId: 'conflict-project-register', authorityDecision: { actor: 'test-user', decision: 'approved', action: 'project-execution-policy-change', expiresAt: '2099-09-15T00:00:00.000Z', context: projectExecutionPolicyDecisionContext({ input: descriptor, expectedRevision: 0 }) } });
   await harness.startRun({
     projectId: descriptor.id,
     runId: 'historical-quality-run',
@@ -119,12 +158,20 @@ test('lifecycle planning reports every conflicting active logical Run before sta
     profileConfig: { requireCanonicalDecision: false, requireUserCodeReview: false, requireFinalQualityReview: true },
     features: [{ id: 'quality/old', acceptance: ['review'], dependsOn: [], allowedPaths: [], metadata: { stage: 'quality', qualityReview: true, qualityRoot: 'engine:V3.8.4', sourcePolicy: 'review-and-repair' } }],
     metadata: { commandIntent: { action: 'quality', target: 'V3.8.4' } },
+    executionAuthorizationEvidence: { explicitUnattended: true },
   }, { commandId: 'start-historical-quality' });
-  const plan = await harness.createLifecyclePlan({ projectId: descriptor.id, action: 'quality', target: 'V3.8.4', arguments: ['full'], extensionId: extension.id, executionWorkspaceRoot: workspaceRoot });
-  assert.deepEqual(plan.authority.activeRunConflicts, [{ runId: 'historical-quality-run', revision: 1, status: 'ready' }]);
+  const plan = await harness.createLifecyclePlan({ projectId: descriptor.id, action: 'quality', target: 'V3.8.4', arguments: ['full'], extensionId: extension.id, executionWorkspaceRoot: workspaceRoot, executionAuthorizationEvidence: { explicitUnattended: true } });
   const preflight = await harness.createExecutionReadinessReport(plan);
-  assert.equal(preflight.executionReady, false);
-  assert.equal(preflight.checks.find(check => check.id === 'run-lineage').issues[0].code, 'ACTIVE_LOGICAL_RUN_CONFLICT');
+  assert.equal(preflight.executionReady, true);
+  const lineage = preflight.checks.find(check => check.id === 'run-lineage');
+  assert.equal(lineage.ready, true);
+  assert.equal(lineage.details.resolution.action, 'supersede-and-start');
+  assert.equal(lineage.details.resolution.reasonCode, 'INCOMPATIBLE_RUNS_SAFE_TO_SUPERSEDE');
+  assert.equal(lineage.issues.length, 0);
+  const started = await harness.startLifecyclePlan(plan, { commandId: 'automatic-lineage-resolution', preflightReport: preflight });
+  assert.equal(started.state.runId, plan.run.runId);
+  assert.equal((await harness.authorityStore.read(descriptor.id, 'historical-quality-run')).status, 'superseded');
+  assert.equal((await harness.lineageStore.read(descriptor.id, plan.logicalTaskKey)).activeRunId, plan.run.runId);
 });
 
 test('release activation stages a complete generation and switches the active pointer once', async t => {

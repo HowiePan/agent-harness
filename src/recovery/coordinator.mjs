@@ -4,12 +4,15 @@ import { assertHardRecoveryDecision, hardRecoveryCapability } from './authorizat
 import { createRecoveryCapsule, verifyRecoveryCapsule } from './capsule.mjs';
 import { readRecoveryVerification, recoveryVerificationMediaType, sealRecoveryVerification } from './verification.mjs';
 import { recordLegacySourceUnavailable } from './source-disposition.mjs';
+import { assertRecoveryResolution, readRecoveryResolution, recoveryResolutionMediaType, sealRecoveryResolution } from './resolution.mjs';
 
 export class RecoveryCoordinator {
   #kernel;
+  #projectRegistry;
 
-  constructor({ kernel, importers, dataRoot = kernel.authorityStore.root, controlRoot }) {
+  constructor({ kernel, importers, projectRegistry = null, dataRoot = kernel.authorityStore.root, controlRoot }) {
     this.#kernel = kernel;
+    this.#projectRegistry = projectRegistry;
     this.dataRoot = dataRoot;
     this.controlRoot = controlRoot;
     this.importers = new Map(importers.map(importer => [importer.id, importer]));
@@ -71,26 +74,58 @@ export class RecoveryCoordinator {
     return { ...body, planDigest: digestJson(body), assessment };
   }
 
-  async hardRecover({ projectId, runId, verificationRef, decisionId, dispositions = {}, verifiedEvidenceRefs = {} }, command) {
+  async resolveHardRecovery({ projectId, runId, verificationRef, authorityBasis = 'explicit-recover-command', planDigest = null, ttlMs = 60 * 60 * 1000 }, command) {
+    assert(command?.commandId, 'COMMAND_ID_REQUIRED', 'Recovery resolution requires a stable command ID.');
+    assert(Number.isInteger(command?.expectedRevision), 'EXPECTED_REVISION_REQUIRED', 'Recovery resolution requires an expected Authority revision.');
+    const state = await this.#kernel.authorityStore.read(projectId, runId);
+    const project = this.#projectRegistry ? await this.#projectRegistry.get(projectId) : null;
+    assert(project?.policy?.recovery?.automaticVerifiedHardRecovery !== false, 'HARD_RECOVERY_POLICY_DENIED', 'Project recovery policy denies automatic verified hard recovery.');
+    assert(state.revision === command.expectedRevision, 'REVISION_CONFLICT', 'Authority revision changed before recovery resolution.', { expected: command.expectedRevision, actual: state.revision });
+    const verification = await readRecoveryVerification(this.#kernel.evidenceStore, verificationRef, { projectId, runId, state, now: this.#kernel.now });
+    const createdAt = this.#kernel.now();
+    const receipt = sealRecoveryResolution({
+      protocolVersion: '1.0', kind: 'recovery-resolution', authorityBasis, projectId, runId,
+      logicalTaskKey: state.metadata?.logicalTaskKey ?? null, planDigest: planDigest ?? state.metadata?.lifecyclePlanDigest ?? null,
+      verificationRef, authorityEpoch: state.epoch, authorityGeneration: state.generation, expectedRevision: state.revision,
+      targetEpoch: state.epoch + 1, action: 'hard-recovery', reasonCode: 'VERIFIED_CAPSULE_REQUIRES_NEW_EPOCH',
+      effectClasses: ['authority-epoch-transition', 'completion-revalidation', 'rollback-snapshot', 'transport-invalidation'],
+      createdAt, expiresAt: new Date(Date.parse(createdAt) + ttlMs).toISOString(),
+    });
+    assertRecoveryResolution(receipt, { projectId, runId, state, verification, now: this.#kernel.now });
+    const evidence = await this.#kernel.evidenceStore.put(receipt, {
+      mediaType: recoveryResolutionMediaType, projectId, runId, epoch: state.epoch, generation: state.generation,
+      sourceDigest: state.sourceDigest, artifactDigest: state.artifactDigest, policyDigest: state.policyDigest,
+      pluginSetDigest: state.pluginSetDigest, labels: ['recovery-resolution'],
+    });
+    return { receipt, resolutionRef: evidence.ref };
+  }
+
+  async hardRecover({ projectId, runId, verificationRef, resolutionRef = null, decisionId = null, dispositions = {}, verifiedEvidenceRefs = {} }, command) {
     assert(command?.commandId, 'COMMAND_ID_REQUIRED', 'Live hard recovery requires a stable command ID.');
     assert(Number.isInteger(command?.expectedRevision), 'EXPECTED_REVISION_REQUIRED', 'Live hard recovery requires an expected Authority revision.');
     assert(verificationRef, 'RECOVERY_VERIFICATION_REQUIRED', 'Live hard recovery requires a Recovery Capsule verification reference.');
-    assert(decisionId, 'RECOVERY_AUTHORITY_DECISION_REQUIRED', 'Live hard recovery requires an approved Authority Decision.');
-    const requestDigest = digestJson({ projectId, runId, verificationRef, decisionId, dispositions, verifiedEvidenceRefs });
-    const current = await this.#kernel.authorityStore.read(projectId, runId);
+    const callerDigest = digestJson({ projectId, runId, verificationRef, resolutionRef, decisionId, dispositions, verifiedEvidenceRefs });
+    let current = await this.#kernel.authorityStore.read(projectId, runId);
     const prior = current.commands?.[command.commandId];
     if (prior) {
       const archive = current.recoveryArchives.find(item => item.commandId === command.commandId);
-      assert(archive?.recoveryRequestDigest === requestDigest, 'COMMAND_ID_REUSED', 'The hard-recovery command ID was already used with a different request.', { commandId: command.commandId });
+      assert(archive?.recoveryCallerDigest === callerDigest, 'COMMAND_ID_REUSED', 'The hard-recovery command ID was already used with a different request.', { commandId: command.commandId });
       return { state: current, receipt: prior, result: structuredClone(prior.result), reused: true };
     }
+    if (!resolutionRef && !decisionId) {
+      const resolved = await this.resolveHardRecovery({ projectId, runId, verificationRef }, { expectedRevision: command.expectedRevision, commandId: `${command.commandId}.resolve` });
+      resolutionRef = resolved.resolutionRef;
+    }
+    const requestDigest = digestJson({ projectId, runId, verificationRef, resolutionRef, decisionId, dispositions, verifiedEvidenceRefs });
+    current = await this.#kernel.authorityStore.read(projectId, runId);
     assert(current.revision === command.expectedRevision, 'REVISION_CONFLICT', 'Authority revision changed before recovery snapshot.', { expected: command.expectedRevision, actual: current.revision });
     const verification = await readRecoveryVerification(this.#kernel.evidenceStore, verificationRef, { projectId, runId, state: current, now: this.#kernel.now });
     const capsule = await verifyRecoveryCapsule(verification.capsuleRoot, { controlRoot: this.controlRoot });
     assert(capsule.manifest.manifestDigest === verification.capsuleManifestDigest && capsule.manifest.sourceDigest === verification.sourceDigest && capsule.manifest.assessmentDigest === verification.assessmentDigest, 'RECOVERY_CAPSULE_CHANGED_AFTER_VERIFICATION', 'Recovery Capsule changed after its verification Receipt was issued.');
     const importer = this.importers.get(verification.importer.id);
     assert(importer && importer.version === verification.importer.version, 'RECOVERY_CAPSULE_IMPORTER_UNAVAILABLE', 'The exact Recovery Capsule importer is not installed.');
-    assertHardRecoveryDecision(current, decisionId, verification, this.#kernel.now);
+    if (resolutionRef) await readRecoveryResolution(this.#kernel.evidenceStore, resolutionRef, { projectId, runId, state: current, verification, now: this.#kernel.now });
+    else assertHardRecoveryDecision(current, decisionId, verification, this.#kernel.now);
     const rollbackSnapshot = await this.#kernel.evidenceStore.put(current, {
       mediaType: 'application/json', projectId, runId, epoch: current.epoch, generation: current.generation,
       sourceDigest: current.sourceDigest, artifactDigest: current.artifactDigest, policyDigest: current.policyDigest,
@@ -98,8 +133,8 @@ export class RecoveryCoordinator {
     });
     return this.#kernel.recover(projectId, runId, {
       mode: 'hard-recovery', assessmentDigest: verification.assessmentDigest, sourceDigest: verification.sourceDigest,
-      importer: structuredClone(verification.importer), recoveryVerificationRef: verificationRef, authorityDecisionId: decisionId,
-      recoveryRequestDigest: requestDigest, dispositions, verifiedEvidenceRefs, rollbackSnapshotRef: rollbackSnapshot.ref,
+      importer: structuredClone(verification.importer), recoveryVerificationRef: verificationRef, recoveryResolutionRef: resolutionRef, authorityDecisionId: decisionId,
+      recoveryRequestDigest: requestDigest, recoveryCallerDigest: callerDigest, dispositions, verifiedEvidenceRefs, rollbackSnapshotRef: rollbackSnapshot.ref,
     }, command, hardRecoveryCapability);
   }
 

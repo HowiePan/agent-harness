@@ -23,7 +23,7 @@
 | RCV-001 | P0 | Complete | Recovery Capsule 先复制到受管 staging，assessment 与 manifest 只读取 staging，并复核复制前、staging 和复制后摘要 | `test/recovery-capsule.test.mjs` 源变化和 staging 一致性测试 |
 | RCV-002 | P0 | Complete | Capsule 验证严格校验 Schema、顶层布局、assessment、逐文件记录、计数、大小和全部摘要 | manifest/assessment/payload/totalBytes 篡改负向测试 |
 | RCV-003 | P0 | Complete | `hardRecover()` 只接受内容寻址 verification Evidence；Receipt 绑定 Capsule、Importer、source/assessment digest、project/run 和目标 epoch，执行前再次完整验证 Capsule | Recovery verification Schema、Evidence 与 Coordinator 测试 |
-| RCV-004 | P0 | Complete | live hard recovery 只能经 Coordinator 调用，并强制已记录的 approved Decision、有效期、上下文、expected revision 和稳定 command ID | 缺失、否决、过期、错配及幂等测试 |
+| RCV-004 | P0 | Complete / Superseded by AH-20260915-7007E9BFAFD4 | hard recovery 只能经 Coordinator 调用；新流程强制 Core Recovery Resolution、有效期、上下文、expected revision 和稳定 command ID，旧 approved Decision 仅兼容读取 | 缺失 verification、过期/篡改 Resolution、上下文错配及幂等测试 |
 | RCV-005 | P1 | Complete | Legacy inventory 遇到 symlink、Windows junction 或不支持的文件系统节点时显式 fail-closed | 跨平台 link/junction 测试 |
 | RCV-006 | P1 | Complete | 已覆盖链接、并发变化、三类篡改、严格 Schema、Decision、command 重用和上下文校验 | `npm test` 88/88 通过；最终全套准出结果见验收记录 |
 

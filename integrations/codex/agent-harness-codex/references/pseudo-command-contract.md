@@ -23,6 +23,6 @@ Project-scoped static readiness and action-scoped execution readiness are distin
 
 After resolution, use the packaged Operator Contract and its lifecycle plan executor. Feature remains the lease unit, Steps stay serial inside a Feature, all current-cycle P0-P3 findings block formal quality closure, and every Dispatch, Gate, Decision, Evidence item, and Receipt stays bound to versioned identities and content digests. Do not construct a Run, add a canonical decision, select a prerequisite strategy, or request per-step approval in the adapter. The single explicit command authorizes ordinary state changes declared by the plan; protected operations remain separate approval boundaries.
 
-Inspection language such as “只评估”“不要启动”“dry-run” means resolve and report only. It never creates or resumes a Run. Publication, commit, tag, cutover, live hard recovery, and legacy deletion keep their separate approval requirements.
+Inspection language such as “只评估”“不要启动”“dry-run” means resolve and report only. It never creates or resumes a Run. Publication, commit, tag, external cutover, privilege expansion, irreversible migration, and legacy deletion keep their separate approval requirements. Reattach, ordinary resume, verified control-root-only hard recovery, and audit-preserving replacement are Core lineage decisions and never become user choice prompts.
 
 Codex implements the adapter with a `UserPromptSubmit` Hook plus this single Skill. Another tool can implement the same parser and Operator Contract without adopting Codex files or changing the command envelope.
