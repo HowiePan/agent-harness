@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { dirname, resolve } from 'node:path';
 import { configureBindings } from '../integrations/codex/agent-harness-codex/scripts/configure-bindings.mjs';
 import { hookResponse, loadBindings, parsePseudoCommand } from '../integrations/codex/agent-harness-codex/hooks/pseudo-command-router.mjs';
+import { decodeVisibleLifecycleIntent } from '../integrations/codex/agent-harness-codex/lib/visible-lifecycle-intent.mjs';
 import { resolveCommandIntent } from '../src/extensions/command-contract.mjs';
 import { cardWorldCommandManifest, tabletopCollectionCommandManifest } from '../src/consumers/index.mjs';
 import { digestJson, sha256 } from '../src/canonical.mjs';
@@ -24,22 +25,30 @@ const createActiveReleaseFixture = async controlRoot => {
   const entryRelative = 'bin/agent-harness.mjs';
   const entrypoint = resolve(runtimeRoot, entryRelative);
   const entryBytes = Buffer.from('// fixture runtime\n');
-  const files = [{ path: entryRelative, sha256: sha256(entryBytes), size: entryBytes.length }];
+  const coordinatorRelative = 'integrations/codex/agent-harness-codex/scripts/visible-lifecycle-coordinator.mjs';
+  const coordinatorEntrypoint = resolve(runtimeRoot, coordinatorRelative);
+  const coordinatorBytes = Buffer.from('// fixture visible coordinator\n');
+  const files = [
+    { path: entryRelative, sha256: sha256(entryBytes), size: entryBytes.length },
+    { path: coordinatorRelative, sha256: sha256(coordinatorBytes), size: coordinatorBytes.length },
+  ];
   const packageDigest = digestJson(files);
   const generationId = 'g-fixture';
   await Promise.all([
     mkdir(resolve(runtimeRoot, 'bin'), { recursive: true }),
+    mkdir(dirname(coordinatorEntrypoint), { recursive: true }),
     mkdir(resolve(dataRoot, 'registry', 'generations', generationId, 'projects'), { recursive: true }),
   ]);
   await Promise.all([
     writeFile(entrypoint, entryBytes),
+    writeFile(coordinatorEntrypoint, coordinatorBytes),
     writeFile(resolve(runtimeRoot, 'release-manifest.json'), `${JSON.stringify({ protocolVersion: '1.0', version: '1.0.0', files, packageDigest })}\n`, 'utf8'),
     writeFile(resolve(dataRoot, 'registry', 'generations', generationId, 'extensions.json'), '{}\n', 'utf8'),
   ]);
   const pointer = { protocolVersion: '1.0', kind: 'active-release', generationId, release: { version: '1.0.0', artifactDigest: packageDigest, verified: true }, runtimeRoot: runtimeRelative, runtimeEntrypoint: `${runtimeRelative}/${entryRelative}` };
   pointer.pointerDigest = digestJson(pointer);
   await writeFile(resolve(dataRoot, 'registry', 'active-release.json'), `${JSON.stringify(pointer)}\n`, 'utf8');
-  return { dataRoot, entrypoint, release: { version: '1.0.0', artifactDigest: packageDigest, generationId, pointerDigest: pointer.pointerDigest } };
+  return { dataRoot, entrypoint, coordinatorEntrypoint, release: { version: '1.0.0', artifactDigest: packageDigest, generationId, pointerDigest: pointer.pointerDigest } };
 };
 
 test('Codex plugin exposes one explicit-project pseudo-command router', async () => {
@@ -112,7 +121,15 @@ test('binding configuration makes project selection and Harness location determi
     assert.match(context, /"projectAlias":"engine"/);
     assert.match(context, /"projectId":"cardworld-engine"/);
     assert.match(context, /"entrypoint":/);
+    assert.match(context, /"coordinatorEntrypoint":/);
+    assert.match(context, /"coordinationIntent":/);
+    assert.match(context, /--intent/);
     assert.match(context, /不得搜索磁盘/);
+    const routed = JSON.parse(context.slice(context.indexOf('解析结果：') + '解析结果：'.length));
+    const sealed = decodeVisibleLifecycleIntent(routed.coordinationIntent);
+    assert.deepEqual(sealed.command, { action: 'req', target: 'V3.8.4', arguments: ['expand-to-plan'] });
+    assert.deepEqual(sealed.project, { projectId: 'cardworld-engine', profileId: 'engine-delivery', extensionId: 'cardworld-engine-profile' });
+    assert.equal(sealed.harness.coordinatorEntrypoint, active.coordinatorEntrypoint);
 
     const where = await hookResponse({ prompt: 'h:where', cwd: workspaceRoot }, options);
     assert.match(where.hookSpecificOutput.additionalContext, /只读结果/);
@@ -191,6 +208,22 @@ test('router fails closed when the active release pointer changes after binding'
   await writeFile(pointerFile, `${JSON.stringify(pointer)}\n`, 'utf8');
   const response = await hookResponse({ prompt: 'h:engine quality V3.8.4', cwd: workspaceRoot }, { pluginRoot: installedPlugin });
   assert.match(response.hookSpecificOutput.additionalContext, /绑定不可用/);
+  assert.match(response.hookSpecificOutput.additionalContext, /不得启动或修改任何 Harness 状态/);
+});
+
+test('binding fails closed when the active visible Coordinator is missing or changed', async t => {
+  const fixture = await createTemporaryFixture('agent-harness-coordinator-binding-');
+  t.after(() => rm(fixture, { recursive: true, force: true }));
+  const installedPlugin = resolve(fixture, 'plugin');
+  const controlRoot = resolve(fixture, 'harness');
+  const workspaceRoot = resolve(fixture, 'workspace');
+  await Promise.all([mkdir(installedPlugin, { recursive: true }), mkdir(workspaceRoot, { recursive: true })]);
+  const active = await createActiveReleaseFixture(controlRoot);
+  await configureBindings({ pluginRoot: installedPlugin, controlRoot, workspaceRoot, entrypoint: 'runtime/bin/agent-harness.mjs', dataRoot: 'data', projectSpecs: ['engine|cardworld-engine|engine-delivery|cardworld-engine-profile'] });
+  await writeFile(active.coordinatorEntrypoint, '// changed coordinator\n', 'utf8');
+  const response = await hookResponse({ prompt: 'h:engine quality V3.8.4', cwd: workspaceRoot }, { pluginRoot: installedPlugin });
+  assert.match(response.hookSpecificOutput.additionalContext, /绑定不可用/);
+  assert.match(response.hookSpecificOutput.additionalContext, /active runtime/);
   assert.match(response.hookSpecificOutput.additionalContext, /不得启动或修改任何 Harness 状态/);
 });
 

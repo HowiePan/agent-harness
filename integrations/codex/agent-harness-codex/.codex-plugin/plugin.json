@@ -1,7 +1,7 @@
 {
   "name": "agent-harness-codex",
   "version": "1.0.0",
-  "description": "Explicit-project pseudo-command routing and persistent installation bindings for a standalone Agent Harness",
+  "description": "Explicit-project routing, persistent bindings, and native visible-Agent coordination for a standalone Agent Harness",
   "author": {
     "name": "Agent Harness contributors"
   },
@@ -9,7 +9,7 @@
   "interface": {
     "displayName": "Agent Harness Codex",
     "shortDescription": "Route project-bound Harness commands without disk search.",
-    "longDescription": "Recognizes h:<project-alias> <action> <target> [preset], reads exact Harness and project bindings from plugin data, supports h:where and h:report, and resolves lifecycle semantics through registered Extension Packs.",
+    "longDescription": "Recognizes h:<project-alias> <action> <target> [preset], reads exact Harness and project bindings from plugin data, coordinates conversation-visible lifecycle work through native Codex child Agents, supports h:where and h:report, and resolves lifecycle semantics through registered Extension Packs.",
     "developerName": "Agent Harness contributors",
     "category": "Productivity",
     "capabilities": [
@@ -17,6 +17,7 @@
       "persistent-bindings",
       "conversation-issue-intake",
       "workflow-orchestration",
+      "native-visible-agent-coordination",
       "extension-authoring"
     ],
     "defaultPrompt": "Use h:<project-alias> <action> <target> [preset], h:where to inspect bindings, or h:report <project-alias> to record the current issue."

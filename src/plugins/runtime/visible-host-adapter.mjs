@@ -60,7 +60,10 @@ export const createVisibleHostAdapter = ({ inspectVisibleAgent, spawnVisibleAgen
       surface: nonEmpty(runtimeReceipt?.visibility?.surface, 'VISIBLE_AGENT_HOST_SURFACE_REQUIRED', 'Visible host observation requires a host surface.'),
       inspectRef: nonEmpty(runtimeReceipt?.visibility?.inspectRef, 'VISIBLE_AGENT_HOST_INSPECT_REF_REQUIRED', 'Visible host observation requires an inspectable task reference.'),
     };
-    const observation = await inspectVisibleAgent({ ...expected });
+    const observation = await inspectVisibleAgent({
+      ...expected,
+      hostSpawnReceipt: structuredClone(runtimeReceipt?.hostSpawnReceipt ?? null),
+    });
     return assertObservation(observation, expected);
   };
 

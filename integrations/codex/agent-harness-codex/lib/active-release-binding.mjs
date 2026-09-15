@@ -55,12 +55,16 @@ export const validateActiveReleaseBinding = async ({ controlRoot: controlRootInp
   const entryRelative = relative(runtimeRoot, activeEntrypoint).replaceAll('\\', '/');
   const entryRecord = manifest.files.find(item => item.path === entryRelative);
   if (!entryRecord) throw new Error('active runtime entrypoint 未纳入 release manifest。');
-  const targets = verifyAllFiles ? manifest.files : [entryRecord];
+  const coordinatorRelative = 'integrations/codex/agent-harness-codex/scripts/visible-lifecycle-coordinator.mjs';
+  const coordinatorEntrypoint = resolve(runtimeRoot, coordinatorRelative);
+  const coordinatorRecord = manifest.files.find(item => item.path === coordinatorRelative);
+  if (!coordinatorRecord) throw new Error('active runtime 未包含受验证的 Codex visible lifecycle Coordinator。');
+  const targets = verifyAllFiles ? manifest.files : [entryRecord, coordinatorRecord];
   for (const item of targets) {
     const bytes = await readFile(resolve(runtimeRoot, item.path));
     if (bytes.length !== item.size || sha256(bytes) !== item.sha256) throw new Error(`active runtime 文件与 release manifest 不一致：${item.path}`);
   }
   const registryRoot = resolve(dataRoot, 'registry', 'generations', pointer.generationId);
   if (!(await optionalLstat(resolve(registryRoot, 'extensions.json')))?.isFile() || !(await optionalLstat(resolve(registryRoot, 'projects')))?.isDirectory()) throw new Error(`active Registry generation 不完整：${registryRoot}`);
-  return Object.freeze({ version: manifest.version, artifactDigest: manifest.packageDigest, generationId: pointer.generationId, pointerDigest: pointer.pointerDigest, runtimeRoot, registryRoot, entrypoint: activeEntrypoint });
+  return Object.freeze({ version: manifest.version, artifactDigest: manifest.packageDigest, generationId: pointer.generationId, pointerDigest: pointer.pointerDigest, runtimeRoot, registryRoot, entrypoint: activeEntrypoint, coordinatorEntrypoint });
 };

@@ -4,6 +4,7 @@ import { dirname, isAbsolute, relative, resolve } from 'node:path';
 import process from 'node:process';
 import { fileURLToPath } from 'node:url';
 import { validateActiveReleaseBinding } from '../lib/active-release-binding.mjs';
+import { createVisibleLifecycleIntent, encodeVisibleLifecycleIntent } from '../lib/visible-lifecycle-intent.mjs';
 
 const tokenPattern = /^[a-z][a-z0-9-]{0,31}$/;
 const commandPattern = /^h:([^\s]+)(?:\s+(.+))?$/;
@@ -97,7 +98,7 @@ const validateBindings = async (input, source) => {
   return Object.freeze({
     protocolVersion: '1.0',
     source,
-    harness: Object.freeze({ controlRoot: resolve(harness.controlRoot), entrypoint: resolve(harness.entrypoint), dataRoot: resolve(harness.dataRoot), release }),
+    harness: Object.freeze({ controlRoot: resolve(harness.controlRoot), entrypoint: resolve(harness.entrypoint), coordinatorEntrypoint: activeRelease.coordinatorEntrypoint, dataRoot: resolve(harness.dataRoot), release }),
     projects: Object.freeze(projects),
   });
 };
@@ -163,12 +164,20 @@ export const hookResponse = async (input, options = {}) => {
   if (!workspace) return contextResponse(`Agent Harness 命令拒绝：当前 cwd ${cwd} 既不在项目 ${parsed.projectAlias} 的 workspaceRoot ${project.workspaceRoot} 内，也不是该仓库经验证的 linked worktree。不得搜索其他项目或启动 Harness。`);
 
   if (parsed.kind === 'report') {
-    const report = { ...parsed, project, harness: bindings.harness, workspaceRoot: project.workspaceRoot, workspaceIdentity: project.workspaceIdentity, executionWorkspaceRoot: workspace.executionWorkspaceRoot, workspaceMatch: workspace.kind, cwd, commandId: `report_${randomUUID()}` };
+    const reportHarness = { controlRoot: bindings.harness.controlRoot, entrypoint: bindings.harness.entrypoint, dataRoot: bindings.harness.dataRoot, release: bindings.harness.release };
+    const report = { ...parsed, project, harness: reportHarness, workspaceRoot: project.workspaceRoot, workspaceIdentity: project.workspaceIdentity, executionWorkspaceRoot: workspace.executionWorkspaceRoot, workspaceMatch: workspace.kind, cwd, commandId: `report_${randomUUID()}` };
     return contextResponse(`检测到 h:report。使用 $agent-harness-command 在当前任务采集并脱敏相关对话；缺失证据列入 missingEvidence，不得伪造。通过绑定 entrypoint 以 stdin 调用 issue record；只写 controlRoot/issues。不得新建任务、运行 Harness、接受其他输出目录或提交 Git。返回 issue ID、路径和未提交状态。解析结果：${JSON.stringify(report)}`);
   }
 
-  const intent = { ...parsed, project, harness: bindings.harness, workspaceRoot: project.workspaceRoot, workspaceIdentity: project.workspaceIdentity, executionWorkspaceRoot: workspace.executionWorkspaceRoot, workspaceMatch: workspace.kind, cwd };
-  return contextResponse(`检测到 Agent Harness 伪命令。把它作为确定性的 Command Intent，而不是自由提示词。使用 $agent-harness-command；只使用已绑定的 entrypoint、dataRoot 和 projectId，验证安装/Registry/Extension 摘要后从该 Extension 的 commandManifest 解析动作和预设。不得根据目标格式猜项目，不得搜索磁盘，不得把参数当作 shell。解析结果：${JSON.stringify(intent)}`);
+  const coordinationIntent = createVisibleLifecycleIntent({
+    harness: bindings.harness,
+    project,
+    command: parsed,
+    executionWorkspaceRoot: workspace.executionWorkspaceRoot,
+    coordinatorEntrypoint: bindings.harness.coordinatorEntrypoint,
+  });
+  const intent = { ...parsed, project, harness: bindings.harness, workspaceRoot: project.workspaceRoot, workspaceIdentity: project.workspaceIdentity, executionWorkspaceRoot: workspace.executionWorkspaceRoot, workspaceMatch: workspace.kind, cwd, commandId: coordinationIntent.commandId, coordinationIntent: encodeVisibleLifecycleIntent(coordinationIntent), coordinationIntentDigest: coordinationIntent.intentDigest };
+  return contextResponse(`检测到 Agent Harness 伪命令。把它作为确定性的 Command Intent，而不是自由提示词；动作和预设仍由已绑定 Extension 的 commandManifest 解析。使用 $agent-harness-command；只使用已绑定的 coordinatorEntrypoint，并把 coordinationIntent 作为 --intent 的单一参数启动同进程 plan/preflight/visible lifecycle Coordinator。逐项原样执行它请求的 collaboration 工具，原样回传工具结果；不得自行构造 Host 响应。不得根据目标格式猜项目，不得搜索磁盘，不得把参数当作 shell。解析结果：${JSON.stringify(intent)}`);
 };
 
 const main = async () => {
