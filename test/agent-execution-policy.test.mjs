@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { extensionPack as codexRuntimeExtension } from '../src/extensions/codex-runtime.mjs';
 import { RunCoordinator } from '../src/coordinator/run-coordinator.mjs';
-import { assertAgentRuntimeCompatible, assertRuntimeTransportReceipt } from '../src/plugins/runtime/execution-policy.mjs';
+import { assertAgentRuntimeCompatible, assertRuntimeTransportReceipt, resolveLifecycleExecutionPolicy } from '../src/plugins/runtime/execution-policy.mjs';
 import { createVisibleHostAdapter } from '../src/plugins/runtime/visible-host-adapter.mjs';
 import { validatePluginManifest } from '../src/plugins/contracts.mjs';
 import { command, feature, makeFixture, startRun } from './test-support.mjs';
@@ -31,6 +31,19 @@ test('conversation-visible projects reject headless Runtime selection and requir
   assert.throws(() => assertRuntimeTransportReceipt({ project, manifest: visibleManifest, receipt: { runtimePluginId: visibleManifest.id, agentId: 'agent-1', dispatchId: 'dispatch-1', packetDigest: 'a'.repeat(64), visibility: { mode: 'user-visible', surface: 'codex-task', inspectRef: 'task-123' } } }), error => error.code === 'USER_VISIBLE_RUNTIME_PROMPT_RECEIPT_REQUIRED');
   assert.deepEqual(assertRuntimeTransportReceipt({ project, manifest: visibleManifest, receipt: { runtimePluginId: visibleManifest.id, agentId: 'agent-1', dispatchId: 'dispatch-1', packetDigest: 'a'.repeat(64), prompt, visibility: { mode: 'user-visible', surface: 'codex-task', inspectRef: 'task-123' } } }).mode, 'conversation-visible');
   assert.throws(() => assertRuntimeTransportReceipt({ project, manifest: visibleManifest, receipt: { runtimePluginId: visibleManifest.id, agentId: 'agent-1', dispatchId: 'dispatch-1', packetDigest: 'a'.repeat(64), prompt: { ...prompt, packetDigest: 'c'.repeat(64) }, visibility: { mode: 'user-visible', surface: 'codex-task', inspectRef: 'task-123' } } }), error => error.code === 'USER_VISIBLE_RUNTIME_PROMPT_PACKET_MISMATCH');
+});
+
+test('action-scoped headless execution requires durable approval and cannot be substituted', () => {
+  const authorization = { actor: 'project-owner', decision: 'approved', action: 'quality', authorizedAt: '2026-09-15T00:00:00.000Z', source: 'AH-20260915-8C001F4D266E' };
+  const project = { id: 'engine', policy: { agentExecutionMode: 'conversation-visible', defaultRuntimePlugin: 'visible-runtime', runtimePlugins: ['visible-runtime', 'headless-runtime'], actionExecution: { quality: { agentExecutionMode: 'headless', runtimePluginId: 'headless-runtime', authorization } } } };
+  assert.deepEqual(resolveLifecycleExecutionPolicy({ project, action: 'plan' }).mode, 'conversation-visible');
+  assert.deepEqual(resolveLifecycleExecutionPolicy({ project, action: 'quality' }), { action: 'quality', mode: 'headless', runtimePluginId: 'headless-runtime', scoped: true, authorization });
+  const headless = { ...visibleManifest, id: 'headless-runtime', capabilities: ['spawn', 'wait', 'send', 'heartbeat', 'interrupt', 'headless'], permissions: [] };
+  assert.equal(assertAgentRuntimeCompatible({ project, manifest: headless, action: 'quality', runtimePluginId: 'headless-runtime', agentExecutionMode: 'headless' }).mode, 'headless');
+  assert.throws(() => assertAgentRuntimeCompatible({ project, manifest: headless, action: 'plan', runtimePluginId: 'headless-runtime' }), error => error.code === 'LIFECYCLE_RUNTIME_POLICY_MISMATCH');
+  const unauthorized = structuredClone(project);
+  delete unauthorized.policy.actionExecution.quality.authorization;
+  assert.throws(() => resolveLifecycleExecutionPolicy({ project: unauthorized, action: 'quality' }), error => error.code === 'ACTION_HEADLESS_AUTHORIZATION_REQUIRED');
 });
 
 test('visible host adapter binds inspection and heartbeat to the exact Lease identities', async t => {

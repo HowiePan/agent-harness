@@ -1,7 +1,7 @@
 export { PLUGIN_KINDS, assertPluginIntent, envelope, validatePluginInstance, validatePluginManifest } from './contracts.mjs';
 export { PluginHost } from './host.mjs';
 export { createCallbackRuntime } from './runtime/callback-runtime.mjs';
-export { AGENT_EXECUTION_MODES, assertAgentRuntimeCompatible, assertRuntimeTransportReceipt, resolveAgentExecutionMode } from './runtime/execution-policy.mjs';
+export { AGENT_EXECUTION_MODES, assertAgentRuntimeCompatible, assertRuntimeTransportReceipt, resolveAgentExecutionMode, resolveLifecycleExecutionPolicy } from './runtime/execution-policy.mjs';
 export { assertFreshVisibleObservation, createVisibleHostAdapter, isVisibleHostAdapter } from './runtime/visible-host-adapter.mjs';
 export { createProcessRuntime } from './runtime/process-runtime.mjs';
 export { createInMemoryRuntime } from './runtime/in-memory-runtime.mjs';

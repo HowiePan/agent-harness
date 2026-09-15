@@ -6,6 +6,7 @@ import { inspectExtensionArtifact } from '../extensions/contract.mjs';
 import { ExtensionRegistry } from '../extensions/registry.mjs';
 import { atomicWriteJson, readJson, withDirectoryLock } from '../kernel/atomic-io.mjs';
 import { ProjectRegistry } from '../registry/project-registry.mjs';
+import { assertProjectDescriptorInput, projectDescriptorInput } from '../registry/project-contract.mjs';
 import { activeReleaseFile, readActiveRelease } from '../registry/active-generation.mjs';
 import { assertHarnessWritePath, harnessControlRoot } from '../write-boundary.mjs';
 import { safeSegment } from '../paths.mjs';
@@ -24,10 +25,21 @@ export const verifyReleaseActivationPlan = input => {
   assert(input.release?.verified === true && /^[a-f0-9]{64}$/.test(input.release.artifactDigest ?? ''), 'RELEASE_ACTIVATION_RELEASE_INVALID', 'Release activation requires a verified candidate release.');
   assert(Array.isArray(input.extensions) && Array.isArray(input.projects), 'RELEASE_ACTIVATION_PLAN_INVALID', 'Release activation plan must include Extension and Project sets.');
   assert(input.runtime?.relativeRoot && input.runtime?.entrypoint === 'bin/agent-harness.mjs', 'RELEASE_ACTIVATION_RUNTIME_INVALID', 'Release activation plan requires an immutable runtime target.');
+  const extensionById = new Map(input.extensions.map(extension => [extension.id, extension]));
+  for (const project of input.projects) {
+    assert(project?.id && Number.isInteger(project.expectedRevision) && /^[a-f0-9]{64}$/.test(project.expectedDescriptorDigest ?? ''), 'RELEASE_ACTIVATION_PROJECT_INVALID', 'Release activation Project identity is invalid.');
+    assertProjectDescriptorInput(project.nextDescriptor);
+    assert(project.nextDescriptor.id === project.id, 'RELEASE_ACTIVATION_PROJECT_ID_MISMATCH', `Release activation descriptor does not match Project ${project.id}.`);
+    assert(project.nextDescriptor.harness.version === input.release.version && project.nextDescriptor.harness.artifactDigest === input.release.artifactDigest, 'RELEASE_ACTIVATION_PROJECT_HARNESS_MISMATCH', `Project ${project.id} does not bind the candidate Harness release.`);
+    for (const required of project.nextDescriptor.extensions ?? []) {
+      const candidate = extensionById.get(required.id);
+      assert(candidate && candidate.version === required.version && candidate.artifactDigest === required.digest, 'RELEASE_ACTIVATION_PROJECT_EXTENSION_MISMATCH', `Project ${project.id} does not bind the candidate artifact for ${required.id}.`);
+    }
+  }
   return structuredClone(input);
 };
 
-export const createReleaseActivationPlan = async ({ controlRoot: controlRootInput, dataRoot: dataRootInput, releaseIdentity, projectIds = [], now = () => new Date().toISOString() } = {}) => {
+export const createReleaseActivationPlan = async ({ controlRoot: controlRootInput, dataRoot: dataRootInput, releaseIdentity, projectIds = [], projectDescriptors = [], now = () => new Date().toISOString() } = {}) => {
   const controlRoot = harnessControlRoot(controlRootInput);
   const dataRoot = assertHarnessWritePath(dataRootInput, 'Release activation data root', controlRoot);
   assert(releaseIdentity?.verified && releaseIdentity.version && releaseIdentity.artifactDigest, 'RELEASE_ACTIVATION_RELEASE_REQUIRED', 'Release activation requires a verified candidate release identity.');
@@ -35,28 +47,42 @@ export const createReleaseActivationPlan = async ({ controlRoot: controlRootInpu
   const projectRegistry = new ProjectRegistry({ root: dataRoot, controlRoot });
   const currentExtensions = await extensionRegistry.list();
   const currentProjects = await projectRegistry.list();
-  const selected = projectIds.length ? currentProjects.filter(project => projectIds.includes(project.id)) : currentProjects;
-  assert(selected.length === (projectIds.length || currentProjects.length), 'RELEASE_ACTIVATION_PROJECT_NOT_FOUND', 'Release activation requested an unknown Project.');
+  const requestedIds = [...new Set(projectIds)];
+  assert(requestedIds.length === projectIds.length, 'RELEASE_ACTIVATION_PROJECT_DUPLICATE', 'Release activation Project selection contains duplicate IDs.');
+  const descriptorById = new Map();
+  for (const descriptorInput of projectDescriptors) {
+    const descriptor = assertProjectDescriptorInput(descriptorInput);
+    assert(!descriptorById.has(descriptor.id), 'RELEASE_ACTIVATION_PROJECT_DESCRIPTOR_DUPLICATE', `Release activation includes more than one descriptor for Project ${descriptor.id}.`);
+    descriptorById.set(descriptor.id, structuredClone(descriptor));
+  }
+  const selected = requestedIds.length ? currentProjects.filter(project => requestedIds.includes(project.id)) : currentProjects;
+  assert(selected.length === (requestedIds.length || currentProjects.length), 'RELEASE_ACTIVATION_PROJECT_NOT_FOUND', 'Release activation requested an unknown Project.');
+  const selectedIds = new Set(selected.map(project => project.id));
+  for (const id of descriptorById.keys()) assert(selectedIds.has(id), 'RELEASE_ACTIVATION_PROJECT_DESCRIPTOR_NOT_SELECTED', `Release activation descriptor targets unselected or unknown Project ${id}.`);
   const extensions = [];
   for (const current of currentExtensions.extensions) {
     const artifact = await inspectExtensionArtifact(resolve(controlRoot, current.entry), { controlRoot, expectedDigest: undefined, requireArtifactManifest: true });
     extensions.push({ id: current.id, version: current.version, entry: current.entry, previousDigest: current.digest, artifactDigest: artifact.digest, registeredAt: current.registeredAt, changed: current.digest !== artifact.digest });
   }
   const extensionById = new Map(extensions.map(extension => [extension.id, extension]));
-  const projects = selected.map(project => ({
-    id: project.id,
-    expectedRevision: project.revision,
-    expectedDescriptorDigest: project.descriptorDigest,
-    nextHarness: { version: releaseIdentity.version, artifactDigest: releaseIdentity.artifactDigest },
-    nextExtensions: (project.extensions ?? []).map(required => {
+  const projects = selected.map(project => {
+    const requested = descriptorById.get(project.id) ?? projectDescriptorInput(project);
+    const nextExtensions = (requested.extensions ?? []).map(required => {
       const candidate = extensionById.get(required.id);
       assert(candidate, 'RELEASE_ACTIVATION_EXTENSION_NOT_FOUND', `Project ${project.id} requires an Extension absent from the active registry: ${required.id}`);
       assert(candidate.version === required.version, 'RELEASE_ACTIVATION_EXTENSION_VERSION_MISMATCH', `Project ${project.id} requires ${required.id}@${required.version}, but the candidate artifact is ${candidate.version}.`);
       return { id: required.id, version: required.version, digest: candidate.artifactDigest };
-    }),
-  }));
+    });
+    const nextDescriptor = assertProjectDescriptorInput({ ...structuredClone(requested), harness: { version: releaseIdentity.version, artifactDigest: releaseIdentity.artifactDigest }, extensions: nextExtensions });
+    return {
+      id: project.id,
+      expectedRevision: project.revision,
+      expectedDescriptorDigest: project.descriptorDigest,
+      nextDescriptor,
+    };
+  });
   const pointer = await readJson(activeReleaseFile(dataRoot), null);
-  const generationDigest = digestJson({ release: releaseIdentity, extensions: extensions.map(extension => ({ id: extension.id, version: extension.version, digest: extension.artifactDigest })) });
+  const generationDigest = digestJson({ release: releaseIdentity, extensions: extensions.map(extension => ({ id: extension.id, version: extension.version, digest: extension.artifactDigest })), projects: projects.map(project => ({ id: project.id, descriptor: project.nextDescriptor })) });
   const body = {
     protocolVersion: '1.0',
     kind: 'release-activation-plan',
@@ -155,9 +181,9 @@ export const applyReleaseActivationPlan = async (planInput, { controlRoot: contr
       const current = currentProjects.find(project => project.id === expected.id);
       const projectCommandId = `${safeCommandId}.project.${safeSegment(expected.id, 'projectId')}`;
       const projectCommands = structuredClone(current.commands ?? {});
-      const projectPayload = { operation: 'release-activation', planDigest: plan.planDigest, release: plan.release, extensions: expected.nextExtensions };
+      const projectPayload = { operation: 'release-activation', planDigest: plan.planDigest, release: plan.release, descriptor: expected.nextDescriptor };
       projectCommands[projectCommandId] = { commandId: projectCommandId, payloadDigest: digestJson(projectPayload), revision: current.revision + 1, committedAt: at, authorityDecision: structuredClone(authorityDecision) };
-      const descriptor = { ...structuredClone(current), harness: structuredClone(expected.nextHarness), extensions: structuredClone(expected.nextExtensions), revision: current.revision + 1, updatedAt: at, commands: projectCommands };
+      const descriptor = { protocolVersion: '1.0', ...structuredClone(expected.nextDescriptor), revision: current.revision + 1, updatedAt: at, commands: projectCommands };
       descriptor.descriptorDigest = digestJson(withoutKeys(descriptor, ['descriptorDigest']));
       await atomicWriteJson(resolve(generationRoot, 'projects', `${safeSegment(expected.id, 'projectId')}.json`), descriptor, { root: dataRoot });
     }

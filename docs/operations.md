@@ -41,7 +41,7 @@ Bootstrap 只建立新 Harness Authority 基础设施，不导入旧状态、不
 已存在 `active-release` 的控制根必须使用发布激活完成制品轮换：
 
 ```text
-node bin/agent-harness.mjs release activation-plan
+node bin/agent-harness.mjs release activation-plan [--project <id>] [--project-descriptor <reviewed-descriptor.json>]
 node bin/agent-harness.mjs release activation-apply --plan <plan.json> --command-id <id> --decision <approved-decision.json>
 ```
 
@@ -61,7 +61,7 @@ Preflight 一次聚合 Plan、Project、活动 Release/Runtime、历史同逻辑
 
 `run dispatch` 同时返回不可变 Packet 与由 Descriptor 固定的 Prompt Codec 确定性生成的完整 Prompt。Codex Operator 必须把 `prompt.text` 原样交给宿主原生 multi-agent delegation，不能自行串联、改写或补充提示词；完整 Host Coordinator 通过 `createVisibleHostAdapter({ inspectVisibleAgent, spawnVisibleAgent, waitVisibleAgent, readVisibleResult, ... })` 注入 `createHarness()`，再调用 `executeVisibleLifecyclePlan()`。它会从 Authority 恢复活动 Lease、重新做宿主 attestation、等待、heartbeat、传回严格 schema 结果并连续调度 repair/re-review。原始 `run bind` JSON 不能充当证明。当前产品宿主若没有这些受信原生回调，必须在 preflight 停止，不能用 CLI 或模型 JSON 代替。
 
-只有 Project Descriptor 明确声明 `agentExecutionMode: headless`，且用户明确请求 CI/无人值守执行时，才可使用阻塞 Coordinator：
+只有 Project Descriptor 的项目默认策略或当前动作的 `policy.actionExecution.<action>` 明确声明 `agentExecutionMode: headless`，且用户明确请求 CI/无人值守执行时，才可使用阻塞 Coordinator。动作级 headless 条目还必须保存绑定同一 action 的批准者、`decision: approved` 与授权时间；未配置的动作继续使用项目默认 Runtime：
 
 ```text
 node bin/agent-harness.mjs lifecycle execute --plan <plan.json> --preflight <preflight.json> --command-id <command-id> --progress

@@ -73,18 +73,25 @@ export const createCardWorldProjectDescriptor = ({
   model,
   contextBudgetCommand = defaultContextBudgetCommand(),
   maxConcurrency = AUTO_CONCURRENCY,
+  actionExecution = {},
 } = {}) => {
   assert(workspaceRoot && isAbsolute(workspaceRoot), 'CARDWORLD_WORKSPACE_REQUIRED', 'CardWorld descriptor requires an absolute workspaceRoot.');
+  assert(actionExecution && typeof actionExecution === 'object' && !Array.isArray(actionExecution), 'CARDWORLD_ACTION_EXECUTION_INVALID', 'CardWorld actionExecution must be an object.');
   if (runtimePluginId !== 'codex-conversation-runtime') assert(agentExecutionMode, 'HEADLESS_EXECUTION_MODE_EXPLICIT_REQUIRED', 'Selecting a non-default Runtime requires an explicit agentExecutionMode; headless execution is never inferred from a Runtime ID.');
   const resolvedAgentExecutionMode = agentExecutionMode ?? 'conversation-visible';
   const workspace = { root: workspaceRoot, rootSelector: 'git-worktree', excluded: ['.git', '.cardworld-local', 'card_world_engine/target', 'card_world_engine/pkg', 'node_modules'] };
   if (remote) workspace.remote = remote;
-  const processBackedRuntime = ['codex-cli-runtime', 'codex-isolated-runtime'].includes(runtimePluginId);
-  const runtimeConfig = processBackedRuntime ? { sandbox: 'workspace-write', ephemeral: true, approveForMe: true } : {};
-  if (model) runtimeConfig.model = model;
+  const scopedRuntimeIds = Object.values(actionExecution).map(value => value?.runtimePluginId).filter(Boolean);
+  const runtimePlugins = [...new Set([runtimePluginId, ...scopedRuntimeIds])];
   const selectedRuntimeExtension = runtimeExtension === undefined
-    ? (['codex-conversation-runtime', 'codex-cli-runtime', 'codex-isolated-runtime'].includes(runtimePluginId) ? { id: 'codex-runtime', version: '1.0.0' } : null)
+    ? (runtimePlugins.some(id => ['codex-conversation-runtime', 'codex-cli-runtime', 'codex-isolated-runtime'].includes(id)) ? { id: 'codex-runtime', version: '1.0.0' } : null)
     : runtimeExtension;
+  const runtimeConfigs = Object.fromEntries(runtimePlugins.map(id => {
+    const processBacked = ['codex-cli-runtime', 'codex-isolated-runtime'].includes(id);
+    const config = processBacked ? { sandbox: 'workspace-write', ephemeral: true, approveForMe: true } : {};
+    if (model) config.model = model;
+    return [id, config];
+  }));
   return {
     id,
     ...(harness ? { harness: structuredClone(harness) } : {}),
@@ -98,9 +105,10 @@ export const createCardWorldProjectDescriptor = ({
     policy: {
       agentExecutionMode: resolvedAgentExecutionMode,
       defaultRuntimePlugin: runtimePluginId,
-      runtimePlugins: [runtimePluginId],
+      runtimePlugins,
       promptCodecPlugin: 'reference-agent-prompt-codec',
-      runtimeConfigs: { [runtimePluginId]: runtimeConfig },
+      runtimeConfigs,
+      ...(Object.keys(actionExecution).length ? { actionExecution: structuredClone(actionExecution) } : {}),
       maxConcurrency,
     },
     gateRecipes: [
@@ -253,7 +261,7 @@ export const createCardWorldLifecyclePlan = ({ intent, project, runId, sourceDig
     feature.metadata.scope = intent.scope;
   }
   return {
-    run: { runId, profileId: 'engine-delivery', profileConfig, features, runtimePluginId: project.policy?.defaultRuntimePlugin },
+    run: { runId, profileId: 'engine-delivery', profileConfig, features },
     stopCondition: { type: quality ? 'quality-run-complete' : full ? 'engine-full-complete' : 'engine-action-complete', action: intent.action, requiresFeatureCompletion: true, requiresAllFindingsResolved: full || quality || intent.action === 'deliver', requiredFinalGates: gateIds },
     protectedOperations: ['publication', 'commit', 'push', 'hard-recovery', 'deletion', 'privilege-expansion', 'cutover'],
   };

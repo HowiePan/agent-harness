@@ -9,9 +9,31 @@ export const resolveAgentExecutionMode = policy => {
   return mode;
 };
 
-export const assertAgentRuntimeCompatible = ({ project, manifest }) => {
+export const resolveLifecycleExecutionPolicy = ({ project, action } = {}) => {
+  const policy = project?.policy;
+  const scoped = action ? policy?.actionExecution?.[action] : null;
+  const mode = scoped?.agentExecutionMode ?? resolveAgentExecutionMode(policy);
+  assert(AGENT_EXECUTION_MODES.includes(mode), 'PROJECT_AGENT_EXECUTION_MODE_INVALID', `Unsupported Agent execution mode: ${mode}`);
+  const runtimePluginId = scoped?.runtimePluginId ?? policy?.defaultRuntimePlugin;
+  assert(runtimePluginId, 'DEFAULT_RUNTIME_REQUIRED', `Project ${project?.id ?? '<unknown>'} requires an explicit Runtime for ${action ?? 'the default execution policy'}.`);
+  assert((policy?.runtimePlugins ?? []).includes(runtimePluginId), 'PROJECT_RUNTIME_DENIED', `Runtime ${runtimePluginId} is not allowed by Project ${project?.id ?? '<unknown>'}.`);
+  if (scoped) {
+    const authorization = scoped.authorization;
+    assert(authorization?.actor && authorization.decision === 'approved' && authorization.action === action, 'ACTION_HEADLESS_AUTHORIZATION_REQUIRED', `Action-scoped execution for ${action} requires a Project-owner approval bound to that action.`);
+    assert(typeof authorization.authorizedAt === 'string' && !Number.isNaN(Date.parse(authorization.authorizedAt)), 'ACTION_HEADLESS_AUTHORIZATION_INVALID', `Action-scoped execution authorization for ${action} requires a valid authorizedAt timestamp.`);
+  }
+  return { action: action ?? null, mode, runtimePluginId, scoped: Boolean(scoped), authorization: scoped?.authorization ? structuredClone(scoped.authorization) : null };
+};
+
+export const assertAgentRuntimeCompatible = ({ project, manifest, action, runtimePluginId, agentExecutionMode }) => {
   assert(manifest?.kind === 'agent-runtime', 'PLUGIN_KIND_MISMATCH', `Plugin ${manifest?.id ?? '<unknown>'} is not an agent-runtime.`);
-  const mode = resolveAgentExecutionMode(project?.policy);
+  const resolved = action !== undefined || runtimePluginId !== undefined || agentExecutionMode !== undefined
+    ? resolveLifecycleExecutionPolicy({ project, action })
+    : { mode: resolveAgentExecutionMode(project?.policy), runtimePluginId: manifest.id, action: null, scoped: false, authorization: null };
+  assert(runtimePluginId === undefined || runtimePluginId === resolved.runtimePluginId, 'LIFECYCLE_RUNTIME_POLICY_MISMATCH', `Runtime ${runtimePluginId} does not match the Project execution policy for ${action ?? 'this Run'}.`);
+  assert(agentExecutionMode === undefined || agentExecutionMode === resolved.mode, 'LIFECYCLE_EXECUTION_MODE_MISMATCH', `Execution mode ${agentExecutionMode} does not match the Project execution policy for ${action ?? 'this Run'}.`);
+  assert(manifest.id === resolved.runtimePluginId, 'LIFECYCLE_RUNTIME_MANIFEST_MISMATCH', `Runtime manifest ${manifest.id} does not match selected Runtime ${resolved.runtimePluginId}.`);
+  const mode = resolved.mode;
   const capabilities = new Set(manifest.capabilities ?? []);
   const permissions = new Set(manifest.permissions ?? []);
   if (mode === 'conversation-visible') {
@@ -21,11 +43,11 @@ export const assertAgentRuntimeCompatible = ({ project, manifest }) => {
   } else {
     assert(capabilities.has('headless'), 'HEADLESS_AGENT_RUNTIME_REQUIRED', `Project ${project?.id ?? '<unknown>'} explicitly selects headless execution, but Runtime ${manifest.id} does not declare headless capability.`);
   }
-  return { mode, userVisible: capabilities.has('user-visible'), hostOrchestrated: capabilities.has('host-orchestrated') };
+  return { ...resolved, userVisible: capabilities.has('user-visible'), hostOrchestrated: capabilities.has('host-orchestrated') };
 };
 
-export const assertRuntimeTransportReceipt = ({ project, manifest, receipt }) => {
-  const policy = assertAgentRuntimeCompatible({ project, manifest });
+export const assertRuntimeTransportReceipt = ({ project, manifest, receipt, action, runtimePluginId, agentExecutionMode }) => {
+  const policy = assertAgentRuntimeCompatible({ project, manifest, action, runtimePluginId, agentExecutionMode });
   assert(receipt?.runtimePluginId === manifest.id, 'RUNTIME_RECEIPT_PLUGIN_MISMATCH', `Runtime Receipt does not match selected Runtime ${manifest.id}.`);
   if (policy.mode === 'conversation-visible') {
     assert(receipt.visibility?.mode === 'user-visible', 'USER_VISIBLE_RUNTIME_RECEIPT_REQUIRED', 'A conversation-visible Agent Lease requires a user-visible Runtime Receipt.');

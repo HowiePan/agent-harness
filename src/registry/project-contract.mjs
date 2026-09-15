@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { assert } from '../errors.mjs';
 import { validateJsonSchema } from '../json-schema.mjs';
+import { resolveLifecycleExecutionPolicy } from '../plugins/runtime/execution-policy.mjs';
 
 const inputSchema = JSON.parse(readFileSync(new URL('../../schemas/project-descriptor-input.schema.json', import.meta.url), 'utf8'));
 const recordSchema = JSON.parse(readFileSync(new URL('../../schemas/project-descriptor.schema.json', import.meta.url), 'utf8'));
@@ -24,6 +25,11 @@ export const assertProjectDescriptorInput = (input, { strictIdentity = true } = 
   if (strictIdentity) {
     const result = validateJsonSchema(input, inputSchema);
     assert(result.valid, 'PROJECT_DESCRIPTOR_SCHEMA_INVALID', 'Project Descriptor input does not satisfy its production Schema.', { errors: result.errors });
+    resolveLifecycleExecutionPolicy({ project: input });
+    for (const action of Object.keys(input.policy?.actionExecution ?? {})) {
+      assert(/^[a-z0-9][a-z0-9.-]+$/.test(action), 'PROJECT_ACTION_EXECUTION_KEY_INVALID', `Project action execution key is invalid: ${action}`);
+      resolveLifecycleExecutionPolicy({ project: input, action });
+    }
   }
   return input;
 };

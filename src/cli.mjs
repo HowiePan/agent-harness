@@ -85,7 +85,7 @@ agent-harness lifecycle plan --input <json|-> [--control-root <path>] [--data-ro
 agent-harness lifecycle preflight --plan <json|-> [--no-write-probe]
 agent-harness lifecycle start --plan <json|-> --preflight <json> --command-id <id>
 agent-harness lifecycle execute --plan <json|-> --preflight <json> --command-id <id> [--max <n>] [--max-rounds <n>] [--progress]
-agent-harness release activation-plan [--control-root <path>] [--data-root <path>]
+agent-harness release activation-plan [--control-root <path>] [--data-root <path>] [--project <id>] [--project-descriptor <json>]...
 agent-harness release activation-apply --plan <json|-> --command-id <id> --decision <json>
 agent-harness evidence add --project <id> --run <id> --file <path> [--feature <id>] [--dispatch <id>]
 agent-harness recovery assess --extension <module> --importer <id> --legacy-root <path>
@@ -144,7 +144,8 @@ const releaseIdentity = await loadReleaseIdentity({ artifactDigest: take('--harn
 const extensionRegistry = new ExtensionRegistry({ dataRoot, controlRoot });
 
 if (command === 'release' && subject === 'activation-plan') {
-  const plan = await createReleaseActivationPlan({ controlRoot, dataRoot, releaseIdentity, projectIds: takeAll('--project') });
+  const projectDescriptors = await Promise.all(takeAll('--project-descriptor').map(jsonFile));
+  const plan = await createReleaseActivationPlan({ controlRoot, dataRoot, releaseIdentity, projectIds: takeAll('--project'), projectDescriptors });
   console.log(JSON.stringify({ ok: true, plan }, null, 2));
   process.exit(0);
 }

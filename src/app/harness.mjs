@@ -26,7 +26,7 @@ import { assertHarnessWritePath, harnessControlRoot, harnessProjectRoot } from '
 import { RunCoordinator } from '../coordinator/run-coordinator.mjs';
 import { AUTO_CONCURRENCY, AUTO_CONCURRENCY_LIMIT, resolveConcurrencyLimit } from '../concurrency.mjs';
 import { ProjectGateRunner, inspectProjectGateCapabilities } from '../gates/project-gate-runner.mjs';
-import { assertAgentRuntimeCompatible, assertRuntimeTransportReceipt } from '../plugins/runtime/execution-policy.mjs';
+import { assertAgentRuntimeCompatible, assertRuntimeTransportReceipt, resolveLifecycleExecutionPolicy } from '../plugins/runtime/execution-policy.mjs';
 import { assertFreshVisibleObservation, createVisibleHostAdapter, isVisibleHostAdapter } from '../plugins/runtime/visible-host-adapter.mjs';
 import { validateBusinessResult } from '../result-contract.mjs';
 import { sealExecutionReadinessReport, verifyExecutionReadinessReport } from '../execution-readiness.mjs';
@@ -180,7 +180,7 @@ export const createHarness = async ({ controlRoot: controlRootInput, dataRoot: d
         } catch (error) { add('extension', false, {}, issues(error)); }
         try {
           const runtimeManifest = pluginHost.get(plan.run.runtimePluginId, 'agent-runtime').manifest;
-          runtimePolicy = assertAgentRuntimeCompatible({ project, manifest: runtimeManifest });
+          runtimePolicy = assertAgentRuntimeCompatible({ project, manifest: runtimeManifest, action: plan.intent.action, runtimePluginId: plan.run.runtimePluginId, agentExecutionMode: plan.run.agentExecutionMode });
           add('runtime', true, { id: runtimeManifest.id, version: runtimeManifest.version, mode: runtimePolicy.mode });
         } catch (error) { add('runtime', false, {}, issues(error)); }
         try {
@@ -290,7 +290,7 @@ export const createHarness = async ({ controlRoot: controlRootInput, dataRoot: d
       });
       if (existing) assert(existing.metadata?.lifecyclePlanDigest === plan.planDigest, 'LIFECYCLE_PLAN_RUN_CONFLICT', 'A Run with the deterministic lifecycle ID exists for a different Command Plan.', { runId: existing.runId, existingPlanDigest: existing.metadata?.lifecyclePlanDigest, planDigest: plan.planDigest });
       const runtimeManifest = pluginHost.get(plan.run.runtimePluginId, 'agent-runtime').manifest;
-      assertAgentRuntimeCompatible({ project, manifest: runtimeManifest });
+      assertAgentRuntimeCompatible({ project, manifest: runtimeManifest, action: plan.intent.action, runtimePluginId: plan.run.runtimePluginId, agentExecutionMode: plan.run.agentExecutionMode });
       return plan;
     },
 
@@ -303,7 +303,7 @@ export const createHarness = async ({ controlRoot: controlRootInput, dataRoot: d
       assert(project.revision === plan.project.revision && project.descriptorDigest === plan.project.descriptorDigest, 'LIFECYCLE_PLAN_PROJECT_STALE', 'Lifecycle Command Plan is stale for the current Project Descriptor.');
       assert(currentReleaseIdentity.artifactDigest === plan.harness.artifactDigest && currentReleaseIdentity.version === plan.harness.version, 'LIFECYCLE_PLAN_RELEASE_STALE', 'Lifecycle Command Plan is stale for the active Harness release.');
       const runtimeManifest = pluginHost.get(plan.run.runtimePluginId, 'agent-runtime').manifest;
-      const runtimePolicy = assertAgentRuntimeCompatible({ project, manifest: runtimeManifest });
+      const runtimePolicy = assertAgentRuntimeCompatible({ project, manifest: runtimeManifest, action: plan.intent.action, runtimePluginId: plan.run.runtimePluginId, agentExecutionMode: plan.run.agentExecutionMode });
       const existing = await authorityStore.read(plan.project.id, plan.run.runId, { required: false });
       if (runtimePolicy.hostOrchestrated && !isVisibleHostAdapter(trustedAgentAdapter)) {
         return { status: 'attention-required', reason: 'visible-agent-host-adapter-unavailable', planDigest: plan.planDigest, plan, runtimePolicy, state: existing };
@@ -319,7 +319,7 @@ export const createHarness = async ({ controlRoot: controlRootInput, dataRoot: d
           artifactDigest: plan.run.artifactDigest,
           sourceDigest: plan.run.sourceDigest,
           executionWorkspaceRoot: plan.run.executionWorkspaceRoot,
-          metadata: { ...(plan.run.metadata ?? {}), lifecyclePlanDigest: plan.planDigest, commandIntent: plan.intent, stopCondition: plan.stopCondition },
+          metadata: { ...(plan.run.metadata ?? {}), lifecyclePlanDigest: plan.planDigest, commandIntent: plan.intent, lifecycleExecution: { runtimePluginId: plan.run.runtimePluginId, agentExecutionMode: plan.run.agentExecutionMode }, stopCondition: plan.stopCondition },
         }, { commandId: `${commandId}.start` });
         state = started.state;
       } else {
@@ -452,7 +452,8 @@ export const createHarness = async ({ controlRoot: controlRootInput, dataRoot: d
       const lease = state.leases.find(item => item.dispatchId === dispatchId && item.status === 'active');
       assert(dispatch && lease, 'ACTIVE_LEASE_REQUIRED', `Dispatch does not have an active managed Lease: ${dispatchId}`);
       const manifest = pluginHost.get(dispatch.runtimePluginId, 'agent-runtime').manifest;
-      const runtimePolicy = assertAgentRuntimeCompatible({ project, manifest });
+      const action = state.metadata?.commandIntent?.action;
+      const runtimePolicy = assertAgentRuntimeCompatible({ project, manifest, action, runtimePluginId: dispatch.runtimePluginId, agentExecutionMode: dispatch.execution?.runtime?.mode });
       assert(runtimePolicy.mode === 'headless', 'VISIBLE_AGENT_HOST_REQUIRED', 'Conversation-visible Agents must be controlled by the interactive host, not through Runtime plugin invocation.');
       return pluginHost.invoke(dispatch.runtimePluginId, method, { agentId: lease.agentId, ...structuredClone(input) });
     },
@@ -484,7 +485,13 @@ export const createHarness = async ({ controlRoot: controlRootInput, dataRoot: d
       const pluginSet = pluginHost.snapshot();
       const installedCompositionDigest = digestJson({ plugins: pluginSet.manifests, extensions: extensionSet.installed });
       const policyDigest = input.policyDigest ?? digestJson({ profiles: project.profiles, extensions: project.extensions ?? [], policy: project.policy ?? {}, gateRecipes: project.gateRecipes ?? [], artifactProviders: project.artifactProviders ?? [] });
-      return kernel.startRun({ ...input, profileConfig, policyDigest, sourceDigest: input.sourceDigest ?? snapshot.digest, pluginSetDigest: input.pluginSetDigest ?? installedCompositionDigest, metadata: { ...input.metadata, workspace: structuredClone(workspace), projectDescriptorDigest: project.descriptorDigest, extensionSetDigest: extensionSet.digest } }, command);
+      const commandAction = input.metadata?.commandIntent?.action;
+      const executionPolicy = commandAction ? resolveLifecycleExecutionPolicy({ project, action: commandAction }) : null;
+      if (executionPolicy && input.metadata?.lifecycleExecution) {
+        assert(input.metadata.lifecycleExecution.runtimePluginId === executionPolicy.runtimePluginId && input.metadata.lifecycleExecution.agentExecutionMode === executionPolicy.mode, 'RUN_EXECUTION_POLICY_MISMATCH', 'Run execution metadata does not match the current Project action execution policy.');
+      }
+      const lifecycleExecution = executionPolicy ? { runtimePluginId: executionPolicy.runtimePluginId, agentExecutionMode: executionPolicy.mode } : input.metadata?.lifecycleExecution;
+      return kernel.startRun({ ...input, profileConfig, policyDigest, sourceDigest: input.sourceDigest ?? snapshot.digest, pluginSetDigest: input.pluginSetDigest ?? installedCompositionDigest, metadata: { ...input.metadata, ...(lifecycleExecution ? { lifecycleExecution } : {}), workspace: structuredClone(workspace), projectDescriptorDigest: project.descriptorDigest, extensionSetDigest: extensionSet.digest } }, command);
     },
 
     async dispatch(projectId, runId, input, command) {
@@ -492,14 +499,16 @@ export const createHarness = async ({ controlRoot: controlRootInput, dataRoot: d
       assert(state.revision === command.expectedRevision, 'REVISION_CONFLICT', 'Authority revision changed before scheduling.', { expected: command.expectedRevision, actual: state.revision });
       const project = await projectRegistry.get(projectId);
       const workspaceRoot = state.metadata?.workspace?.root ?? project.workspace.root;
-      const runtimePluginId = input.runtimePluginId ?? project.policy?.defaultRuntimePlugin ?? null;
+      const action = state.metadata?.commandIntent?.action;
+      const selectedPolicy = resolveLifecycleExecutionPolicy({ project, action });
+      const runtimePluginId = input.runtimePluginId ?? state.metadata?.lifecycleExecution?.runtimePluginId ?? selectedPolicy.runtimePluginId;
       assert(runtimePluginId, 'DEFAULT_RUNTIME_REQUIRED', `Project ${projectId} requires an explicit default Runtime.`);
       let runtimeManifest = null;
       let runtimePolicy = null;
       if (runtimePluginId) {
         assert((project.policy?.runtimePlugins ?? [runtimePluginId]).includes(runtimePluginId), 'PROJECT_RUNTIME_DENIED', `Runtime ${runtimePluginId} is not allowed by Project ${projectId}.`);
         runtimeManifest = pluginHost.get(runtimePluginId, 'agent-runtime').manifest;
-        runtimePolicy = assertAgentRuntimeCompatible({ project, manifest: runtimeManifest });
+        runtimePolicy = assertAgentRuntimeCompatible({ project, manifest: runtimeManifest, action, runtimePluginId, agentExecutionMode: state.metadata?.lifecycleExecution?.agentExecutionMode ?? selectedPolicy.mode });
       }
       const promptCodecPluginId = project.policy?.promptCodecPlugin ?? null;
       assert(promptCodecPluginId, 'PROJECT_PROMPT_CODEC_REQUIRED', `Project ${projectId} requires an explicit Prompt Codec.`);
@@ -547,7 +556,7 @@ export const createHarness = async ({ controlRoot: controlRootInput, dataRoot: d
       assert(dispatch?.status === 'requested', 'DISPATCH_NOT_SPAWNABLE', `Dispatch is not awaiting a Runtime: ${dispatchId}`);
       assert(dispatch.runtimePluginId === runtimePluginId, 'DISPATCH_RUNTIME_MISMATCH', `Dispatch ${dispatchId} is bound to Runtime ${dispatch.runtimePluginId}, not ${runtimePluginId}.`);
       const manifest = pluginHost.get(runtimePluginId, 'agent-runtime').manifest;
-      const runtimePolicy = assertAgentRuntimeCompatible({ project, manifest });
+      const runtimePolicy = assertAgentRuntimeCompatible({ project, manifest, action: state.metadata?.commandIntent?.action, runtimePluginId, agentExecutionMode: dispatch.execution?.runtime?.mode });
       assert(!runtimePolicy.hostOrchestrated, 'VISIBLE_AGENT_HOST_REQUIRED', `Runtime ${runtimePluginId} must be started by the interactive host as a visible child Agent.`);
       const { packet, prompt } = await compileDispatchPrompt(state, dispatch);
       const runtime = await pluginHost.invoke(runtimePluginId, 'spawn', packet, { prompt });
@@ -571,7 +580,7 @@ export const createHarness = async ({ controlRoot: controlRootInput, dataRoot: d
       assert(dispatch?.status === 'requested', 'DISPATCH_NOT_BINDABLE', `Dispatch is not awaiting a Runtime: ${input.dispatchId}`);
       const project = await projectRegistry.get(projectId);
       const manifest = pluginHost.get(dispatch.runtimePluginId, 'agent-runtime').manifest;
-      const runtimePolicy = assertRuntimeTransportReceipt({ project, manifest, receipt: input.runtimeReceipt });
+      const runtimePolicy = assertRuntimeTransportReceipt({ project, manifest, receipt: input.runtimeReceipt, action: state.metadata?.commandIntent?.action, runtimePluginId: dispatch.runtimePluginId, agentExecutionMode: dispatch.execution?.runtime?.mode });
       let runtimeReceipt = structuredClone(input.runtimeReceipt);
       if (runtimePolicy.mode === 'conversation-visible') {
         const { prompt } = await compileDispatchPrompt(state, dispatch);

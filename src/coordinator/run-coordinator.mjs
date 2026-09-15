@@ -1,7 +1,7 @@
 import { newId } from '../canonical.mjs';
 import { assert } from '../errors.mjs';
 import { AUTO_CONCURRENCY, AUTO_CONCURRENCY_LIMIT, resolveConcurrencyLimit } from '../concurrency.mjs';
-import { assertAgentRuntimeCompatible } from '../plugins/runtime/execution-policy.mjs';
+import { assertAgentRuntimeCompatible, resolveLifecycleExecutionPolicy } from '../plugins/runtime/execution-policy.mjs';
 
 const parseLastJsonObject = text => {
   const lines = String(text ?? '').split(/\r?\n/).filter(Boolean);
@@ -32,15 +32,16 @@ export class RunCoordinator {
 
   async tick({ projectId, runId, runtimePluginId, maxConcurrency } = {}) {
     const project = await this.harness.projectRegistry.get(projectId);
-    const selectedRuntime = runtimePluginId ?? project.policy?.defaultRuntimePlugin;
+    let state = await this.harness.authorityStore.read(projectId, runId);
+    const executionPolicy = resolveLifecycleExecutionPolicy({ project, action: state.metadata?.commandIntent?.action });
+    const selectedRuntime = runtimePluginId ?? state.metadata?.lifecycleExecution?.runtimePluginId ?? executionPolicy.runtimePluginId;
     assert(selectedRuntime, 'DEFAULT_RUNTIME_REQUIRED', `Project ${projectId} requires a default Runtime or an explicit runtimePluginId.`);
     assert((project.policy?.runtimePlugins ?? []).includes(selectedRuntime), 'PROJECT_RUNTIME_DENIED', `Runtime ${selectedRuntime} is not allowed by Project ${projectId}.`);
     const runtimeManifest = this.harness.getRuntimeManifest(selectedRuntime);
-    const runtimePolicy = assertAgentRuntimeCompatible({ project, manifest: runtimeManifest });
+    const runtimePolicy = assertAgentRuntimeCompatible({ project, manifest: runtimeManifest, action: state.metadata?.commandIntent?.action, runtimePluginId: selectedRuntime, agentExecutionMode: state.metadata?.lifecycleExecution?.agentExecutionMode ?? executionPolicy.mode });
     const configuredLimit = resolveConcurrencyLimit(project.policy?.maxConcurrency, project.policy?.maxConcurrency === AUTO_CONCURRENCY ? AUTO_CONCURRENCY_LIMIT : 1);
     const requestedLimit = resolveConcurrencyLimit(maxConcurrency, configuredLimit);
     const physicalLimit = runtimeManifest.capabilities.includes('workspace-shared') ? 1 : requestedLimit;
-    let state = await this.harness.authorityStore.read(projectId, runId);
     if (runtimePolicy.hostOrchestrated) return { status: 'attention-required', reason: 'user-visible-runtime-requires-host-orchestration', runtimePluginId: selectedRuntime, state, physicalLimit };
     const orphaned = state.leases.filter(lease => lease.status === 'active');
     if (orphaned.length) return { status: 'attention-required', reason: 'active-leases-require-original-runtime-or-resume', leaseIds: orphaned.map(lease => lease.leaseId), state };

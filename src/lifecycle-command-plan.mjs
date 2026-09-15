@@ -3,6 +3,7 @@ import { digestJson, withoutKeys } from './canonical.mjs';
 import { assert } from './errors.mjs';
 import { assertJsonSchema } from './json-schema.mjs';
 import { safeSegment } from './paths.mjs';
+import { resolveLifecycleExecutionPolicy } from './plugins/runtime/execution-policy.mjs';
 
 const schema = JSON.parse(readFileSync(new URL('../schemas/lifecycle-command-plan.schema.json', import.meta.url), 'utf8'));
 
@@ -39,6 +40,9 @@ export const createLifecycleCommandPlan = ({ intent, project, extension, release
   const compiled = compiler({ intent: structuredClone(intent), project: structuredClone(project), extension: compilerExtension, runId, sourceDigest, executionWorkspaceRoot });
   assert(compiled?.run?.profileId === intent.profileId, 'LIFECYCLE_PLAN_PROFILE_MISMATCH', 'Plan compiler returned a Profile different from the Command Manifest.');
   assert(Array.isArray(compiled.run.features) && compiled.run.features.length > 0, 'LIFECYCLE_PLAN_FEATURES_REQUIRED', 'Plan compiler must return at least one Feature.');
+  const executionPolicy = resolveLifecycleExecutionPolicy({ project, action: intent.action });
+  assert(compiled.run.runtimePluginId === undefined || compiled.run.runtimePluginId === executionPolicy.runtimePluginId, 'LIFECYCLE_COMPILER_RUNTIME_OVERRIDE_DENIED', 'Plan compiler cannot override the Runtime selected by the Project action execution policy.');
+  assert(compiled.run.agentExecutionMode === undefined || compiled.run.agentExecutionMode === executionPolicy.mode, 'LIFECYCLE_COMPILER_EXECUTION_MODE_OVERRIDE_DENIED', 'Plan compiler cannot override the Agent execution mode selected by the Project action execution policy.');
   const body = {
     protocolVersion: '1.0',
     kind: 'lifecycle-command-plan',
@@ -55,7 +59,8 @@ export const createLifecycleCommandPlan = ({ intent, project, extension, release
       sourceDigest,
       artifactDigest: releaseIdentity.artifactDigest,
       executionWorkspaceRoot,
-      runtimePluginId: compiled.run.runtimePluginId ?? project.policy?.defaultRuntimePlugin ?? null,
+      runtimePluginId: executionPolicy.runtimePluginId,
+      agentExecutionMode: executionPolicy.mode,
       ...(compiled.run.metadata ? { metadata: structuredClone(compiled.run.metadata) } : {}),
     },
     stopCondition: structuredClone(compiled.stopCondition ?? { type: 'run-ready-to-close' }),
