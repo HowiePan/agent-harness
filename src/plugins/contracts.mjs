@@ -44,6 +44,7 @@ export const validatePluginManifest = manifest => {
 
 export const validatePluginInstance = (manifest, instance) => {
   for (const method of requiredMethods[manifest.kind]) assert(typeof instance?.[method] === 'function', 'PLUGIN_CONTRACT_INVALID', `Plugin ${manifest.id} is missing ${method}().`);
+  if (manifest.kind === 'codec' && manifest.capabilities.includes('agent-prompt')) assert(typeof instance?.compilePrompt === 'function', 'PLUGIN_CONTRACT_INVALID', `Prompt Codec ${manifest.id} is missing compilePrompt().`);
   return instance;
 };
 

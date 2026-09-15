@@ -262,7 +262,7 @@ if (command === 'features' && subject === 'compile') {
   const harness = await createHarness({ controlRoot, dataRoot, extensions, releaseIdentity, initializeStorage: !readOnlyHarness });
   if (command === 'project' && subject === 'register') {
     const runtimePluginId = take('--runtime');
-    const rawInput = take('--descriptor') ? await jsonFile(take('--descriptor')) : { id: take('--id'), workspace: { root: resolve(take('--workspace')) }, profiles: String(take('--profiles') ?? '').split(',').filter(Boolean), policy: { agentExecutionMode: take('--agent-execution-mode'), defaultRuntimePlugin: runtimePluginId, runtimePlugins: runtimePluginId ? [runtimePluginId] : [] } };
+    const rawInput = take('--descriptor') ? await jsonFile(take('--descriptor')) : { id: take('--id'), workspace: { root: resolve(take('--workspace')) }, profiles: String(take('--profiles') ?? '').split(',').filter(Boolean), policy: { agentExecutionMode: take('--agent-execution-mode'), defaultRuntimePlugin: runtimePluginId, runtimePlugins: runtimePluginId ? [runtimePluginId] : [], promptCodecPlugin: take('--prompt-codec') } };
     const input = {
       ...rawInput,
       harness: rawInput.harness ?? { version: releaseIdentity.version, artifactDigest: releaseIdentity.artifactDigest },

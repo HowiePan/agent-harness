@@ -63,7 +63,7 @@ Codex 插件提供通用伪命令 Router：`h:<项目别名> <动作> <目标> [
 
 Hook 只把符合语法的输入转换成 Command Intent，不直接启动流程。`$agent-harness-command` 是显式回退入口。需求审查的多个预设和两条 Harness 的完整流程都由各自 Extension 声明，Authority/Evidence、P0-P3 阻断与批准边界仍由统一 Operator Contract 保证。完整参数见 [运维手册](docs/operations.md)。
 
-交互式 Project Descriptor 必须声明 `agentExecutionMode: conversation-visible`。每个 Dispatch 由当前 Codex 宿主创建可见子 Agent；可信宿主适配器把 Agent、Dispatch、Packet 与可检查任务引用绑定后才能建立 Lease，提交前还必须有新鲜 heartbeat。缺少原生子 Agent、宿主证明或观察能力时流程以 `attention-required` 停止，禁止用原始 CLI Receipt、`codex exec` 或其他后台 Agent 进程兜底。`headless` 必须由用户请求与 Descriptor 分别明确授权，不能根据 Runtime ID 推断。测试、构建、打包和确定性 Gate 仍可使用受管子进程，但启动前必须挂接实时观察器并显示启动、进度/输出和结束状态，且不能承载 Agent 推理。
+交互式 Project Descriptor 必须声明 `agentExecutionMode: conversation-visible` 和 `promptCodecPlugin`。每个 Dispatch 固定 Prompt Codec/Contract 版本，由 Codec 从不可变 Packet 确定性生成完整 Prompt；Codex 宿主只能把这段文本原样交给可见子 Agent，不能临时串联或改写。可信宿主适配器把 Agent、Dispatch、Packet 摘要、Prompt 摘要与可检查任务引用绑定后才能建立 Lease，提交前还必须有新鲜 heartbeat。缺少 Prompt 生成、原生子 Agent、宿主证明或观察能力时流程以 `attention-required` 停止，禁止即兴拼 Prompt、用原始 CLI Receipt、`codex exec` 或其他后台 Agent 进程兜底。`headless` 必须由用户请求与 Descriptor 分别明确授权，不能根据 Runtime ID 推断。测试、构建、打包和确定性 Gate 仍可使用受管子进程，但启动前必须挂接实时观察器并显示启动、进度/输出和结束状态，且不能承载 Agent 推理。
 
 ## 项目边界
 

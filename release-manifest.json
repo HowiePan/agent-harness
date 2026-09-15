@@ -122,13 +122,13 @@
     },
     {
       "path": "docs/operations.md",
-      "sha256": "b866c4042aee32ad27e69b551ea74da5bde72c62f2b9ceba021e715f72ff73cd",
-      "size": 19573
+      "sha256": "12686b9f9332f424ee257dc4d997f2721b2a481f0324ba1841c5513e1c540927",
+      "size": 19958
     },
     {
       "path": "docs/operator-contract.md",
-      "sha256": "3bb8c798af60760d054c5d363e2160dda2f4bdc9aecea6a84ce1cdb5d31bd5ba",
-      "size": 3904
+      "sha256": "1c24497c64fe8f517ec1ce48d5430da603638c238ff7a62c2768d084c5203535",
+      "size": 4201
     },
     {
       "path": "docs/path-policy.md",
@@ -137,8 +137,8 @@
     },
     {
       "path": "docs/plugin-sdk.md",
-      "sha256": "c024d2b4bbf307020467359f246245e08f688d08e8e0a6038bd510ab89f66773",
-      "size": 7056
+      "sha256": "310ddb8aee9aa4d9a4a4e7877a85e9d30cde4989af2be37505be8e8b659eb5c8",
+      "size": 7500
     },
     {
       "path": "docs/post-extraction-register.md",
@@ -222,8 +222,8 @@
     },
     {
       "path": "integrations/codex/agent-harness-codex/references/pseudo-command-contract.md",
-      "sha256": "c5b229777383a0954de343d4bec91dc7cca542d2fa4d33fb286f060f6aee45b0",
-      "size": 5703
+      "sha256": "9598b4bb9b17f02f8785fa0a7ac6a871ad8a243ab22835a500e4535c757c9e2b",
+      "size": 5934
     },
     {
       "path": "integrations/codex/agent-harness-codex/scripts/configure-bindings.mjs",
@@ -242,13 +242,13 @@
     },
     {
       "path": "integrations/codex/agent-harness-codex/skills/agent-harness-extension-author/references/extension-contract.md",
-      "sha256": "56f58a85b00c2b7e08fe69d300748633ea5fd103c4b77f4a8035003f8087e3ea",
-      "size": 4279
+      "sha256": "8ec50b58f62535376c4dfa9c0903fd65d858cfb3969c6d7b2f7968bebd916f42",
+      "size": 4748
     },
     {
       "path": "integrations/codex/agent-harness-codex/skills/agent-harness-extension-author/SKILL.md",
-      "sha256": "fefa171d661062f59085afe66aea23f9e568355abd0f463114f8909e1ce8ee1d",
-      "size": 3653
+      "sha256": "72630f90b63fd5eec8a5e422f19351ce0739cccf4f6b782e887d1c63ef7ac1ff",
+      "size": 4392
     },
     {
       "path": "integrations/codex/agent-harness-codex/skills/agent-harness-operator/agents/openai.yaml",
@@ -262,8 +262,8 @@
     },
     {
       "path": "integrations/codex/agent-harness-codex/skills/agent-harness-operator/SKILL.md",
-      "sha256": "ef6281fe668c0247c20c1a07115cd46211a923f888f7a1d545232b291d87c70c",
-      "size": 4569
+      "sha256": "d0bf944e64e38b36fdea667b8dd02a0ca8b8651f0924cc586950c02896647b20",
+      "size": 5227
     },
     {
       "path": "LICENSE",
@@ -312,8 +312,8 @@
     },
     {
       "path": "README.md",
-      "sha256": "151c49a03fcb2a42251f557067ac20f4ecd8e094506d52f606e4271208462cd1",
-      "size": 8133
+      "sha256": "5c3260d06f2ed93ecf81af881d5aa1ab2b3586dbdfd7c7e3b93d0508b994e691",
+      "size": 8361
     },
     {
       "path": "schemas/authority.schema.json",
@@ -407,13 +407,13 @@
     },
     {
       "path": "schemas/project-descriptor-input.schema.json",
-      "sha256": "d81c5fdd05b42b598812b761f673c08dff59796612af6d805f22aa27d0c8846f",
-      "size": 2389
+      "sha256": "89676abb8cff96078b7a0d19fae1b3518e9c50851b1dd068cd7d1df410a3fe97",
+      "size": 2497
     },
     {
       "path": "schemas/project-descriptor.schema.json",
-      "sha256": "5cd137b8437cad5c0d312902a45b229efd70405a67c92e9a136120711ac92d7c",
-      "size": 3718
+      "sha256": "2928d3f09f31a2bc4febfe1d7adf5ad6d3e2bb4d2cc3c90836fe1aeb1aa98ee1",
+      "size": 3826
     },
     {
       "path": "schemas/recovery-capsule.schema.json",
@@ -447,8 +447,8 @@
     },
     {
       "path": "src/app/harness.mjs",
-      "sha256": "bf96a45993b8b0ccd3db03599181432739acc0db49f68a7ef902f880704c21bc",
-      "size": 33541
+      "sha256": "b2117d28353932ea88e972d2c047415a836a0c52e90ad6d69df1ea8fbcda1edc",
+      "size": 37381
     },
     {
       "path": "src/bootstrap.mjs",
@@ -462,8 +462,8 @@
     },
     {
       "path": "src/cli.mjs",
-      "sha256": "9be8bbe265807c72b5e04b7acc4b18858359da23f055e9e6d3130e850aa41e7e",
-      "size": 29237
+      "sha256": "09bcc9ef71813eb08c180ba9a4b02cdfa3db3a90056debfc6197434ac317f75d",
+      "size": 29280
     },
     {
       "path": "src/concurrency.mjs",
@@ -472,8 +472,8 @@
     },
     {
       "path": "src/consumers/cardworld-engine.mjs",
-      "sha256": "c2e27143a60d60c7a14b23d8e0f4225948b18c3ba36470f260cb9f91bb2f13c5",
-      "size": 11775
+      "sha256": "1a7b93ea5fc1665a70998216d01b6c66b51365489054f65c0d94af5f2d8ff2db",
+      "size": 11832
     },
     {
       "path": "src/consumers/index.mjs",
@@ -482,8 +482,8 @@
     },
     {
       "path": "src/consumers/tabletop-collection.mjs",
-      "sha256": "b0e7d3f741660a525cb72e63f9ff3a75bdcedd19975daa602bfe51393dd66308",
-      "size": 11683
+      "sha256": "0cb2cd19d0372ee1b72011eb87c4aa96f11fcaf921ba27564c8ddfc9d30a4551",
+      "size": 11740
     },
     {
       "path": "src/coordinator/run-coordinator.mjs",
@@ -572,8 +572,8 @@
     },
     {
       "path": "src/kernel/kernel.mjs",
-      "sha256": "2d2d45a478e8758dc16df90cb1c8c1541e5909cdf545fdcef45e1b41c8c4aaab",
-      "size": 39503
+      "sha256": "12563495b53acbe3bf78dc451aff4ce80eb062318d63c95d6c679b64e3e50645",
+      "size": 40739
     },
     {
       "path": "src/kernel/quality.mjs",
@@ -641,14 +641,19 @@
       "size": 1423
     },
     {
+      "path": "src/plugins/codec/agent-prompt-codec.mjs",
+      "sha256": "49a4d3d41fba3863b288cb5614b76e50a2ffde57004dff32c2996166615b40ac",
+      "size": 6371
+    },
+    {
       "path": "src/plugins/codec/json-codec.mjs",
       "sha256": "df3dd39dfb0c103a9a4e84499ea4910c19e7f52766444bc1a983575e88384c9f",
       "size": 780
     },
     {
       "path": "src/plugins/contracts.mjs",
-      "sha256": "8bea9b9f8a21e74e563cbe73b89973f258100fd8360fc2bc692a3d83ce0b1746",
-      "size": 5181
+      "sha256": "007ba0319c560bc571958a7be89a2165cce429110a0fb578d67319b16aed21b7",
+      "size": 5405
     },
     {
       "path": "src/plugins/execution/managed-output.mjs",
@@ -667,8 +672,8 @@
     },
     {
       "path": "src/plugins/index.mjs",
-      "sha256": "8956f6c05aec0152b819f1c4934e91c63dd430872b05f982f18957cdc9a349c1",
-      "size": 1343
+      "sha256": "fe58104cf0c8f5a4aaeeb03cd7d26099e92eee88c0621a1e519fadf4e7866e9f",
+      "size": 1506
     },
     {
       "path": "src/plugins/loader.mjs",
@@ -707,8 +712,8 @@
     },
     {
       "path": "src/plugins/runtime/codex-cli-runtime.mjs",
-      "sha256": "65ff495e1187fcfa41f05ae5225fb25b7f53634c85517d4d80efd5a7ee8603de",
-      "size": 18698
+      "sha256": "41b58bda78d92a5816e6a7ecee7f1247c63d85d89b48d3dba915cd38fc7e967d",
+      "size": 18925
     },
     {
       "path": "src/plugins/runtime/codex-runtime.mjs",
@@ -717,8 +722,8 @@
     },
     {
       "path": "src/plugins/runtime/execution-policy.mjs",
-      "sha256": "4f8865d555cb47ecba2f7e5eb1d9d53bff1d3d41a0311b58f9f08f1db3f67a06",
-      "size": 3485
+      "sha256": "f9ad85a3aee702fba25c2171600ba1b7a710f819b89a676bf36d7b008a843818",
+      "size": 4104
     },
     {
       "path": "src/plugins/runtime/in-memory-runtime.mjs",
@@ -837,8 +842,8 @@
     },
     {
       "path": "src/registry/project-registry.mjs",
-      "sha256": "1f723a6e5254b95d95d3eb02b567dc1cd865b78f09ded3ee6fd6f72db63f5e89",
-      "size": 7876
+      "sha256": "b24b67f353252ebc2c7d87e5a69f7d0e833bd49c94a6e1af2e43966c63f6467d",
+      "size": 8076
     },
     {
       "path": "src/release-identity.mjs",
@@ -871,7 +876,7 @@
       "size": 3735
     }
   ],
-  "packageDigest": "921523b1daab7b90e5dd5439368792b6355ab2aebca077d8aa472dd6d104555d",
+  "packageDigest": "e730c6d90b7f717bd57194aaad7c05eed8383e1d9a538301864339451ea92ac9",
   "metadataFiles": [
     "release-manifest.json",
     "sbom.spdx.json"

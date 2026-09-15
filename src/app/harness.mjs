@@ -3,11 +3,12 @@ import { atomicWriteJson } from '../kernel/atomic-io.mjs';
 import { AuthorityStore } from '../kernel/authority-store.mjs';
 import { EvidenceStore } from '../kernel/evidence-store.mjs';
 import { buildDispatchPacket, HarnessKernel } from '../kernel/kernel.mjs';
-import { digestJson } from '../canonical.mjs';
+import { digestJson, sha256 } from '../canonical.mjs';
 import { assert } from '../errors.mjs';
 import { PluginHost } from '../plugins/host.mjs';
 import { createConflictScheduler } from '../plugins/scheduler/conflict-scheduler.mjs';
 import { createJsonCodec } from '../plugins/codec/json-codec.mjs';
+import { AGENT_PROMPT_CONTRACT_VERSION, createAgentPromptCodec, REFERENCE_AGENT_PROMPT_CODEC_MANIFEST } from '../plugins/codec/agent-prompt-codec.mjs';
 import { createStaticModelRouter } from '../plugins/model/static-router.mjs';
 import { createAuthorityStoragePlugin } from '../plugins/storage/authority-storage.mjs';
 import { featureDeliveryProfile } from '../profiles/feature-delivery.mjs';
@@ -31,6 +32,7 @@ export const defaultDataRoot = (controlRoot = harnessControlRoot()) => resolve(c
 const manifests = Object.freeze({
   scheduler: { id: 'reference-conflict-scheduler', kind: 'scheduler', version: '1.0.0', capabilities: ['feature-dag', 'conflict-graph', 'lane-fairness'], permissions: [] },
   codec: { id: 'reference-json-codec', kind: 'codec', version: '1.0.0', capabilities: ['json', 'structured-result'], permissions: [] },
+  promptCodec: REFERENCE_AGENT_PROMPT_CODEC_MANIFEST,
   model: { id: 'reference-static-model-router', kind: 'model-router', version: '1.0.0', capabilities: ['capability-route', 'risk-route'], permissions: [] },
   storage: { id: 'reference-file-storage', kind: 'storage-provider', version: '1.0.0', capabilities: ['expected-revision', 'idempotency', 'atomic-write', 'recovery'], permissions: ['state.write'] },
 });
@@ -51,6 +53,7 @@ export const createHarness = async ({ controlRoot: controlRootInput, dataRoot: d
   const pluginHost = new PluginHost({ allowedPermissions: allowedPluginPermissions });
   pluginHost.register(manifests.scheduler, createConflictScheduler({ manifest: manifests.scheduler }));
   pluginHost.register(manifests.codec, createJsonCodec({ manifest: manifests.codec }));
+  pluginHost.register(manifests.promptCodec, createAgentPromptCodec({ manifest: manifests.promptCodec }));
   pluginHost.register(manifests.model, createStaticModelRouter({ manifest: manifests.model, routes: [] }));
   pluginHost.register(manifests.storage, createAuthorityStoragePlugin({ manifest: manifests.storage, store: authorityStore }));
   const projectRegistry = new ProjectRegistry({ root: authorityStore.root, controlRoot, now, strictIdentity: strictProjectIdentity });
@@ -83,6 +86,24 @@ export const createHarness = async ({ controlRoot: controlRootInput, dataRoot: d
     },
     snapshot() { return pluginHost.snapshot(); },
   });
+
+  const compileDispatchPrompt = async (state, dispatch) => {
+    const feature = dispatch.featureSnapshot ?? state.features.find(item => item.id === dispatch.featureId);
+    const packet = buildDispatchPacket(state, dispatch, feature);
+    assert(digestJson(packet) === dispatch.packetDigest, 'PACKET_DIGEST_MISMATCH', 'Persisted Dispatch no longer matches its packet.');
+    const binding = dispatch.execution?.prompt;
+    assert(binding?.pluginId && binding?.pluginVersion && binding?.contractVersion, 'AGENT_PROMPT_BINDING_REQUIRED', 'Dispatch requires an exact Prompt Codec and contract binding.');
+    const codec = pluginHost.get(binding.pluginId, 'codec');
+    assert(codec.manifest.capabilities.includes('agent-prompt'), 'AGENT_PROMPT_CODEC_REQUIRED', `Codec ${binding.pluginId} does not provide agent-prompt capability.`);
+    assert(codec.manifest.version === binding.pluginVersion, 'AGENT_PROMPT_CODEC_VERSION_MISMATCH', 'Installed Prompt Codec version does not match the immutable Dispatch binding.');
+    const compiled = await pluginHost.invoke(binding.pluginId, 'compilePrompt', packet);
+    const prompt = compiled.payload;
+    assert(compiled.pluginId === binding.pluginId && compiled.pluginVersion === binding.pluginVersion, 'AGENT_PROMPT_CODEC_RECEIPT_MISMATCH', 'Prompt compilation Receipt does not match the bound Prompt Codec.');
+    assert(prompt.contractVersion === binding.contractVersion && prompt.codecPluginId === binding.pluginId && prompt.codecPluginVersion === binding.pluginVersion, 'AGENT_PROMPT_CONTRACT_BINDING_MISMATCH', 'Generated Prompt does not match the Dispatch Prompt Contract binding.');
+    assert(prompt.packetDigest === dispatch.packetDigest, 'AGENT_PROMPT_PACKET_DIGEST_MISMATCH', 'Generated Prompt is not bound to the immutable Dispatch packet.');
+    assert(typeof prompt.text === 'string' && prompt.text.length > 0 && sha256(prompt.text) === prompt.promptDigest, 'AGENT_PROMPT_DIGEST_MISMATCH', 'Generated Prompt content does not match its digest.');
+    return { packet, prompt: structuredClone(prompt) };
+  };
 
   const api = {
     dataRoot: authorityStore.root,
@@ -255,6 +276,12 @@ export const createHarness = async ({ controlRoot: controlRootInput, dataRoot: d
         runtimeManifest = pluginHost.get(runtimePluginId, 'agent-runtime').manifest;
         runtimePolicy = assertAgentRuntimeCompatible({ project, manifest: runtimeManifest });
       }
+      const promptCodecPluginId = project.policy?.promptCodecPlugin ?? null;
+      assert(promptCodecPluginId, 'PROJECT_PROMPT_CODEC_REQUIRED', `Project ${projectId} requires an explicit Prompt Codec.`);
+      assert(input.promptCodecPluginId === undefined || input.promptCodecPluginId === promptCodecPluginId, 'PROJECT_PROMPT_CODEC_OVERRIDE_DENIED', 'Dispatch cannot override the Prompt Codec pinned by the Project Descriptor.');
+      const promptCodecManifest = pluginHost.get(promptCodecPluginId, 'codec').manifest;
+      assert(promptCodecManifest.capabilities.includes('agent-prompt'), 'AGENT_PROMPT_CODEC_REQUIRED', `Codec ${promptCodecPluginId} does not provide agent-prompt capability.`);
+      const promptBinding = { pluginId: promptCodecManifest.id, pluginVersion: promptCodecManifest.version, contractVersion: AGENT_PROMPT_CONTRACT_VERSION };
       const configuredLimit = resolveConcurrencyLimit(project.policy?.maxConcurrency, project.policy?.maxConcurrency === AUTO_CONCURRENCY ? AUTO_CONCURRENCY_LIMIT : 1);
       const requestedLimit = resolveConcurrencyLimit(input.maxConcurrency, configuredLimit);
       const schedulingLimit = runtimeManifest?.capabilities.includes('workspace-shared') ? 1 : requestedLimit;
@@ -264,7 +291,10 @@ export const createHarness = async ({ controlRoot: controlRootInput, dataRoot: d
       const visibleHeartbeatTimeoutMs = Number(project.policy?.visibleHeartbeatTimeoutMs ?? 120000);
       if (runtimePolicy.mode === 'conversation-visible') assert(Number.isFinite(visibleHeartbeatTimeoutMs) && visibleHeartbeatTimeoutMs > 0, 'VISIBLE_AGENT_HEARTBEAT_TIMEOUT_INVALID', 'Visible Agent heartbeat timeout must be a positive number of milliseconds.');
       const scheduledInput = { ...input, maxConcurrency: schedulingLimit, runtimePluginId, runtimeRequirements: { mode: runtimePolicy.mode, userVisible: runtimePolicy.userVisible, hostOrchestrated: runtimePolicy.hostOrchestrated, ...(runtimePolicy.mode === 'conversation-visible' ? { heartbeatTimeoutMs: visibleHeartbeatTimeoutMs } : {}) }, sourceSnapshotRef: snapshotEvidence.ref };
-      if (input.candidateFeatureIds) return kernel.schedule(projectId, runId, scheduledInput, command);
+      if (input.candidateFeatureIds) {
+        const executionByFeatureId = Object.fromEntries(input.candidateFeatureIds.map(featureId => [featureId, { prompt: structuredClone(promptBinding) }]));
+        return kernel.schedule(projectId, runId, { ...scheduledInput, executionByFeatureId }, command);
+      }
       const activeFeatureIds = [...new Set([...state.leases.filter(lease => ['requested', 'active'].includes(lease.status)).map(lease => lease.featureId), ...state.dispatches.filter(dispatch => ['requested', 'assigned'].includes(dispatch.status)).map(dispatch => dispatch.featureId)])];
       const strategy = await pluginHost.invoke(input.schedulerPluginId ?? manifests.scheduler.id, 'select', { revision: state.revision, features: state.features, activeFeatureIds, limit: schedulingLimit, deniedFeatureIds: [] });
       const executionByFeatureId = {};
@@ -273,7 +303,7 @@ export const createHarness = async ({ controlRoot: controlRootInput, dataRoot: d
       if (toolBrokerPluginId) pluginHost.get(toolBrokerPluginId, 'tool-broker');
       for (const featureId of strategy.payload.featureIds) {
         const feature = state.features.find(item => item.id === featureId);
-        const execution = runtimePolicy ? { runtime: { mode: runtimePolicy.mode, userVisible: runtimePolicy.userVisible, hostOrchestrated: runtimePolicy.hostOrchestrated } } : {};
+        const execution = { prompt: structuredClone(promptBinding), ...(runtimePolicy ? { runtime: { mode: runtimePolicy.mode, userVisible: runtimePolicy.userVisible, hostOrchestrated: runtimePolicy.hostOrchestrated } } : {}) };
         if (modelRouterPluginId) {
           const request = { featureId, role: feature.ownerRole, capabilities: feature.metadata.requiredCapabilities ?? [], risk: Number(feature.metadata.risk ?? 0) };
           const route = await pluginHost.invoke(modelRouterPluginId, 'route', { ...request, requestDigest: digestJson(request) });
@@ -294,23 +324,19 @@ export const createHarness = async ({ controlRoot: controlRootInput, dataRoot: d
       const manifest = pluginHost.get(runtimePluginId, 'agent-runtime').manifest;
       const runtimePolicy = assertAgentRuntimeCompatible({ project, manifest });
       assert(!runtimePolicy.hostOrchestrated, 'VISIBLE_AGENT_HOST_REQUIRED', `Runtime ${runtimePluginId} must be started by the interactive host as a visible child Agent.`);
-      const feature = dispatch.featureSnapshot ?? state.features.find(item => item.id === dispatch.featureId);
-      const packet = buildDispatchPacket(state, dispatch, feature);
-      assert(digestJson(packet) === dispatch.packetDigest, 'PACKET_DIGEST_MISMATCH', 'Persisted Dispatch no longer matches its packet.');
-      const runtime = await pluginHost.invoke(runtimePluginId, 'spawn', packet);
+      const { packet, prompt } = await compileDispatchPrompt(state, dispatch);
+      const runtime = await pluginHost.invoke(runtimePluginId, 'spawn', packet, { prompt });
       const payload = runtime.payload;
       const bound = await api.bindDispatch(projectId, runId, { dispatchId, agentId: payload.agentId, runtimeReceipt: payload.transportReceipt }, { expectedRevision: state.revision, commandId });
-      return { packet, runtimeReceipt: runtime, lease: bound.result.lease, state: bound.state };
+      return { packet, prompt, runtimeReceipt: runtime, lease: bound.result.lease, state: bound.state };
     },
 
     async readDispatchPacket(projectId, runId, dispatchId) {
       const state = await authorityStore.read(projectId, runId);
       const dispatch = state.dispatches.find(item => item.dispatchId === dispatchId);
       assert(dispatch?.status === 'requested', 'DISPATCH_NOT_READABLE', `Dispatch is not awaiting a visible Agent: ${dispatchId}`);
-      const feature = dispatch.featureSnapshot ?? state.features.find(item => item.id === dispatch.featureId);
-      const packet = buildDispatchPacket(state, dispatch, feature);
-      assert(digestJson(packet) === dispatch.packetDigest, 'PACKET_DIGEST_MISMATCH', 'Persisted Dispatch no longer matches its packet.');
-      return { dispatch: structuredClone(dispatch), packet };
+      const { packet, prompt } = await compileDispatchPrompt(state, dispatch);
+      return { dispatch: structuredClone(dispatch), packet, prompt };
     },
 
     async bindDispatch(projectId, runId, input, command) {
@@ -323,13 +349,16 @@ export const createHarness = async ({ controlRoot: controlRootInput, dataRoot: d
       const runtimePolicy = assertRuntimeTransportReceipt({ project, manifest, receipt: input.runtimeReceipt });
       let runtimeReceipt = structuredClone(input.runtimeReceipt);
       if (runtimePolicy.mode === 'conversation-visible') {
+        const { prompt } = await compileDispatchPrompt(state, dispatch);
         assert(runtimeReceipt.agentId === input.agentId, 'RUNTIME_RECEIPT_AGENT_MISMATCH', 'Runtime Receipt Agent identity does not match the requested Lease binding.');
         assert(runtimeReceipt.dispatchId === dispatch.dispatchId, 'RUNTIME_RECEIPT_DISPATCH_MISMATCH', 'Runtime Receipt Dispatch identity does not match the managed Dispatch.');
         assert(runtimeReceipt.packetDigest === dispatch.packetDigest, 'PACKET_DIGEST_MISMATCH', 'Runtime Receipt does not match the immutable Dispatch packet.');
+        assert(runtimeReceipt.prompt?.codecPluginId === prompt.codecPluginId && runtimeReceipt.prompt?.codecPluginVersion === prompt.codecPluginVersion && runtimeReceipt.prompt?.contractVersion === prompt.contractVersion, 'AGENT_PROMPT_RECEIPT_IDENTITY_MISMATCH', 'Visible Runtime Receipt does not match the generated Prompt Contract identity.');
+        assert(runtimeReceipt.prompt?.packetDigest === prompt.packetDigest && runtimeReceipt.prompt?.promptDigest === prompt.promptDigest, 'AGENT_PROMPT_RECEIPT_DIGEST_MISMATCH', 'Visible Runtime Receipt is not bound to the exact generated Prompt and Dispatch packet.');
         assert(typeof agentAdapter?.verifyVisibleLease === 'function', 'VISIBLE_AGENT_HOST_ATTESTOR_REQUIRED', 'Conversation-visible Lease binding requires a trusted host adapter that can verify the visible child Agent.');
-        const attestation = await agentAdapter.verifyVisibleLease({ project: structuredClone(project), dispatch: structuredClone(dispatch), agentId: input.agentId, runtimeReceipt: structuredClone(runtimeReceipt) });
+        const attestation = await agentAdapter.verifyVisibleLease({ project: structuredClone(project), dispatch: structuredClone(dispatch), prompt: structuredClone(prompt), agentId: input.agentId, runtimeReceipt: structuredClone(runtimeReceipt) });
         assert(attestation?.verified === true, 'VISIBLE_AGENT_HOST_ATTESTATION_REJECTED', 'The interactive host did not verify the visible child Agent Lease.');
-        assert(attestation.agentId === input.agentId && attestation.dispatchId === dispatch.dispatchId && attestation.packetDigest === dispatch.packetDigest, 'VISIBLE_AGENT_HOST_ATTESTATION_MISMATCH', 'Host attestation is not bound to this Agent, Dispatch, and packet.');
+        assert(attestation.agentId === input.agentId && attestation.dispatchId === dispatch.dispatchId && attestation.packetDigest === dispatch.packetDigest && attestation.promptDigest === prompt.promptDigest, 'VISIBLE_AGENT_HOST_ATTESTATION_MISMATCH', 'Host attestation is not bound to this Agent, Dispatch, packet, and generated Prompt.');
         runtimeReceipt.hostAttestation = { ...structuredClone(attestation), verified: true };
       }
       return kernel.bindLease(projectId, runId, { dispatchId: dispatch.dispatchId, agentId: input.agentId, packetDigest: dispatch.packetDigest, runtimeReceipt }, command);

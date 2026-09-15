@@ -56,7 +56,7 @@ node bin/agent-harness.mjs run schedule --project <id> --run <id>
 node bin/agent-harness.mjs run dispatch --project <id> --run <id> --dispatch <dispatch-id>
 ```
 
-Plan 中的 Run ID、Feature graph、Profile config、Runtime、Gate plan 和 protected-operation 列表由已安装 Extension 的 compiler 产生，模型和 Hook 不得自行构造。Codex Operator 使用宿主原生 multi-agent delegation 创建可见子 Agent，并由可信宿主适配器证明 Agent、Dispatch、Packet 与 inspect reference 后绑定 Lease；原始 `run bind` JSON 不能充当证明。运行期间至少记录一次新鲜 heartbeat，最后提交结构化结果。没有可见委派或可信绑定能力时返回 `attention-required`；禁止调用 `codex exec`、后台 Agent CLI、`run execute` 或 `lifecycle execute` 兜底。
+Plan 中的 Run ID、Feature graph、Profile config、Runtime、Gate plan 和 protected-operation 列表由已安装 Extension 的 compiler 产生，模型和 Hook 不得自行构造。`run dispatch` 同时返回不可变 Packet 与由 Descriptor 固定的 Prompt Codec 确定性生成的完整 Prompt。Codex Operator 必须把 `prompt.text` 原样交给宿主原生 multi-agent delegation，不能自行串联、改写或补充提示词；可信宿主适配器证明 Agent、Dispatch、Packet 摘要、Prompt 摘要与 inspect reference 后才能绑定 Lease，原始 `run bind` JSON 不能充当证明。运行期间至少记录一次新鲜 heartbeat，最后提交结构化结果。没有 Prompt 生成、可见委派或可信绑定能力时返回 `attention-required`；禁止即兴拼 Prompt、调用 `codex exec`、后台 Agent CLI、`run execute` 或 `lifecycle execute` 兜底。
 
 只有 Project Descriptor 明确声明 `agentExecutionMode: headless`，且用户明确请求 CI/无人值守执行时，才可使用阻塞 Coordinator：
 
@@ -114,7 +114,7 @@ Hook 只解析单行、最长 512 字符、至多一个预设参数的信封，�
 CLI 的底层问题登记入口为 `issue record --input <json|-> --command-id <id>`。稳定故障码可通过 `correlation` 生成与观察时间无关的 incident fingerprint。不可变 Intake 写入后，使用 `issue triage` 另行记录带 revision、批准 Decision、关系和 resolution Evidence 的分诊状态；`issue list`/`issue status` 都是零写入查询。初始化类故障归类为 `deployment-incident`，不伪造 Defect Bundle 所需的 Descriptor 或 Authority 身份。
 
 1. `run status` 读取 revision、epoch、generation、Feature、Lease 和 finding。
-2. `conversation-visible` 是交互式默认：`run schedule` 生成 Dispatch，`run dispatch` 读取不可变 Packet，当前宿主创建可见子 Agent 后通过可信宿主适配器绑定；没有适配器时禁止改用原始 `run bind`。`run execute` 仅供用户请求与 Descriptor 双重显式 headless。
+2. `conversation-visible` 是交互式默认：`run schedule` 生成绑定 Prompt Codec/Contract 的 Dispatch，`run dispatch` 读取不可变 Packet 和标准生成 Prompt，当前宿主原样委派 Prompt 创建可见子 Agent后，再通过同时绑定 Packet/Prompt 摘要的可信宿主适配器绑定；没有生成 Prompt 或适配器时禁止临时写 Prompt、改用原始 `run bind`。`run execute` 仅供用户请求与 Descriptor 双重显式 headless。
 3. `run gates --scope final --fresh` 从 Project Descriptor 执行确定性最终 Gate，并始终把启动、输出和结束事件显示在可观察终端；无观察器时不启动进程。
 4. 可见子 Agent 运行时，Operator 持续报告任务身份和状态并定期写 heartbeat；Agent 输出先进入 Evidence，再 submit。
 5. Gate、finding 和 Decision 分别记录，不用聊天文本替代 Authority。

@@ -28,7 +28,7 @@ export const makeFixture = async ({ projectId = 'project', profiles = ['feature-
     const harness = await createHarness({ dataRoot, releaseIdentity, strictProjectIdentity: false, extensions: [...profileExtensions, ...extensions], agentAdapter });
     const testRuntimeManifest = { id: 'test-runtime', kind: 'agent-runtime', version: '1.0.0', capabilities: ['spawn', 'wait', 'send', 'heartbeat', 'interrupt', 'headless'], permissions: [] };
     harness.registerPlugin(testRuntimeManifest, createInMemoryRuntime({ manifest: testRuntimeManifest, handler: async () => ({ status: 'completed', summary: 'test runtime completed' }) }));
-    await harness.projectRegistry.register({ id: projectId, workspace: { root: workspace }, profiles, policy: { agentExecutionMode: 'headless', runtimePlugins: ['test-runtime'], defaultRuntimePlugin: 'test-runtime', ...policy }, gateRecipes, artifactProviders }, { commandId: `register-${projectId}` });
+    await harness.projectRegistry.register({ id: projectId, workspace: { root: workspace }, profiles, policy: { agentExecutionMode: 'headless', runtimePlugins: ['test-runtime'], defaultRuntimePlugin: 'test-runtime', promptCodecPlugin: 'reference-agent-prompt-codec', ...policy }, gateRecipes, artifactProviders }, { commandId: `register-${projectId}` });
     return { root, workspace, dataRoot, harness, projectId, cleanup };
   } catch (error) {
     await cleanup();

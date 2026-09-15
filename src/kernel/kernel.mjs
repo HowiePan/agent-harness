@@ -96,6 +96,7 @@ export class HarnessKernel {
   async schedule(projectId, runId, input, command) {
     assert(input.runtimePluginId, 'DEFAULT_RUNTIME_REQUIRED', 'Scheduling requires an explicit Runtime identity.');
     assert(['conversation-visible', 'headless'].includes(input.runtimeRequirements?.mode), 'RUNTIME_REQUIREMENTS_REQUIRED', 'Scheduling requires explicit Agent execution requirements.');
+    assert(Object.values(input.executionByFeatureId ?? {}).every(execution => execution.prompt?.pluginId && execution.prompt?.pluginVersion && execution.prompt?.contractVersion), 'AGENT_PROMPT_BINDING_REQUIRED', 'Scheduling requires an exact Prompt Codec and contract binding for every candidate Feature.');
     const snapshotEvidence = await this.evidenceStore.read(input.sourceSnapshotRef);
     return this.authorityStore.transact(projectId, runId, { expectedRevision: command.expectedRevision, commandId: command.commandId, payload: input }, state => {
       assert(snapshotEvidence.metadata.projectId === projectId && snapshotEvidence.metadata.runId === runId && snapshotEvidence.metadata.epoch === state.epoch && snapshotEvidence.metadata.generation === state.generation && snapshotEvidence.metadata.sourceDigest === state.sourceDigest, 'SOURCE_SNAPSHOT_CONTEXT_MISMATCH', 'Scheduling requires a workspace snapshot bound to the current Authority source.');
@@ -134,7 +135,10 @@ export class HarnessKernel {
         assert(typeof input.runtimeReceipt.visibility.surface === 'string' && input.runtimeReceipt.visibility.surface.length > 0, 'USER_VISIBLE_RUNTIME_SURFACE_REQUIRED', 'A conversation-visible Dispatch requires a visible surface kind.');
         assert(typeof input.runtimeReceipt.visibility.inspectRef === 'string' && input.runtimeReceipt.visibility.inspectRef.length > 0, 'USER_VISIBLE_RUNTIME_INSPECT_REF_REQUIRED', 'A conversation-visible Dispatch requires an inspectable task reference.');
         assert(input.runtimeReceipt.agentId === input.agentId && input.runtimeReceipt.dispatchId === dispatch.dispatchId && input.runtimeReceipt.packetDigest === dispatch.packetDigest, 'USER_VISIBLE_RUNTIME_BINDING_MISMATCH', 'Visible Runtime Receipt must bind the Agent, Dispatch, and immutable packet.');
+        assert(input.runtimeReceipt.prompt?.codecPluginId === dispatch.execution?.prompt?.pluginId && input.runtimeReceipt.prompt?.codecPluginVersion === dispatch.execution?.prompt?.pluginVersion && input.runtimeReceipt.prompt?.contractVersion === dispatch.execution?.prompt?.contractVersion, 'AGENT_PROMPT_RECEIPT_IDENTITY_MISMATCH', 'Visible Runtime Receipt must bind the immutable Prompt Codec and contract identity.');
+        assert(input.runtimeReceipt.prompt?.packetDigest === dispatch.packetDigest && /^[a-f0-9]{64}$/.test(input.runtimeReceipt.prompt?.promptDigest ?? ''), 'AGENT_PROMPT_RECEIPT_DIGEST_MISMATCH', 'Visible Runtime Receipt must bind the exact generated Prompt and Dispatch packet.');
         assert(input.runtimeReceipt.hostAttestation?.verified === true, 'VISIBLE_AGENT_HOST_ATTESTATION_REQUIRED', 'A conversation-visible Dispatch requires trusted host attestation.');
+        assert(input.runtimeReceipt.hostAttestation.promptDigest === input.runtimeReceipt.prompt.promptDigest, 'VISIBLE_AGENT_HOST_ATTESTATION_MISMATCH', 'Visible host attestation must bind the exact generated Prompt.');
       }
       assert(input.packetDigest === dispatch.packetDigest, 'PACKET_DIGEST_MISMATCH', 'Runtime receipt does not match the managed Dispatch packet.');
       const feature = state.features.find(item => item.id === dispatch.featureId);

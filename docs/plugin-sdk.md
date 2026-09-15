@@ -12,7 +12,7 @@ Profile、一个或多个插件工厂、声明式 `commandManifest`、Lifecycle 
 | Agent Runtime | 启动、等待、心跳、中断执行载体 | user-visible conversation、headless CLI/process、callback、HTTP、in-memory |
 | Model Router | 基于 capability 选择模型 | static capability router |
 | Tool Broker | 在授权根内执行受限工具 | local workspace broker |
-| Prompt/Result Codec | 编码 Dispatch、解码业务 Result | JSON codec |
+| Prompt/Result Codec | 将不可变 Dispatch 确定性编译为完整 Agent Prompt、解码业务 Result，并返回内容摘要 | agent-prompt codec、JSON codec |
 | Gate Executor | 执行确定性检查并返回 Receipt | process gate |
 | Artifact Provider | 解析并固定外部 Artifact 身份 | local artifact |
 | Storage Provider | 提供外部 Authority/Evidence 存储 | local atomic storage |
@@ -43,7 +43,7 @@ Model Router 的 `route` Intent 会连同插件 ID、版本和请求摘要固化
 
 Runtime 必须准确声明工作区能力：`workspace-shared` 会被参考 Coordinator 收紧为单物理执行槽；只有能提供独立 workspace，并在合并时验证基线的 Runtime 才能声明 `workspace-isolated`。参考 `codex-isolated-runtime` 使用独立目录、完整 changed-files 对账和逐文件乐观合并；其他 worktree、容器或远端 Runtime 必须满足同样的不变量。不得仅为提高并发数伪报隔离能力。
 
-生产 Project Descriptor 必须显式声明 `policy.agentExecutionMode`。`conversation-visible` Runtime 必须声明 `user-visible` 与 `host-orchestrated`、申请 `agent.conversation`、禁止 `process.spawn`，并通过可信宿主适配器把 Lease Receipt 的 `agentId`、`dispatchId`、`packetDigest`、`visibility.mode`、surface 和 inspect reference 共同证明；提交要求新鲜 heartbeat。进程型 Agent Runtime 必须声明 `headless`，只能在用户请求与 Project Descriptor 双重显式授权下选择，不能从 Runtime ID 推断。宿主不可用时必须返回 attention-required，禁止选择 CLI Runtime 或原始 Receipt 兜底。
+生产 Project Descriptor 必须显式声明 `policy.agentExecutionMode` 与 `policy.promptCodecPlugin`。每个 Dispatch 固定 Prompt Codec ID/版本和 Prompt Contract 版本；Codec 从不可变 Packet 确定性生成完整 Prompt，并产生 `packetDigest` 与 `promptDigest`。Operator/Runtime 只能原样传输该文本，禁止临时组织、改写、增删或翻译。`conversation-visible` Runtime 必须声明 `user-visible` 与 `host-orchestrated`、申请 `agent.conversation`、禁止 `process.spawn`，并通过可信宿主适配器把 Lease Receipt 的 `agentId`、`dispatchId`、两个摘要、Prompt 身份、`visibility.mode`、surface 和 inspect reference 共同证明；提交要求新鲜 heartbeat。进程型 Agent Runtime 必须声明 `headless`，只能在用户请求与 Project Descriptor 双重显式授权下选择，不能从 Runtime ID 推断。Prompt 生成或宿主不可用时必须返回 attention-required，禁止即兴拼 Prompt、选择 CLI Runtime 或用原始 Receipt 兜底。
 
 所有启动本地进程的 headless Runtime/Gate 还必须声明 `managed-outputs`、每个输出目录的字节/文件预算及保留策略。Host 会拒绝未声明输出的进程插件；Controller 负责目录分配、运行中超限终止和摘要绑定的清理 Receipt。确定性 Gate 在 spawn 前要求实时观察器，并向 Operator 发布启动、输出/进度和结束事件。`os-sandbox` 可作为独立 Provider 插入；策略为 `required` 时缺少 Provider 必须 fail-closed。完整合同见 [插件执行输出、预算与 OS 沙箱](execution-control.md)。
 

@@ -135,7 +135,7 @@ test('doctor reports lifecycle readiness only when all persisted roots and regis
   const exactDigest = (await loadReleaseIdentity()).artifactDigest;
   const extensionBody = { protocolVersion: '1.0', revision: 0, extensions: [], commands: {} };
   await writeFile(resolve(registryDirectory, 'extensions.json'), `${JSON.stringify({ ...extensionBody, registryDigest: digestJson(extensionBody) })}\n`, 'utf8');
-  const descriptorInput = { id: 'fixture-project', harness: { version: '1.0.0', artifactDigest: exactDigest }, workspace: { root: resolve(projectRoot, 'test') }, profiles: ['feature-delivery'], extensions: [], policy: { agentExecutionMode: 'headless', defaultRuntimePlugin: 'fixture-runtime', runtimePlugins: ['fixture-runtime'] }, gateRecipes: [], artifactProviders: [] };
+  const descriptorInput = { id: 'fixture-project', harness: { version: '1.0.0', artifactDigest: exactDigest }, workspace: { root: resolve(projectRoot, 'test') }, profiles: ['feature-delivery'], extensions: [], policy: { agentExecutionMode: 'headless', defaultRuntimePlugin: 'fixture-runtime', runtimePlugins: ['fixture-runtime'], promptCodecPlugin: 'reference-agent-prompt-codec' }, gateRecipes: [], artifactProviders: [] };
   const commandReceipt = { commandId: 'fixture-register', payloadDigest: digestJson(descriptorInput), revision: 1, committedAt: '2026-09-13T00:00:00.000Z', authorityDecision: null };
   const descriptorBody = { ...descriptorInput, protocolVersion: '1.0', revision: 1, updatedAt: '2026-09-13T00:00:00.000Z', commands: { 'fixture-register': commandReceipt } };
   await writeFile(resolve(projectDirectory, 'fixture-project.json'), `${JSON.stringify({ ...descriptorBody, descriptorDigest: digestJson(descriptorBody) })}\n`, 'utf8');

@@ -4,7 +4,18 @@ import { dirname, resolve } from 'node:path';
 import { access, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { adaptCodexStructuredOutputSchema, createCodexCliRuntime, resolveCodexExecutionPolicy, validateCodexStructuredOutputSchema } from '../src/plugins/runtime/codex-cli-runtime.mjs';
 import { businessResultFromRuntime } from '../src/coordinator/run-coordinator.mjs';
+import { compileAgentPrompt } from '../src/plugins/codec/agent-prompt-codec.mjs';
 import { makeFixture } from './test-support.mjs';
+
+const runtimePacket = (fixture, dispatchId, extra = {}) => ({
+  protocolVersion: '1.0',
+  projectId: fixture.projectId,
+  dispatchId,
+  feature: { id: 'probe', allowedPaths: ['src'], forbiddenPaths: [] },
+  execution: { prompt: { pluginId: 'reference-agent-prompt-codec', pluginVersion: '1.0.0', contractVersion: '1.0' } },
+  ...extra,
+});
+const spawnRuntime = (runtime, packet) => runtime.spawn(packet, { prompt: compileAgentPrompt(packet) });
 
 test('Codex CLI execution policy emits one mutually exclusive approval or sandbox mode', () => {
   assert.deepEqual(resolveCodexExecutionPolicy({ sandbox: 'workspace-write', approveForMe: true }), {
@@ -43,7 +54,11 @@ test('Codex CLI Runtime rejects an invalid output Schema before spawning a proce
   const schemaPath = resolve(fixture.root, 'invalid-output-schema.json');
   await writeFile(schemaPath, JSON.stringify({ $schema: 'https://json-schema.org/draft/2020-12/schema', $id: 'urn:invalid', type: 'object', properties: {}, required: [], additionalProperties: true }), 'utf8');
   const runtime = createCodexCliRuntime({ resolveProject: id => fixture.harness.projectRegistry.get(id), runtimeRoot: fixture.dataRoot, schemaPath, spawnProcess: () => { throw new Error('must not spawn'); } });
-  await assert.rejects(() => runtime.spawn({ projectId: fixture.projectId, dispatchId: 'dispatch-invalid-schema', feature: { id: 'probe', allowedPaths: ['src'], forbiddenPaths: [] } }), error => error.code === 'CODEX_OUTPUT_SCHEMA_INVALID');
+  const packet = runtimePacket(fixture, 'dispatch-missing-prompt');
+  await assert.rejects(() => runtime.spawn(packet), error => error.code === 'AGENT_PROMPT_CONTRACT_BINDING_MISMATCH');
+  const prompt = compileAgentPrompt(packet);
+  await assert.rejects(() => runtime.spawn(packet, { prompt: { ...prompt, text: `${prompt.text}\nmodified` } }), error => error.code === 'AGENT_PROMPT_DIGEST_MISMATCH');
+  await assert.rejects(() => spawnRuntime(runtime, runtimePacket(fixture, 'dispatch-invalid-schema')), error => error.code === 'CODEX_OUTPUT_SCHEMA_INVALID');
   await assert.rejects(() => access(resolve(fixture.dataRoot, 'runtime')), error => error.code === 'ENOENT');
 });
 
@@ -53,9 +68,11 @@ test('Codex CLI Runtime uses non-interactive structured output and records trans
   const runtime = createCodexCliRuntime({ resolveProject: id => fixture.harness.projectRegistry.get(id), runtimeRoot: fixture.dataRoot, executable: process.execPath, executableArgs: [resolve('test/fixtures/codex-cli-probe.mjs')] });
   const executionWorkspace = resolve(fixture.root, 'execution-workspace');
   await mkdir(executionWorkspace, { recursive: true });
-  const spawned = await runtime.spawn({ projectId: fixture.projectId, dispatchId: 'dispatch-probe', workspace: { root: executionWorkspace }, feature: { id: 'probe', allowedPaths: ['src'], forbiddenPaths: [] } });
+  const spawned = await spawnRuntime(runtime, runtimePacket(fixture, 'dispatch-probe', { workspace: { root: executionWorkspace } }));
   assert.equal(spawned.payload.transportReceipt.workspaceRoot, executionWorkspace);
   assert.equal(spawned.payload.transportReceipt.approvalMode, 'approve-for-me');
+  assert.equal(spawned.payload.transportReceipt.prompt.codecPluginId, 'reference-agent-prompt-codec');
+  assert.match(spawned.payload.transportReceipt.prompt.promptDigest, /^[a-f0-9]{64}$/);
   const waited = await runtime.wait({ agentId: spawned.payload.agentId });
   assert.equal(waited.payload.status, 'completed');
   assert.equal(waited.payload.result.status, 'completed');
@@ -75,7 +92,7 @@ test('Codex CLI Runtime uses non-interactive structured output and records trans
   await assert.rejects(() => access(dirname(waited.payload.eventsPath)), error => error.code === 'ENOENT');
 
   const failingRuntime = createCodexCliRuntime({ resolveProject: id => fixture.harness.projectRegistry.get(id), runtimeRoot: fixture.dataRoot, spawnProcess: () => { throw new Error('synthetic spawn failure'); } });
-  await assert.rejects(() => failingRuntime.spawn({ projectId: fixture.projectId, dispatchId: 'failed-spawn', feature: { id: 'probe', allowedPaths: ['src'], forbiddenPaths: [] } }), /synthetic spawn failure/);
+  await assert.rejects(() => spawnRuntime(failingRuntime, runtimePacket(fixture, 'failed-spawn')), /synthetic spawn failure/);
   await assert.rejects(() => access(resolve(fixture.dataRoot, 'runtime', 'codex-cli')), error => error.code === 'ENOENT');
 });
 
@@ -88,7 +105,7 @@ test('Codex CLI Runtime preserves startup failure evidence instead of reporting 
     executable: process.execPath,
     executableArgs: ['-e', "process.stderr.write('synthetic Codex CLI startup failure'); process.exitCode = 2;"],
   });
-  const spawned = await runtime.spawn({ projectId: fixture.projectId, dispatchId: 'dispatch-startup-failure', feature: { id: 'probe', allowedPaths: ['src'], forbiddenPaths: [] } });
+  const spawned = await spawnRuntime(runtime, runtimePacket(fixture, 'dispatch-startup-failure'));
   const waited = await runtime.wait({ agentId: spawned.payload.agentId });
   assert.equal(waited.payload.status, 'failed');
   assert.equal(waited.payload.startupError.code, 'CODEX_CLI_STARTUP_FAILED');
@@ -111,7 +128,7 @@ test('Codex CLI Runtime surfaces provider schema failures ahead of missing resul
     executable: process.execPath,
     executableArgs: ['-e', `process.stdout.write(${JSON.stringify(event + '\n')}); process.exitCode = 1;`],
   });
-  const spawned = await runtime.spawn({ projectId: fixture.projectId, dispatchId: 'dispatch-provider-failure', feature: { id: 'probe', allowedPaths: ['src'], forbiddenPaths: [] } });
+  const spawned = await spawnRuntime(runtime, runtimePacket(fixture, 'dispatch-provider-failure'));
   const waited = await runtime.wait({ agentId: spawned.payload.agentId });
   assert.equal(waited.payload.providerError.code, 'CODEX_OUTPUT_SCHEMA_INVALID');
   assert.equal(waited.payload.providerError.failureClass, 'runtime-contract');

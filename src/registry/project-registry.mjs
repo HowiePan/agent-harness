@@ -32,6 +32,7 @@ export class ProjectRegistry {
     assert(['conversation-visible', 'headless'].includes(input.policy?.agentExecutionMode), 'PROJECT_AGENT_EXECUTION_MODE_REQUIRED', 'Project Descriptor must explicitly select conversation-visible or headless Agent execution.');
     assert(typeof input.policy?.defaultRuntimePlugin === 'string' && input.policy.defaultRuntimePlugin.length > 0, 'PROJECT_DEFAULT_RUNTIME_REQUIRED', 'Project Descriptor requires an explicit default Agent Runtime.');
     assert(Array.isArray(input.policy?.runtimePlugins) && input.policy.runtimePlugins.includes(input.policy.defaultRuntimePlugin), 'PROJECT_RUNTIME_ALLOWLIST_INVALID', 'Project Descriptor runtimePlugins must include its default Agent Runtime.');
+    assert(typeof input.policy?.promptCodecPlugin === 'string' && input.policy.promptCodecPlugin.length > 0, 'PROJECT_PROMPT_CODEC_REQUIRED', 'Project Descriptor requires an explicit Prompt Codec.');
     assert(input.workspace.rootSelector === undefined || input.workspace.rootSelector === 'git-worktree', 'PROJECT_WORKSPACE_SELECTOR_INVALID', 'Project Descriptor workspace rootSelector must be git-worktree when present.');
     assert(Array.isArray(input.extensions ?? []), 'PROJECT_EXTENSIONS_INVALID', 'Project Descriptor extensions must be an array.');
     const extensionIds = new Set();

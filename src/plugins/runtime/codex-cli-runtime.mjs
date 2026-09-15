@@ -2,12 +2,13 @@ import { readFile, writeFile } from 'node:fs/promises';
 import { spawn as nodeSpawn } from 'node:child_process';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { newId, sha256 } from '../../canonical.mjs';
+import { digestJson, newId, sha256 } from '../../canonical.mjs';
 import { assert } from '../../errors.mjs';
 import { assertSchemaDefinition } from '../../json-schema.mjs';
 import { envelope } from '../contracts.mjs';
 import { assertHarnessWritePath, temporaryEnvironment } from '../../write-boundary.mjs';
 import { createManagedOutputSession } from '../execution/managed-output.mjs';
+import { compileAgentPrompt } from '../codec/agent-prompt-codec.mjs';
 
 const CODEX_OUTPUTS = Object.freeze([
   Object.freeze({ id: 'temporary', retention: 'ephemeral', environment: ['TEMP', 'TMP', 'TMPDIR'], maxBytes: 256 * 1024 * 1024, maxFiles: 20_000 }),
@@ -97,15 +98,16 @@ export const resolveCodexExecutionPolicy = (config = {}) => {
   };
 };
 
-export const buildCodexPrompt = packet => `You are an execution Runtime controlled by Agent Harness.
+export const buildCodexPrompt = packet => compileAgentPrompt(packet).text;
 
-Complete exactly the supplied Feature inside the current workspace. Treat the Feature allowedPaths and forbiddenPaths as hard boundaries. Do not edit Harness Authority, Evidence, Dispatch, Lease, or Receipt data. Feature steps are ordered and share one logical attempt. For quality review Findings, report the affectedPaths, symbols, contracts, generatedOutputs, and conflictKeys needed to safely schedule independent repair Features. For normal development work, report followUpFeatures when the work decomposes into independent scoped tasks; each item must include its ID, acceptance, allowedPaths, forbiddenPaths, dependsOn, symbols, contracts, generatedOutputs, and conflictKeys.
-
-Return only the structured business result required by the provided JSON Schema. Include an accurate changedFiles array using workspace-relative forward-slash paths. If the Feature cannot be completed, return status "blocked" or "failed" with a stable failureClass and blocker summary. Do not claim completion without running the Feature acceptance checks.
-
-Dispatch packet:
-${JSON.stringify(packet, null, 2)}
-`;
+const assertGeneratedPrompt = (packet, prompt) => {
+  const binding = packet.execution?.prompt;
+  assert(binding?.pluginId && binding?.pluginVersion && binding?.contractVersion, 'AGENT_PROMPT_BINDING_REQUIRED', 'Codex Runtime requires the immutable Dispatch Prompt binding.');
+  assert(prompt?.codecPluginId === binding.pluginId && prompt?.codecPluginVersion === binding.pluginVersion && prompt?.contractVersion === binding.contractVersion, 'AGENT_PROMPT_CONTRACT_BINDING_MISMATCH', 'Generated Prompt does not match the Dispatch Prompt Contract binding.');
+  assert(prompt.packetDigest === digestJson(packet), 'AGENT_PROMPT_PACKET_DIGEST_MISMATCH', 'Generated Prompt is not bound to the immutable Dispatch packet.');
+  assert(typeof prompt.text === 'string' && prompt.text.length > 0 && prompt.promptDigest === sha256(prompt.text), 'AGENT_PROMPT_DIGEST_MISMATCH', 'Generated Prompt content does not match its digest.');
+  return prompt;
+};
 
 const parseEvents = text => text.split(/\r?\n/).filter(Boolean).flatMap(line => {
   try { return [JSON.parse(line)]; } catch { return []; }
@@ -147,7 +149,6 @@ export const createCodexCliRuntime = ({
   executableArgs = [],
   schemaPath = codexResultSchema,
   spawnProcess = nodeSpawn,
-  promptBuilder = buildCodexPrompt,
   manifest = CODEX_CLI_RUNTIME_MANIFEST,
   workspaceProvider = null,
 }) => {
@@ -162,10 +163,11 @@ export const createCodexCliRuntime = ({
     return { source: validatedSchema, provider: adaptCodexStructuredOutputSchema(validatedSchema) };
   };
   return {
-    async spawn(packet) {
+    async spawn(packet, { prompt } = {}) {
       const project = await resolveProject(packet.projectId);
       const config = project.policy?.runtimeConfigs?.[manifest.id] ?? {};
       assert((project.policy?.runtimePlugins ?? [manifest.id]).includes(manifest.id), 'PROJECT_RUNTIME_DENIED', `Project ${project.id} does not allow ${manifest.id}.`);
+      const generatedPrompt = assertGeneratedPrompt(packet, prompt);
       const executionPolicy = resolveCodexExecutionPolicy(config);
       const { sandbox, approvalMode } = executionPolicy;
       const { source: outputSchema, provider: providerOutputSchema } = await loadOutputSchema();
@@ -203,9 +205,9 @@ export const createCodexCliRuntime = ({
           child.on('close', (exitCode, signal) => settle({ exitCode, signal, error: null }));
         });
         const sandboxReceipt = { mode: sandbox, approvalMode, requested: true, applied: false, providerId: manifest.id };
-        tasks.set(agentId, { child, completion, stdout: () => stdout, stderr: () => stderr, lastMessagePath, eventsPath, packetDigest: packet.packetDigest ?? null, workspaceContext, result: null, outputSession, stopOutputMonitor, sandboxReceipt, outputSchemaDigest: sha256(JSON.stringify(outputSchema)) });
-        child.stdin?.end(promptBuilder(structuredClone(packet)));
-        return envelope(manifest, 'receipt', { operation: 'spawn', agentId, transportReceipt: { runtimePluginId: manifest.id, pid: child.pid ?? null, sandbox, approvalMode, managedOutputRoot: directory, managedOutputs: managedOutputs.outputs, workspaceRoot: executionRoot, sourceWorkspaceRoot: packet.workspace?.root ?? project.workspace.root, startedAt: new Date().toISOString() } });
+        tasks.set(agentId, { child, completion, stdout: () => stdout, stderr: () => stderr, lastMessagePath, eventsPath, packetDigest: generatedPrompt.packetDigest, promptDigest: generatedPrompt.promptDigest, workspaceContext, result: null, outputSession, stopOutputMonitor, sandboxReceipt, outputSchemaDigest: sha256(JSON.stringify(outputSchema)) });
+        child.stdin?.end(generatedPrompt.text);
+        return envelope(manifest, 'receipt', { operation: 'spawn', agentId, transportReceipt: { runtimePluginId: manifest.id, prompt: { contractVersion: generatedPrompt.contractVersion, codecPluginId: generatedPrompt.codecPluginId, codecPluginVersion: generatedPrompt.codecPluginVersion, packetDigest: generatedPrompt.packetDigest, promptDigest: generatedPrompt.promptDigest }, pid: child.pid ?? null, sandbox, approvalMode, managedOutputRoot: directory, managedOutputs: managedOutputs.outputs, workspaceRoot: executionRoot, sourceWorkspaceRoot: packet.workspace?.root ?? project.workspace.root, startedAt: new Date().toISOString() } });
       } catch (error) {
         if (child?.exitCode === null) child.kill('SIGTERM');
         if (workspaceProvider && workspaceContext) await workspaceProvider.discard(workspaceContext).catch(() => {});

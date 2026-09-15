@@ -98,6 +98,7 @@ export const createTabletopCollectionProjectDescriptor = ({
       agentExecutionMode: resolvedAgentExecutionMode,
       defaultRuntimePlugin: runtimePluginId,
       runtimePlugins: [runtimePluginId],
+      promptCodecPlugin: 'reference-agent-prompt-codec',
       runtimeConfigs: { [runtimePluginId]: runtimeConfig },
       maxConcurrency,
       maxLogicalGames,

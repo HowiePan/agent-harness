@@ -6,6 +6,7 @@ export { createProcessRuntime } from './runtime/process-runtime.mjs';
 export { createInMemoryRuntime } from './runtime/in-memory-runtime.mjs';
 export { createStaticModelRouter } from './model/static-router.mjs';
 export { createJsonCodec } from './codec/json-codec.mjs';
+export { AGENT_PROMPT_CONTRACT_VERSION, compileAgentPrompt, createAgentPromptCodec, REFERENCE_AGENT_PROMPT_CODEC_MANIFEST } from './codec/agent-prompt-codec.mjs';
 export { createConflictScheduler } from './scheduler/conflict-scheduler.mjs';
 export { createWorkspaceToolBroker } from './tool/workspace-broker.mjs';
 export { createProcessGateExecutor } from './gate/process-gate.mjs';

@@ -3,8 +3,9 @@ import { dirname, resolve } from 'node:path';
 
 let prompt = '';
 for await (const chunk of process.stdin) prompt += chunk;
-const marker = 'Dispatch packet:\n';
-const packet = JSON.parse(prompt.slice(prompt.indexOf(marker) + marker.length));
+const startMarker = 'BEGIN_AGENT_HARNESS_DISPATCH_PACKET_JSON\n';
+const endMarker = '\nEND_AGENT_HARNESS_DISPATCH_PACKET_JSON';
+const packet = JSON.parse(prompt.slice(prompt.indexOf(startMarker) + startMarker.length, prompt.indexOf(endMarker)));
 const changedFile = packet.feature.allowedPaths[0];
 await mkdir(dirname(resolve(changedFile)), { recursive: true });
 await writeFile(resolve(changedFile), `${packet.feature.id}\n`, 'utf8');
