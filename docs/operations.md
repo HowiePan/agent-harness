@@ -61,11 +61,7 @@ Preflight 一次聚合 Plan、Project、活动 Release/Runtime、历史同逻辑
 
 `run dispatch` 同时返回不可变 Packet 与由 Descriptor 固定的 Prompt Codec 确定性生成的完整 Prompt。Codex Operator 必须把 `prompt.text` 原样交给宿主原生 multi-agent delegation，不能自行串联、改写或补充提示词；完整 Host Coordinator 通过 `createVisibleHostAdapter({ inspectVisibleAgent, spawnVisibleAgent, waitVisibleAgent, readVisibleResult, ... })` 注入 `createHarness()`，再调用 `executeVisibleLifecyclePlan()`。它会从 Authority 恢复活动 Lease、重新做宿主 attestation、等待、heartbeat、传回严格 schema 结果并连续调度 repair/re-review。原始 `run bind` JSON 不能充当证明。当前产品宿主若没有这些受信原生回调，必须在 preflight 停止，不能用 CLI 或模型 JSON 代替。
 
-只有 Project Descriptor 的项目默认策略或当前动作的 `policy.actionExecution.<action>` 明确声明 `agentExecutionMode: headless`，且用户明确请求 CI/无人值守执行时，才可使用阻塞 Coordinator。动作级 headless 条目还必须保存绑定同一 action 的批准者、`decision: approved` 与授权时间；未配置的动作继续使用项目默认 Runtime：
-
-```text
-node bin/agent-harness.mjs lifecycle execute --plan <plan.json> --preflight <preflight.json> --command-id <command-id> --progress
-```
+只有 Project Descriptor 的项目默认策略或当前动作的 `policy.actionExecution.<action>` 明确声明 `agentExecutionMode: headless`，可信用户约束允许显式无人值守，并且宿主能从本次原始 CI/无人值守请求签发 `LifecycleExecutionGrant` 时，才可使用阻塞 Coordinator。Descriptor 条目只保存 allow-policy，不得保存批准者、时间或 execution grant；未配置的动作继续使用项目默认 Runtime。Grant 与 Project revision/digest、Command Intent、Run、Runtime、workspace 和 constraint digest 精确绑定，过期、撤销、策略变化或跨 Run 重放全部 fail closed。Standalone CLI 的 `lifecycle execute` 与 `run execute` 已关闭并稳定返回 `AGENT_CLI_EXECUTION_DISABLED`；CI/无人值守只能由持有可信 `executionAuthorizationAdapter` 的宿主嵌入调用 Harness API，不能从 shell/Descriptor 自行补造授权。
 
 `project-descriptor-input.schema.json` 约束可提交的配置输入；`project-descriptor.schema.json` 约束 Registry 增加 revision、commands、时间和摘要后的持久记录。更新时不得把整个 Registry 记录重新作为输入，Programmatic API 使用 `projectDescriptorInput(record)` 提取配置面。CLI 生成器会把当前 Harness 和已安装 Extension 的精确摘要封入输入。静态示例是 Consumer 生成器输入，不伪造会随发布制品变化的摘要。
 
@@ -117,7 +113,7 @@ Hook 只解析单行、最长 512 字符、至多一个预设参数的信封，�
 CLI 的底层问题登记入口为 `issue record --input <json|-> --command-id <id>`。稳定故障码可通过 `correlation` 生成与观察时间无关的 incident fingerprint。不可变 Intake 写入后，使用 `issue triage` 另行记录带 revision、批准 Decision、关系和 resolution Evidence 的分诊状态；`issue list`/`issue status` 都是零写入查询。初始化类故障归类为 `deployment-incident`，不伪造 Defect Bundle 所需的 Descriptor 或 Authority 身份。
 
 1. `run status` 读取 revision、epoch、generation、Feature、Lease 和 finding。
-2. `conversation-visible` 是交互式默认：`run schedule` 生成绑定 Prompt Codec/Contract 的 Dispatch，`run dispatch` 读取不可变 Packet 和标准生成 Prompt，当前宿主原样委派 Prompt 创建可见子 Agent后，再通过同时绑定 Packet/Prompt 摘要的可信宿主适配器绑定；没有生成 Prompt 或适配器时禁止临时写 Prompt、改用原始 `run bind`。`run execute` 仅供用户请求与 Descriptor 双重显式 headless。
+2. `conversation-visible` 是交互式默认：`run schedule` 生成绑定 Prompt Codec/Contract 的 Dispatch，`run dispatch` 读取不可变 Packet 和标准生成 Prompt，当前宿主原样委派 Prompt 创建可见子 Agent后，再通过同时绑定 Packet/Prompt 摘要的可信宿主适配器绑定；没有生成 Prompt 或适配器时禁止临时写 Prompt、改用原始 `run bind`。Standalone CLI 不提供 Agent execute；宿主 API 只能恢复 Authority 中已固定、仍通过可信适配器复验的 command-scoped headless Grant，不能从 Descriptor 重新推导许可。
 3. `run gates --scope final --fresh` 从 Project Descriptor 执行确定性最终 Gate，并始终把启动、输出和结束事件显示在可观察终端；无观察器时不启动进程。
 4. 可见子 Agent 运行时，Operator 持续报告任务身份和状态并定期写 heartbeat；Agent 输出先进入 Evidence，再 submit。
 5. Gate、finding 和 Decision 分别记录，不用聊天文本替代 Authority。

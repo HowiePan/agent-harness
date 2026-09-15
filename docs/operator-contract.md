@@ -6,7 +6,7 @@ Operator Contract 是工具无关的 Harness 协调规范。Codex Skill、未来
 
 - Authority 是唯一流程状态；对话、模型记忆、进程输出与报表都是非权威输入。
 - 每个 Project 必须显式选择 Prompt Codec，每个 Dispatch 固定 Codec/Contract 版本；Codec 从不可变 Packet 确定性生成完整 Prompt，Operator 只能原样传给子 Agent，不能临时组织、摘要、改写或增删。
-- 交互式 Agent 执行必须选择同时声明 `user-visible` 与 `host-orchestrated` 的 `conversation-visible` Runtime，并通过可信宿主证明把每个 Dispatch/Packet 摘要和 Prompt 摘要绑定到当前宿主创建的可见子 Agent；任务引用、状态与新鲜 heartbeat 可检查，Prompt 生成或宿主不可用时禁止回退到即兴 Prompt、CLI/隐藏进程。headless 需要用户与 Descriptor 双重显式授权，不能推断。
+- 交互式 Agent 执行必须选择同时声明 `user-visible` 与 `host-orchestrated` 的 `conversation-visible` Runtime，并通过可信宿主证明把每个 Dispatch/Packet 摘要和 Prompt 摘要绑定到当前宿主创建的可见子 Agent；任务引用、状态与新鲜 heartbeat 可检查，Prompt 生成或宿主不可用时禁止回退到即兴 Prompt、CLI/隐藏进程。Headless 不能推断：Descriptor allow-policy、版本化 deny-wins 用户约束与宿主从原始 CI/无人值守请求签发的 command-scoped Grant 必须同时通过，Descriptor 或通用批准不能充当 Grant。
 - 所有写命令绑定 expected revision 和唯一 command ID。
 - `start`、`resume` 或调度返回首批 Dispatch 后，Operator 必须持续消费全部 Dispatch、Lease、Runtime 结果、Gate、Decision 和 Receipt，直到 Run 关闭、失败或需要用户权限。
 - 单个 Agent 完成不等于 Run 完成。
@@ -22,7 +22,7 @@ Operator Contract 是工具无关的 Harness 协调规范。Codex Skill、未来
 
 ## 路径与回执
 
-Harness 数据、临时目录、调试输出、构建制品和缓存只能写入 Standalone Control Root 内。npm 包目录不能隐式成为数据根。进程型 Agent Runtime 仅允许双重显式 headless/CI 使用；确定性 Gate、构建、测试与短控制命令可用受管进程，但必须在启动前挂接实时观察器，并显示启动、进度/输出和结束状态。所有进程插件必须声明容量预算、保留策略和沙箱模式，并在成功、失败、超限与取消路径返回清理回执。未声明输出或观察器视为协议错误。
+Harness 数据、临时目录、调试输出、构建制品和缓存只能写入 Standalone Control Root 内。npm 包目录不能隐式成为数据根。进程型 Agent Runtime 仅允许通过 Descriptor allow-policy、可信用户约束、command-scoped Grant 和 Core launch capability 的显式 headless/CI 使用；默认 Harness 不开放 Agent `process.spawn`，可见 Runtime 与进程 Runtime 分属独立 Extension。确定性 Gate、构建、测试与短控制命令可用受管进程，但必须在启动前挂接实时观察器，并显示启动、进度/输出和结束状态。所有进程插件必须声明容量预算、保留策略和沙箱模式，并在成功、失败、超限与取消路径返回清理回执。未声明输出或观察器视为协议错误。
 
 ## 权限边界
 

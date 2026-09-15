@@ -62,7 +62,7 @@
     },
     "run": {
       "type": "object",
-      "required": ["runId", "profileId", "profileConfig", "features", "sourceDigest", "artifactDigest", "executionWorkspaceRoot", "runtimePluginId", "agentExecutionMode"],
+      "required": ["runId", "profileId", "profileConfig", "features", "sourceDigest", "artifactDigest", "executionWorkspaceRoot", "runtimePluginId", "agentExecutionMode", "executionConstraintDigest", "executionGrant"],
       "properties": {
         "runId": { "type": "string", "minLength": 1 },
         "profileId": { "type": "string", "minLength": 1 },
@@ -72,7 +72,9 @@
         "artifactDigest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
         "executionWorkspaceRoot": { "type": "string", "minLength": 1 },
         "runtimePluginId": { "type": "string", "minLength": 1 },
-        "agentExecutionMode": { "enum": ["conversation-visible", "headless"] }
+        "agentExecutionMode": { "enum": ["conversation-visible", "headless"] },
+        "executionConstraintDigest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "executionGrant": { "type": ["object", "null"] }
       },
       "additionalProperties": true
     },

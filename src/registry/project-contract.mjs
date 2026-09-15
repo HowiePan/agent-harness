@@ -18,6 +18,11 @@ export const assertProjectDescriptorInput = (input, { strictIdentity = true } = 
   assert(extras.length === 0, 'PROJECT_DESCRIPTOR_ADDITIONAL_PROPERTY', 'Project Descriptor input contains persisted or unknown properties.', { extras });
   assertPlainObject(input.workspace, 'PROJECT_DESCRIPTOR_INVALID', 'Project Descriptor requires a workspace object.');
   if (input.policy !== undefined) assertPlainObject(input.policy, 'PROJECT_POLICY_INVALID', 'Project Descriptor policy must be an object.');
+  assert(!Object.hasOwn(input.policy ?? {}, 'executionGrant') && !Object.hasOwn(input.policy ?? {}, 'lifecycleExecutionGrant') && !Object.hasOwn(input.policy ?? {}, 'authorization'), 'DESCRIPTOR_EXECUTION_AUTHORIZATION_FORBIDDEN', 'Project Descriptor policy cannot contain execution authorization or grants.');
+  for (const [action, execution] of Object.entries(input.policy?.actionExecution ?? {})) {
+    assertPlainObject(execution, 'PROJECT_ACTION_EXECUTION_INVALID', `Project action execution policy must be an object: ${action}`);
+    assert(!Object.hasOwn(execution, 'authorization') && !Object.hasOwn(execution, 'executionGrant') && !Object.hasOwn(execution, 'lifecycleExecutionGrant'), 'LEGACY_DESCRIPTOR_AUTHORIZATION_FORBIDDEN', 'Project Descriptor actionExecution is configuration, not user authority; persisted execution authorization is forbidden.');
+  }
   assert(Array.isArray(input.gateRecipes ?? []), 'PROJECT_GATE_RECIPES_INVALID', 'Project Descriptor gateRecipes must be an array.');
   assert((input.gateRecipes ?? []).every(value => value && typeof value === 'object' && !Array.isArray(value)), 'PROJECT_GATE_RECIPES_INVALID', 'Every Project gate recipe must be an object.');
   assert(Array.isArray(input.artifactProviders ?? []), 'PROJECT_ARTIFACT_PROVIDERS_INVALID', 'Project Descriptor artifactProviders must be an array.');

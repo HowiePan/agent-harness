@@ -33,17 +33,16 @@ test('conversation-visible projects reject headless Runtime selection and requir
   assert.throws(() => assertRuntimeTransportReceipt({ project, manifest: visibleManifest, receipt: { runtimePluginId: visibleManifest.id, agentId: 'agent-1', dispatchId: 'dispatch-1', packetDigest: 'a'.repeat(64), prompt: { ...prompt, packetDigest: 'c'.repeat(64) }, visibility: { mode: 'user-visible', surface: 'codex-task', inspectRef: 'task-123' } } }), error => error.code === 'USER_VISIBLE_RUNTIME_PROMPT_PACKET_MISMATCH');
 });
 
-test('action-scoped headless execution requires durable approval and cannot be substituted', () => {
-  const authorization = { actor: 'project-owner', decision: 'approved', action: 'quality', authorizedAt: '2026-09-15T00:00:00.000Z', source: 'AH-20260915-8C001F4D266E' };
-  const project = { id: 'engine', policy: { agentExecutionMode: 'conversation-visible', defaultRuntimePlugin: 'visible-runtime', runtimePlugins: ['visible-runtime', 'headless-runtime'], actionExecution: { quality: { agentExecutionMode: 'headless', runtimePluginId: 'headless-runtime', authorization } } } };
+test('action-scoped execution is configuration only and legacy persisted authorization is rejected', () => {
+  const project = { id: 'engine', policy: { agentExecutionMode: 'conversation-visible', defaultRuntimePlugin: 'visible-runtime', runtimePlugins: ['visible-runtime', 'headless-runtime'], actionExecution: { quality: { agentExecutionMode: 'headless', runtimePluginId: 'headless-runtime' } } } };
   assert.deepEqual(resolveLifecycleExecutionPolicy({ project, action: 'plan' }).mode, 'conversation-visible');
-  assert.deepEqual(resolveLifecycleExecutionPolicy({ project, action: 'quality' }), { action: 'quality', mode: 'headless', runtimePluginId: 'headless-runtime', scoped: true, authorization });
+  assert.deepEqual(resolveLifecycleExecutionPolicy({ project, action: 'quality' }), { action: 'quality', mode: 'headless', runtimePluginId: 'headless-runtime', scoped: true });
   const headless = { ...visibleManifest, id: 'headless-runtime', capabilities: ['spawn', 'wait', 'send', 'heartbeat', 'interrupt', 'headless'], permissions: [] };
   assert.equal(assertAgentRuntimeCompatible({ project, manifest: headless, action: 'quality', runtimePluginId: 'headless-runtime', agentExecutionMode: 'headless' }).mode, 'headless');
   assert.throws(() => assertAgentRuntimeCompatible({ project, manifest: headless, action: 'plan', runtimePluginId: 'headless-runtime' }), error => error.code === 'LIFECYCLE_RUNTIME_POLICY_MISMATCH');
-  const unauthorized = structuredClone(project);
-  delete unauthorized.policy.actionExecution.quality.authorization;
-  assert.throws(() => resolveLifecycleExecutionPolicy({ project: unauthorized, action: 'quality' }), error => error.code === 'ACTION_HEADLESS_AUTHORIZATION_REQUIRED');
+  const legacy = structuredClone(project);
+  legacy.policy.actionExecution.quality.authorization = { actor: 'self-asserted', decision: 'approved', action: 'quality', authorizedAt: '2000-01-01T00:00:00.000Z' };
+  assert.throws(() => resolveLifecycleExecutionPolicy({ project: legacy, action: 'quality' }), error => error.code === 'LEGACY_DESCRIPTOR_AUTHORIZATION_FORBIDDEN');
 });
 
 test('visible host adapter binds inspection and heartbeat to the exact Lease identities', async t => {

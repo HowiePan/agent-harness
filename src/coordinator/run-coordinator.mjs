@@ -43,6 +43,7 @@ export class RunCoordinator {
     const requestedLimit = resolveConcurrencyLimit(maxConcurrency, configuredLimit);
     const physicalLimit = runtimeManifest.capabilities.includes('workspace-shared') ? 1 : requestedLimit;
     if (runtimePolicy.hostOrchestrated) return { status: 'attention-required', reason: 'user-visible-runtime-requires-host-orchestration', runtimePluginId: selectedRuntime, state, physicalLimit };
+    await this.harness.assertRunExecutionAuthorized(projectId, runId);
     const orphaned = state.leases.filter(lease => lease.status === 'active');
     if (orphaned.length) return { status: 'attention-required', reason: 'active-leases-require-original-runtime-or-resume', leaseIds: orphaned.map(lease => lease.leaseId), state };
     let dispatches = state.dispatches.filter(dispatch => dispatch.status === 'requested');

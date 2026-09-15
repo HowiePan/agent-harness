@@ -1,6 +1,7 @@
 import { digestJson } from '../canonical.mjs';
 import { assert } from '../errors.mjs';
 import { assertPluginIntent, validatePluginInstance, validatePluginManifest } from './contracts.mjs';
+import { assertAgentRuntimeLaunchCapability } from '../execution-authorization.mjs';
 
 export class PluginHost {
   constructor({ allowedPermissions = [] } = {}) {
@@ -28,6 +29,16 @@ export class PluginHost {
   async invoke(id, method, ...args) {
     const plugin = this.get(id);
     assert(typeof plugin.instance[method] === 'function', 'PLUGIN_METHOD_INVALID', `Plugin ${id} does not implement ${method}().`);
+    if (plugin.manifest.kind === 'agent-runtime' && plugin.manifest.permissions.includes('process.spawn') && method === 'spawn') {
+      const packet = args[0];
+      const options = args[1] ?? {};
+      assertAgentRuntimeLaunchCapability(options.launchCapability, {
+        grantDigest: options.executionGrantDigest,
+        runtimePluginId: plugin.manifest.id,
+        dispatchId: packet?.dispatchId,
+        packetDigest: options.packetDigest,
+      });
+    }
     return assertPluginIntent(await plugin.instance[method](...args));
   }
 

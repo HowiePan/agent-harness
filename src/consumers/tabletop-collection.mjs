@@ -66,8 +66,11 @@ export const createTabletopCollectionProjectDescriptor = ({
   workspaceRoot,
   remote,
   runtimePluginId = 'codex-conversation-runtime',
+  runtimePluginIds = [runtimePluginId],
   agentExecutionMode,
   runtimeExtension,
+  headlessRuntimeExtension,
+  runtimeConfigs: runtimeConfigOverrides = {},
   extensions = [],
   model,
   maxConcurrency = 10,
@@ -79,12 +82,18 @@ export const createTabletopCollectionProjectDescriptor = ({
   const resolvedAgentExecutionMode = agentExecutionMode ?? 'conversation-visible';
   const workspace = { root: workspaceRoot, rootSelector: 'git-worktree', excluded: ['.git', 'node_modules', 'dist', 'build', 'coverage', 'runs'] };
   if (remote) workspace.remote = remote;
-  const processBackedRuntime = ['codex-cli-runtime', 'codex-isolated-runtime'].includes(runtimePluginId);
-  const runtimeConfig = processBackedRuntime ? { sandbox: 'workspace-write', ephemeral: true, approveForMe: true } : {};
-  if (model) runtimeConfig.model = model;
-  const selectedRuntimeExtension = runtimeExtension === undefined
-    ? (['codex-conversation-runtime', 'codex-cli-runtime', 'codex-isolated-runtime'].includes(runtimePluginId) ? { id: 'codex-runtime', version: '1.0.0' } : null)
-    : runtimeExtension;
+  const runtimePlugins = [...new Set(runtimePluginIds)];
+  assert(runtimePlugins.includes(runtimePluginId), 'PROJECT_RUNTIME_ALLOWLIST_INVALID', 'runtimePluginIds must include the default Runtime.');
+  const selectedRuntimeExtensions = [];
+  if (runtimePlugins.includes('codex-conversation-runtime')) selectedRuntimeExtensions.push(runtimeExtension === undefined ? { id: 'codex-runtime', version: '1.0.0' } : runtimeExtension);
+  if (runtimePlugins.some(id => ['codex-cli-runtime', 'codex-isolated-runtime'].includes(id))) selectedRuntimeExtensions.push(headlessRuntimeExtension === undefined ? { id: 'codex-headless-runtime', version: '1.0.0' } : headlessRuntimeExtension);
+  if (!runtimePlugins.some(id => ['codex-conversation-runtime', 'codex-cli-runtime', 'codex-isolated-runtime'].includes(id)) && runtimeExtension) selectedRuntimeExtensions.push(runtimeExtension);
+  const runtimeConfigs = Object.fromEntries(runtimePlugins.map(id => {
+    const processBacked = ['codex-cli-runtime', 'codex-isolated-runtime'].includes(id);
+    const config = { ...(processBacked ? { sandbox: 'workspace-write', ephemeral: true } : {}), ...(runtimeConfigOverrides[id] ?? {}) };
+    if (model) config.model = model;
+    return [id, config];
+  }));
   return {
     id,
     ...(harness ? { harness: structuredClone(harness) } : {}),
@@ -92,15 +101,15 @@ export const createTabletopCollectionProjectDescriptor = ({
     profiles: ['collection-batch'],
     extensions: [
       { id: 'tabletop-collection-profile', version: '1.0.0' },
-      ...(selectedRuntimeExtension ? [structuredClone(selectedRuntimeExtension)] : []),
+      ...selectedRuntimeExtensions.filter(Boolean).map(value => structuredClone(value)),
       ...structuredClone(extensions),
     ],
     policy: {
       agentExecutionMode: resolvedAgentExecutionMode,
       defaultRuntimePlugin: runtimePluginId,
-      runtimePlugins: [runtimePluginId],
+      runtimePlugins,
       promptCodecPlugin: 'reference-agent-prompt-codec',
-      runtimeConfigs: { [runtimePluginId]: runtimeConfig },
+      runtimeConfigs,
       maxConcurrency,
       maxLogicalGames,
       collectionBatches: structuredClone(batches),

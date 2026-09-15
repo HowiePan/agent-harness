@@ -9,6 +9,38 @@ import { assertProjectDescriptorInput, assertProjectDescriptorRecord } from './p
 import { resolveActiveRegistryRoot } from './active-generation.mjs';
 import { activeReleaseFile } from './active-generation.mjs';
 
+const executionPolicySnapshot = descriptor => ({
+  agentExecutionMode: descriptor?.policy?.agentExecutionMode ?? null,
+  defaultRuntimePlugin: descriptor?.policy?.defaultRuntimePlugin ?? null,
+  runtimePlugins: [...(descriptor?.policy?.runtimePlugins ?? [])].sort(),
+  actionExecution: descriptor?.policy?.actionExecution ?? {},
+});
+
+const selectsHeadless = descriptor => descriptor?.policy?.agentExecutionMode === 'headless'
+  || Object.values(descriptor?.policy?.actionExecution ?? {}).some(value => value?.agentExecutionMode === 'headless');
+
+const assertExecutionPolicyDecision = ({ current, input, expectedRevision, authorityDecision, now }) => {
+  const previous = executionPolicySnapshot(current);
+  const next = executionPolicySnapshot(input);
+  const previousPolicyDigest = digestJson(previous);
+  const nextPolicyDigest = digestJson(next);
+  if (previousPolicyDigest === nextPolicyDigest || (!selectsHeadless(current) && !selectsHeadless(input))) return;
+  assert(authorityDecision?.actor && authorityDecision.decision === 'approved' && authorityDecision.action === 'project-execution-policy-change', 'PROJECT_EXECUTION_POLICY_AUTHORITY_REQUIRED', 'Adding or changing headless Agent execution policy requires an exact approved Authority Decision.');
+  assert(authorityDecision.context?.projectId === input.id
+    && authorityDecision.context?.expectedRevision === expectedRevision
+    && authorityDecision.context?.previousPolicyDigest === previousPolicyDigest
+    && authorityDecision.context?.nextPolicyDigest === nextPolicyDigest,
+  'PROJECT_EXECUTION_POLICY_DECISION_CONTEXT_MISMATCH', 'Project execution-policy Decision must bind the Project, expected revision, and exact before/after policy digests.');
+  assert(typeof authorityDecision.expiresAt === 'string' && Date.parse(authorityDecision.expiresAt) > Date.parse(now()), 'PROJECT_EXECUTION_POLICY_DECISION_EXPIRED', 'Project execution-policy Decision must be unexpired.');
+};
+
+export const projectExecutionPolicyDecisionContext = ({ current = null, input, expectedRevision = current?.revision ?? 0 }) => ({
+  projectId: input.id,
+  expectedRevision,
+  previousPolicyDigest: digestJson(executionPolicySnapshot(current)),
+  nextPolicyDigest: digestJson(executionPolicySnapshot(input)),
+});
+
 export class ProjectRegistry {
   constructor({ root, controlRoot, now = () => new Date().toISOString(), strictIdentity = true }) {
     this.controlRoot = harnessControlRoot(controlRoot);
@@ -58,6 +90,7 @@ export class ProjectRegistry {
         return current;
       }
       assert((current?.revision ?? 0) === expectedRevision, 'PROJECT_REVISION_CONFLICT', 'Project Descriptor revision changed.', { expected: expectedRevision, actual: current?.revision ?? 0 });
+      assertExecutionPolicyDecision({ current, input, expectedRevision, authorityDecision, now: this.now });
       if (current) {
         const priorHighImpact = digestJson({ harness: current.harness ?? null, workspace: current.workspace, profiles: current.profiles, extensions: current.extensions ?? [], policy: current.policy ?? {}, gateRecipes: current.gateRecipes ?? [], artifactProviders: current.artifactProviders ?? [] });
         const nextHighImpact = digestJson({ harness: input.harness ?? null, workspace: input.workspace, profiles: input.profiles, extensions: input.extensions ?? [], policy: input.policy ?? {}, gateRecipes: input.gateRecipes ?? [], artifactProviders: input.artifactProviders ?? [] });

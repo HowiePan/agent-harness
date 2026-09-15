@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
-import { createHarness, createStaticModelRouter, defineExtensionPack, digestJson, ExtensionRegistry, loadExtensionPack, projectDescriptorInput, projectDescriptorSchemas, ProjectRegistry, sha256, validateJsonSchema } from '../src/index.mjs';
+import { createHarness, createStaticModelRouter, defineExtensionPack, digestJson, ExtensionRegistry, loadExtensionPack, projectDescriptorInput, projectDescriptorSchemas, projectExecutionPolicyDecisionContext, ProjectRegistry, sha256, validateJsonSchema } from '../src/index.mjs';
 import { extensionPack as engineDeliveryExtension } from '../src/consumers/cardworld-engine.mjs';
 import { makeFixture, startRun } from './test-support.mjs';
 
@@ -38,7 +38,7 @@ test('production Project Registry requires exact Harness and Extension artifact 
     error => error.code === 'PROJECT_HARNESS_IDENTITY_REQUIRED',
   );
   const input = { id: 'strict-project', harness: { version: '1.0.0', artifactDigest: 'a'.repeat(64) }, workspace: { root: fixture.workspace }, profiles: ['feature-delivery'], extensions: [], policy: { agentExecutionMode: 'headless', defaultRuntimePlugin: 'test-runtime', runtimePlugins: ['test-runtime'], promptCodecPlugin: 'reference-agent-prompt-codec' } };
-  const record = await registry.register(input, { commandId: 'strict-project-valid' });
+  const record = await registry.register(input, { commandId: 'strict-project-valid', authorityDecision: { actor: 'test-user', decision: 'approved', action: 'project-execution-policy-change', expiresAt: '2099-09-15T00:00:00.000Z', context: projectExecutionPolicyDecisionContext({ input, expectedRevision: 0 }) } });
   assert.equal(validateJsonSchema(input, projectDescriptorSchemas.input).valid, true);
   assert.equal(validateJsonSchema(record, projectDescriptorSchemas.record).valid, true);
   await assert.rejects(() => registry.register({ ...input, protocolVersion: '9.9' }, { expectedRevision: record.revision, commandId: 'override-protocol' }), error => error.code === 'PROJECT_DESCRIPTOR_ADDITIONAL_PROPERTY');

@@ -17,19 +17,15 @@ export const resolveLifecycleExecutionPolicy = ({ project, action } = {}) => {
   const runtimePluginId = scoped?.runtimePluginId ?? policy?.defaultRuntimePlugin;
   assert(runtimePluginId, 'DEFAULT_RUNTIME_REQUIRED', `Project ${project?.id ?? '<unknown>'} requires an explicit Runtime for ${action ?? 'the default execution policy'}.`);
   assert((policy?.runtimePlugins ?? []).includes(runtimePluginId), 'PROJECT_RUNTIME_DENIED', `Runtime ${runtimePluginId} is not allowed by Project ${project?.id ?? '<unknown>'}.`);
-  if (scoped) {
-    const authorization = scoped.authorization;
-    assert(authorization?.actor && authorization.decision === 'approved' && authorization.action === action, 'ACTION_HEADLESS_AUTHORIZATION_REQUIRED', `Action-scoped execution for ${action} requires a Project-owner approval bound to that action.`);
-    assert(typeof authorization.authorizedAt === 'string' && !Number.isNaN(Date.parse(authorization.authorizedAt)), 'ACTION_HEADLESS_AUTHORIZATION_INVALID', `Action-scoped execution authorization for ${action} requires a valid authorizedAt timestamp.`);
-  }
-  return { action: action ?? null, mode, runtimePluginId, scoped: Boolean(scoped), authorization: scoped?.authorization ? structuredClone(scoped.authorization) : null };
+  assert(!scoped || !Object.hasOwn(scoped, 'authorization'), 'LEGACY_DESCRIPTOR_AUTHORIZATION_FORBIDDEN', 'Project Descriptor actionExecution is configuration, not user authority; persisted execution authorization is forbidden.');
+  return { action: action ?? null, mode, runtimePluginId, scoped: Boolean(scoped) };
 };
 
 export const assertAgentRuntimeCompatible = ({ project, manifest, action, runtimePluginId, agentExecutionMode }) => {
   assert(manifest?.kind === 'agent-runtime', 'PLUGIN_KIND_MISMATCH', `Plugin ${manifest?.id ?? '<unknown>'} is not an agent-runtime.`);
   const resolved = action !== undefined || runtimePluginId !== undefined || agentExecutionMode !== undefined
     ? resolveLifecycleExecutionPolicy({ project, action })
-    : { mode: resolveAgentExecutionMode(project?.policy), runtimePluginId: manifest.id, action: null, scoped: false, authorization: null };
+    : { mode: resolveAgentExecutionMode(project?.policy), runtimePluginId: manifest.id, action: null, scoped: false };
   assert(runtimePluginId === undefined || runtimePluginId === resolved.runtimePluginId, 'LIFECYCLE_RUNTIME_POLICY_MISMATCH', `Runtime ${runtimePluginId} does not match the Project execution policy for ${action ?? 'this Run'}.`);
   assert(agentExecutionMode === undefined || agentExecutionMode === resolved.mode, 'LIFECYCLE_EXECUTION_MODE_MISMATCH', `Execution mode ${agentExecutionMode} does not match the Project execution policy for ${action ?? 'this Run'}.`);
   assert(manifest.id === resolved.runtimePluginId, 'LIFECYCLE_RUNTIME_MANIFEST_MISMATCH', `Runtime manifest ${manifest.id} does not match selected Runtime ${resolved.runtimePluginId}.`);

@@ -9,6 +9,7 @@ import { envelope } from '../contracts.mjs';
 import { assertHarnessWritePath, temporaryEnvironment } from '../../write-boundary.mjs';
 import { createManagedOutputSession } from '../execution/managed-output.mjs';
 import { compileAgentPrompt } from '../codec/agent-prompt-codec.mjs';
+import { assertAgentRuntimeLaunchCapability } from '../../execution-authorization.mjs';
 
 const CODEX_OUTPUTS = Object.freeze([
   Object.freeze({ id: 'temporary', retention: 'ephemeral', environment: ['TEMP', 'TMP', 'TMPDIR'], maxBytes: 256 * 1024 * 1024, maxFiles: 20_000 }),
@@ -163,11 +164,12 @@ export const createCodexCliRuntime = ({
     return { source: validatedSchema, provider: adaptCodexStructuredOutputSchema(validatedSchema) };
   };
   return {
-    async spawn(packet, { prompt } = {}) {
+    async spawn(packet, { prompt, launchCapability, executionGrantDigest, packetDigest } = {}) {
       const project = await resolveProject(packet.projectId);
       const config = project.policy?.runtimeConfigs?.[manifest.id] ?? {};
       assert((project.policy?.runtimePlugins ?? [manifest.id]).includes(manifest.id), 'PROJECT_RUNTIME_DENIED', `Project ${project.id} does not allow ${manifest.id}.`);
       const generatedPrompt = assertGeneratedPrompt(packet, prompt);
+      assertAgentRuntimeLaunchCapability(launchCapability, { grantDigest: executionGrantDigest, runtimePluginId: manifest.id, dispatchId: packet?.dispatchId, packetDigest });
       const executionPolicy = resolveCodexExecutionPolicy(config);
       const { sandbox, approvalMode } = executionPolicy;
       const { source: outputSchema, provider: providerOutputSchema } = await loadOutputSchema();

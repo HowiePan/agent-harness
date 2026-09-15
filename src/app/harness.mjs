@@ -18,7 +18,7 @@ import { ProjectRegistry } from '../registry/project-registry.mjs';
 import { RecoveryCoordinator } from '../recovery/coordinator.mjs';
 import { installExtensionPacks } from '../extensions/contract.mjs';
 import { resolveCommandIntent } from '../extensions/command-contract.mjs';
-import { createLifecycleCommandPlan, validateLifecycleCommandPlan } from '../lifecycle-command-plan.mjs';
+import { createLifecycleCommandPlan, deriveLifecycleRunId, validateLifecycleCommandPlan } from '../lifecycle-command-plan.mjs';
 import { loadReleaseIdentity } from '../release-identity.mjs';
 import { captureWorkspace, diffWorkspaceSnapshots } from '../workspace-snapshot.mjs';
 import { resolveProjectWorkspace } from '../workspace-identity.mjs';
@@ -31,6 +31,14 @@ import { assertFreshVisibleObservation, createVisibleHostAdapter, isVisibleHostA
 import { validateBusinessResult } from '../result-contract.mjs';
 import { sealExecutionReadinessReport, verifyExecutionReadinessReport } from '../execution-readiness.mjs';
 import { readActiveRelease, resolveActiveRuntimeRoot } from '../registry/active-generation.mjs';
+import {
+  buildExecutionGrantContext,
+  createAgentRuntimeLaunchCapability,
+  isExecutionAuthorizationAdapter,
+  issueHeadlessExecutionGrant,
+  resolveExecutionConstraints,
+  verifyHeadlessExecutionGrant,
+} from '../execution-authorization.mjs';
 
 export const defaultDataRoot = (controlRoot = harnessControlRoot()) => resolve(controlRoot, '.agent-harness-data');
 
@@ -42,7 +50,7 @@ const manifests = Object.freeze({
   storage: { id: 'reference-file-storage', kind: 'storage-provider', version: '1.0.0', capabilities: ['expected-revision', 'idempotency', 'atomic-write', 'recovery'], permissions: ['state.write'] },
 });
 
-export const createHarness = async ({ controlRoot: controlRootInput, dataRoot: dataRootInput, now, id, releaseIdentity, strictProjectIdentity = true, initializeStorage = true, allowedPluginPermissions = ['state.write', 'agent.conversation', 'process.spawn', 'workspace.read', 'workspace.write', 'gate.execute', 'artifact.read'], extraProfiles = [], extensions = [], agentAdapter = null } = {}) => {
+export const createHarness = async ({ controlRoot: controlRootInput, dataRoot: dataRootInput, now, id, releaseIdentity, strictProjectIdentity = true, initializeStorage = true, allowedPluginPermissions = ['state.write', 'agent.conversation', 'workspace.read', 'workspace.write', 'gate.execute', 'artifact.read'], extraProfiles = [], extensions = [], agentAdapter = null, executionAuthorizationAdapter = null } = {}) => {
   const controlRoot = harnessControlRoot(controlRootInput);
   const dataRoot = dataRootInput ?? defaultDataRoot(controlRoot);
   const controlledDataRoot = assertHarnessWritePath(dataRoot, 'Harness dataRoot', controlRoot);
@@ -65,6 +73,12 @@ export const createHarness = async ({ controlRoot: controlRootInput, dataRoot: d
         : typeof agentAdapter.verifyVisibleLease === 'function' || typeof agentAdapter.heartbeatVisibleAgent === 'function'
           ? assert(false, 'VISIBLE_AGENT_HOST_ADAPTER_REQUIRED', 'Visible Agent host callbacks must be wrapped by createVisibleHostAdapter().')
           : agentAdapter;
+  const trustedExecutionAuthorizationAdapter = executionAuthorizationAdapter === null || executionAuthorizationAdapter === undefined
+    ? null
+    : isExecutionAuthorizationAdapter(executionAuthorizationAdapter)
+      ? executionAuthorizationAdapter
+      : assert(false, 'EXECUTION_AUTHORIZATION_ADAPTER_REQUIRED', 'Execution authorization callbacks must be wrapped by createExecutionAuthorizationAdapter().');
+  const executionConstraints = resolveExecutionConstraints(trustedExecutionAuthorizationAdapter);
   const profileRegistry = new ProfileRegistry([featureDeliveryProfile, ...extraProfiles]);
   const pluginHost = new PluginHost({ allowedPermissions: allowedPluginPermissions });
   pluginHost.register(manifests.scheduler, createConflictScheduler({ manifest: manifests.scheduler }));
@@ -121,6 +135,40 @@ export const createHarness = async ({ controlRoot: controlRootInput, dataRoot: d
     return { packet, prompt: structuredClone(prompt) };
   };
 
+  const grantContextFor = ({ project, intent = null, runId, runtimePluginId, runtimeVersion, executionWorkspaceRoot, sourceDigest, harnessArtifactDigest = currentReleaseIdentity.artifactDigest, extensionDigest = null, constraintDigest }) => buildExecutionGrantContext({
+    project,
+    intent,
+    runId,
+    runtimePluginId,
+    runtimeVersion,
+    executionWorkspaceRoot,
+    sourceDigest,
+    harnessArtifactDigest,
+    extensionDigest,
+    constraintDigest,
+  });
+
+  const verifyPlanExecutionAuthorization = async ({ project, plan, manifest }) => {
+    assert(plan.run.executionConstraintDigest === executionConstraints.constraintDigest, 'EXECUTION_CONSTRAINT_STALE', 'Lifecycle Plan was created under different trusted execution constraints.');
+    if (plan.run.agentExecutionMode !== 'headless') return { constraints: executionConstraints, grant: null, verification: null };
+    const context = grantContextFor({ project, intent: plan.intent, runId: plan.run.runId, runtimePluginId: plan.run.runtimePluginId, runtimeVersion: manifest.version, executionWorkspaceRoot: plan.run.executionWorkspaceRoot, sourceDigest: plan.run.sourceDigest, harnessArtifactDigest: plan.harness.artifactDigest, extensionDigest: plan.extension.digest, constraintDigest: plan.run.executionConstraintDigest });
+    return verifyHeadlessExecutionGrant({ adapter: trustedExecutionAuthorizationAdapter, grant: plan.run.executionGrant, context, manifest, now: kernel.now });
+  };
+
+  const verifyRunExecutionAuthorization = async ({ project, state, manifest }) => {
+    const lifecycleExecution = state.metadata?.lifecycleExecution;
+    const action = state.metadata?.commandIntent?.action;
+    const policy = assertAgentRuntimeCompatible({ project, manifest, action, runtimePluginId: lifecycleExecution?.runtimePluginId ?? manifest.id, agentExecutionMode: lifecycleExecution?.agentExecutionMode });
+    if (policy.mode !== 'headless') return { policy, constraints: executionConstraints, grant: null, verification: null };
+    assert(lifecycleExecution?.executionConstraintDigest === executionConstraints.constraintDigest, 'EXECUTION_CONSTRAINT_STALE', 'Run was authorized under different trusted execution constraints.');
+    const currentPolicyDigest = digestJson({ profiles: project.profiles, extensions: project.extensions ?? [], policy: project.policy ?? {}, gateRecipes: project.gateRecipes ?? [], artifactProviders: project.artifactProviders ?? [] });
+    assert(currentPolicyDigest === state.policyDigest, 'RUN_EXECUTION_POLICY_STALE', 'Project execution policy changed after this Run was authorized.');
+    const pinnedProject = { ...project, revision: lifecycleExecution.executionGrant?.context?.projectRevision, descriptorDigest: state.metadata?.projectDescriptorDigest };
+    const context = grantContextFor({ project: pinnedProject, intent: state.metadata?.commandIntent ?? null, runId: state.runId, runtimePluginId: manifest.id, runtimeVersion: manifest.version, executionWorkspaceRoot: state.metadata?.workspace?.root ?? project.workspace.root, sourceDigest: lifecycleExecution.authorizationSourceDigest, harnessArtifactDigest: lifecycleExecution.harnessArtifactDigest, extensionDigest: lifecycleExecution.extensionDigest, constraintDigest: lifecycleExecution.executionConstraintDigest });
+    const authorized = await verifyHeadlessExecutionGrant({ adapter: trustedExecutionAuthorizationAdapter, grant: lifecycleExecution.executionGrant, context, manifest, now: kernel.now });
+    return { policy, ...authorized };
+  };
+
   const api = {
     dataRoot: authorityStore.root,
     controlRoot,
@@ -141,6 +189,7 @@ export const createHarness = async ({ controlRoot: controlRootInput, dataRoot: d
       let plan;
       let project;
       let runtimePolicy;
+      let runtimeManifest;
       let existingState = null;
       const add = (id, ready, details = {}, found = []) => checks.push({ id, ready, details: structuredClone(details), issues: structuredClone(found) });
       try { plan = validateLifecycleCommandPlan(planInput); add('plan', true, { planDigest: plan.planDigest }); }
@@ -179,7 +228,7 @@ export const createHarness = async ({ controlRoot: controlRootInput, dataRoot: d
           add('extension', true, { extension: plan.extension });
         } catch (error) { add('extension', false, {}, issues(error)); }
         try {
-          const runtimeManifest = pluginHost.get(plan.run.runtimePluginId, 'agent-runtime').manifest;
+          runtimeManifest = pluginHost.get(plan.run.runtimePluginId, 'agent-runtime').manifest;
           runtimePolicy = assertAgentRuntimeCompatible({ project, manifest: runtimeManifest, action: plan.intent.action, runtimePluginId: plan.run.runtimePluginId, agentExecutionMode: plan.run.agentExecutionMode });
           add('runtime', true, { id: runtimeManifest.id, version: runtimeManifest.version, mode: runtimePolicy.mode });
         } catch (error) { add('runtime', false, {}, issues(error)); }
@@ -188,6 +237,19 @@ export const createHarness = async ({ controlRoot: controlRootInput, dataRoot: d
           assert(prompt.capabilities.includes('agent-prompt'), 'AGENT_PROMPT_CODEC_REQUIRED', 'Project Prompt Codec does not provide agent-prompt capability.');
           add('prompt-transport', true, { id: prompt.id, version: prompt.version });
         } catch (error) { add('prompt-transport', false, {}, issues(error)); }
+        if (runtimePolicy?.mode === 'headless') {
+          const constraintIssues = [];
+          if (executionConstraints.unattended !== 'allow-explicit') constraintIssues.push({ code: 'HEADLESS_USER_INTENT_REQUIRED', message: 'Trusted user constraints deny unattended Agent execution.' });
+          if (runtimeManifest?.permissions?.includes('process.spawn') && executionConstraints.processBackedAgent !== 'allow-explicit') constraintIssues.push({ code: 'PROCESS_BACKED_AGENT_USER_DENIED', message: 'Trusted user constraints deny process-backed Agent execution.' });
+          add('user-constraint', constraintIssues.length === 0, { constraints: executionConstraints }, constraintIssues);
+          try {
+            const authorization = await verifyPlanExecutionAuthorization({ project, plan, manifest: runtimeManifest });
+            add('command-grant', true, { grantDigest: authorization.grant.grantDigest, provider: authorization.verification.provider, assertionId: authorization.verification.assertionId });
+          } catch (error) { add('command-grant', false, {}, issues(error)); }
+        } else {
+          add('user-constraint', true, { constraints: executionConstraints, requiredFor: 'headless-only' });
+          add('command-grant', true, { kind: 'interactive-command', additionalApprovalRequired: false });
+        }
         if (runtimePolicy?.hostOrchestrated) {
           const ready = isVisibleHostAdapter(trustedAgentAdapter) && ['inspect', 'spawn', 'wait', 'result'].every(capability => trustedAgentAdapter.capabilities?.[capability] === true);
           add('visible-host', ready, isVisibleHostAdapter(trustedAgentAdapter) ? { provider: trustedAgentAdapter.provider, adapterVersion: trustedAgentAdapter.adapterVersion, capabilities: trustedAgentAdapter.capabilities } : {}, ready ? [] : [{ code: 'VISIBLE_AGENT_HOST_COORDINATOR_UNAVAILABLE', message: 'Conversation-visible execution requires an injected trusted Host Adapter with inspect, spawn, wait, and structured-result capabilities.' }]);
@@ -262,16 +324,14 @@ export const createHarness = async ({ controlRoot: controlRootInput, dataRoot: d
       assert(required.version === extension.version && required.digest === extension.digest, 'PROJECT_EXTENSION_IDENTITY_MISMATCH', `Project ${project.id} does not bind the active Extension ${extension.id}.`);
       if (strictProjectIdentity) assert(project.harness?.version === currentReleaseIdentity.version && project.harness?.artifactDigest === currentReleaseIdentity.artifactDigest, 'PROJECT_HARNESS_IDENTITY_MISMATCH', `Project ${project.id} does not bind the active Harness release.`);
       const snapshot = await captureWorkspace(workspace.root, { excluded: project.workspace.excluded ?? [] });
-      const derivedRunId = createLifecycleCommandPlan({
-        intent,
-        project,
-        extension,
-        releaseIdentity: { ...currentReleaseIdentity, verified: true },
-        sourceDigest: snapshot.digest,
-        executionWorkspaceRoot: workspace.root,
-        authorityRevision: 0,
-        compiler: extension.operations?.createLifecyclePlan,
-      }).run.runId;
+      const derivedRunId = deriveLifecycleRunId({ projectId: project.id, intent, sourceDigest: snapshot.digest, artifactDigest: currentReleaseIdentity.artifactDigest });
+      const executionPolicy = resolveLifecycleExecutionPolicy({ project, action: intent.action });
+      const runtimeManifest = pluginHost.get(executionPolicy.runtimePluginId, 'agent-runtime').manifest;
+      let executionGrant = input.executionGrant ?? null;
+      if (executionPolicy.mode === 'headless' && executionGrant === null && input.executionAuthorizationEvidence !== undefined && isExecutionAuthorizationAdapter(trustedExecutionAuthorizationAdapter)) {
+        const context = grantContextFor({ project, intent, runId: derivedRunId, runtimePluginId: executionPolicy.runtimePluginId, runtimeVersion: runtimeManifest.version, executionWorkspaceRoot: workspace.root, sourceDigest: snapshot.digest, extensionDigest: extension.digest, constraintDigest: executionConstraints.constraintDigest });
+        executionGrant = await issueHeadlessExecutionGrant({ adapter: trustedExecutionAuthorizationAdapter, context, evidence: input.executionAuthorizationEvidence });
+      }
       const existing = await authorityStore.read(project.id, derivedRunId, { required: false });
       const activeRunConflicts = (await authorityStore.list(project.id))
         .filter(state => state.runId !== derivedRunId && !['closed', 'superseded'].includes(state.status) && state.metadata?.commandIntent?.action === intent.action && state.metadata?.commandIntent?.target === intent.target)
@@ -283,13 +343,14 @@ export const createHarness = async ({ controlRoot: controlRootInput, dataRoot: d
         releaseIdentity: { ...currentReleaseIdentity, verified: true },
         sourceDigest: snapshot.digest,
         executionWorkspaceRoot: workspace.root,
+        executionConstraintDigest: executionConstraints.constraintDigest,
+        executionGrant,
         authorityRevision: existing?.revision ?? 0,
         existingRunId: existing?.runId ?? null,
         activeRunConflicts,
         compiler: extension.operations?.createLifecyclePlan,
       });
       if (existing) assert(existing.metadata?.lifecyclePlanDigest === plan.planDigest, 'LIFECYCLE_PLAN_RUN_CONFLICT', 'A Run with the deterministic lifecycle ID exists for a different Command Plan.', { runId: existing.runId, existingPlanDigest: existing.metadata?.lifecyclePlanDigest, planDigest: plan.planDigest });
-      const runtimeManifest = pluginHost.get(plan.run.runtimePluginId, 'agent-runtime').manifest;
       assertAgentRuntimeCompatible({ project, manifest: runtimeManifest, action: plan.intent.action, runtimePluginId: plan.run.runtimePluginId, agentExecutionMode: plan.run.agentExecutionMode });
       return plan;
     },
@@ -304,6 +365,7 @@ export const createHarness = async ({ controlRoot: controlRootInput, dataRoot: d
       assert(currentReleaseIdentity.artifactDigest === plan.harness.artifactDigest && currentReleaseIdentity.version === plan.harness.version, 'LIFECYCLE_PLAN_RELEASE_STALE', 'Lifecycle Command Plan is stale for the active Harness release.');
       const runtimeManifest = pluginHost.get(plan.run.runtimePluginId, 'agent-runtime').manifest;
       const runtimePolicy = assertAgentRuntimeCompatible({ project, manifest: runtimeManifest, action: plan.intent.action, runtimePluginId: plan.run.runtimePluginId, agentExecutionMode: plan.run.agentExecutionMode });
+      await verifyPlanExecutionAuthorization({ project, plan, manifest: runtimeManifest });
       const existing = await authorityStore.read(plan.project.id, plan.run.runId, { required: false });
       if (runtimePolicy.hostOrchestrated && !isVisibleHostAdapter(trustedAgentAdapter)) {
         return { status: 'attention-required', reason: 'visible-agent-host-adapter-unavailable', planDigest: plan.planDigest, plan, runtimePolicy, state: existing };
@@ -319,7 +381,7 @@ export const createHarness = async ({ controlRoot: controlRootInput, dataRoot: d
           artifactDigest: plan.run.artifactDigest,
           sourceDigest: plan.run.sourceDigest,
           executionWorkspaceRoot: plan.run.executionWorkspaceRoot,
-          metadata: { ...(plan.run.metadata ?? {}), lifecyclePlanDigest: plan.planDigest, commandIntent: plan.intent, lifecycleExecution: { runtimePluginId: plan.run.runtimePluginId, agentExecutionMode: plan.run.agentExecutionMode }, stopCondition: plan.stopCondition },
+          metadata: { ...(plan.run.metadata ?? {}), lifecyclePlanDigest: plan.planDigest, commandIntent: plan.intent, lifecycleExecution: { runtimePluginId: plan.run.runtimePluginId, agentExecutionMode: plan.run.agentExecutionMode, executionConstraintDigest: plan.run.executionConstraintDigest, executionGrant: plan.run.executionGrant, authorizationSourceDigest: plan.run.sourceDigest, harnessArtifactDigest: plan.harness.artifactDigest, extensionDigest: plan.extension.digest }, stopCondition: plan.stopCondition },
         }, { commandId: `${commandId}.start` });
         state = started.state;
       } else {
@@ -455,7 +517,15 @@ export const createHarness = async ({ controlRoot: controlRootInput, dataRoot: d
       const action = state.metadata?.commandIntent?.action;
       const runtimePolicy = assertAgentRuntimeCompatible({ project, manifest, action, runtimePluginId: dispatch.runtimePluginId, agentExecutionMode: dispatch.execution?.runtime?.mode });
       assert(runtimePolicy.mode === 'headless', 'VISIBLE_AGENT_HOST_REQUIRED', 'Conversation-visible Agents must be controlled by the interactive host, not through Runtime plugin invocation.');
+      if (!['interrupt', 'cleanup', 'discard'].includes(method)) await verifyRunExecutionAuthorization({ project, state, manifest });
       return pluginHost.invoke(dispatch.runtimePluginId, method, { agentId: lease.agentId, ...structuredClone(input) });
+    },
+
+    async assertRunExecutionAuthorized(projectId, runId) {
+      const [project, state] = await Promise.all([projectRegistry.get(projectId), authorityStore.read(projectId, runId)]);
+      const runtimePluginId = state.metadata?.lifecycleExecution?.runtimePluginId ?? resolveLifecycleExecutionPolicy({ project, action: state.metadata?.commandIntent?.action }).runtimePluginId;
+      const manifest = pluginHost.get(runtimePluginId, 'agent-runtime').manifest;
+      return verifyRunExecutionAuthorization({ project, state, manifest });
     },
 
     async startRun(input, command) {
@@ -485,12 +555,26 @@ export const createHarness = async ({ controlRoot: controlRootInput, dataRoot: d
       const pluginSet = pluginHost.snapshot();
       const installedCompositionDigest = digestJson({ plugins: pluginSet.manifests, extensions: extensionSet.installed });
       const policyDigest = input.policyDigest ?? digestJson({ profiles: project.profiles, extensions: project.extensions ?? [], policy: project.policy ?? {}, gateRecipes: project.gateRecipes ?? [], artifactProviders: project.artifactProviders ?? [] });
-      const commandAction = input.metadata?.commandIntent?.action;
-      const executionPolicy = commandAction ? resolveLifecycleExecutionPolicy({ project, action: commandAction }) : null;
-      if (executionPolicy && input.metadata?.lifecycleExecution) {
+      const commandIntent = input.metadata?.commandIntent ?? null;
+      const commandAction = commandIntent?.action;
+      const executionPolicy = resolveLifecycleExecutionPolicy({ project, action: commandAction });
+      if (input.metadata?.lifecycleExecution) {
         assert(input.metadata.lifecycleExecution.runtimePluginId === executionPolicy.runtimePluginId && input.metadata.lifecycleExecution.agentExecutionMode === executionPolicy.mode, 'RUN_EXECUTION_POLICY_MISMATCH', 'Run execution metadata does not match the current Project action execution policy.');
       }
-      const lifecycleExecution = executionPolicy ? { runtimePluginId: executionPolicy.runtimePluginId, agentExecutionMode: executionPolicy.mode } : input.metadata?.lifecycleExecution;
+      const executionConstraintDigest = input.metadata?.lifecycleExecution?.executionConstraintDigest ?? input.executionConstraintDigest ?? executionConstraints.constraintDigest;
+      assert(executionConstraintDigest === executionConstraints.constraintDigest, 'EXECUTION_CONSTRAINT_STALE', 'Run creation uses stale or mismatched trusted execution constraints.');
+      const authorizationSourceDigest = input.metadata?.lifecycleExecution?.authorizationSourceDigest ?? input.sourceDigest ?? snapshot.digest;
+      let executionGrant = input.metadata?.lifecycleExecution?.executionGrant ?? input.executionGrant ?? null;
+      const lifecycleExecution = { runtimePluginId: executionPolicy.runtimePluginId, agentExecutionMode: executionPolicy.mode, executionConstraintDigest, executionGrant, authorizationSourceDigest, harnessArtifactDigest: input.metadata?.lifecycleExecution?.harnessArtifactDigest ?? currentReleaseIdentity.artifactDigest, extensionDigest: input.metadata?.lifecycleExecution?.extensionDigest ?? null };
+      if (executionPolicy.mode === 'headless') {
+        const runtimeManifest = pluginHost.get(executionPolicy.runtimePluginId, 'agent-runtime').manifest;
+        const context = grantContextFor({ project, intent: commandIntent, runId: input.runId, runtimePluginId: executionPolicy.runtimePluginId, runtimeVersion: runtimeManifest.version, executionWorkspaceRoot: workspace.root, sourceDigest: authorizationSourceDigest, harnessArtifactDigest: lifecycleExecution.harnessArtifactDigest, extensionDigest: lifecycleExecution.extensionDigest, constraintDigest: executionConstraintDigest });
+        if (executionGrant === null && input.executionAuthorizationEvidence !== undefined && isExecutionAuthorizationAdapter(trustedExecutionAuthorizationAdapter)) {
+          executionGrant = await issueHeadlessExecutionGrant({ adapter: trustedExecutionAuthorizationAdapter, context, evidence: input.executionAuthorizationEvidence });
+          lifecycleExecution.executionGrant = executionGrant;
+        }
+        await verifyHeadlessExecutionGrant({ adapter: trustedExecutionAuthorizationAdapter, grant: executionGrant, context, manifest: runtimeManifest, now: kernel.now });
+      }
       return kernel.startRun({ ...input, profileConfig, policyDigest, sourceDigest: input.sourceDigest ?? snapshot.digest, pluginSetDigest: input.pluginSetDigest ?? installedCompositionDigest, metadata: { ...input.metadata, ...(lifecycleExecution ? { lifecycleExecution } : {}), workspace: structuredClone(workspace), projectDescriptorDigest: project.descriptorDigest, extensionSetDigest: extensionSet.digest } }, command);
     },
 
@@ -509,6 +593,7 @@ export const createHarness = async ({ controlRoot: controlRootInput, dataRoot: d
         assert((project.policy?.runtimePlugins ?? [runtimePluginId]).includes(runtimePluginId), 'PROJECT_RUNTIME_DENIED', `Runtime ${runtimePluginId} is not allowed by Project ${projectId}.`);
         runtimeManifest = pluginHost.get(runtimePluginId, 'agent-runtime').manifest;
         runtimePolicy = assertAgentRuntimeCompatible({ project, manifest: runtimeManifest, action, runtimePluginId, agentExecutionMode: state.metadata?.lifecycleExecution?.agentExecutionMode ?? selectedPolicy.mode });
+        if (runtimePolicy.mode === 'headless') await verifyRunExecutionAuthorization({ project, state, manifest: runtimeManifest });
       }
       const promptCodecPluginId = project.policy?.promptCodecPlugin ?? null;
       assert(promptCodecPluginId, 'PROJECT_PROMPT_CODEC_REQUIRED', `Project ${projectId} requires an explicit Prompt Codec.`);
@@ -558,8 +643,10 @@ export const createHarness = async ({ controlRoot: controlRootInput, dataRoot: d
       const manifest = pluginHost.get(runtimePluginId, 'agent-runtime').manifest;
       const runtimePolicy = assertAgentRuntimeCompatible({ project, manifest, action: state.metadata?.commandIntent?.action, runtimePluginId, agentExecutionMode: dispatch.execution?.runtime?.mode });
       assert(!runtimePolicy.hostOrchestrated, 'VISIBLE_AGENT_HOST_REQUIRED', `Runtime ${runtimePluginId} must be started by the interactive host as a visible child Agent.`);
+      const authorization = await verifyRunExecutionAuthorization({ project, state, manifest });
       const { packet, prompt } = await compileDispatchPrompt(state, dispatch);
-      const runtime = await pluginHost.invoke(runtimePluginId, 'spawn', packet, { prompt });
+      const launchCapability = createAgentRuntimeLaunchCapability({ grantDigest: authorization.grant.grantDigest, runtimePluginId, dispatchId, packetDigest: dispatch.packetDigest });
+      const runtime = await pluginHost.invoke(runtimePluginId, 'spawn', packet, { prompt, launchCapability, executionGrantDigest: authorization.grant.grantDigest, packetDigest: dispatch.packetDigest });
       const payload = runtime.payload;
       const bound = await api.bindDispatch(projectId, runId, { dispatchId, agentId: payload.agentId, runtimeReceipt: payload.transportReceipt }, { expectedRevision: state.revision, commandId });
       return { packet, prompt, runtimeReceipt: runtime, lease: bound.result.lease, state: bound.state };

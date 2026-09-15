@@ -5,6 +5,7 @@ import { access, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { adaptCodexStructuredOutputSchema, createCodexCliRuntime, resolveCodexExecutionPolicy, validateCodexStructuredOutputSchema } from '../src/plugins/runtime/codex-cli-runtime.mjs';
 import { businessResultFromRuntime } from '../src/coordinator/run-coordinator.mjs';
 import { compileAgentPrompt } from '../src/plugins/codec/agent-prompt-codec.mjs';
+import { createAgentRuntimeLaunchCapability } from '../src/execution-authorization.mjs';
 import { makeFixture } from './test-support.mjs';
 
 const runtimePacket = (fixture, dispatchId, extra = {}) => ({
@@ -15,7 +16,12 @@ const runtimePacket = (fixture, dispatchId, extra = {}) => ({
   execution: { prompt: { pluginId: 'reference-agent-prompt-codec', pluginVersion: '1.0.0', contractVersion: '1.0' } },
   ...extra,
 });
-const spawnRuntime = (runtime, packet) => runtime.spawn(packet, { prompt: compileAgentPrompt(packet) });
+const spawnRuntime = (runtime, packet) => {
+  const prompt = compileAgentPrompt(packet);
+  const executionGrantDigest = 'a'.repeat(64);
+  const launchCapability = createAgentRuntimeLaunchCapability({ grantDigest: executionGrantDigest, runtimePluginId: 'codex-cli-runtime', dispatchId: packet.dispatchId, packetDigest: prompt.packetDigest });
+  return runtime.spawn(packet, { prompt, launchCapability, executionGrantDigest, packetDigest: prompt.packetDigest });
+};
 
 test('Codex CLI execution policy emits one mutually exclusive approval or sandbox mode', () => {
   assert.deepEqual(resolveCodexExecutionPolicy({ sandbox: 'workspace-write', approveForMe: true }), {

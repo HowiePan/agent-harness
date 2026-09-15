@@ -16,7 +16,7 @@
 
 Feature Steps remain serial within one Feature. Separate Features may run concurrently only when dependencies, conflict paths, lane policy, logical limits, and physical capacity all permit it.
 
-Interactive execution must not become opaque: a conversation-visible Runtime must be host-orchestrated and cannot hold `process.spawn`; it cannot be driven by the headless `RunCoordinator`; and failure to create, attest, observe, heartbeat or reattach a visible child Agent is attention-required with no CLI/process/standalone-task fallback. Record at least one fresh heartbeat before submission and keep the current conversation updated with its inspectable reference and meaningful status changes. Headless mode requires separate explicit authorization in both the user request and Project Descriptor and is never inferred.
+Interactive execution must not become opaque: a conversation-visible Runtime must be host-orchestrated and cannot hold `process.spawn`; it cannot be driven by the headless `RunCoordinator`; and failure to create, attest, observe, heartbeat or reattach a visible child Agent is attention-required with no CLI/process/standalone-task fallback. Record at least one fresh heartbeat before submission and keep the current conversation updated with its inspectable reference and meaningful status changes. Headless mode is never inferred: Descriptor allow-policy, trusted deny-wins user constraints, and a host-verified command-scoped Grant derived from the original explicit CI/unattended request must all agree.
 
 ## Attention conditions
 

@@ -41,22 +41,10 @@
     },
     "actionExecution": {
       "type": "object",
-      "required": ["agentExecutionMode", "runtimePluginId", "authorization"],
+      "required": ["agentExecutionMode", "runtimePluginId"],
       "properties": {
         "agentExecutionMode": { "enum": ["conversation-visible", "headless"] },
-        "runtimePluginId": { "type": "string", "pattern": "^[a-z0-9][a-z0-9.-]+$" },
-        "authorization": {
-          "type": "object",
-          "required": ["actor", "decision", "action", "authorizedAt"],
-          "properties": {
-            "actor": { "type": "string", "minLength": 1 },
-            "decision": { "const": "approved" },
-            "action": { "type": "string", "minLength": 1 },
-            "authorizedAt": { "type": "string", "format": "date-time" },
-            "source": { "type": "string", "minLength": 1 }
-          },
-          "additionalProperties": true
-        }
+        "runtimePluginId": { "type": "string", "pattern": "^[a-z0-9][a-z0-9.-]+$" }
       },
       "additionalProperties": false
     }

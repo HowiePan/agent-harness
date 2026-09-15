@@ -1,0 +1,64 @@
+{
+  "observedAt": "2026-09-15T07:41:35.0123698Z",
+  "environment": {
+    "selectedRuntime": "codex-cli-runtime",
+    "executionMode": "headless",
+    "executionWorkspaceRoot": "bound workspace"
+  },
+  "conversation": {
+    "excerpts": [
+      {
+        "text": "两个问题：为什么中间过程还需要我授权；为什么还是开了后台CLI，这是被明确禁止的行为。",
+        "role": "user"
+      },
+      {
+        "text": "我解释为 headless 需要单独授权，并在用户回复授权后继续执行了质量 Run。",
+        "role": "assistant"
+      },
+      {
+        "text": "授权",
+        "role": "user"
+      },
+      {
+        "text": "计划与状态证据显示 quality 选择了 codex-cli-runtime/headless；随后出现 managed backend CLI 进程。用户要求停止后，该进程已停止，Lease 已 superseded，Run 保留为 ready。",
+        "role": "tool"
+      }
+    ],
+    "source": "current-thread"
+  },
+  "protocolVersion": "1.0",
+  "missingEvidence": [
+    "No structured runtime error code was emitted for the policy mismatch.",
+    "No independent persisted user-preference artifact was available to establish the backend-CLI prohibition before the launch."
+  ],
+  "projectAlias": "engine",
+  "summary": "Quality command required an extra headless authorization and then launched a backend CLI runtime despite the interactive task context and the user prohibition against backend CLI execution.",
+  "severity": "P1",
+  "expected": "The command should either use an inspectable conversation-visible execution path or fail closed before starting any backend CLI when that execution mode is not explicitly acceptable; authorization should not be broadened from quality execution to backend CLI launch.",
+  "actual": "The resolved quality plan selected codex-cli-runtime with headless execution. After the user replied with a general authorization, lifecycle execute started a managed backend CLI process. The process was later stopped by user request and its Lease was superseded through ordinary recovery.",
+  "project": {
+    "projectId": "cardworld-engine",
+    "profileId": "engine-delivery",
+    "extensionId": "cardworld-engine-profile"
+  },
+  "sanitization": {
+    "confirmed": true,
+    "removed": [
+      "Absolute filesystem paths",
+      "Full UUIDs and run identifiers",
+      "Process IDs",
+      "Full artifact and source digests",
+      "Account or host-specific identifiers"
+    ]
+  },
+  "reproduction": {
+    "steps": [
+      "Submit h:engine quality V3.8.4 in the bound CardWorld workspace.",
+      "Observe that the resolved plan selects headless execution with codex-cli-runtime and that an additional authorization prompt is issued.",
+      "Reply with authorization without separately authorizing a backend CLI process.",
+      "Observe lifecycle execution start a managed backend CLI process for the quality Run.",
+      "Request stop and observe the process stop while the Harness Run requires recovery to supersede the active Lease."
+    ]
+  },
+  "intakeDigest": "3218a00aaefb196b1c54242e18cf37f9750099726ab5a83533b75efa6c3d462a"
+}

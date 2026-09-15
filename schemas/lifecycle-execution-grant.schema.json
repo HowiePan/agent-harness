@@ -1,0 +1,51 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-harness.local/schemas/lifecycle-execution-grant.schema.json",
+  "title": "Lifecycle Execution Grant",
+  "type": "object",
+  "required": ["protocolVersion", "kind", "grantId", "actor", "decision", "interactionMode", "context", "issuedAt", "expiresAt", "attestation", "grantDigest"],
+  "properties": {
+    "protocolVersion": { "const": "1.0" },
+    "kind": { "const": "lifecycle-execution-grant" },
+    "grantId": { "type": "string", "minLength": 1 },
+    "actor": { "type": "string", "minLength": 1 },
+    "decision": { "const": "approved" },
+    "interactionMode": { "const": "unattended" },
+    "context": {
+      "type": "object",
+      "required": ["projectId", "projectRevision", "projectDescriptorDigest", "intentDigest", "action", "target", "scope", "runId", "runtimePluginId", "runtimeVersion", "agentExecutionMode", "executionWorkspaceRoot", "sourceDigest", "harnessArtifactDigest", "extensionDigest", "constraintDigest"],
+      "properties": {
+        "projectId": { "type": "string", "minLength": 1 },
+        "projectRevision": { "type": "integer", "minimum": 1 },
+        "projectDescriptorDigest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "intentDigest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "action": { "type": ["string", "null"] },
+        "target": { "type": ["string", "null"] },
+        "scope": { "type": ["string", "null"] },
+        "runId": { "type": "string", "minLength": 1 },
+        "runtimePluginId": { "type": "string", "minLength": 1 },
+        "runtimeVersion": { "type": "string", "pattern": "^\\d+\\.\\d+\\.\\d+$" },
+        "agentExecutionMode": { "const": "headless" },
+        "executionWorkspaceRoot": { "type": "string", "minLength": 1 },
+        "sourceDigest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "harnessArtifactDigest": { "type": ["string", "null"], "pattern": "^[a-f0-9]{64}$" },
+        "extensionDigest": { "type": ["string", "null"], "pattern": "^[a-f0-9]{64}$" },
+        "constraintDigest": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+      },
+      "additionalProperties": false
+    },
+    "issuedAt": { "type": "string", "format": "date-time" },
+    "expiresAt": { "type": "string", "format": "date-time" },
+    "attestation": {
+      "type": "object",
+      "required": ["provider", "reference"],
+      "properties": {
+        "provider": { "type": "string", "minLength": 1 },
+        "reference": { "type": "string", "minLength": 1 }
+      },
+      "additionalProperties": false
+    },
+    "grantDigest": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+  },
+  "additionalProperties": false
+}

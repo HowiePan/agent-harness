@@ -4,14 +4,14 @@ import { access, readFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { RunCoordinator } from '../src/index.mjs';
-import { extensionPack as codexRuntimeExtension } from '../src/extensions/codex-runtime.mjs';
+import { extensionPack as codexRuntimeExtension } from '../src/extensions/codex-headless-runtime.mjs';
 import { feature, makeFixture, startRun } from './test-support.mjs';
 
 const probe = resolve(dirname(fileURLToPath(import.meta.url)), 'fixtures', 'isolated-codex-probe.mjs');
 
 test('isolated Codex Runtime executes and safely integrates ten game Features in physical parallel', async t => {
   const runtime = 'codex-isolated-runtime';
-  const fixture = await makeFixture({ extensions: [codexRuntimeExtension], policy: { runtimePlugins: [runtime], defaultRuntimePlugin: runtime, maxConcurrency: 10, runtimeConfigs: { [runtime]: { executable: process.execPath, executableArgs: [probe], linkedDirectories: [], sandbox: 'workspace-write', approveForMe: true } } } });
+  const fixture = await makeFixture({ extensions: [codexRuntimeExtension], allowedPluginPermissions: ['state.write', 'agent.conversation', 'process.spawn', 'workspace.read', 'workspace.write', 'gate.execute', 'artifact.read'], policy: { runtimePlugins: [runtime], defaultRuntimePlugin: runtime, maxConcurrency: 10, runtimeConfigs: { [runtime]: { executable: process.execPath, executableArgs: [probe], linkedDirectories: [], sandbox: 'workspace-write', approveForMe: true } } } });
   t.after(() => fixture.cleanup());
   const features = Array.from({ length: 10 }, (_, index) => feature(`game-${index + 1}`, {}, { laneId: `game-${index + 1}`, allowedPaths: [`work/game-${index + 1}.txt`] }));
   await startRun(fixture, { features });
@@ -34,7 +34,7 @@ test('isolated Codex Runtime executes and safely integrates ten game Features in
 
 test('isolated Runtime discards invalid output and removes debug directories on the failure path', async t => {
   const runtime = 'codex-isolated-runtime';
-  const fixture = await makeFixture({ extensions: [codexRuntimeExtension], policy: { runtimePlugins: [runtime], defaultRuntimePlugin: runtime, runtimeConfigs: { [runtime]: { executable: process.execPath, executableArgs: [probe], linkedDirectories: [] } } } });
+  const fixture = await makeFixture({ extensions: [codexRuntimeExtension], allowedPluginPermissions: ['state.write', 'agent.conversation', 'process.spawn', 'workspace.read', 'workspace.write', 'gate.execute', 'artifact.read'], policy: { runtimePlugins: [runtime], defaultRuntimePlugin: runtime, runtimeConfigs: { [runtime]: { executable: process.execPath, executableArgs: [probe], linkedDirectories: [] } } } });
   t.after(() => fixture.cleanup());
   await startRun(fixture, { features: [feature('invalid-claim', { omitChangedFiles: true }, { allowedPaths: ['work/invalid-claim.txt'] })] });
   const tick = await new RunCoordinator({ harness: fixture.harness }).tick({ projectId: fixture.projectId, runId: 'run', maxConcurrency: 1 });

@@ -1,6 +1,6 @@
 # 插件执行输出、预算与 OS 沙箱
 
-V1.0.0 把外部进程的中间产物纳入统一 Execution Controller。任何申请 `process.spawn` 的 Agent Runtime，以及声明 `process` capability 的 Gate Executor，都必须同时声明 `managed-outputs` 和 `execution.outputs`；缺失时 Plugin Host 以 `PLUGIN_MANAGED_OUTPUTS_REQUIRED` 或 `PLUGIN_OUTPUT_DECLARATIONS_REQUIRED` 拒绝加载。进程型 Agent Runtime 还必须声明 `headless`，并被 `agentExecutionMode: headless` 的 Project 显式选择；`conversation-visible` Project 在进程启动前以 `OPAQUE_AGENT_PROCESS_DENIED`/`USER_VISIBLE_AGENT_RUNTIME_REQUIRED` 拒绝。
+V1.0.0 把外部进程的中间产物纳入统一 Execution Controller。任何申请 `process.spawn` 的 Agent Runtime，以及声明 `process` capability 的 Gate Executor，都必须同时声明 `managed-outputs` 和 `execution.outputs`；缺失时 Plugin Host 以 `PLUGIN_MANAGED_OUTPUTS_REQUIRED` 或 `PLUGIN_OUTPUT_DECLARATIONS_REQUIRED` 拒绝加载。进程型 Agent Runtime 还必须声明 `headless`，并被 `agentExecutionMode: headless` 的 Project 显式选择；`conversation-visible` Project 在进程启动前以 `OPAQUE_AGENT_PROCESS_DENIED`/`USER_VISIBLE_AGENT_RUNTIME_REQUIRED` 拒绝。默认 Harness 不授予 Agent `process.spawn`，进程 Runtime 由独立 Extension 显式装载；每次启动还要复验可信用户约束、command-scoped `LifecycleExecutionGrant` 和 Core 为准确 Grant/Runtime/Dispatch/Packet 签发的不可序列化 launch capability，缺失时在 `spawnProcess` 前拒绝。
 
 ## 输出声明
 

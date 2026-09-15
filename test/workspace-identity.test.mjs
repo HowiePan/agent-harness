@@ -2,7 +2,8 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { mkdir, mkdtemp, rm, rmdir, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
-import { createHarness, createInMemoryRuntime, harnessTemporaryRoot, ProjectGateRunner, resolveProjectWorkspace } from '../src/index.mjs';
+import { createHarness, createInMemoryRuntime, harnessTemporaryRoot, projectExecutionPolicyDecisionContext, ProjectGateRunner, resolveProjectWorkspace } from '../src/index.mjs';
+import { createTestExecutionAuthorizationAdapter } from './test-support.mjs';
 
 let sequence = 0;
 const command = state => ({ commandId: `workspace-command-${++sequence}`, ...(state ? { expectedRevision: state.revision } : {}) });
@@ -32,11 +33,12 @@ test('a Run pins a verified linked worktree through Authority and Dispatch', asy
     await rmdir(harnessTemporaryRoot()).catch(error => { if (!['ENOENT', 'ENOTEMPTY'].includes(error.code)) throw error; });
   });
   const repository = await createRepositoryFixture(root);
-  const harness = await createHarness({ dataRoot: resolve(root, 'data'), strictProjectIdentity: false, releaseIdentity: { version: '1.0.0', artifactDigest: null } });
+  const harness = await createHarness({ dataRoot: resolve(root, 'data'), strictProjectIdentity: false, releaseIdentity: { version: '1.0.0', artifactDigest: null }, executionAuthorizationAdapter: createTestExecutionAuthorizationAdapter() });
   const runtimeManifest = { id: 'workspace-test-runtime', kind: 'agent-runtime', version: '1.0.0', capabilities: ['spawn', 'wait', 'send', 'heartbeat', 'interrupt', 'headless'], permissions: [] };
   harness.registerPlugin(runtimeManifest, createInMemoryRuntime({ manifest: runtimeManifest, handler: async () => ({ status: 'completed', summary: 'done', changedFiles: [] }) }));
-  await harness.projectRegistry.register({ id: 'project', workspace: { root: repository.repositoryRoot, rootSelector: 'git-worktree', excluded: ['.git'] }, profiles: ['feature-delivery'], policy: { agentExecutionMode: 'headless', runtimePlugins: [runtimeManifest.id], defaultRuntimePlugin: runtimeManifest.id, promptCodecPlugin: 'reference-agent-prompt-codec' }, gateRecipes: [{ id: 'worktree-gate', scope: 'final', command: [process.execPath, resolve('test', 'fixtures', 'gate-probe.mjs')] }], artifactProviders: [] }, { commandId: 'register-project' });
-  const started = await harness.startRun({ projectId: 'project', runId: 'run', profileId: 'feature-delivery', executionWorkspaceRoot: repository.worktreeRoot, features: [{ id: 'one', acceptance: ['done'], dependsOn: [], allowedPaths: ['worktree.txt'], metadata: {} }] }, command());
+  const descriptorInput = { id: 'project', workspace: { root: repository.repositoryRoot, rootSelector: 'git-worktree', excluded: ['.git'] }, profiles: ['feature-delivery'], policy: { agentExecutionMode: 'headless', runtimePlugins: [runtimeManifest.id], defaultRuntimePlugin: runtimeManifest.id, promptCodecPlugin: 'reference-agent-prompt-codec' }, gateRecipes: [{ id: 'worktree-gate', scope: 'final', command: [process.execPath, resolve('test', 'fixtures', 'gate-probe.mjs')] }], artifactProviders: [] };
+  await harness.projectRegistry.register(descriptorInput, { commandId: 'register-project', authorityDecision: { actor: 'test-user', decision: 'approved', action: 'project-execution-policy-change', expiresAt: '2099-09-15T00:00:00.000Z', context: projectExecutionPolicyDecisionContext({ input: descriptorInput, expectedRevision: 0 }) } });
+  const started = await harness.startRun({ projectId: 'project', runId: 'run', profileId: 'feature-delivery', executionWorkspaceRoot: repository.worktreeRoot, features: [{ id: 'one', acceptance: ['done'], dependsOn: [], allowedPaths: ['worktree.txt'], metadata: {} }], executionAuthorizationEvidence: { explicitUnattended: true } }, command());
   assert.equal(started.state.metadata.workspace.root, repository.worktreeRoot);
   assert.equal(started.state.metadata.workspace.selector, 'git-worktree');
   assert.equal(started.state.metadata.workspace.identity.commonDir, repository.commonDirectory);

@@ -11,7 +11,7 @@ export * from './maintenance/index.mjs';
 export * from './plugins/index.mjs';
 export * from './profiles/index.mjs';
 export * from './recovery/index.mjs';
-export { ProjectRegistry } from './registry/project-registry.mjs';
+export { ProjectRegistry, projectExecutionPolicyDecisionContext } from './registry/project-registry.mjs';
 export { assertProjectDescriptorInput, assertProjectDescriptorRecord, projectDescriptorInput, projectDescriptorSchemas } from './registry/project-contract.mjs';
 export { validateJsonSchema } from './json-schema.mjs';
 export { captureWorkspace, diffWorkspaceSnapshots } from './workspace-snapshot.mjs';
@@ -20,6 +20,15 @@ export { RunCoordinator, businessResultFromRuntime } from './coordinator/run-coo
 export { inspectProjectGateCapabilities, ProjectGateRunner } from './gates/project-gate-runner.mjs';
 export { createLifecycleCommandPlan, deriveLifecycleRunId, lifecyclePlanDigest, validateLifecycleCommandPlan } from './lifecycle-command-plan.mjs';
 export { sealExecutionReadinessReport, verifyExecutionReadinessReport } from './execution-readiness.mjs';
+export {
+  DEFAULT_EXECUTION_CONSTRAINTS,
+  buildExecutionGrantContext,
+  createExecutionAuthorizationAdapter,
+  executionGrantDigest,
+  isExecutionAuthorizationAdapter,
+  sealLifecycleExecutionGrant,
+  validateLifecycleExecutionGrant,
+} from './execution-authorization.mjs';
 export { validateBusinessResult } from './result-contract.mjs';
 export { readActiveRelease, resolveActiveRuntimeRoot } from './registry/active-generation.mjs';
 export { applyReleaseActivationPlan, createReleaseActivationPlan, releaseActivationPlanDigest, verifyReleaseActivationPlan } from './maintenance/release-activation.mjs';

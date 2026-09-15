@@ -1,13 +1,34 @@
 import { mkdtemp, mkdir, rm, rmdir, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
-import { createHarness, createInMemoryRuntime, harnessTemporaryRoot } from '../src/index.mjs';
+import { createExecutionAuthorizationAdapter, createHarness, createInMemoryRuntime, harnessTemporaryRoot, projectExecutionPolicyDecisionContext, sealLifecycleExecutionGrant } from '../src/index.mjs';
 import { extensionPack as engineDeliveryExtension } from '../src/consumers/cardworld-engine.mjs';
 import { extensionPack as collectionBatchExtension } from '../src/consumers/tabletop-collection.mjs';
 
 let sequence = 0;
 export const command = state => ({ commandId: `test-command-${++sequence}`, ...(state ? { expectedRevision: state.revision } : {}) });
 
-export const makeFixture = async ({ projectId = 'project', profiles = ['feature-delivery'], policy = {}, gateRecipes = [], artifactProviders = [], extensions = [], agentAdapter = null, releaseIdentity = { version: '1.0.0', artifactDigest: null } } = {}) => {
+export const createTestExecutionAuthorizationAdapter = (constraintOverrides = {}) => createExecutionAuthorizationAdapter({
+  provider: 'test-host',
+  constraints: { processBackedAgent: 'allow-explicit', unattended: 'allow-explicit', decisionLineage: 'test-user-explicit-policy', ...constraintOverrides },
+  authorizeExecution: ({ context, evidence }) => {
+    if (evidence?.explicitUnattended !== true) return null;
+    return sealLifecycleExecutionGrant({
+      protocolVersion: '1.0',
+      kind: 'lifecycle-execution-grant',
+      grantId: `test-grant-${context.runId}`,
+      actor: 'test-user',
+      decision: 'approved',
+      interactionMode: 'unattended',
+      context,
+      issuedAt: '2026-09-15T00:00:00.000Z',
+      expiresAt: '2099-09-15T00:00:00.000Z',
+      attestation: { provider: 'test-host', reference: `test-user-request-${context.runId}` },
+    });
+  },
+  verifyExecutionGrant: ({ grant }) => ({ verified: grant.attestation.provider === 'test-host', provider: 'test-host', assertionId: `verified-${grant.grantId}`, observedAt: new Date().toISOString() }),
+});
+
+export const makeFixture = async ({ projectId = 'project', profiles = ['feature-delivery'], policy = {}, gateRecipes = [], artifactProviders = [], extensions = [], agentAdapter = null, executionAuthorizationAdapter = undefined, allowedPluginPermissions = undefined, releaseIdentity = { version: '1.0.0', artifactDigest: null } } = {}) => {
   const parent = resolve(harnessTemporaryRoot(), 'tests');
   await mkdir(parent, { recursive: true });
   const root = await mkdtemp(resolve(parent, 'case-'));
@@ -25,7 +46,8 @@ export const makeFixture = async ({ projectId = 'project', profiles = ['feature-
     await rmdir(harnessTemporaryRoot()).catch(error => { if (!['ENOENT', 'ENOTEMPTY'].includes(error.code)) throw error; });
   };
   try {
-    const harness = await createHarness({ dataRoot, releaseIdentity, strictProjectIdentity: false, extensions: [...profileExtensions, ...extensions], agentAdapter });
+    const trustedExecutionAuthorizationAdapter = executionAuthorizationAdapter === undefined ? createTestExecutionAuthorizationAdapter() : executionAuthorizationAdapter;
+    const harness = await createHarness({ dataRoot, releaseIdentity, strictProjectIdentity: false, extensions: [...profileExtensions, ...extensions], agentAdapter, executionAuthorizationAdapter: trustedExecutionAuthorizationAdapter, ...(allowedPluginPermissions ? { allowedPluginPermissions } : {}) });
     const testRuntimeManifest = { id: 'test-runtime', kind: 'agent-runtime', version: '1.0.0', capabilities: ['spawn', 'wait', 'send', 'heartbeat', 'interrupt', 'headless'], permissions: [] };
     harness.registerPlugin(testRuntimeManifest, createInMemoryRuntime({
       manifest: testRuntimeManifest,
@@ -41,7 +63,8 @@ export const makeFixture = async ({ projectId = 'project', profiles = ['feature-
           }
         : { status: 'completed', summary: 'test runtime completed', changedFiles: [] },
     }));
-    await harness.projectRegistry.register({ id: projectId, workspace: { root: workspace }, profiles, policy: { agentExecutionMode: 'headless', runtimePlugins: ['test-runtime'], defaultRuntimePlugin: 'test-runtime', promptCodecPlugin: 'reference-agent-prompt-codec', ...policy }, gateRecipes, artifactProviders }, { commandId: `register-${projectId}` });
+    const descriptorInput = { id: projectId, workspace: { root: workspace }, profiles, policy: { agentExecutionMode: 'headless', runtimePlugins: ['test-runtime'], defaultRuntimePlugin: 'test-runtime', promptCodecPlugin: 'reference-agent-prompt-codec', ...policy }, gateRecipes, artifactProviders };
+    await harness.projectRegistry.register(descriptorInput, { commandId: `register-${projectId}`, authorityDecision: { actor: 'test-user', decision: 'approved', action: 'project-execution-policy-change', expiresAt: '2099-09-15T00:00:00.000Z', context: projectExecutionPolicyDecisionContext({ input: descriptorInput, expectedRevision: 0 }) } });
     return { root, workspace, dataRoot, harness, projectId, cleanup };
   } catch (error) {
     await cleanup();
@@ -52,7 +75,7 @@ export const makeFixture = async ({ projectId = 'project', profiles = ['feature-
 export const feature = (id, metadata = {}, extra = {}) => ({ id, acceptance: [`${id} accepted`], dependsOn: [], allowedPaths: [`work/${id}`], metadata, ...extra });
 
 export const startRun = async (fixture, { runId = 'run', profileId = 'feature-delivery', features = [feature('one')], profileConfig = {}, artifactDigest = null } = {}) => {
-  const output = await fixture.harness.startRun({ projectId: fixture.projectId, runId, profileId, features, profileConfig, artifactDigest }, command());
+  const output = await fixture.harness.startRun({ projectId: fixture.projectId, runId, profileId, features, profileConfig, artifactDigest, executionAuthorizationEvidence: { explicitUnattended: true } }, command());
   return output.state;
 };
 

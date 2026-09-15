@@ -28,11 +28,11 @@ test('CardWorld consumer compiles one canonical requirement and project-owned de
   assert.equal(descriptor.policy.promptCodecPlugin, 'reference-agent-prompt-codec');
   assert.equal(descriptor.policy.maxConcurrency, 'auto');
   assert.deepEqual(descriptor.policy.runtimeConfigs['codex-conversation-runtime'], {});
-  const actionAuthorization = { actor: 'project-owner', decision: 'approved', action: 'quality', authorizedAt: '2026-09-15T00:00:00.000Z' };
-  const scoped = createCardWorldProjectDescriptor({ workspaceRoot: process.cwd(), actionExecution: { quality: { agentExecutionMode: 'headless', runtimePluginId: 'codex-cli-runtime', authorization: actionAuthorization } } });
+  const scoped = createCardWorldProjectDescriptor({ workspaceRoot: process.cwd(), runtimePluginIds: ['codex-conversation-runtime', 'codex-cli-runtime'], actionExecution: { quality: { agentExecutionMode: 'headless', runtimePluginId: 'codex-cli-runtime' } } });
   assert.deepEqual(scoped.policy.runtimePlugins, ['codex-conversation-runtime', 'codex-cli-runtime']);
-  assert.deepEqual(scoped.policy.actionExecution.quality.authorization, actionAuthorization);
-  assert.deepEqual(scoped.policy.runtimeConfigs['codex-cli-runtime'], { sandbox: 'workspace-write', ephemeral: true, approveForMe: true });
+  assert.deepEqual(scoped.extensions.map(extension => extension.id), ['cardworld-engine-profile', 'codex-runtime', 'codex-headless-runtime']);
+  assert.deepEqual(scoped.policy.actionExecution.quality, { agentExecutionMode: 'headless', runtimePluginId: 'codex-cli-runtime' });
+  assert.deepEqual(scoped.policy.runtimeConfigs['codex-cli-runtime'], { sandbox: 'workspace-write', ephemeral: true });
   const graph = compileCardWorldFeatureGraph({
     requirement: { id: 'v-next', acceptance: ['requirement is singular and approved'] },
     features: [
@@ -125,8 +125,8 @@ test('consumer descriptors do not retain Codex when another Runtime is selected'
   assert.deepEqual(collection.extensions.map(extension => extension.id), ['tabletop-collection-profile']);
   assert.equal(engine.policy.agentExecutionMode, 'headless');
   assert.equal(collection.policy.agentExecutionMode, 'headless');
-  const mixed = createCardWorldProjectDescriptor({ workspaceRoot: process.cwd(), runtimePluginId: 'another-runtime', agentExecutionMode: 'headless', actionExecution: { quality: { agentExecutionMode: 'headless', runtimePluginId: 'codex-cli-runtime', authorization: { actor: 'project-owner', decision: 'approved', action: 'quality', authorizedAt: '2026-09-15T00:00:00.000Z' } } } });
-  assert.deepEqual(mixed.extensions.map(extension => extension.id), ['cardworld-engine-profile', 'codex-runtime']);
+  const mixed = createCardWorldProjectDescriptor({ workspaceRoot: process.cwd(), runtimePluginId: 'another-runtime', runtimePluginIds: ['another-runtime', 'codex-cli-runtime'], agentExecutionMode: 'headless', actionExecution: { quality: { agentExecutionMode: 'headless', runtimePluginId: 'codex-cli-runtime' } } });
+  assert.deepEqual(mixed.extensions.map(extension => extension.id), ['cardworld-engine-profile', 'codex-headless-runtime']);
   const explicit = createTabletopCollectionProjectDescriptor({ workspaceRoot: process.cwd(), runtimePluginId: 'another-runtime', agentExecutionMode: 'headless', runtimeExtension: { id: 'another-runtime-pack', version: '2.0.0', digest: 'a'.repeat(64) } });
   assert.deepEqual(explicit.extensions.map(extension => extension.id), ['tabletop-collection-profile', 'another-runtime-pack']);
 });

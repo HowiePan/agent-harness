@@ -67,8 +67,11 @@ export const createCardWorldProjectDescriptor = ({
   workspaceRoot,
   remote,
   runtimePluginId = 'codex-conversation-runtime',
+  runtimePluginIds = [runtimePluginId],
   agentExecutionMode,
   runtimeExtension,
+  headlessRuntimeExtension,
+  runtimeConfigs: runtimeConfigOverrides = {},
   extensions = [],
   model,
   contextBudgetCommand = defaultContextBudgetCommand(),
@@ -81,14 +84,16 @@ export const createCardWorldProjectDescriptor = ({
   const resolvedAgentExecutionMode = agentExecutionMode ?? 'conversation-visible';
   const workspace = { root: workspaceRoot, rootSelector: 'git-worktree', excluded: ['.git', '.cardworld-local', 'card_world_engine/target', 'card_world_engine/pkg', 'node_modules'] };
   if (remote) workspace.remote = remote;
-  const scopedRuntimeIds = Object.values(actionExecution).map(value => value?.runtimePluginId).filter(Boolean);
-  const runtimePlugins = [...new Set([runtimePluginId, ...scopedRuntimeIds])];
-  const selectedRuntimeExtension = runtimeExtension === undefined
-    ? (runtimePlugins.some(id => ['codex-conversation-runtime', 'codex-cli-runtime', 'codex-isolated-runtime'].includes(id)) ? { id: 'codex-runtime', version: '1.0.0' } : null)
-    : runtimeExtension;
+  const runtimePlugins = [...new Set(runtimePluginIds)];
+  assert(runtimePlugins.includes(runtimePluginId), 'PROJECT_RUNTIME_ALLOWLIST_INVALID', 'runtimePluginIds must include the default Runtime.');
+  for (const [action, value] of Object.entries(actionExecution)) assert(runtimePlugins.includes(value?.runtimePluginId), 'ACTION_RUNTIME_EXPLICIT_ALLOWLIST_REQUIRED', `Action ${action} Runtime must be explicitly included in runtimePluginIds.`);
+  const selectedRuntimeExtensions = [];
+  if (runtimePlugins.includes('codex-conversation-runtime')) selectedRuntimeExtensions.push(runtimeExtension === undefined ? { id: 'codex-runtime', version: '1.0.0' } : runtimeExtension);
+  if (runtimePlugins.some(id => ['codex-cli-runtime', 'codex-isolated-runtime'].includes(id))) selectedRuntimeExtensions.push(headlessRuntimeExtension === undefined ? { id: 'codex-headless-runtime', version: '1.0.0' } : headlessRuntimeExtension);
+  if (!runtimePlugins.some(id => ['codex-conversation-runtime', 'codex-cli-runtime', 'codex-isolated-runtime'].includes(id)) && runtimeExtension) selectedRuntimeExtensions.push(runtimeExtension);
   const runtimeConfigs = Object.fromEntries(runtimePlugins.map(id => {
     const processBacked = ['codex-cli-runtime', 'codex-isolated-runtime'].includes(id);
-    const config = processBacked ? { sandbox: 'workspace-write', ephemeral: true, approveForMe: true } : {};
+    const config = { ...(processBacked ? { sandbox: 'workspace-write', ephemeral: true } : {}), ...(runtimeConfigOverrides[id] ?? {}) };
     if (model) config.model = model;
     return [id, config];
   }));
@@ -99,7 +104,7 @@ export const createCardWorldProjectDescriptor = ({
     profiles: ['engine-delivery'],
     extensions: [
       { id: 'cardworld-engine-profile', version: '1.0.0' },
-      ...(selectedRuntimeExtension ? [structuredClone(selectedRuntimeExtension)] : []),
+      ...selectedRuntimeExtensions.filter(Boolean).map(value => structuredClone(value)),
       ...structuredClone(extensions),
     ],
     policy: {

@@ -7,6 +7,8 @@ import { createCardWorldProjectDescriptor } from '../src/consumers/cardworld-eng
 import { loadExtensionPack } from '../src/extensions/contract.mjs';
 import { createInMemoryRuntime } from '../src/plugins/runtime/in-memory-runtime.mjs';
 import { harnessTemporaryRoot } from '../src/write-boundary.mjs';
+import { createTestExecutionAuthorizationAdapter } from './test-support.mjs';
+import { projectExecutionPolicyDecisionContext } from '../src/registry/project-registry.mjs';
 
 test('a failed final Gate returns attention and a fresh retry closes the same quality Run', async t => {
   const controlRoot = resolve(process.cwd());
@@ -22,7 +24,7 @@ test('a failed final Gate returns attention and a fresh retry closes the same qu
 
   const engine = await loadExtensionPack('./src/consumers/cardworld-engine.mjs', { cwd: controlRoot, controlRoot });
   const releaseIdentity = { version: '1.0.0', artifactDigest: 'a'.repeat(64), verified: true };
-  const harness = await createHarness({ controlRoot, dataRoot, releaseIdentity, strictProjectIdentity: false, extensions: [engine] });
+  const harness = await createHarness({ controlRoot, dataRoot, releaseIdentity, strictProjectIdentity: false, extensions: [engine], executionAuthorizationAdapter: createTestExecutionAuthorizationAdapter() });
   const runtimeManifest = { id: 'gate-test-runtime', kind: 'agent-runtime', version: '1.0.0', capabilities: ['spawn', 'wait', 'headless'], permissions: [] };
   harness.registerPlugin(runtimeManifest, createInMemoryRuntime({ manifest: runtimeManifest, handler: async () => ({ status: 'completed', summary: 'quality review clean', changedFiles: [], findings: [] }) }));
   const descriptor = createCardWorldProjectDescriptor({ workspaceRoot: workspace, harness: releaseIdentity, runtimePluginId: runtimeManifest.id, runtimeExtension: null, agentExecutionMode: 'headless' });
@@ -35,8 +37,8 @@ test('a failed final Gate returns attention and a fresh retry closes the same qu
     command: [process.execPath, '-e', "process.exit(require('node:fs').existsSync(process.argv[1]) ? 0 : 2)", passFlag],
     cwd: '.',
   }];
-  await harness.projectRegistry.register(descriptor, { expectedRevision: 0, commandId: 'gate-recovery-project' });
-  const plan = await harness.createLifecyclePlan({ projectId: descriptor.id, action: 'quality', target: 'V3.8.4', arguments: ['full'], extensionId: engine.id, executionWorkspaceRoot: workspace });
+  await harness.projectRegistry.register(descriptor, { expectedRevision: 0, commandId: 'gate-recovery-project', authorityDecision: { actor: 'test-user', decision: 'approved', action: 'project-execution-policy-change', expiresAt: '2099-09-15T00:00:00.000Z', context: projectExecutionPolicyDecisionContext({ input: descriptor, expectedRevision: 0 }) } });
+  const plan = await harness.createLifecyclePlan({ projectId: descriptor.id, action: 'quality', target: 'V3.8.4', arguments: ['full'], extensionId: engine.id, executionWorkspaceRoot: workspace, executionAuthorizationEvidence: { explicitUnattended: true } });
   const progress = () => {};
   const firstPreflight = await harness.createExecutionReadinessReport(plan, { onGateProgress: progress });
   assert.equal(firstPreflight.executionReady, true);

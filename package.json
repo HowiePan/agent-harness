@@ -23,6 +23,7 @@
     "./profiles": "./src/profiles/index.mjs",
     "./extensions": "./src/extensions/index.mjs",
     "./extensions/codex-runtime": "./src/extensions/codex-runtime.mjs",
+    "./extensions/codex-headless-runtime": "./src/extensions/codex-headless-runtime.mjs",
     "./extensions/legacy-compat": "./src/extensions/legacy-compat.mjs",
     "./consumers": "./src/consumers/index.mjs",
     "./consumers/cardworld-engine": "./src/consumers/cardworld-engine.mjs",

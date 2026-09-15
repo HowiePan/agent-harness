@@ -4,7 +4,6 @@ import { resolve } from 'node:path';
 import { createHarness, defaultDataRoot } from './app/harness.mjs';
 import { applyBootstrapPlan, createBootstrapPlan } from './bootstrap.mjs';
 import { newId } from './canonical.mjs';
-import { RunCoordinator } from './coordinator/run-coordinator.mjs';
 import { ProjectGateRunner } from './gates/project-gate-runner.mjs';
 import { loadExtensionPack } from './extensions/contract.mjs';
 import { ExtensionRegistry } from './extensions/registry.mjs';
@@ -66,7 +65,6 @@ agent-harness run start --project <id> --run <id> --profile <id> --features <jso
 agent-harness run status --project <id> --run <id>
 agent-harness run schedule --project <id> --run <id> [--max <n|auto>] [--runtime <plugin-id>]
 agent-harness run dispatch --project <id> --run <id> --dispatch <id>
-agent-harness run execute --project <id> --run <id> [--max <n|auto>] [--runtime <plugin-id>] [--max-rounds <n>]
 agent-harness run gates --project <id> --run <id> --scope <feature|stable|final> [--fresh] [--ids <id,id>] [--progress]
 agent-harness run bind --project <id> --run <id> --dispatch <id> --agent <id> --runtime-receipt <json|->
 agent-harness run submit --project <id> --run <id> --dispatch <id> --result <json|->
@@ -84,7 +82,6 @@ agent-harness run supersede --project <id> --run <id> --replacement-run <id> --p
 agent-harness lifecycle plan --input <json|-> [--control-root <path>] [--data-root <path>]
 agent-harness lifecycle preflight --plan <json|-> [--no-write-probe]
 agent-harness lifecycle start --plan <json|-> --preflight <json> --command-id <id>
-agent-harness lifecycle execute --plan <json|-> --preflight <json> --command-id <id> [--max <n>] [--max-rounds <n>] [--progress]
 agent-harness release activation-plan [--control-root <path>] [--data-root <path>] [--project <id>] [--project-descriptor <json>]...
 agent-harness release activation-apply --plan <json|-> --command-id <id> --decision <json>
 agent-harness evidence add --project <id> --run <id> --file <path> [--feature <id>] [--dispatch <id>]
@@ -109,6 +106,9 @@ if (command === 'help' || has('--help')) {
 }
 
 try {
+if ((command === 'run' || command === 'lifecycle') && subject === 'execute') {
+  throw Object.assign(new Error('Agent execution is unavailable from the standalone CLI. Use a trusted host embedding with a visible adapter or an explicit unattended authorization adapter.'), { code: 'AGENT_CLI_EXECUTION_DISABLED' });
+}
 if (command === 'installation' && subject === 'init') {
   const installation = await initializeHarnessInstallation({ controlRoot: take('--control-root') });
   console.log(JSON.stringify({ ok: true, installation }, null, 2));
@@ -291,9 +291,6 @@ if (command === 'features' && subject === 'compile') {
   } else if (command === 'lifecycle' && subject === 'preflight') {
     const output = await harness.createExecutionReadinessReport(await jsonInput('--plan'), { onGateProgress: progressWriter, probeWrite: !has('--no-write-probe') });
     console.log(JSON.stringify({ ok: output.executionReady, report: output }, null, 2));
-  } else if (command === 'lifecycle' && subject === 'execute') {
-    const output = await harness.executeLifecyclePlan(await jsonInput('--plan'), { commandId: take('--command-id'), preflightReport: await preflightInput(), maxConcurrency: optionalNumber('--max'), maxRounds: Number(take('--max-rounds') ?? 100), forceFreshGates: !has('--no-fresh-gates'), onGateProgress: progressWriter });
-    console.log(JSON.stringify({ ok: output.status === 'closed', ...output }, null, 2));
   } else if (command === 'run' && subject === 'schedule') {
     const state = await harness.authorityStore.read(take('--project'), take('--run'));
     const output = await harness.dispatch(state.projectId, state.runId, { maxConcurrency: optionalNumber('--max'), runtimePluginId: take('--runtime') ?? null }, { expectedRevision: state.revision, commandId: take('--command-id') ?? newId('command') });
@@ -301,10 +298,6 @@ if (command === 'features' && subject === 'compile') {
   } else if (command === 'run' && subject === 'dispatch') {
     const output = await harness.readDispatchPacket(take('--project'), take('--run'), take('--dispatch'));
     console.log(JSON.stringify({ ok: true, ...output }, null, 2));
-  } else if (command === 'run' && subject === 'execute') {
-    const coordinator = new RunCoordinator({ harness });
-    const output = await coordinator.run({ projectId: take('--project'), runId: take('--run'), runtimePluginId: take('--runtime') ?? null, maxConcurrency: optionalNumber('--max'), maxRounds: Number(take('--max-rounds') ?? 100) });
-    console.log(JSON.stringify({ ok: output.status !== 'attention-required', ...output }, null, 2));
   } else if (command === 'run' && subject === 'gates') {
     const runner = new ProjectGateRunner({ harness, onProgress: progressWriter });
     const output = await runner.run({ projectId: take('--project'), runId: take('--run'), scope: take('--scope') ?? 'final', forceFresh: has('--fresh'), gateIds: String(take('--ids') ?? '').split(',').filter(Boolean) });

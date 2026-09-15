@@ -12,6 +12,8 @@ import { ProjectRegistry } from '../src/registry/project-registry.mjs';
 import { loadReleaseIdentity } from '../src/release-identity.mjs';
 import { activeReleaseFile } from '../src/registry/active-generation.mjs';
 import { harnessTemporaryRoot } from '../src/write-boundary.mjs';
+import { createTestExecutionAuthorizationAdapter } from './test-support.mjs';
+import { projectExecutionPolicyDecisionContext } from '../src/registry/project-registry.mjs';
 
 const releaseIdentity = { version: '1.0.0', artifactDigest: 'a'.repeat(64), verified: true };
 
@@ -54,7 +56,7 @@ test('lifecycle planning deterministically composes quality/full without convers
   assert.equal(await harness.authorityStore.read(descriptor.id, first.run.runId, { required: false }), null);
 });
 
-test('quality alone can be durably authorized for headless execution while other Engine actions stay visible', async t => {
+test('headless quality requires one trusted command grant while other Engine actions stay visible', async t => {
   const controlRoot = resolve(process.cwd());
   const tempParent = resolve(harnessTemporaryRoot(), 'lifecycle-command-tests');
   await mkdir(tempParent, { recursive: true });
@@ -66,22 +68,31 @@ test('quality alone can be durably authorized for headless execution while other
   await writeFile(resolve(workspaceRoot, 'README.md'), 'fixture\n', 'utf8');
   const extension = await loadExtensionPack('./src/consumers/cardworld-engine.mjs', { cwd: controlRoot, controlRoot });
   const runtimeExtension = await loadExtensionPack('./src/extensions/codex-runtime.mjs', { cwd: controlRoot, controlRoot });
-  const authorization = { actor: 'project-owner', decision: 'approved', action: 'quality', authorizedAt: '2026-09-15T00:00:00.000Z', source: 'AH-20260915-8C001F4D266E' };
-  const descriptor = createCardWorldProjectDescriptor({ workspaceRoot, harness: releaseIdentity, actionExecution: { quality: { agentExecutionMode: 'headless', runtimePluginId: 'codex-cli-runtime', authorization } } });
+  const headlessExtension = await loadExtensionPack('./src/extensions/codex-headless-runtime.mjs', { cwd: controlRoot, controlRoot });
+  const descriptor = createCardWorldProjectDescriptor({ workspaceRoot, harness: releaseIdentity, runtimePluginIds: ['codex-conversation-runtime', 'codex-cli-runtime'], actionExecution: { quality: { agentExecutionMode: 'headless', runtimePluginId: 'codex-cli-runtime' } } });
   descriptor.gateRecipes = [];
-  descriptor.extensions = descriptor.extensions.map(item => ({ ...item, digest: item.id === extension.id ? extension.digest : runtimeExtension.digest }));
-  const harness = await createHarness({ controlRoot, dataRoot, releaseIdentity, strictProjectIdentity: false, extensions: [extension, runtimeExtension] });
-  await harness.projectRegistry.register(descriptor, { expectedRevision: 0, commandId: 'scoped-headless-register' });
+  descriptor.extensions = descriptor.extensions.map(item => ({ ...item, digest: item.id === extension.id ? extension.digest : item.id === runtimeExtension.id ? runtimeExtension.digest : headlessExtension.digest }));
+  const harness = await createHarness({ controlRoot, dataRoot, releaseIdentity, strictProjectIdentity: false, extensions: [extension, runtimeExtension, headlessExtension], executionAuthorizationAdapter: createTestExecutionAuthorizationAdapter(), allowedPluginPermissions: ['state.write', 'agent.conversation', 'process.spawn', 'workspace.read', 'workspace.write', 'gate.execute', 'artifact.read'] });
+  await harness.projectRegistry.register(descriptor, { expectedRevision: 0, commandId: 'scoped-headless-register', authorityDecision: { actor: 'test-user', decision: 'approved', action: 'project-execution-policy-change', expiresAt: '2099-09-15T00:00:00.000Z', context: projectExecutionPolicyDecisionContext({ input: descriptor, expectedRevision: 0 }) } });
   const quality = await harness.createLifecyclePlan({ projectId: descriptor.id, action: 'quality', target: 'V3.8.4', arguments: ['full'], extensionId: extension.id, executionWorkspaceRoot: workspaceRoot });
+  const deniedPreflight = await harness.createExecutionReadinessReport(quality);
+  assert.equal(deniedPreflight.executionReady, false);
+  assert.equal(deniedPreflight.checks.find(check => check.id === 'command-grant').issues[0].code, 'LIFECYCLE_EXECUTION_GRANT_REQUIRED');
+  const authorizedQuality = await harness.createLifecyclePlan({ projectId: descriptor.id, action: 'quality', target: 'V3.8.4', arguments: ['full'], extensionId: extension.id, executionWorkspaceRoot: workspaceRoot, executionAuthorizationEvidence: { explicitUnattended: true } });
   const planning = await harness.createLifecyclePlan({ projectId: descriptor.id, action: 'plan', target: 'V3.8.4', extensionId: extension.id, executionWorkspaceRoot: workspaceRoot });
-  assert.equal(quality.run.runtimePluginId, 'codex-cli-runtime');
-  assert.equal(quality.run.agentExecutionMode, 'headless');
+  assert.equal(authorizedQuality.run.runtimePluginId, 'codex-cli-runtime');
+  assert.equal(authorizedQuality.run.agentExecutionMode, 'headless');
+  assert.match(authorizedQuality.run.executionGrant.grantDigest, /^[a-f0-9]{64}$/);
   assert.equal(planning.run.runtimePluginId, 'codex-conversation-runtime');
   assert.equal(planning.run.agentExecutionMode, 'conversation-visible');
-  const preflight = await harness.createExecutionReadinessReport(quality);
+  const preflight = await harness.createExecutionReadinessReport(authorizedQuality);
   assert.equal(preflight.executionReady, true);
   assert.deepEqual(preflight.checks.find(check => check.id === 'visible-host').details, { required: false });
-  assert.equal(await harness.authorityStore.read(descriptor.id, quality.run.runId, { required: false }), null);
+  const changedConstraintHarness = await createHarness({ controlRoot, dataRoot, releaseIdentity, strictProjectIdentity: false, extensions: [extension, runtimeExtension, headlessExtension], executionAuthorizationAdapter: createTestExecutionAuthorizationAdapter({ revision: 2, decisionLineage: 'test-user-explicit-policy-v2' }), allowedPluginPermissions: ['state.write', 'agent.conversation', 'process.spawn', 'workspace.read', 'workspace.write', 'gate.execute', 'artifact.read'] });
+  const staleConstraintPreflight = await changedConstraintHarness.createExecutionReadinessReport(authorizedQuality);
+  assert.equal(staleConstraintPreflight.executionReady, false);
+  assert.equal(staleConstraintPreflight.checks.find(check => check.id === 'command-grant').issues[0].code, 'EXECUTION_CONSTRAINT_STALE');
+  assert.equal(await harness.authorityStore.read(descriptor.id, authorizedQuality.run.runId, { required: false }), null);
 });
 
 test('lifecycle planning reports every conflicting active logical Run before start', async t => {
@@ -134,17 +145,26 @@ test('release activation stages a complete generation and switches the active po
   const descriptor = createCardWorldProjectDescriptor({ workspaceRoot, harness: { version: release.version, artifactDigest: release.artifactDigest } });
   descriptor.extensions = descriptor.extensions.map(item => ({ ...item, digest: item.id === extension.id ? extension.digest : runtime.digest }));
   await projects.register(descriptor, { expectedRevision: 0, commandId: 'activation-project' });
-  const authorization = { actor: 'project-owner', decision: 'approved', action: 'quality', authorizedAt: '2026-09-15T00:00:00.000Z', source: 'AH-20260915-8C001F4D266E' };
   const nextDescriptor = structuredClone(descriptor);
-  nextDescriptor.policy.runtimePlugins = ['codex-conversation-runtime', 'codex-cli-runtime'];
-  nextDescriptor.policy.runtimeConfigs['codex-cli-runtime'] = { sandbox: 'workspace-write', ephemeral: true, approveForMe: true };
-  nextDescriptor.policy.actionExecution = { quality: { agentExecutionMode: 'headless', runtimePluginId: 'codex-cli-runtime', authorization } };
+  nextDescriptor.policy.visibleHeartbeatTimeoutMs = 60000;
+  const descriptorWithGrant = structuredClone(nextDescriptor);
+  descriptorWithGrant.policy.executionGrant = { actor: 'user', decision: 'approved' };
+  await assert.rejects(
+    () => createReleaseActivationPlan({ controlRoot, dataRoot, releaseIdentity: release, projectDescriptors: [descriptorWithGrant] }),
+    error => error.code === 'DESCRIPTOR_EXECUTION_AUTHORIZATION_FORBIDDEN',
+  );
+  const descriptorWithLegacyApproval = structuredClone(nextDescriptor);
+  descriptorWithLegacyApproval.policy.actionExecution = { quality: { agentExecutionMode: 'headless', runtimePluginId: 'codex-conversation-runtime', authorization: { actor: 'user', decision: 'approved' } } };
+  await assert.rejects(
+    () => createReleaseActivationPlan({ controlRoot, dataRoot, releaseIdentity: release, projectDescriptors: [descriptorWithLegacyApproval] }),
+    error => error.code === 'LEGACY_DESCRIPTOR_AUTHORIZATION_FORBIDDEN',
+  );
   const plan = await createReleaseActivationPlan({ controlRoot, dataRoot, releaseIdentity: release, projectDescriptors: [nextDescriptor], now: () => '2026-09-14T13:00:00.000Z' });
   const alternativeDescriptor = structuredClone(nextDescriptor);
-  alternativeDescriptor.policy.actionExecution.quality.authorization.source = 'different-authority-source';
+  alternativeDescriptor.policy.visibleHeartbeatTimeoutMs = 90000;
   const alternativePlan = await createReleaseActivationPlan({ controlRoot, dataRoot, releaseIdentity: release, projectDescriptors: [alternativeDescriptor], now: () => '2026-09-14T13:00:00.000Z' });
   assert.notEqual(plan.generationId, alternativePlan.generationId);
-  assert.equal(plan.projects[0].nextDescriptor.policy.actionExecution.quality.runtimePluginId, 'codex-cli-runtime');
+  assert.equal(plan.projects[0].nextDescriptor.policy.visibleHeartbeatTimeoutMs, 60000);
   const decision = { actor: 'test', decision: 'approved', action: 'release-activation', context: { planDigest: plan.planDigest } };
   const applied = await applyReleaseActivationPlan(plan, { controlRoot, dataRoot, releaseIdentity: release, commandId: 'activation-apply', authorityDecision: decision, now: () => '2026-09-14T13:00:01.000Z' });
   assert.equal(applied.reused, false);
@@ -156,7 +176,7 @@ test('release activation stages a complete generation and switches the active po
   assert.equal(activeExtension.artifact.resolvedPath.startsWith(applied.runtimeRoot), true);
   const activeProject = await projects.get(descriptor.id);
   assert.equal(activeProject.revision, 2);
-  assert.deepEqual(activeProject.policy.actionExecution.quality.authorization, authorization);
+  assert.equal(activeProject.policy.visibleHeartbeatTimeoutMs, 60000);
   const repeated = await applyReleaseActivationPlan(plan, { controlRoot, dataRoot, releaseIdentity: release, commandId: 'activation-apply', authorityDecision: decision, now: () => '2026-09-14T13:00:02.000Z' });
   assert.equal(repeated.reused, true);
 });
