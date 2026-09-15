@@ -8,6 +8,7 @@ import { sealReleaseCandidateReceipt } from '../src/maintenance/release-receipt.
 import { assertNoLinkPath } from '../src/paths.mjs';
 import { verifyReleaseManifest } from '../src/release-identity.mjs';
 import { assertHarnessWritePath, temporaryEnvironment } from '../src/write-boundary.mjs';
+import { parseLastJsonDocument } from './parse-json-output.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const scratchRoot = assertHarnessWritePath(resolve(root, '.tmp', 'release-candidate'), 'release candidate scratch root', root);
@@ -101,7 +102,8 @@ try {
     NPM_CONFIG_UPDATE_NOTIFIER: 'false',
   };
   const packed = await run(process.execPath, [npmCli, 'pack', '--json', '--pack-destination', scratch], { environment });
-  const packResult = JSON.parse(packed.stdout)[0];
+  const packOutput = parseLastJsonDocument(packed.stdout);
+  const packResult = Array.isArray(packOutput) ? packOutput[0] : null;
   assert(packResult?.filename && packResult.integrity && packResult.shasum && Array.isArray(packResult.files), 'RELEASE_NPM_PACK_RESULT_INVALID', 'npm pack did not return a complete package record.');
   const packedPaths = new Set(packResult.files.map(file => file.path));
   for (const file of manifest.files) assert(packedPaths.has(file.path), 'RELEASE_MANIFEST_FILE_NOT_PACKED', `Release manifest file is missing from the archive: ${file.path}`);
