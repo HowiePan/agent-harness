@@ -1,7 +1,14 @@
 {
-  "id": "tabletop-project",
+  "id": "tabletop-collection",
   "workspaceRoot": "/workspaces/tabletop-collection",
   "remote": "https://github.com/HowiePan/CardWorld.git",
   "maxConcurrency": 10,
-  "maxLogicalGames": 10
+  "maxLogicalGames": 10,
+  "batches": [
+    {
+      "id": "B1",
+      "ruleStatus": "rule-ready",
+      "gameIds": ["doudizhu", "gomoku", "texas-holdem", "chess", "tycoon", "liars-dice", "junqi", "bind-and-die", "go", "riichi"]
+    }
+  ]
 }

@@ -13,7 +13,7 @@ node bin/agent-harness.mjs doctor --data-root .agent-harness-data/doctor
 node scripts/check-residue.mjs
 ```
 
-`doctor` 是零写入检查：只解析并验证目标路径，不初始化状态目录，也不导入 Extension 代码。输出分别标明控制根模式、安装就绪、数据根/Extension Registry/Project Registry/Authority 是否存在，以及 `storageReady`、逐项目 `projectReady` 和最终 `lifecycleReady`；`writeCapability=not-probed` 表示零写入检查不能证明当前调用方具有写权限。生产预检必须同时传入绑定的 `--project`、`--profile`、`--extension-id` 和可选 `--execution-workspace`，不得用“任意项目存在”代替目标项目就绪。
+`doctor` 是零写入静态检查：只解析并验证目标路径，不初始化状态目录，也不导入 Extension 代码。输出分别标明控制根模式、活动不可变 Runtime、数据根/Extension Registry/Project Registry/Authority 是否存在，以及 `installationReady`、`storageReady`、`registryReady` 和逐项目 `projectReady`。它固定返回 `executionReady=null`、`lifecycleReady=false` 与 `action-scoped-execution-preflight-required`；`writeCapability=not-probed` 也不能证明当前调用方具有写权限。任何具体动作都必须对确定的 Plan 另做执行预检。
 
 先用 `project register` 登记 Project Descriptor，再用 `run start` 创建 Run。所有写命令携带唯一 `--command-id`；更新已有 Authority 时同时携带最新 revision。使用 `node bin/agent-harness.mjs --help` 查看完整参数。
 
@@ -28,7 +28,7 @@ node bin/agent-harness.mjs project descriptor --extension agent-harness/consumer
 
 生产 Project Descriptor 必须同时记录 Harness 版本/制品摘要与每个 Extension 的 ID/版本/制品摘要，Run 创建前精确校验已安装集合。选择非 Codex Runtime 时，Consumer Descriptor 不再声明 `codex-runtime`；调用方显式提供所选 Runtime Extension 身份即可。业务仓无需保存生成器、配置、Skill 或 Harness 代码。
 
-首次投产推荐使用两阶段 Bootstrap。`bootstrap plan` 只读取发布清单、Registry 和 Project 状态，不导入 Extension、也不创建数据根；`bootstrap apply` 必须携带审核后的原计划、批准 Decision 和唯一 command ID。Apply 使用可恢复 journal，逐项幂等登记 Extension，初始化受管 Store，生成并登记 Project Descriptor，最后强制通过项目级 readiness：
+首次投产推荐使用两阶段 Bootstrap。`bootstrap plan` 只读取发布清单、Registry 和 Project 状态，不导入 Extension、也不创建数据根；`bootstrap apply` 必须携带审核后的原计划、批准 Decision 和唯一 command ID。Apply 使用可恢复 journal，逐项幂等登记 Extension，初始化受管 Store，生成并登记 Project Descriptor，最后只强制通过 Registry/Project 静态就绪；它不再声称具体 lifecycle 已可执行：
 
 ```powershell
 node bin/agent-harness.mjs bootstrap plan --input <bootstrap-request.json> > <reviewed-bootstrap-plan.json>
@@ -45,23 +45,26 @@ node bin/agent-harness.mjs release activation-plan
 node bin/agent-harness.mjs release activation-apply --plan <plan.json> --command-id <id> --decision <approved-decision.json>
 ```
 
-激活一次性绑定候选 Harness、Extension 集合和受影响 Project；事务先提交候选 generation，最后切换活动指针。业务生命周期命令不得隐式触发 Bootstrap 或逐项请求制品升级授权。
+激活一次性绑定候选 Harness、Extension 集合和受影响 Project；先把发布清单覆盖的全部 Runtime 字节复制、复验到内容寻址的只读候选根，再提交 Registry generation，最后切换同时绑定 generation 与 `runtimeRoot` 的活动指针。安装标记随 CLI Apply 指向该不可变 Runtime；开发 checkout 后续变化不能改变活动 Extension 字节。插件绑定的 `entrypoint` 必须改为 Apply 输出的 `runtimeEntrypoint` 后再按同版本 remove/add 规则重装。业务生命周期命令不得隐式触发 Bootstrap 或逐项请求制品升级授权。
 
-生命周期命令先生成确定性的 `LifecycleCommandPlan`。交互式 Codex 默认只启动 Authority，再由当前宿主把 Dispatch 委派给可见子 Agent：
+生命周期命令先生成确定性的 `LifecycleCommandPlan`，再生成绑定同一 Plan、Project revision、Release 和短 TTL 的聚合式执行预检：
 
 ```text
 node bin/agent-harness.mjs lifecycle plan --input <intent.json>
-node bin/agent-harness.mjs lifecycle start --plan <plan.json> --command-id <command-id>
+node bin/agent-harness.mjs lifecycle preflight --plan <plan.json> > <preflight.json>
+node bin/agent-harness.mjs lifecycle start --plan <plan.json> --preflight <preflight.json> --command-id <command-id>
 node bin/agent-harness.mjs run schedule --project <id> --run <id>
 node bin/agent-harness.mjs run dispatch --project <id> --run <id> --dispatch <dispatch-id>
 ```
 
-Plan 中的 Run ID、Feature graph、Profile config、Runtime、Gate plan 和 protected-operation 列表由已安装 Extension 的 compiler 产生，模型和 Hook 不得自行构造。`run dispatch` 同时返回不可变 Packet 与由 Descriptor 固定的 Prompt Codec 确定性生成的完整 Prompt。Codex Operator 必须把 `prompt.text` 原样交给宿主原生 multi-agent delegation，不能自行串联、改写或补充提示词；可信宿主适配器证明 Agent、Dispatch、Packet 摘要、Prompt 摘要与 inspect reference 后才能绑定 Lease，原始 `run bind` JSON 不能充当证明。运行期间至少记录一次新鲜 heartbeat，最后提交结构化结果。没有 Prompt 生成、可见委派或可信绑定能力时返回 `attention-required`；禁止即兴拼 Prompt、调用 `codex exec`、后台 Agent CLI、`run execute` 或 `lifecycle execute` 兜底。
+Preflight 一次聚合 Plan、Project、活动 Release/Runtime、历史同逻辑 Run、workspace 源码摘要、Extension、Runtime、Prompt transport、可见 Host、活动 Lease 重连、全部最终 Gate 命令/脚本/包脚本/sandbox/live observer 和原子写探针。任一项失败时 `executionReady=false`，`lifecycle start` 拒绝且不创建 Run。Plan 中的 Run ID、Feature graph、Profile config、Runtime、Gate plan 和 protected-operation 列表由已安装 Extension 的 compiler 产生，模型和 Hook 不得自行构造。
+
+`run dispatch` 同时返回不可变 Packet 与由 Descriptor 固定的 Prompt Codec 确定性生成的完整 Prompt。Codex Operator 必须把 `prompt.text` 原样交给宿主原生 multi-agent delegation，不能自行串联、改写或补充提示词；完整 Host Coordinator 通过 `createVisibleHostAdapter({ inspectVisibleAgent, spawnVisibleAgent, waitVisibleAgent, readVisibleResult, ... })` 注入 `createHarness()`，再调用 `executeVisibleLifecyclePlan()`。它会从 Authority 恢复活动 Lease、重新做宿主 attestation、等待、heartbeat、传回严格 schema 结果并连续调度 repair/re-review。原始 `run bind` JSON 不能充当证明。当前产品宿主若没有这些受信原生回调，必须在 preflight 停止，不能用 CLI 或模型 JSON 代替。
 
 只有 Project Descriptor 明确声明 `agentExecutionMode: headless`，且用户明确请求 CI/无人值守执行时，才可使用阻塞 Coordinator：
 
 ```text
-node bin/agent-harness.mjs lifecycle execute --plan <plan.json> --command-id <command-id> --progress
+node bin/agent-harness.mjs lifecycle execute --plan <plan.json> --preflight <preflight.json> --command-id <command-id> --progress
 ```
 
 `project-descriptor-input.schema.json` 约束可提交的配置输入；`project-descriptor.schema.json` 约束 Registry 增加 revision、commands、时间和摘要后的持久记录。更新时不得把整个 Registry 记录重新作为输入，Programmatic API 使用 `projectDescriptorInput(record)` 提取配置面。CLI 生成器会把当前 Harness 和已安装 Extension 的精确摘要封入输入。静态示例是 Consumer 生成器输入，不伪造会随发布制品变化的摘要。
@@ -88,7 +91,7 @@ codex plugin add agent-harness-codex@agent-harness-local
 
 使用 `h:report <项目别名>` 上报当前对话中的 Harness 问题。该保留命令只依赖绑定文件，因此即使 data root、Extension Registry、Project Descriptor 或 Authority 不可用也能登记问题。它从当前对话提取相关摘录、执行脱敏并列出缺失 Evidence，通过绑定的精确入口调用 `issue record`；不创建新对话，不启动 Run/Gate，也不修复实现。输出目录固定为 `<controlRoot>/issues`，不接受任意路径参数，不写业务仓、Codex worktree、用户目录或历史迁移目录。记录只有在用户另行决定提交并推送后才具备跨设备持久性。
 
-绑定由插件随附的 `scripts/configure-bindings.mjs` 写入。为每个项目重复传入 `--project "<别名>|<projectId>|<profileId>|<extensionId>|<workspaceRoot>"`；旧的四段格式仍可通过顶层 `--workspace-root` 兼容。配置器逐项目固化 Git common-directory identity。绑定文件位于业务仓之外，业务仓保持零 Harness 驻留。
+绑定由插件随附的 `scripts/configure-bindings.mjs` 写入。为每个项目重复传入 `--project "<别名>|<projectId>|<profileId>|<extensionId>|<workspaceRoot>"`；四段格式可用命令行 `--workspace-root` 作为本次配置的默认值，但生成文件不会再写顶层共享 workspace。每个项目必须保存自己的绝对根和 Git common-directory identity，Engine 与 Collection 不得继承同一个根。绑定文件位于业务仓之外，业务仓保持零 Harness 驻留。
 
 当前 Engine Extension 声明：
 
@@ -118,7 +121,9 @@ CLI 的底层问题登记入口为 `issue record --input <json|-> --command-id <
 3. `run gates --scope final --fresh` 从 Project Descriptor 执行确定性最终 Gate，并始终把启动、输出和结束事件显示在可观察终端；无观察器时不启动进程。
 4. 可见子 Agent 运行时，Operator 持续报告任务身份和状态并定期写 heartbeat；Agent 输出先进入 Evidence，再 submit。
 5. Gate、finding 和 Decision 分别记录，不用聊天文本替代 Authority。
-6. 所有 P0-P3 关闭、Profile Gate 满足后生成 close Receipt。
+6. 质量 review Feature 固定只读；每个 Finding 生成仅限 `affectedPaths` 的 repair Feature，completed repair 必须有非空验证 checkpoint 与宿主保存的 verification Receipt；最后一个 repair 完成后自动按当前源码摘要生成全量只读 re-review。复审重复 Finding 会重新打开并进入新 round。
+7. Gate 失败返回 `attention-required/final-gates-not-passed`，不调用 close；环境修复后用新 Preflight 在同一 Run 上强制 fresh 重试。
+8. 所有 P0-P3 关闭、每个质量根都有当前源码摘要下的零 Finding review、Profile Gate 满足后生成 close Receipt。
 
 ## 备份与恢复
 

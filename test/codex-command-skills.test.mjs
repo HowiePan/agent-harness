@@ -175,7 +175,7 @@ test('binding accepts only linked worktrees with the configured Git common direc
     dataRoot: 'data',
     projectSpecs: ['engine|cardworld-engine|engine-delivery|cardworld-engine-profile'],
   });
-  assert.equal(configured.workspaceIdentity.type, 'git-common-dir');
+  assert.equal(configured.projects.engine.workspaceIdentity.type, 'git-common-dir');
   const linked = await hookResponse({ prompt: 'h:engine quality V3.8.4', cwd: linkedWorktree }, { pluginRoot: localPluginRoot });
   assert.match(linked.hookSpecificOutput.additionalContext, /"workspaceMatch":"linked-worktree"/);
   assert.match(linked.hookSpecificOutput.additionalContext, /"executionWorkspaceRoot"/);

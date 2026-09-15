@@ -43,7 +43,20 @@
       "required": ["expectedRevision"],
       "properties": {
         "expectedRevision": { "type": "integer", "minimum": 0 },
-        "existingRunId": { "type": ["string", "null"] }
+        "existingRunId": { "type": ["string", "null"] },
+        "activeRunConflicts": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["runId", "revision", "status"],
+            "properties": {
+              "runId": { "type": "string", "minLength": 1 },
+              "revision": { "type": "integer", "minimum": 1 },
+              "status": { "type": "string", "minLength": 1 }
+            },
+            "additionalProperties": false
+          }
+        }
       },
       "additionalProperties": false
     },

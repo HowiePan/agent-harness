@@ -72,6 +72,7 @@ export const createTabletopCollectionProjectDescriptor = ({
   model,
   maxConcurrency = 10,
   maxLogicalGames = 10,
+  batches = [],
 } = {}) => {
   assert(workspaceRoot && isAbsolute(workspaceRoot), 'COLLECTION_WORKSPACE_REQUIRED', 'Collection descriptor requires an absolute workspaceRoot.');
   if (runtimePluginId !== 'codex-conversation-runtime') assert(agentExecutionMode, 'HEADLESS_EXECUTION_MODE_EXPLICIT_REQUIRED', 'Selecting a non-default Runtime requires an explicit agentExecutionMode; headless execution is never inferred from a Runtime ID.');
@@ -102,6 +103,7 @@ export const createTabletopCollectionProjectDescriptor = ({
       runtimeConfigs: { [runtimePluginId]: runtimeConfig },
       maxConcurrency,
       maxLogicalGames,
+      collectionBatches: structuredClone(batches),
       profileConfigs: { 'collection-batch': { maxLogicalGames } },
     },
     gateRecipes: [
@@ -155,7 +157,7 @@ export const compileTabletopCollectionFeatureGraph = ({ batchId, games, sharedCa
       logicalRoot: capability.feature.logicalRoot ?? `capability:${capability.key}`,
       laneId: capability.feature.laneId ?? '_shared',
       dependsOn: capability.feature.dependsOn ?? [],
-      metadata: { ...(capability.feature.metadata ?? {}), batchId, capabilityKey: capability.key, capabilityOwner: true, ruleStatus: capability.feature.ruleStatus ?? defaultRuleStatus },
+      metadata: { ...(capability.feature.metadata ?? {}), batchId, gameId: null, capabilityKey: capability.key, capabilityOwner: true, ruleStatus: capability.feature.ruleStatus ?? defaultRuleStatus },
     };
   });
   const owners = new Map(sharedCapabilities.map((capability, index) => [capability.key, shared[index].id]));
@@ -171,45 +173,72 @@ export const compileTabletopCollectionFeatureGraph = ({ batchId, games, sharedCa
   return validateWorkGraph([...shared, ...gameFeatures]);
 };
 
-export const createTabletopCollectionLifecyclePlan = ({ intent, project, runId }) => {
-  const gateIds = (project.gateRecipes ?? []).filter(recipe => recipe.scope === 'final' && recipe.required !== false).map(recipe => recipe.id);
+export const createTabletopCollectionLifecyclePlan = ({ intent, project, runId, sourceDigest }) => {
+  const finalGateIds = (project.gateRecipes ?? []).filter(recipe => recipe.scope === 'final' && recipe.required !== false).map(recipe => recipe.id);
+  const gateIds = ['full', 'quality', 'close'].includes(intent.action) ? finalGateIds : [];
   const quality = intent.action === 'quality';
   const selector = intent.selector ?? null;
+  const batch = (project.policy?.collectionBatches ?? []).find(item => item.id === intent.target);
+  assert(batch && Array.isArray(batch.gameIds) && batch.gameIds.length > 0, 'COLLECTION_BATCH_DESCRIPTOR_REQUIRED', `Project Descriptor must declare non-empty gameIds for batch ${intent.target}.`);
+  assert(new Set(batch.gameIds).size === batch.gameIds.length, 'COLLECTION_GAME_DUPLICATE', `Batch ${intent.target} contains duplicate game IDs.`);
+  assert(batch.gameIds.length <= Number(project.policy?.maxLogicalGames ?? 10), 'LOGICAL_GAME_LIMIT_EXCEEDED', `Batch ${intent.target} exceeds the configured logical game limit.`);
+  if (selector) assert(batch.gameIds.includes(selector), 'COLLECTION_GAME_NOT_IN_BATCH', `Game ${selector} is not declared in batch ${intent.target}.`);
+  const gameIds = selector ? [selector] : batch.gameIds;
   const profileConfig = {
     ...(project.policy?.profileConfigs?.['collection-batch'] ?? {}),
     activeBatch: intent.target,
     maxLogicalGames: Number(project.policy?.maxLogicalGames ?? 10),
     requiredFinalGates: gateIds,
-    ...(quality ? {
-      requireRuleReady: false,
-      requireHarnessAcceptance: false,
-      requireIndependentReview: false,
-      requireUserGameAcceptance: false,
-      requireBatchCloseDecision: false,
-      requireBatchLaunchDecision: false,
-    } : {}),
+    requireRuleReady: !['launch'].includes(intent.action),
+    requireHarnessAcceptance: intent.action === 'full',
+    requireIndependentReview: ['full', 'review'].includes(intent.action),
+    requireUserGameAcceptance: ['full', 'accept'].includes(intent.action),
+    requireBatchCloseDecision: ['full', 'close'].includes(intent.action),
+    requireBatchLaunchDecision: ['full', 'produce'].includes(intent.action),
+    requireFinalQualityReview: ['full', 'quality'].includes(intent.action),
   };
-  const feature = {
-    id: `${intent.action}/${intent.target}${selector ? `/${selector}` : ''}`,
-    kind: intent.action,
-    ownerRole: quality ? 'reviewer' : 'operator',
-    logicalRoot: `${intent.action}:${intent.target}${selector ? `:${selector}` : ''}`,
-    laneId: selector ?? intent.target,
-    acceptance: [
-      `Execute the declared ${intent.action} scope for batch ${intent.target}${selector ? ` and game ${selector}` : ''}.`,
-      'Return structured evidence and an accurate changedFiles list.',
-    ],
-    steps: [{ id: 'execute', title: `Execute ${intent.action} for ${intent.target}${selector ? `/${selector}` : ''}.` }],
-    dependsOn: [],
-    allowedPaths: intent.sourcePolicy === 'read-only' ? [] : [ 'src', 'tests', 'docs', 'packages' ],
-    forbiddenPaths: ['.git', '.agent-harness-data', 'runs'],
-    conflictKeys: [`${intent.action}-${intent.target}-${selector ?? 'all'}`],
+  const makeFeature = ({ action, gameId, dependsOn = [], readOnly = false, qualityReview = false }) => ({
+    id: `${action}/${intent.target}/${gameId}`,
+    kind: action,
+    ownerRole: qualityReview || action === 'review' ? 'reviewer' : action === 'accept' ? 'user-acceptance' : 'operator',
+    logicalRoot: `${action}:${intent.target}:${gameId}`,
+    laneId: gameId,
+    acceptance: qualityReview
+      ? [`Perform a complete read-only quality review for ${gameId} in batch ${intent.target}.`, 'Cite non-empty evidence for every P0-P3 finding and return an exact structured result.']
+      : [`Complete ${action} for ${gameId} in batch ${intent.target}.`, 'Return structured evidence and an exact changedFiles list.'],
+    steps: qualityReview ? [{ id: 'review', title: `Review ${gameId} without workspace writes.` }, { id: 'report', title: 'Report all P0-P3 findings.' }] : [{ id: 'execute', title: `Execute ${action} for ${gameId}.` }],
+    dependsOn,
+    allowedPaths: readOnly || qualityReview ? [] : [`games/presets/${gameId}`, 'packages', 'apps', 'docs'],
+    forbiddenPaths: ['.git', '.agent-harness-data', 'runs', 'F:/agent-harness'],
+    conflictKeys: [`game:${gameId}`, `${action}:${intent.target}:${gameId}`],
     gatePlan: gateIds,
-    metadata: { scope: intent.scope, sourcePolicy: intent.sourcePolicy ?? 'review-and-repair', stage: intent.action, batchId: intent.target, gameId: selector, ruleStatus: 'rule-ready' },
-  };
+    metadata: {
+      scope: intent.scope,
+      sourcePolicy: qualityReview ? 'review-and-repair' : readOnly ? 'read-only' : 'write',
+      stage: action,
+      batchId: intent.target,
+      gameId,
+      ruleStatus: batch.ruleStatus ?? 'rule-ready',
+      ...(qualityReview ? { qualityReview: true, qualityRoot: `collection:${intent.target}:${gameId}`, reviewRound: 1, reviewSourceDigest: sourceDigest, qualityContext: { batchId: intent.target, gameId, ruleStatus: batch.ruleStatus ?? 'rule-ready' } } : {}),
+    },
+  });
+  let features;
+  if (intent.action === 'full') {
+    features = gameIds.flatMap(gameId => {
+      const rules = makeFeature({ action: 'rules', gameId });
+      const produce = makeFeature({ action: 'produce', gameId, dependsOn: [rules.id] });
+      const reviewQuality = makeFeature({ action: 'quality', gameId, dependsOn: [produce.id], qualityReview: true });
+      const independent = makeFeature({ action: 'review', gameId, dependsOn: [reviewQuality.id], readOnly: true });
+      const accept = makeFeature({ action: 'accept', gameId, dependsOn: [independent.id], readOnly: true });
+      return [rules, produce, reviewQuality, independent, accept];
+    });
+  } else {
+    const readOnly = intent.sourcePolicy === 'read-only' || ['review', 'accept', 'close', 'launch'].includes(intent.action);
+    features = gameIds.map(gameId => makeFeature({ action: intent.action, gameId, readOnly, qualityReview: quality }));
+  }
   return {
-    run: { runId, profileId: 'collection-batch', profileConfig, features: [feature], runtimePluginId: project.policy?.defaultRuntimePlugin },
-    stopCondition: { type: 'collection-run-complete', requiresFeatureCompletion: true, requiresAllFindingsResolved: true, requiredFinalGates: gateIds },
+    run: { runId, profileId: 'collection-batch', profileConfig, features, runtimePluginId: project.policy?.defaultRuntimePlugin },
+    stopCondition: { type: intent.action === 'full' ? 'collection-full-complete' : 'collection-action-complete', action: intent.action, requiresFeatureCompletion: true, requiresAllFindingsResolved: ['full', 'quality'].includes(intent.action), requiredFinalGates: gateIds },
     protectedOperations: ['publication', 'commit', 'push', 'hard-recovery', 'deletion', 'privilege-expansion', 'cutover'],
   };
 };

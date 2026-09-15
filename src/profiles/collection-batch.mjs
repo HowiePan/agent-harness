@@ -1,5 +1,6 @@
 import { assert } from '../errors.mjs';
 import { approvalSatisfied, orderedBarrier } from '../workflows/primitives.mjs';
+import { createQualityFollowUpFeatures, hasCurrentCleanQualityReview } from './quality-loop.mjs';
 
 export const collectionBatchProfile = Object.freeze({
   id: 'collection-batch',
@@ -9,7 +10,7 @@ export const collectionBatchProfile = Object.freeze({
     assert(config.activeBatch, 'ACTIVE_BATCH_REQUIRED', 'Collection Profile requires an active batch.');
     const batches = Array.isArray(config.batches) ? config.batches.map(batch => ({ id: String(batch.id), order: Number(batch.order), status: batch.status ?? 'planned' })) : [{ id: String(config.activeBatch), order: 1, status: 'active' }];
     assert(batches.some(batch => batch.id === config.activeBatch), 'ACTIVE_BATCH_UNKNOWN', 'The active batch must exist in the batch list.');
-    const logicalGames = new Set(features.map(feature => feature.metadata.gameId).filter(Boolean));
+    const logicalGames = new Set(features.filter(feature => !feature.metadata.capabilityOwner).map(feature => feature.metadata.gameId).filter(Boolean));
     assert(logicalGames.size <= Number(config.maxLogicalGames ?? 10), 'LOGICAL_GAME_LIMIT_EXCEEDED', 'Collection batch exceeds its configured logical game limit.', { games: [...logicalGames] });
     return {
       activeBatch: String(config.activeBatch),
@@ -22,13 +23,19 @@ export const collectionBatchProfile = Object.freeze({
       requireUserGameAcceptance: config.requireUserGameAcceptance !== false,
       requireBatchCloseDecision: config.requireBatchCloseDecision !== false,
       requireBatchLaunchDecision: config.requireBatchLaunchDecision !== false,
+      requireFinalQualityReview: config.requireFinalQualityReview === true,
     };
+  },
+
+  createFollowUpFeatures(input) {
+    return createQualityFollowUpFeatures(input);
   },
 
   validateRun(state) {
     const owners = new Map();
     for (const feature of state.features) {
       assert(feature.metadata.batchId, 'FEATURE_BATCH_REQUIRED', `Collection Feature ${feature.id} requires metadata.batchId.`);
+      assert(feature.metadata.gameId || feature.metadata.capabilityOwner, 'FEATURE_GAME_REQUIRED', `Collection Feature ${feature.id} requires metadata.gameId unless it is a declared shared-capability owner.`);
       if (feature.metadata.capabilityKey && feature.metadata.capabilityOwner) {
         assert(!owners.has(feature.metadata.capabilityKey), 'CAPABILITY_OWNER_DUPLICATE', `Capability ${feature.metadata.capabilityKey} has multiple owners.`);
         owners.set(feature.metadata.capabilityKey, feature.id);
@@ -57,7 +64,12 @@ export const collectionBatchProfile = Object.freeze({
   canClose(state) {
     const batch = state.profile.config.activeBatch;
     const config = state.profile.config;
-    const games = [...new Set(state.features.map(feature => feature.metadata.gameId).filter(Boolean))];
+    if (config.requireFinalQualityReview) {
+      const qualityRoots = [...new Set(state.features.filter(feature => feature.metadata?.qualityReview).map(feature => feature.metadata.qualityRoot))];
+      const missingQualityRoot = qualityRoots.find(root => !hasCurrentCleanQualityReview(state, root));
+      if (!qualityRoots.length || missingQualityRoot) return { ok: false, reason: `current-source-clean-quality-review-required${missingQualityRoot ? `:${missingQualityRoot}` : ''}` };
+    }
+    const games = [...new Set(state.features.filter(feature => !feature.metadata.capabilityOwner).map(feature => feature.metadata.gameId).filter(Boolean))];
     if (config.requireHarnessAcceptance) {
       const pendingGame = games.find(gameId => !approvalSatisfied(state, `game:${gameId}:harness-accepted`));
       if (pendingGame) return { ok: false, reason: `game-harness-acceptance-required:${pendingGame}` };

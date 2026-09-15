@@ -1,10 +1,10 @@
 import { assert } from '../errors.mjs';
-import { sha256 } from '../canonical.mjs';
 import { approvalSatisfied } from '../workflows/primitives.mjs';
+import { createQualityFollowUpFeatures, hasCurrentCleanQualityReview } from './quality-loop.mjs';
 
 export const ENGINE_STAGES = Object.freeze([
   'requirement-intake', 'canonical-requirement', 'version-planning', 'implementation',
-  'scope-resolution', 'quality', 'quality-repair', 'docs-closeout', 'user-code-review',
+  'scope-resolution', 'docs-closeout', 'quality', 'quality-repair', 'quality-recheck', 'user-code-review', 'delivery-receipt',
 ]);
 
 const stageIndex = stage => ENGINE_STAGES.indexOf(stage);
@@ -18,6 +18,7 @@ export const engineDeliveryProfile = Object.freeze({
       requireCanonicalDecision: config.requireCanonicalDecision !== false,
       requireUserCodeReview: config.requireUserCodeReview !== false,
       requiredFinalGates: [...new Set(config.requiredFinalGates ?? [])],
+      requireFinalQualityReview: config.requireFinalQualityReview === true,
     };
   },
 
@@ -41,45 +42,9 @@ export const engineDeliveryProfile = Object.freeze({
     return incompleteEarlier.length ? { ok: false, reason: 'earlier-stage-incomplete', blockers: incompleteEarlier.map(item => item.id) } : { ok: true };
   },
 
-  createFollowUpFeatures({ feature, findings, result }) {
-    const qualityRepairs = feature.metadata?.stage === 'quality' && feature.metadata?.sourcePolicy === 'review-and-repair'
-      ? findings.map(finding => {
-      const suffix = sha256(String(finding.id)).slice(0, 24);
-      const affectedPaths = finding.affectedPaths?.length ? finding.affectedPaths : feature.allowedPaths;
-      return {
-        id: `quality-repair-${suffix}`,
-        kind: 'quality-repair',
-        ownerRole: 'worker',
-        logicalRoot: `finding:${finding.id}`,
-        laneId: `finding:${finding.id}`,
-        acceptance: [
-          `Resolve ${finding.severity} quality finding ${finding.id}: ${finding.summary}`,
-          'Run focused checks for the finding and return evidence-backed completion.',
-        ],
-        steps: [
-          { id: 'repair', title: `Repair finding ${finding.id}.` },
-          { id: 'verify', title: `Verify the repair for finding ${finding.id}.` },
-        ],
-        dependsOn: [feature.id],
-        allowedPaths: affectedPaths,
-        forbiddenPaths: feature.forbiddenPaths,
-        symbols: finding.symbols,
-        contracts: finding.contracts,
-        generatedOutputs: finding.generatedOutputs,
-        conflictKeys: finding.conflictKeys,
-        gatePlan: feature.gatePlan,
-        metadata: {
-          stage: 'quality-repair',
-          sourcePolicy: feature.metadata.sourcePolicy,
-          findingId: finding.id,
-          findingSeverity: finding.severity,
-          findingSummary: finding.summary,
-          findingEvidence: finding.evidence,
-          repairFindingId: finding.id,
-        },
-      };
-      })
-      : [];
+  createFollowUpFeatures(input) {
+    const { feature, result } = input;
+    const qualityRepairs = createQualityFollowUpFeatures(input);
     if (!feature.metadata?.allowDynamicDecomposition || !Array.isArray(result?.followUpFeatures)) return qualityRepairs;
     const planned = result.followUpFeatures.map(item => {
       assert(item && typeof item === 'object' && !Array.isArray(item), 'FOLLOW_UP_FEATURE_INVALID', 'Every follow-up Feature must be an object.');
@@ -120,6 +85,7 @@ export const engineDeliveryProfile = Object.freeze({
 
   canClose(state) {
     const config = state.profile.config;
+    if (config.requireFinalQualityReview && !hasCurrentCleanQualityReview(state)) return { ok: false, reason: 'current-source-clean-quality-review-required' };
     const missingGate = config.requiredFinalGates.find(id => !state.gates.some(gate => gate.id === id && gate.status === 'passed' && gate.forcedFresh));
     if (missingGate) return { ok: false, reason: `required-final-gate-missing:${missingGate}` };
     if (config.requireUserCodeReview && !approvalSatisfied(state, 'user-code-review')) return { ok: false, reason: 'user-code-review-required' };

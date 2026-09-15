@@ -69,7 +69,15 @@ export class RunCoordinator {
         else if (this.harness.runtimeSupports(selectedRuntime, 'discard')) { await this.harness.invokeBoundRuntime(projectId, runId, item.lease.dispatchId, 'discard'); result = { ...result, changedFiles: [] }; }
         const cleanupReceipt = this.harness.runtimeSupports(selectedRuntime, 'cleanup') ? await this.harness.invokeBoundRuntime(projectId, runId, item.lease.dispatchId, 'cleanup') : null;
         if (cleanupReceipt) cleanedAgents.add(item.lease.agentId);
-        const output = await this.harness.recordResult(projectId, runId, item.dispatch.dispatchId, result, { commandId: `coordinator-submit-${item.dispatch.dispatchId}`, evidenceMetadata: { labels: ['agent-result', `runtime:${selectedRuntime}`] }, runtimeEvidence: { wait: receipt, cleanup: cleanupReceipt } });
+        const output = await this.harness.recordResult(projectId, runId, item.dispatch.dispatchId, result, {
+          commandId: `coordinator-submit-${item.dispatch.dispatchId}`,
+          evidenceMetadata: { labels: ['agent-result', `runtime:${selectedRuntime}`] },
+          runtimeEvidence: {
+            wait: receipt,
+            cleanup: cleanupReceipt,
+            verificationReceipts: structuredClone(receipt.payload?.verificationReceipts ?? []),
+          },
+        });
         committed.push({ dispatchId: item.dispatch.dispatchId, featureId: item.dispatch.featureId, submissionId: output.result.submission.submissionId, status: output.result.featureState, runtimeReceipt: receipt, cleanupReceipt });
         state = output.state;
       }

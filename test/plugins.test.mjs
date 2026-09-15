@@ -109,7 +109,7 @@ test('Gate cache is success-only and all baseline digests participate in the key
 test('Application binds a Runtime receipt before accepting its result', async t => {
   const manifest = { id: 'app-memory-runtime', kind: 'agent-runtime', version: '1.0.0', capabilities: ['spawn', 'wait', 'send', 'heartbeat', 'interrupt', 'headless'], permissions: [] };
   const fixture = await makeFixture({ policy: { runtimePlugins: [manifest.id], defaultRuntimePlugin: manifest.id } }); t.after(() => fixture.cleanup());
-  fixture.harness.registerPlugin(manifest, createInMemoryRuntime({ manifest, handler: async () => ({ status: 'completed', summary: 'runtime done' }) }));
+  fixture.harness.registerPlugin(manifest, createInMemoryRuntime({ manifest, handler: async () => ({ status: 'completed', summary: 'runtime done', changedFiles: [] }) }));
   await startRun(fixture);
   let state = await fixture.harness.authorityStore.read(fixture.projectId, 'run');
   const scheduled = await fixture.harness.dispatch(fixture.projectId, 'run', { maxConcurrency: 1, runtimePluginId: manifest.id }, command(state));

@@ -9,6 +9,7 @@
     "summary": { "type": "string", "minLength": 1 },
     "checkpoints": {
       "type": "array",
+      "minItems": 1,
       "items": {
         "type": "object",
         "required": ["id", "status", "summary", "evidence"],
@@ -16,14 +17,14 @@
           "id": { "type": "string", "minLength": 1 },
           "status": { "type": "string", "minLength": 1 },
           "summary": { "type": "string", "minLength": 1 },
-          "evidence": { "type": "array", "items": { "type": "string" } }
+          "evidence": { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1 } }
         },
         "additionalProperties": false
       }
     },
     "made": { "type": "array", "items": { "type": "string" } },
     "notMade": { "type": "array", "items": { "type": "string" } },
-    "changedFiles": { "type": "array", "uniqueItems": true, "items": { "type": "string" } },
+    "changedFiles": { "type": "array", "uniqueItems": true, "items": { "type": "string", "minLength": 1 } },
     "observations": { "type": "array", "items": { "type": "string" } },
     "findings": {
       "type": "array",
@@ -34,8 +35,8 @@
           "id": { "type": "string", "minLength": 1 },
           "severity": { "type": "string", "enum": ["P0", "P1", "P2", "P3"] },
           "summary": { "type": "string", "minLength": 1 },
-          "evidence": { "type": "array", "uniqueItems": true, "items": { "type": "string", "minLength": 1 } },
-          "affectedPaths": { "type": "array", "uniqueItems": true, "items": { "type": "string", "minLength": 1 } },
+          "evidence": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "type": "string", "minLength": 1 } },
+          "affectedPaths": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "type": "string", "minLength": 1 } },
           "symbols": { "type": "array", "uniqueItems": true, "items": { "type": "string", "minLength": 1 } },
           "contracts": { "type": "array", "uniqueItems": true, "items": { "type": "string", "minLength": 1 } },
           "generatedOutputs": { "type": "array", "uniqueItems": true, "items": { "type": "string", "minLength": 1 } },
@@ -68,11 +69,12 @@
       "anyOf": [
         {
           "type": "object",
-          "required": ["kind", "summary", "resumeWhen"],
+          "required": ["kind", "summary", "resumeWhen", "code"],
           "properties": {
             "kind": { "type": "string", "minLength": 1 },
             "summary": { "type": "string", "minLength": 1 },
-            "resumeWhen": { "type": ["string", "null"] }
+            "resumeWhen": { "type": ["string", "null"] },
+            "code": { "type": ["string", "null"] }
           },
           "additionalProperties": false
         },

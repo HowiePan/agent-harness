@@ -142,7 +142,8 @@ test('doctor reports lifecycle readiness only when all persisted roots and regis
   const { stdout } = await executeFile(process.execPath, [resolve(projectRoot, 'src', 'cli.mjs'), 'doctor', '--data-root', target], { cwd: projectRoot, windowsHide: true });
   const result = JSON.parse(stdout);
   assert.equal(result.initialized, true);
-  assert.equal(result.lifecycleReady, true);
+  assert.equal(result.registryReady, true);
+  assert.equal(result.lifecycleReady, false);
   assert.deepEqual(result.paths, { dataRoot: true, extensionRegistry: true, projectRegistry: true, authority: true });
   assert.deepEqual(result.registeredProjects.map(project => project.id), ['fixture-project']);
 });

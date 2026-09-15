@@ -27,7 +27,20 @@ export const makeFixture = async ({ projectId = 'project', profiles = ['feature-
   try {
     const harness = await createHarness({ dataRoot, releaseIdentity, strictProjectIdentity: false, extensions: [...profileExtensions, ...extensions], agentAdapter });
     const testRuntimeManifest = { id: 'test-runtime', kind: 'agent-runtime', version: '1.0.0', capabilities: ['spawn', 'wait', 'send', 'heartbeat', 'interrupt', 'headless'], permissions: [] };
-    harness.registerPlugin(testRuntimeManifest, createInMemoryRuntime({ manifest: testRuntimeManifest, handler: async () => ({ status: 'completed', summary: 'test runtime completed' }) }));
+    harness.registerPlugin(testRuntimeManifest, createInMemoryRuntime({
+      manifest: testRuntimeManifest,
+      handler: async packet => packet.feature.metadata?.stage === 'quality-repair'
+        ? {
+            result: {
+              status: 'completed',
+              summary: 'test repair completed',
+              checkpoints: [{ id: 'verification', status: 'passed', summary: 'repair verified', evidence: ['test-runtime'] }],
+              changedFiles: [],
+            },
+            verificationReceipts: [{ id: `verification:${packet.feature.id}`, status: 'passed' }],
+          }
+        : { status: 'completed', summary: 'test runtime completed', changedFiles: [] },
+    }));
     await harness.projectRegistry.register({ id: projectId, workspace: { root: workspace }, profiles, policy: { agentExecutionMode: 'headless', runtimePlugins: ['test-runtime'], defaultRuntimePlugin: 'test-runtime', promptCodecPlugin: 'reference-agent-prompt-codec', ...policy }, gateRecipes, artifactProviders }, { commandId: `register-${projectId}` });
     return { root, workspace, dataRoot, harness, projectId, cleanup };
   } catch (error) {
@@ -53,4 +66,4 @@ export const dispatchAndBind = async (fixture, runId, { maxConcurrency = 1, inde
   return { state: bound.state, dispatch, lease: bound.result.lease, dispatches: scheduled.result.dispatches };
 };
 
-export const recordResult = async (fixture, runId, dispatch, result = { status: 'completed', summary: 'done' }) => fixture.harness.recordResult(fixture.projectId, runId, dispatch.dispatchId, result, { commandId: command().commandId });
+export const recordResult = async (fixture, runId, dispatch, result = { status: 'completed', summary: 'done', changedFiles: [] }) => fixture.harness.recordResult(fixture.projectId, runId, dispatch.dispatchId, { changedFiles: [], ...result }, { commandId: command().commandId });

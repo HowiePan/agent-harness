@@ -77,16 +77,14 @@ const validateBindings = async (input, source) => {
   const harness = input.harness;
   if (!harness || !isAbsolute(harness.controlRoot ?? '') || !isAbsolute(harness.entrypoint ?? '') || !isAbsolute(harness.dataRoot ?? '')) throw new Error(`绑定文件必须声明绝对 controlRoot、entrypoint 和 dataRoot：${source}`);
   if (!inside(harness.controlRoot, harness.entrypoint) || !inside(harness.controlRoot, harness.dataRoot)) throw new Error(`entrypoint 和 dataRoot 必须位于 controlRoot 内：${source}`);
-  const legacyWorkspaceRoot = isAbsolute(input.workspaceRoot ?? '') ? resolve(input.workspaceRoot) : null;
-  const legacyWorkspaceIdentity = input.workspaceIdentity;
   if (!input.projects || typeof input.projects !== 'object' || Array.isArray(input.projects) || Object.keys(input.projects).length === 0) throw new Error(`绑定文件至少需要一个项目别名：${source}`);
   const projects = {};
   for (const [alias, project] of Object.entries(input.projects)) {
     if (!tokenPattern.test(alias) || !project?.projectId || !project.profileId || !project.extensionId) throw new Error(`项目绑定无效：${alias}`);
-    const workspaceRoot = isAbsolute(project.workspaceRoot ?? '') ? resolve(project.workspaceRoot) : legacyWorkspaceRoot;
+    const workspaceRoot = isAbsolute(project.workspaceRoot ?? '') ? resolve(project.workspaceRoot) : null;
     if (!workspaceRoot) throw new Error(`项目绑定必须声明绝对 workspaceRoot：${alias}`);
     const discoveredWorkspaceIdentity = await resolveGitWorkspaceIdentity(workspaceRoot);
-    const declaredIdentity = project.workspaceIdentity ?? (legacyWorkspaceRoot && samePath(workspaceRoot, legacyWorkspaceRoot) ? legacyWorkspaceIdentity : undefined);
+    const declaredIdentity = project.workspaceIdentity;
     if (declaredIdentity !== undefined) {
       if (declaredIdentity?.type !== 'git-common-dir' || !isAbsolute(declaredIdentity.commonDir ?? '')) throw new Error(`workspaceIdentity 无效：${alias}`);
       if (!discoveredWorkspaceIdentity || !samePath(declaredIdentity.commonDir, discoveredWorkspaceIdentity.commonDir)) throw new Error(`workspaceIdentity 与 workspaceRoot 不匹配：${alias}`);
@@ -97,8 +95,6 @@ const validateBindings = async (input, source) => {
     protocolVersion: '1.0',
     source,
     harness: Object.freeze({ controlRoot: resolve(harness.controlRoot), entrypoint: resolve(harness.entrypoint), dataRoot: resolve(harness.dataRoot) }),
-    ...(legacyWorkspaceRoot ? { workspaceRoot: legacyWorkspaceRoot } : {}),
-    ...(legacyWorkspaceIdentity ? { workspaceIdentity: Object.freeze({ type: 'git-common-dir', commonDir: resolve(legacyWorkspaceIdentity.commonDir) }) } : {}),
     projects: Object.freeze(projects),
   });
 };

@@ -38,6 +38,12 @@ const jsonInput = async name => {
   for await (const chunk of process.stdin) raw += chunk;
   return JSON.parse(raw);
 };
+const preflightInput = async () => {
+  const source = take('--preflight');
+  if (!source) throw Object.assign(new Error('Missing --preflight'), { code: 'INPUT_REQUIRED' });
+  const input = await jsonFile(source);
+  return input.report ?? input;
+};
 const progressWriter = event => process.stderr.write(`${JSON.stringify({ type: 'agent-harness.progress', ...event })}\n`);
 const command = argv[0] ?? 'help';
 const subject = argv[1];
@@ -76,8 +82,9 @@ agent-harness run recovery-rollback --project <id> --run <id> --snapshot-ref <ev
 agent-harness run close --project <id> --run <id>
 agent-harness run supersede --project <id> --run <id> --replacement-run <id> --plan-digest <digest> [--reason <text>]
 agent-harness lifecycle plan --input <json|-> [--control-root <path>] [--data-root <path>]
-agent-harness lifecycle start --plan <json|-> --command-id <id>
-agent-harness lifecycle execute --plan <json|-> --command-id <id> [--max <n>] [--max-rounds <n>] [--progress]
+agent-harness lifecycle preflight --plan <json|-> [--no-write-probe]
+agent-harness lifecycle start --plan <json|-> --preflight <json> --command-id <id>
+agent-harness lifecycle execute --plan <json|-> --preflight <json> --command-id <id> [--max <n>] [--max-rounds <n>] [--progress]
 agent-harness release activation-plan [--control-root <path>] [--data-root <path>]
 agent-harness release activation-apply --plan <json|-> --command-id <id> --decision <json>
 agent-harness evidence add --project <id> --run <id> --file <path> [--feature <id>] [--dispatch <id>]
@@ -142,7 +149,7 @@ if (command === 'release' && subject === 'activation-plan') {
   process.exit(0);
 }
 if (command === 'release' && subject === 'activation-apply') {
-  const output = await applyReleaseActivationPlan(await jsonInput('--plan'), { controlRoot, dataRoot, releaseIdentity, commandId: take('--command-id'), authorityDecision: take('--decision') ? await jsonFile(take('--decision')) : null });
+  const output = await applyReleaseActivationPlan(await jsonInput('--plan'), { controlRoot, dataRoot, releaseIdentity, commandId: take('--command-id'), authorityDecision: take('--decision') ? await jsonFile(take('--decision')) : null, activateInstallation: true });
   console.log(JSON.stringify({ ok: true, ...output }, null, 2));
   process.exit(0);
 }
@@ -278,10 +285,13 @@ if (command === 'features' && subject === 'compile') {
     const output = await harness.startRun(input, { commandId: take('--command-id') ?? newId('command') });
     console.log(JSON.stringify({ ok: true, state: output.state, reused: output.reused }, null, 2));
   } else if (command === 'lifecycle' && subject === 'start') {
-    const output = await harness.startLifecyclePlan(await jsonInput('--plan'), { commandId: take('--command-id') });
+    const output = await harness.startLifecyclePlan(await jsonInput('--plan'), { commandId: take('--command-id'), preflightReport: await preflightInput() });
     console.log(JSON.stringify({ ok: ['started', 'closed'].includes(output.status), ...output }, null, 2));
+  } else if (command === 'lifecycle' && subject === 'preflight') {
+    const output = await harness.createExecutionReadinessReport(await jsonInput('--plan'), { onGateProgress: progressWriter, probeWrite: !has('--no-write-probe') });
+    console.log(JSON.stringify({ ok: output.executionReady, report: output }, null, 2));
   } else if (command === 'lifecycle' && subject === 'execute') {
-    const output = await harness.executeLifecyclePlan(await jsonInput('--plan'), { commandId: take('--command-id'), maxConcurrency: optionalNumber('--max'), maxRounds: Number(take('--max-rounds') ?? 100), forceFreshGates: !has('--no-fresh-gates'), onGateProgress: progressWriter });
+    const output = await harness.executeLifecyclePlan(await jsonInput('--plan'), { commandId: take('--command-id'), preflightReport: await preflightInput(), maxConcurrency: optionalNumber('--max'), maxRounds: Number(take('--max-rounds') ?? 100), forceFreshGates: !has('--no-fresh-gates'), onGateProgress: progressWriter });
     console.log(JSON.stringify({ ok: output.status === 'closed', ...output }, null, 2));
   } else if (command === 'run' && subject === 'schedule') {
     const state = await harness.authorityStore.read(take('--project'), take('--run'));

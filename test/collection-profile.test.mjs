@@ -46,7 +46,7 @@ test('requested work consumes capacity and a blocked game releases its slot', as
   state = noCapacity.state;
   const dispatch = first.result.dispatches[0];
   const bound = await fixture.harness.bindDispatch(fixture.projectId, 'run', { dispatchId: dispatch.dispatchId, agentId: 'blocked-agent', runtimeReceipt: { runtimePluginId: 'test-runtime' } }, command(state));
-  const blocked = await fixture.harness.recordResult(fixture.projectId, 'run', dispatch.dispatchId, { status: 'blocked', summary: 'local blocker', failureClass: 'dependency' }, { commandId: command().commandId });
+  const blocked = await fixture.harness.recordResult(fixture.projectId, 'run', dispatch.dispatchId, { status: 'blocked', summary: 'local blocker', failureClass: 'dependency', changedFiles: [] }, { commandId: command().commandId });
   const replacement = await fixture.harness.dispatch(fixture.projectId, 'run', { maxConcurrency: 2 }, command(blocked.state));
   assert.equal(replacement.result.dispatches.length, 1);
   assert.equal(replacement.result.dispatches[0].featureId, 'g3/main');

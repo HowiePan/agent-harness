@@ -73,8 +73,7 @@ export const configureBindings = async input => {
   const target = resolve(directory, 'bindings.json');
   const temporary = resolve(directory, `bindings.${process.pid}.tmp`);
   await mkdir(directory, { recursive: true });
-  const workspaceIdentity = workspaceRoot ? await resolveGitWorkspaceIdentity(workspaceRoot) : null;
-  const document = { protocolVersion: '1.0', harness: { controlRoot, entrypoint, dataRoot }, ...(workspaceRoot ? { workspaceRoot } : {}), ...(workspaceIdentity ? { workspaceIdentity } : {}), projects };
+  const document = { protocolVersion: '1.0', harness: { controlRoot, entrypoint, dataRoot }, projects };
   await writeFile(temporary, `${JSON.stringify(document, null, 2)}\n`, { encoding: 'utf8', flag: 'wx' });
   try {
     await rename(temporary, target);

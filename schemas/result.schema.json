@@ -7,10 +7,23 @@
   "properties": {
     "status": { "enum": ["completed", "blocked", "failed"] },
     "summary": { "type": "string", "minLength": 1 },
-    "checkpoints": { "type": "array", "items": { "type": "object" } },
+    "checkpoints": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "status", "summary", "evidence"],
+        "properties": {
+          "id": { "type": "string", "minLength": 1 },
+          "status": { "type": "string", "minLength": 1 },
+          "summary": { "type": "string", "minLength": 1 },
+          "evidence": { "type": "array", "items": { "type": "string", "minLength": 1 } }
+        },
+        "additionalProperties": false
+      }
+    },
     "made": { "type": "array", "items": { "type": "string" } },
     "notMade": { "type": "array", "items": { "type": "string" } },
-    "changedFiles": { "type": "array", "uniqueItems": true, "items": { "type": "string" } },
+    "changedFiles": { "type": "array", "uniqueItems": true, "items": { "type": "string", "minLength": 1 } },
     "observations": { "type": "array", "items": { "type": "string" } },
     "findings": {
       "type": "array",
@@ -50,8 +63,13 @@
         "additionalProperties": false
       }
     },
-    "failureClass": { "type": "string" },
-    "blocker": { "type": "object", "required": ["kind", "summary"], "properties": { "kind": { "type": "string" }, "summary": { "type": "string" }, "resumeWhen": { "type": "string" } }, "additionalProperties": true }
+    "failureClass": { "type": ["string", "null"] },
+    "blocker": {
+      "anyOf": [
+        { "type": "object", "required": ["kind", "summary"], "properties": { "kind": { "type": "string" }, "summary": { "type": "string" }, "resumeWhen": { "type": ["string", "null"] }, "code": { "type": "string" } }, "additionalProperties": false },
+        { "type": "null" }
+      ]
+    }
   },
-  "additionalProperties": true
+  "additionalProperties": false
 }

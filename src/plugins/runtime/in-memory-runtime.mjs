@@ -18,7 +18,10 @@ export const createInMemoryRuntime = ({ manifest, handler }) => {
       const task = tasks.get(agentId);
       assert(task, 'MEMORY_AGENT_NOT_FOUND', `In-memory agent not found: ${agentId}`);
       try { await task.promise; } catch {}
-      return envelope(manifest, 'event', { operation: 'wait', agentId, status: task.status, result: task.result, error: task.error });
+      const transported = task.result?.result && typeof task.result.result === 'object'
+        ? { result: task.result.result, verificationReceipts: structuredClone(task.result.verificationReceipts ?? []) }
+        : { result: task.result };
+      return envelope(manifest, 'event', { operation: 'wait', agentId, status: task.status, ...transported, error: task.error });
     },
     async send({ agentId, message }) {
       assert(tasks.has(agentId), 'MEMORY_AGENT_NOT_FOUND', `In-memory agent not found: ${agentId}`);

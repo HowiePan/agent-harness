@@ -63,7 +63,7 @@ Codex 插件提供通用伪命令 Router：`h:<项目别名> <动作> <目标> [
 
 Hook 只把符合语法的输入转换成 Command Intent，不直接启动流程。`$agent-harness-command` 是显式回退入口。需求审查的多个预设和两条 Harness 的完整流程都由各自 Extension 声明，Authority/Evidence、P0-P3 阻断与批准边界仍由统一 Operator Contract 保证。完整参数见 [运维手册](docs/operations.md)。
 
-交互式 Project Descriptor 必须声明 `agentExecutionMode: conversation-visible` 和 `promptCodecPlugin`。每个 Dispatch 固定 Prompt Codec/Contract 版本，由 Codec 从不可变 Packet 确定性生成完整 Prompt；Codex 宿主只能把这段文本原样交给可见子 Agent，不能临时串联或改写。可信宿主适配器把 Agent、Dispatch、Packet 摘要、Prompt 摘要与可检查任务引用绑定后才能建立 Lease，提交前还必须有新鲜 heartbeat。缺少 Prompt 生成、原生子 Agent、宿主证明或观察能力时流程以 `attention-required` 停止，禁止即兴拼 Prompt、用原始 CLI Receipt、`codex exec` 或其他后台 Agent 进程兜底。`headless` 必须由用户请求与 Descriptor 分别明确授权，不能根据 Runtime ID 推断。测试、构建、打包和确定性 Gate 仍可使用受管子进程，但启动前必须挂接实时观察器并显示启动、进度/输出和结束状态，且不能承载 Agent 推理。
+交互式 Project Descriptor 必须声明 `agentExecutionMode: conversation-visible` 和 `promptCodecPlugin`。每个 Dispatch 固定 Prompt Codec/Contract 版本，由 Codec 从不可变 Packet 确定性生成完整 Prompt；Codex 宿主只能把这段文本原样交给可见子 Agent，不能临时串联或改写。可信宿主适配器把 Agent、Dispatch、Packet 摘要、Prompt 摘要与可检查任务引用绑定后才能建立 Lease，并负责 spawn、wait、heartbeat、结构化 result transport 与重启重连。缺少任一原生能力时 action-scoped preflight 一次列出全部 blockers、`executionReady=false`，且不创建 Run；禁止即兴拼 Prompt、用原始 CLI Receipt、`codex exec` 或其他后台 Agent 进程兜底。`headless` 必须由用户请求与 Descriptor 分别明确授权，不能根据 Runtime ID 推断。质量审查本身强制只读；Finding 修复必须带非空检查点和宿主保存的验证 Receipt，修复后自动按新源码摘要进行全量只读复审。测试、构建、打包和确定性 Gate 仍可使用受管子进程，但启动前必须挂接实时观察器并显示启动、进度/输出和结束状态，且不能承载 Agent 推理。
 
 ## 项目边界
 
@@ -80,4 +80,4 @@ npm run build:release-candidate
 node bin/agent-harness.mjs doctor --data-root .tmp/doctor
 ```
 
-`build:release-candidate` 只接受干净提交，生成真实 tarball、隔离安装探针与内容寻址 Release Candidate Receipt。`doctor` 按准确 Project/Profile/Extension 检查 readiness，不执行 Extension，也不创建目录或文件；`project list` 与 `run status` 同样不加载 Extension 代码。首次投产使用零写入 `bootstrap plan` 和经批准、可恢复的 `bootstrap apply`。CLI 的所有改变状态命令都要求 `--command-id`；完整命令见 [运维手册](docs/operations.md)。
+`build:release-candidate` 只接受干净提交，生成真实 tarball、隔离安装探针与内容寻址 Release Candidate Receipt。`doctor` 只报告安装、Registry 与逐项目静态就绪，不再把它们误称为可执行；具体动作必须先生成短 TTL、绑定 Plan/Project/Release 的 `ExecutionReadinessReport`。`project list` 与 `run status` 同样不加载 Extension 代码。首次投产使用零写入 `bootstrap plan` 和经批准、可恢复的 `bootstrap apply`。CLI 的所有改变状态命令都要求 `--command-id`；完整命令见 [运维手册](docs/operations.md)。

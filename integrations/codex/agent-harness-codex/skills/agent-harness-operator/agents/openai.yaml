@@ -4,4 +4,4 @@ interface:
   default_prompt: "Use $agent-harness-operator to inspect or operate an existing Harness run with explicit low-level control."
 
 policy:
-  allow_implicit_invocation: false
+  allow_implicit_invocation: true

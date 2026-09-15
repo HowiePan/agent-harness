@@ -5,7 +5,7 @@ import { AuthorityStore } from './kernel/authority-store.mjs';
 import { ProjectRegistry } from './registry/project-registry.mjs';
 import { resolveProjectWorkspace } from './workspace-identity.mjs';
 import { assertHarnessWritePath, harnessControlRoot, harnessProjectRoot } from './write-boundary.mjs';
-import { activeReleaseFile, resolveActiveRegistryRoot } from './registry/active-generation.mjs';
+import { activeReleaseFile, resolveActiveRegistryRoot, resolveActiveRuntimeRoot } from './registry/active-generation.mjs';
 
 const errorView = error => ({ code: error.code ?? 'UNEXPECTED_ERROR', message: error.message });
 
@@ -71,6 +71,7 @@ export const inspectLifecycleReadiness = async ({ controlRoot: controlRootInput,
     authority: existsSync(resolve(dataRoot, 'authority')),
   };
   const activeRelease = existsSync(activeReleaseFile(dataRoot));
+  const activeRuntimeRoot = activeRelease ? await resolveActiveRuntimeRoot(dataRoot, controlRoot) : null;
   const storageReady = ['dataRoot', 'extensionRegistry', 'projectRegistry', 'authority'].every(key => paths[key]);
   const projectsReady = projectReadiness.length > 0 && projectReadiness.every(item => item.projectReady);
   return {
@@ -79,16 +80,20 @@ export const inspectLifecycleReadiness = async ({ controlRoot: controlRootInput,
     controlRootMode: controlRoot === harnessProjectRoot() ? 'source-checkout' : 'installed',
     dataRoot,
     releaseVerified: Boolean(releaseIdentity?.verified),
-    installationReady: true,
+    installationReady: Boolean(releaseIdentity?.verified) && storageReady && activeRelease,
     writeCapability: 'not-probed',
     paths,
     activeRelease,
+    activeRuntimeRoot,
     storageReady,
     extensionRegistryRevision: extensionState.revision,
     registeredExtensions: extensionState.extensions.map(item => ({ ...structuredClone(item), artifactVerified: extensionVerification.get(item.id)?.ok === true })),
     registeredProjects: projects.map(project => ({ id: project.id, revision: project.revision, descriptorDigest: project.descriptorDigest })),
     projectReadiness,
-    lifecycleReady: Boolean(releaseIdentity?.verified) && storageReady && projectsReady,
+    registryReady: Boolean(releaseIdentity?.verified) && storageReady && projectsReady,
+    executionReady: null,
+    lifecycleReady: false,
+    lifecycleReadinessReason: 'action-scoped-execution-preflight-required',
   };
 };
 

@@ -125,7 +125,7 @@ test('artifact rebase invalidates only the declared impact set', async t => {
   const pendingDispatch = first.dispatches.find(item => item.dispatchId !== first.dispatch.dispatchId);
   let state = result.state;
   const boundSecond = await fixture.harness.bindDispatch(fixture.projectId, 'run', { dispatchId: pendingDispatch.dispatchId, agentId: 'agent-unaffected', runtimeReceipt: { runtimePluginId: 'test-runtime' } }, command(state));
-  result = await fixture.harness.recordResult(fixture.projectId, 'run', pendingDispatch.dispatchId, { status: 'completed', summary: 'done' }, { commandId: command().commandId });
+  result = await fixture.harness.recordResult(fixture.projectId, 'run', pendingDispatch.dispatchId, { status: 'completed', summary: 'done', changedFiles: [] }, { commandId: command().commandId });
   const decision = {
     id: 'approve-artifact-b',
     actor: 'project-owner',

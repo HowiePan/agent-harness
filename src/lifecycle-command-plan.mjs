@@ -27,7 +27,7 @@ export const deriveLifecycleRunId = ({ projectId, intent, sourceDigest, artifact
  * Build a plan from an Extension-owned compiler result. The compiler is pure from
  * the Authority's perspective: it may return Intent, but it cannot write state.
  */
-export const createLifecycleCommandPlan = ({ intent, project, extension, releaseIdentity, sourceDigest, executionWorkspaceRoot, authorityRevision = 0, existingRunId = null, compiler }) => {
+export const createLifecycleCommandPlan = ({ intent, project, extension, releaseIdentity, sourceDigest, executionWorkspaceRoot, authorityRevision = 0, existingRunId = null, activeRunConflicts = [], compiler }) => {
   assert(intent?.action && intent?.target, 'COMMAND_INTENT_REQUIRED', 'Lifecycle planning requires a resolved Command Intent.');
   assert(project?.id && project.revision && project.descriptorDigest, 'LIFECYCLE_PLAN_PROJECT_INVALID', 'Lifecycle planning requires a persisted Project Descriptor identity.');
   assert(extension?.id && extension.version && extension.digest && extension.commandManifest, 'LIFECYCLE_PLAN_EXTENSION_INVALID', 'Lifecycle planning requires a verified Extension Pack.');
@@ -46,7 +46,7 @@ export const createLifecycleCommandPlan = ({ intent, project, extension, release
     project: { id: project.id, revision: project.revision, descriptorDigest: project.descriptorDigest },
     extension: { id: extension.id, version: extension.version, digest: extension.digest, manifestId: extension.commandManifest.id },
     harness: { version: releaseIdentity.version, artifactDigest: releaseIdentity.artifactDigest },
-    authority: { expectedRevision: Number(authorityRevision), existingRunId },
+    authority: { expectedRevision: Number(authorityRevision), existingRunId, activeRunConflicts: structuredClone(activeRunConflicts) },
     run: {
       runId,
       profileId: compiled.run.profileId,

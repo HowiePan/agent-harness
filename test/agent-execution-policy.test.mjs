@@ -116,7 +116,20 @@ test('host-orchestrated visible Runtime schedules work but never falls back to a
   const bound = await fixture.harness.bindDispatch(fixture.projectId, 'run', { dispatchId: dispatch.dispatchId, agentId: 'visible-agent', runtimeReceipt: { runtimePluginId: runtime, agentId: 'visible-agent', dispatchId: dispatch.dispatchId, packetDigest: dispatch.packetDigest, prompt: promptReceipt, visibility: { mode: 'user-visible', surface: 'codex-task', inspectRef: 'task-123' } } }, command(state));
   assert.equal(bound.result.lease.agentId, 'visible-agent');
   assert.equal(bound.result.lease.runtimeReceipt.hostAttestation.verified, true);
-  await assert.rejects(() => fixture.harness.recordResult(fixture.projectId, 'run', dispatch.dispatchId, { status: 'completed', summary: 'done' }, { commandId: command().commandId }), error => error.code === 'VISIBLE_AGENT_HEARTBEAT_REQUIRED');
+  const visibleResult = {
+    status: 'completed',
+    summary: 'done',
+    checkpoints: [{ id: 'review', status: 'passed', summary: 'reviewed', evidence: ['test-attestation'] }],
+    made: [],
+    notMade: [],
+    changedFiles: [],
+    observations: [],
+    findings: [],
+    followUpFeatures: [],
+    failureClass: null,
+    blocker: null,
+  };
+  await assert.rejects(() => fixture.harness.recordResult(fixture.projectId, 'run', dispatch.dispatchId, visibleResult, { commandId: command().commandId }), error => error.code === 'VISIBLE_AGENT_HEARTBEAT_REQUIRED');
 });
 
 test('Harness rejects unwrapped visible host callbacks instead of trusting a custom attestor', async () => {

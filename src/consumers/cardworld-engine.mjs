@@ -59,7 +59,7 @@ const defaultContextBudgetCommand = () => [process.execPath, resolve(packageRoot
 const gate = (id, command, cwd, extra = {}) => ({ id, scope: 'final', required: true, forceFresh: true, command, cwd, ...extra });
 const powershell = process.platform === 'win32' ? 'powershell' : 'pwsh';
 const cardWorldTask = (task, ...args) => [powershell, '-NoProfile', '-File', 'scripts/cardworld.ps1', '-Task', task, ...args];
-const actionStage = Object.freeze({ full: 'requirement-intake', requirements: 'requirement-intake', plan: 'version-planning', implement: 'implementation', scope: 'scope-resolution', quality: 'quality', docs: 'docs-closeout', review: 'user-code-review', deliver: 'docs-closeout' });
+const actionStage = Object.freeze({ requirements: 'requirement-intake', plan: 'version-planning', implement: 'implementation', scope: 'scope-resolution', quality: 'quality', docs: 'docs-closeout', review: 'user-code-review', deliver: 'delivery-receipt' });
 
 export const createCardWorldProjectDescriptor = ({
   id = 'cardworld-engine',
@@ -151,50 +151,110 @@ const CARDWORLD_QUALITY_ALLOWED_PATHS = Object.freeze([
   'docs/integration_guide.md',
 ]);
 
+const actionPaths = Object.freeze({
+  requirements: ['docs/requirements.md', 'docs/versions'],
+  plan: ['docs/versions', 'docs/requirements.md'],
+  implement: [...CARDWORLD_QUALITY_ALLOWED_PATHS],
+  scope: ['docs/versions', 'docs/requirements.md'],
+  docs: ['docs/versions', 'docs/versions/INDEX.md', 'docs/integration_guide.md'],
+  review: [],
+  deliver: [],
+});
+
+const makeEngineFeature = ({ action, target, stage, dependsOn = [], allowedPaths, sourcePolicy = 'write', ownerRole = 'operator', qualityReview = false, sourceDigest }) => ({
+  id: `${action}/${target}`,
+  kind: action,
+  ownerRole,
+  logicalRoot: `${action}:${target}`,
+  laneId: qualityReview ? 'quality' : action,
+  acceptance: qualityReview
+    ? [
+        `Perform a complete read-only review of ${target} against authoritative version documents and the current workspace source digest.`,
+        'Run relevant focused checks and cite non-empty evidence for every P0-P3 finding.',
+        'Return an exact structured result; do not modify the workspace during review.',
+      ]
+    : [
+        `Complete the declared ${action} scope for ${target}.`,
+        'Return structured evidence and an exact changedFiles list.',
+      ],
+  steps: qualityReview
+    ? [{ id: 'review', title: `Review ${target} completely without workspace writes.` }, { id: 'report', title: 'Report every P0-P3 finding and supporting evidence.' }]
+    : [{ id: 'execute', title: `Execute ${action} for ${target}.` }],
+  dependsOn,
+  allowedPaths: qualityReview ? [] : [...allowedPaths],
+  forbiddenPaths: ['.git', '.agent-harness-data', '.cardworld-local', 'F:/agent-harness'],
+  conflictKeys: [`${target}-${qualityReview ? 'quality-review' : action}`],
+  gatePlan: [],
+  metadata: {
+    stage,
+    sourcePolicy,
+    target,
+    version: target,
+    allowDynamicDecomposition: !qualityReview && allowedPaths.length > 0,
+    ...(qualityReview ? {
+      qualityReview: true,
+      qualityRoot: `engine:${target}`,
+      reviewRound: 1,
+      reviewSourceDigest: sourceDigest,
+      qualityContext: { target, version: target },
+    } : {}),
+  },
+});
+
 /**
  * Compile the action-level plan consumed by the neutral lifecycle executor.
  * This function only returns data; it never touches Authority or the workspace.
  */
-export const createCardWorldLifecyclePlan = ({ intent, project, runId }) => {
-  const gateIds = (project.gateRecipes ?? []).filter(recipe => recipe.scope === 'final' && recipe.required !== false).map(recipe => recipe.id);
+export const createCardWorldLifecyclePlan = ({ intent, project, runId, sourceDigest }) => {
+  const finalGateIds = (project.gateRecipes ?? []).filter(recipe => recipe.scope === 'final' && recipe.required !== false).map(recipe => recipe.id);
+  const gateIds = ['full', 'quality', 'deliver'].includes(intent.action) ? finalGateIds : [];
   const quality = intent.action === 'quality';
-  const readOnly = intent.sourcePolicy === 'read-only';
+  const full = intent.action === 'full';
   const profileConfig = {
     ...(project.policy?.profileConfigs?.['engine-delivery'] ?? {}),
     requiredFinalGates: gateIds,
-    ...(quality ? { requireCanonicalDecision: false, requireUserCodeReview: false } : {}),
+    requireCanonicalDecision: full || (intent.action === 'requirements' && intent.scope !== 'version-planning'),
+    requireUserCodeReview: full || intent.action === 'deliver',
+    requireFinalQualityReview: full || quality || intent.action === 'deliver',
   };
-  const feature = {
-    id: `${intent.action}/${intent.target}`,
-    kind: intent.action,
-    ownerRole: quality ? 'reviewer' : 'operator',
-    logicalRoot: `${intent.action}:${intent.target}`,
-    laneId: quality ? 'quality' : intent.action,
-    acceptance: quality
-      ? [
-          `Review the complete ${intent.target} implementation against the authoritative version documents and current workspace state.`,
-          'Run the relevant focused checks and record evidence for every quality conclusion.',
-          ...(readOnly ? [] : ['For every actionable P0-P3 finding, report affectedPaths, symbols, contracts, generatedOutputs, and conflictKeys so independent repairs can be scheduled safely.']),
-          'Return a complete structured result with accurate changedFiles and any unresolved blockers.',
-        ]
-      : [
-          `Execute the declared ${intent.action} scope for ${intent.target} and return structured evidence.`,
-          'If the work naturally decomposes into independent tasks, return followUpFeatures with one scoped item per task so the Harness can schedule non-conflicting work in parallel.',
-        ],
-    steps: quality ? [
-      { id: 'review', title: `Review ${intent.target} implementation, tests, contracts, and release-boundary evidence.` },
-      { id: 'report', title: 'Report the final disposition and remaining blockers.' },
-    ] : [{ id: 'execute', title: `Execute ${intent.action} for ${intent.target}.` }],
-    dependsOn: [],
-    allowedPaths: readOnly ? [] : [...CARDWORLD_QUALITY_ALLOWED_PATHS],
-    forbiddenPaths: ['.git', '.agent-harness-data', '.cardworld-local', 'F:/agent-harness'],
-    conflictKeys: [`${intent.target}-${intent.action}`],
-    gatePlan: gateIds,
-    metadata: { scope: intent.scope, sourcePolicy: intent.sourcePolicy ?? 'review-and-repair', stage: quality ? 'quality' : actionStage[intent.action], target: intent.target, version: intent.target, allowDynamicDecomposition: !quality && !readOnly },
-  };
+  let features;
+  if (full) {
+    const chain = [
+      ['requirements-intake', 'requirement-intake', actionPaths.requirements, 'write'],
+      ['canonical-requirement', 'canonical-requirement', actionPaths.requirements, 'write'],
+      ['plan', 'version-planning', actionPaths.plan, 'write'],
+      ['implement', 'implementation', actionPaths.implement, 'write'],
+      ['scope', 'scope-resolution', actionPaths.scope, 'write'],
+      ['docs', 'docs-closeout', actionPaths.docs, 'write'],
+    ];
+    features = chain.map(([action, stage, allowedPaths, sourcePolicy], index) => makeEngineFeature({ action, target: intent.target, stage, allowedPaths, sourcePolicy, dependsOn: index ? [`${chain[index - 1][0]}/${intent.target}`] : [] }));
+    features.push(makeEngineFeature({ action: 'quality', target: intent.target, stage: 'quality', allowedPaths: [], sourcePolicy: 'review-and-repair', ownerRole: 'reviewer', qualityReview: true, sourceDigest, dependsOn: [`docs/${intent.target}`] }));
+    features.push(makeEngineFeature({ action: 'review', target: intent.target, stage: 'user-code-review', allowedPaths: [], sourcePolicy: 'read-only', ownerRole: 'reviewer', dependsOn: [`quality/${intent.target}`] }));
+    features.push(makeEngineFeature({ action: 'deliver', target: intent.target, stage: 'delivery-receipt', allowedPaths: [], sourcePolicy: 'read-only', dependsOn: [`review/${intent.target}`] }));
+  } else if (quality) {
+    features = [makeEngineFeature({ action: 'quality', target: intent.target, stage: 'quality', allowedPaths: [], sourcePolicy: intent.sourcePolicy ?? 'review-and-repair', ownerRole: 'reviewer', qualityReview: true, sourceDigest })];
+  } else if (intent.action === 'deliver') {
+    const finalQuality = makeEngineFeature({ action: 'quality', target: intent.target, stage: 'quality', allowedPaths: [], sourcePolicy: 'review-and-repair', ownerRole: 'reviewer', qualityReview: true, sourceDigest });
+    const delivery = makeEngineFeature({ action: 'deliver', target: intent.target, stage: 'delivery-receipt', allowedPaths: [], sourcePolicy: 'read-only', dependsOn: [finalQuality.id] });
+    features = [finalQuality, delivery];
+  } else if (intent.action === 'requirements' && intent.scope !== 'version-planning') {
+    features = [
+      makeEngineFeature({ action: 'requirements-intake', target: intent.target, stage: 'requirement-intake', allowedPaths: actionPaths.requirements }),
+      makeEngineFeature({ action: 'canonical-requirement', target: intent.target, stage: 'canonical-requirement', allowedPaths: actionPaths.requirements, dependsOn: [`requirements-intake/${intent.target}`] }),
+      makeEngineFeature({ action: 'plan', target: intent.target, stage: 'version-planning', allowedPaths: actionPaths.plan, dependsOn: [`canonical-requirement/${intent.target}`] }),
+    ];
+  } else {
+    const readOnly = intent.sourcePolicy === 'read-only' || ['review', 'deliver'].includes(intent.action);
+    const effectiveAction = intent.action === 'requirements' ? 'plan' : intent.action;
+    features = [makeEngineFeature({ action: effectiveAction, target: intent.target, stage: actionStage[effectiveAction], allowedPaths: readOnly ? [] : actionPaths[effectiveAction], sourcePolicy: readOnly ? 'read-only' : 'write', ownerRole: effectiveAction === 'review' ? 'reviewer' : 'operator' })];
+  }
+  for (const feature of features) {
+    feature.gatePlan = [...gateIds];
+    feature.metadata.scope = intent.scope;
+  }
   return {
-    run: { runId, profileId: 'engine-delivery', profileConfig, features: [feature], runtimePluginId: project.policy?.defaultRuntimePlugin },
-    stopCondition: { type: 'quality-run-complete', requiresFeatureCompletion: true, requiresAllFindingsResolved: true, requiredFinalGates: gateIds },
+    run: { runId, profileId: 'engine-delivery', profileConfig, features, runtimePluginId: project.policy?.defaultRuntimePlugin },
+    stopCondition: { type: quality ? 'quality-run-complete' : full ? 'engine-full-complete' : 'engine-action-complete', action: intent.action, requiresFeatureCompletion: true, requiresAllFindingsResolved: full || quality || intent.action === 'deliver', requiredFinalGates: gateIds },
     protectedOperations: ['publication', 'commit', 'push', 'hard-recovery', 'deletion', 'privilege-expansion', 'cutover'],
   };
 };

@@ -54,7 +54,7 @@ test('Application derives changed files from snapshots and rejects an omitted un
   const bound = await dispatchAndBind(fixture, 'run');
   await mkdir(resolve(fixture.workspace, 'outside'));
   await writeFile(resolve(fixture.workspace, 'outside', 'unclaimed.txt'), 'unauthorized', 'utf8');
-  await assert.rejects(() => fixture.harness.recordResult(fixture.projectId, 'run', bound.dispatch.dispatchId, { status: 'completed', summary: 'omitted changed files' }, { commandId: command().commandId }), error => error.code === 'FEATURE_PATH_NOT_ALLOWED');
+  await assert.rejects(() => fixture.harness.recordResult(fixture.projectId, 'run', bound.dispatch.dispatchId, { status: 'completed', summary: 'omitted changed files' }, { commandId: command().commandId }), error => error.code === 'RESULT_SCHEMA_INVALID');
 });
 
 test('review findings returned by a Runtime are atomically opened with submission evidence', async t => {
@@ -65,7 +65,7 @@ test('review findings returned by a Runtime are atomically opened with submissio
     features: [feature('quality/full-sweep', { stage: 'quality' }, { ownerRole: 'reviewer', allowedPaths: [] })],
   });
   const bound = await dispatchAndBind(fixture, 'run');
-  const output = await recordResult(fixture, 'run', bound.dispatch, { status: 'completed', summary: 'review completed', changedFiles: [], findings: [{ id: 'Q-001', severity: 'P2', summary: 'current defect', evidence: ['src/example.rs:10'] }] });
+  const output = await recordResult(fixture, 'run', bound.dispatch, { status: 'completed', summary: 'review completed', changedFiles: [], findings: [{ id: 'Q-001', severity: 'P2', summary: 'current defect', evidence: ['src/example.rs:10'], affectedPaths: ['src/example.rs'] }] });
   assert.equal(output.state.findings.length, 1);
   assert.equal(output.state.findings[0].featureId, 'quality/full-sweep');
   assert.deepEqual(output.state.findings[0].evidence, ['src/example.rs:10']);

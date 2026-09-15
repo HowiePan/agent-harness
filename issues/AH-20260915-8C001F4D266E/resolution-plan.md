@@ -1,5 +1,7 @@
 # AH-20260915-8C001F4D266E 审查与系统性修复方案
 
+> 2026-09-15 深度补充：以 Engine `quality/full` 真实完整闭环为目标的逐项审计见 `quality-end-to-end-gap-audit.md`。该审计确认主链至少 16 项缺口，并单列 Engine 其他动作与 Collection 的未准出范围；本文件原有“6 个当前缺口”是启动/部署层初步范围，不再代表全链路总数。
+
 ## 审查结论
 
 - 建议分级：`P1`
@@ -113,3 +115,8 @@
 3. 暂停新的 V3.8.4 quality Run，先完成 W1-W5；历史 Run 维持只读。
 4. 当前可复验的实现级证据为 `npm test` 135/135、`npm run check` 通过、clean-room 通过、pack dry-run 通过、residue 通过；这些只证明代码与打包自洽，不证明真实 Codex Host Coordinator 可用。
 
+## 实施更新（2026-09-15）
+
+W2、W4 的仓库实现，以及 W3/W5 可由仓库提供的 SDK、状态机和合成验证部分已完成。当前验证为 `npm test` 147/147、Conformance 3/3、Canary 3/3、check、真实 tarball clean-room、pack dry-run、residue 全部通过；详细逐项处置见 `quality-end-to-end-gap-audit.md` 的“一次性交付实施结果”。
+
+仍不能把本 Issue 标为 operationally closed：当前 Codex 产品宿主没有向本任务暴露可受信的 spawn/inspect/attest/wait/result bridge；当前工作树未获 commit 授权，因而不能生成合规 RC、激活实际控制根或重装插件；7 个历史 Run 也未获精确 supersede/归档授权。上述限制现在会被一次性 Preflight 明确报告，不再创建新的半成品 Run或诱导重复 Bootstrap。

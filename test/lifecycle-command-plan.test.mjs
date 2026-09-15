@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { access, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { createHarness } from '../src/app/harness.mjs';
@@ -20,6 +20,7 @@ test('lifecycle planning deterministically composes quality/full without convers
   const tempParent = resolve(harnessTemporaryRoot(), 'lifecycle-command-tests');
   await mkdir(tempParent, { recursive: true });
   const root = await mkdtemp(resolve(tempParent, 'plan-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
   const workspaceRoot = resolve(root, 'CardWorld');
   const dataRoot = resolve(root, 'data');
   await mkdir(resolve(workspaceRoot, '.git'), { recursive: true });
@@ -32,7 +33,6 @@ test('lifecycle planning deterministically composes quality/full without convers
   await harness.projectRegistry.register(descriptor, { expectedRevision: 0, commandId: 'plan-project-register' });
   const first = await harness.createLifecyclePlan({ projectId: descriptor.id, action: 'quality', target: 'V3.8.4', arguments: ['full'], extensionId: extension.id, executionWorkspaceRoot: workspaceRoot });
   const second = await harness.createLifecyclePlan({ projectId: descriptor.id, action: 'quality', target: 'V3.8.4', arguments: ['full'], extensionId: extension.id, executionWorkspaceRoot: workspaceRoot });
-  t.after(() => rm(root, { recursive: true, force: true }));
   assert.equal(first.planDigest, second.planDigest);
   assert.equal(first.run.profileConfig.requireCanonicalDecision, false);
   assert.equal(first.run.profileConfig.requireUserCodeReview, false);
@@ -41,14 +41,49 @@ test('lifecycle planning deterministically composes quality/full without convers
   assert.equal(first.run.runtimePluginId, 'codex-conversation-runtime');
   assert.equal(first.stopCondition.type, 'quality-run-complete');
   assert.deepEqual(first.protectedOperations.includes('hard-recovery'), true);
-  const started = await harness.startLifecyclePlan(first, { commandId: 'visible-lifecycle' });
-  assert.equal(started.status, 'attention-required');
-  assert.equal(started.reason, 'visible-agent-host-adapter-unavailable');
-  assert.equal(started.runtimePolicy.mode, 'conversation-visible');
-  assert.equal(started.state, null);
-  const blockedCoordinator = await harness.executeLifecyclePlan(first, { commandId: 'visible-lifecycle-execute' });
-  assert.equal(blockedCoordinator.status, 'attention-required');
-  assert.equal(blockedCoordinator.reason, 'visible-agent-host-adapter-unavailable');
+  const preflight = await harness.createExecutionReadinessReport(first);
+  assert.equal(preflight.executionReady, false);
+  assert.equal(preflight.checks.find(check => check.id === 'visible-host').issues[0].code, 'VISIBLE_AGENT_HOST_COORDINATOR_UNAVAILABLE');
+  const gateIssueCodes = preflight.checks.find(check => check.id === 'gates').issues.map(issue => issue.code);
+  assert.equal(gateIssueCodes.includes('PROCESS_PROGRESS_OBSERVER_REQUIRED'), true);
+  assert.equal(preflight.checks.find(check => check.id === 'write-capability').ready, true);
+  await assert.rejects(
+    () => harness.startLifecyclePlan(first, { commandId: 'visible-lifecycle', preflightReport: preflight }),
+    error => error.code === 'EXECUTION_NOT_READY',
+  );
+  assert.equal(await harness.authorityStore.read(descriptor.id, first.run.runId, { required: false }), null);
+});
+
+test('lifecycle planning reports every conflicting active logical Run before start', async t => {
+  const controlRoot = resolve(process.cwd());
+  const tempParent = resolve(harnessTemporaryRoot(), 'lifecycle-command-tests');
+  await mkdir(tempParent, { recursive: true });
+  const root = await mkdtemp(resolve(tempParent, 'conflict-'));
+  const workspaceRoot = resolve(root, 'CardWorld');
+  const dataRoot = resolve(root, 'data');
+  await mkdir(resolve(workspaceRoot, '.git'), { recursive: true });
+  await writeFile(resolve(workspaceRoot, 'README.md'), 'fixture\n', 'utf8');
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const extension = await loadExtensionPack('./src/consumers/cardworld-engine.mjs', { cwd: controlRoot, controlRoot });
+  const runtimeExtension = await loadExtensionPack('./src/extensions/codex-runtime.mjs', { cwd: controlRoot, controlRoot });
+  const harness = await createHarness({ controlRoot, dataRoot, releaseIdentity, strictProjectIdentity: false, extensions: [extension, runtimeExtension] });
+  const descriptor = createCardWorldProjectDescriptor({ workspaceRoot, harness: releaseIdentity });
+  descriptor.gateRecipes = [];
+  descriptor.extensions = descriptor.extensions.map(item => ({ ...item, digest: item.id === extension.id ? extension.digest : runtimeExtension.digest }));
+  await harness.projectRegistry.register(descriptor, { expectedRevision: 0, commandId: 'conflict-project-register' });
+  await harness.startRun({
+    projectId: descriptor.id,
+    runId: 'historical-quality-run',
+    profileId: 'engine-delivery',
+    profileConfig: { requireCanonicalDecision: false, requireUserCodeReview: false, requireFinalQualityReview: true },
+    features: [{ id: 'quality/old', acceptance: ['review'], dependsOn: [], allowedPaths: [], metadata: { stage: 'quality', qualityReview: true, qualityRoot: 'engine:V3.8.4', sourcePolicy: 'review-and-repair' } }],
+    metadata: { commandIntent: { action: 'quality', target: 'V3.8.4' } },
+  }, { commandId: 'start-historical-quality' });
+  const plan = await harness.createLifecyclePlan({ projectId: descriptor.id, action: 'quality', target: 'V3.8.4', arguments: ['full'], extensionId: extension.id, executionWorkspaceRoot: workspaceRoot });
+  assert.deepEqual(plan.authority.activeRunConflicts, [{ runId: 'historical-quality-run', revision: 1, status: 'ready' }]);
+  const preflight = await harness.createExecutionReadinessReport(plan);
+  assert.equal(preflight.executionReady, false);
+  assert.equal(preflight.checks.find(check => check.id === 'run-lineage').issues[0].code, 'ACTIVE_LOGICAL_RUN_CONFLICT');
 });
 
 test('release activation stages a complete generation and switches the active pointer once', async t => {
@@ -56,6 +91,7 @@ test('release activation stages a complete generation and switches the active po
   const tempParent = resolve(harnessTemporaryRoot(), 'lifecycle-command-tests');
   await mkdir(tempParent, { recursive: true });
   const root = await mkdtemp(resolve(tempParent, 'activation-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
   const workspaceRoot = resolve(root, 'CardWorld');
   const dataRoot = resolve(root, 'data');
   await mkdir(resolve(workspaceRoot, '.git'), { recursive: true });
@@ -71,10 +107,13 @@ test('release activation stages a complete generation and switches the active po
   const plan = await createReleaseActivationPlan({ controlRoot, dataRoot, releaseIdentity: release, now: () => '2026-09-14T13:00:00.000Z' });
   const decision = { actor: 'test', decision: 'approved', action: 'release-activation', context: { planDigest: plan.planDigest } };
   const applied = await applyReleaseActivationPlan(plan, { controlRoot, dataRoot, releaseIdentity: release, commandId: 'activation-apply', authorityDecision: decision, now: () => '2026-09-14T13:00:01.000Z' });
-  t.after(() => rm(root, { recursive: true, force: true }));
   assert.equal(applied.reused, false);
   const pointer = JSON.parse(await readFile(activeReleaseFile(dataRoot), 'utf8'));
   assert.equal(pointer.generationId, plan.generationId);
+  assert.equal(pointer.runtimeRoot, plan.runtime.relativeRoot);
+  await access(applied.runtimeEntrypoint);
+  const activeExtension = await extensionRegistry.loadOneArtifact(extension.id);
+  assert.equal(activeExtension.artifact.resolvedPath.startsWith(applied.runtimeRoot), true);
   const activeProject = await projects.get(descriptor.id);
   assert.equal(activeProject.revision, 2);
   const repeated = await applyReleaseActivationPlan(plan, { controlRoot, dataRoot, releaseIdentity: release, commandId: 'activation-apply', authorityDecision: decision, now: () => '2026-09-14T13:00:02.000Z' });

@@ -10,6 +10,7 @@ import { extensionIdentity, inspectExtensionArtifact, loadExtensionPack, resolve
 import { assertJsonSchema } from '../json-schema.mjs';
 import { resolveActiveRegistryRoot } from '../registry/active-generation.mjs';
 import { activeReleaseFile } from '../registry/active-generation.mjs';
+import { resolveActiveRuntimeRoot } from '../registry/active-generation.mjs';
 
 const seal = value => ({ ...value, registryDigest: digestJson(value) });
 const emptyRegistry = () => seal({ protocolVersion: '1.0', revision: 0, extensions: [], commands: {} });
@@ -26,6 +27,11 @@ export class ExtensionRegistry {
 
   async filePath() { return resolve(await resolveActiveRegistryRoot(this.dataRoot, this.controlRoot), 'extensions.json'); }
 
+  async entryPath(receipt) {
+    const runtimeRoot = await resolveActiveRuntimeRoot(this.dataRoot, this.controlRoot);
+    return assertNoLinkPath(this.controlRoot, resolve(runtimeRoot, receipt.entry), 'Registered Extension entrypoint');
+  }
+
   async list() {
     const registry = await readJson(await this.filePath(), emptyRegistry());
     assertJsonSchema(registry, registrySchema, { code: 'EXTENSION_REGISTRY_SCHEMA_INVALID', label: 'Extension Registry' });
@@ -37,7 +43,7 @@ export class ExtensionRegistry {
     const current = await this.list();
     const packs = [];
     for (const receipt of current.extensions) {
-      const entry = assertNoLinkPath(this.controlRoot, resolve(this.controlRoot, receipt.entry), 'Registered Extension entrypoint');
+      const entry = await this.entryPath(receipt);
       const pack = await loadExtensionPack(entry, { controlRoot: this.controlRoot, expectedDigest: receipt.digest, requireArtifactManifest: true });
       assert(pack.id === receipt.id && pack.version === receipt.version, 'EXTENSION_INSTALLATION_IDENTITY_MISMATCH', `Registered Extension ${receipt.id} no longer matches its installation receipt.`);
       packs.push(pack);
@@ -49,7 +55,7 @@ export class ExtensionRegistry {
     const current = await this.list();
     const receipt = current.extensions.find(item => item.id === id);
     assert(receipt, 'EXTENSION_NOT_REGISTERED', `Extension is not registered: ${id}`);
-    const entry = assertNoLinkPath(this.controlRoot, resolve(this.controlRoot, receipt.entry), 'Registered Extension entrypoint');
+    const entry = await this.entryPath(receipt);
     const pack = await loadExtensionPack(entry, { controlRoot: this.controlRoot, expectedDigest: receipt.digest, requireArtifactManifest: true });
     assert(pack.id === receipt.id && pack.version === receipt.version, 'EXTENSION_INSTALLATION_IDENTITY_MISMATCH', `Registered Extension ${receipt.id} no longer matches its installation receipt.`);
     return pack;
@@ -59,7 +65,7 @@ export class ExtensionRegistry {
     const current = await this.list();
     const receipt = current.extensions.find(item => item.id === id);
     assert(receipt, 'EXTENSION_NOT_REGISTERED', `Extension is not registered: ${id}`);
-    const entry = assertNoLinkPath(this.controlRoot, resolve(this.controlRoot, receipt.entry), 'Registered Extension entrypoint');
+    const entry = await this.entryPath(receipt);
     const artifact = await inspectExtensionArtifact(entry, { controlRoot: this.controlRoot, expectedDigest: receipt.digest, requireArtifactManifest: true });
     return { receipt: structuredClone(receipt), artifact };
   }
@@ -68,7 +74,7 @@ export class ExtensionRegistry {
     const current = await this.list();
     const verified = [];
     for (const receipt of current.extensions) {
-      const entry = assertNoLinkPath(this.controlRoot, resolve(this.controlRoot, receipt.entry), 'Registered Extension entrypoint');
+      const entry = await this.entryPath(receipt);
       await inspectExtensionArtifact(entry, { controlRoot: this.controlRoot, expectedDigest: receipt.digest, requireArtifactManifest: true });
       verified.push(structuredClone(receipt));
     }

@@ -121,7 +121,7 @@ export const applyBootstrapPlan = async (planInput, { controlRoot: controlRootIn
     const projectRegistry = new ProjectRegistry({ root: dataRoot, controlRoot, now });
     const project = await projectRegistry.register(descriptor, { expectedRevision: plan.expectedProjectRevision, commandId: `${safeCommandId}.project.${descriptor.id}`, authorityDecision });
     const readiness = await inspectLifecycleReadiness({ controlRoot, dataRoot, releaseIdentity, projectId: plan.request.binding.projectId, profileId: plan.request.binding.profileId, extensionId: plan.request.binding.extensionId, executionWorkspaceRoot: plan.request.binding.workspaceRoot });
-    assert(readiness.lifecycleReady, 'BOOTSTRAP_READINESS_FAILED', 'Bootstrap completed writes but project-scoped lifecycle readiness did not pass.', { projectReadiness: readiness.projectReadiness });
+    assert(readiness.registryReady, 'BOOTSTRAP_READINESS_FAILED', 'Bootstrap completed writes but project-scoped Registry readiness did not pass.', { projectReadiness: readiness.projectReadiness });
     const receiptBody = { protocolVersion: '1.0', kind: 'bootstrap-receipt', commandId: safeCommandId, planDigest: plan.planDigest, status: 'committed', projectId: project.id, projectRevision: project.revision, descriptorDigest: project.descriptorDigest, extensionRegistryRevision: readiness.extensionRegistryRevision, committedAt: now(), authorityDecision: structuredClone(authorityDecision), readiness };
     const receipt = { ...receiptBody, receiptDigest: digestJson(receiptBody) };
     await atomicWriteJson(journalFile, receipt, { root: dataRoot });

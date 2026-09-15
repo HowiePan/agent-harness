@@ -5,6 +5,7 @@ import {
   COLLECTION_FINAL_GATE_IDS,
   compileCardWorldFeatureGraph,
   compileTabletopCollectionFeatureGraph,
+  createCardWorldLifecyclePlan,
   createCardWorldProjectDescriptor,
   createTabletopCollectionProjectDescriptor,
 } from '../src/consumers/index.mjs';
@@ -37,6 +38,49 @@ test('CardWorld consumer compiles one canonical requirement and project-owned de
   });
   assert.equal(graph.filter(feature => feature.metadata.canonical).length, 1);
   assert.deepEqual(graph.find(feature => feature.id === 'plan').dependsOn, ['requirement/v-next']);
+});
+
+test('CardWorld full lifecycle keeps every mutable stage before the final quality review', () => {
+  const project = createCardWorldProjectDescriptor({ workspaceRoot: process.cwd() });
+  project.gateRecipes = [];
+  const plan = createCardWorldLifecyclePlan({
+    intent: { action: 'full', target: 'V-next', scope: 'requirement-intake..delivery-receipt' },
+    project,
+    runId: 'full-v-next',
+    sourceDigest: 'a'.repeat(64),
+  });
+  assert.deepEqual(plan.run.features.map(feature => feature.metadata.stage), [
+    'requirement-intake', 'canonical-requirement', 'version-planning', 'implementation', 'scope-resolution', 'docs-closeout', 'quality', 'user-code-review', 'delivery-receipt',
+  ]);
+  const quality = plan.run.features.find(feature => feature.metadata.stage === 'quality');
+  assert.deepEqual(quality.dependsOn, ['docs/V-next']);
+  assert.deepEqual(quality.allowedPaths, []);
+});
+
+test('CardWorld action plans use action-specific stages, paths, stop conditions, and delivery verification', () => {
+  const project = createCardWorldProjectDescriptor({ workspaceRoot: process.cwd() });
+  project.gateRecipes = [];
+  const expected = new Map([
+    ['requirements', ['requirement-intake', 'canonical-requirement', 'version-planning']],
+    ['plan', ['version-planning']],
+    ['implement', ['implementation']],
+    ['scope', ['scope-resolution']],
+    ['quality', ['quality']],
+    ['docs', ['docs-closeout']],
+    ['review', ['user-code-review']],
+    ['deliver', ['quality', 'delivery-receipt']],
+  ]);
+  for (const [action, stages] of expected) {
+    const plan = createCardWorldLifecyclePlan({ intent: { action, target: 'V-next', scope: action, sourcePolicy: action === 'quality' ? 'review-and-repair' : null }, project, runId: `${action}-v-next`, sourceDigest: 'a'.repeat(64) });
+    assert.deepEqual(plan.run.features.map(feature => feature.metadata.stage), stages, action);
+    assert.equal(plan.stopCondition.action, action);
+  }
+  const quality = createCardWorldLifecyclePlan({ intent: { action: 'quality', target: 'V-next', scope: 'quality', sourcePolicy: 'review-and-repair' }, project, runId: 'quality-v-next', sourceDigest: 'a'.repeat(64) });
+  assert.deepEqual(quality.run.features[0].allowedPaths, []);
+  assert.equal(quality.stopCondition.type, 'quality-run-complete');
+  const deliver = createCardWorldLifecyclePlan({ intent: { action: 'deliver', target: 'V-next', scope: 'delivery-receipt' }, project, runId: 'deliver-v-next', sourceDigest: 'a'.repeat(64) });
+  assert.equal(deliver.run.profileConfig.requireFinalQualityReview, true);
+  assert.equal(deliver.run.profileConfig.requireUserCodeReview, true);
 });
 
 test('Collection consumer keeps ten game lanes, Feature dependencies, and one shared capability owner', () => {

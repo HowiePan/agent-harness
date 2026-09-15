@@ -16,7 +16,7 @@ const unsupported = operation => async () => {
 
 const assertObservation = (observation, expected) => {
   assert(observation?.verified === true, 'VISIBLE_AGENT_HOST_OBSERVATION_UNVERIFIED', 'The host did not return a verified visible-Agent observation.');
-  assert(['queued', 'running', 'completed'].includes(observation.status), 'VISIBLE_AGENT_HOST_STATUS_INVALID', 'The visible-Agent observation must expose an observable lifecycle status.');
+  assert(['queued', 'running', 'completed', 'failed', 'blocked'].includes(observation.status), 'VISIBLE_AGENT_HOST_STATUS_INVALID', 'The visible-Agent observation must expose an observable lifecycle status.');
   assert(observation.agentId === expected.agentId, 'VISIBLE_AGENT_HOST_AGENT_MISMATCH', 'Visible-Agent observation is bound to a different Agent.');
   assert(observation.dispatchId === expected.dispatchId, 'VISIBLE_AGENT_HOST_DISPATCH_MISMATCH', 'Visible-Agent observation is bound to a different Dispatch.');
   assert(observation.packetDigest === expected.packetDigest, 'VISIBLE_AGENT_HOST_PACKET_MISMATCH', 'Visible-Agent observation is bound to a different Dispatch packet.');
@@ -46,7 +46,7 @@ export const assertFreshVisibleObservation = (observation, { now = () => new Dat
  * accepted as proof until every identity, digest, visibility, and inspection field is
  * checked here.
  */
-export const createVisibleHostAdapter = ({ inspectVisibleAgent, provider = 'interactive-host', adapterVersion = '1.0.0' } = {}) => {
+export const createVisibleHostAdapter = ({ inspectVisibleAgent, spawnVisibleAgent, waitVisibleAgent, readVisibleResult, sendVisibleAgent, interruptVisibleAgent, provider = 'interactive-host', adapterVersion = '1.0.0' } = {}) => {
   assert(typeof inspectVisibleAgent === 'function', 'VISIBLE_AGENT_HOST_INSPECTOR_REQUIRED', 'A visible host adapter requires the native host inspectVisibleAgent capability.');
   assert(typeof provider === 'string' && provider.length > 0, 'VISIBLE_AGENT_HOST_PROVIDER_REQUIRED', 'A visible host adapter requires a provider identity.');
   assert(semanticVersion.test(adapterVersion), 'VISIBLE_AGENT_HOST_ADAPTER_VERSION_INVALID', 'A visible host adapter requires a semantic adapter version.');
@@ -66,6 +66,16 @@ export const createVisibleHostAdapter = ({ inspectVisibleAgent, provider = 'inte
 
   return Object.freeze({
     [visibleHostAdapterBrand]: true,
+    provider,
+    adapterVersion,
+    capabilities: Object.freeze({
+      inspect: true,
+      spawn: typeof spawnVisibleAgent === 'function',
+      wait: typeof waitVisibleAgent === 'function',
+      result: typeof readVisibleResult === 'function',
+      send: typeof sendVisibleAgent === 'function',
+      interrupt: typeof interruptVisibleAgent === 'function',
+    }),
     verifyVisibleLease: async input => {
       const observation = await observe(input);
       return {
@@ -98,10 +108,11 @@ export const createVisibleHostAdapter = ({ inspectVisibleAgent, provider = 'inte
         progress: observation.progress ?? null,
       };
     },
-    spawn: unsupported('spawn'),
-    wait: unsupported('wait'),
-    send: unsupported('send'),
+    spawn: typeof spawnVisibleAgent === 'function' ? spawnVisibleAgent : unsupported('spawn'),
+    wait: typeof waitVisibleAgent === 'function' ? waitVisibleAgent : unsupported('wait'),
+    result: typeof readVisibleResult === 'function' ? readVisibleResult : unsupported('result'),
+    send: typeof sendVisibleAgent === 'function' ? sendVisibleAgent : unsupported('send'),
     heartbeat: unsupported('heartbeat'),
-    interrupt: unsupported('interrupt'),
+    interrupt: typeof interruptVisibleAgent === 'function' ? interruptVisibleAgent : unsupported('interrupt'),
   });
 };

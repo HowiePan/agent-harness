@@ -9,6 +9,7 @@ import { qualityCanClose, validateFinding } from './quality.mjs';
 import { assertArtifactRebaseDecision } from '../maintenance/upgrade-authorization.mjs';
 import { buildRunReceipt, writeRunReceipt } from './receipts.mjs';
 import { scheduleFeatures, validateWorkGraph } from './work-graph.mjs';
+import { validateBusinessResult } from '../result-contract.mjs';
 
 const activeLease = lease => ['requested', 'active'].includes(lease.status);
 const activeDispatch = dispatch => ['requested', 'assigned'].includes(dispatch.status);
@@ -183,22 +184,40 @@ export class HarnessKernel {
         assert(Date.parse(this.now()) - Date.parse(lease.lastHeartbeatAt) < timeoutMs, 'VISIBLE_AGENT_HEARTBEAT_EXPIRED', 'Conversation-visible Agent heartbeat expired before submission.');
       }
       assert(input.epoch === state.epoch && input.generation === state.generation, 'STALE_SUBMISSION', 'Submission belongs to an older epoch or generation.');
-      assert(['completed', 'blocked', 'failed'].includes(input.result?.status), 'RESULT_STATUS_INVALID', 'Result status must be completed, blocked, or failed.');
       const feature = state.features.find(item => item.id === lease.featureId);
+      const result = validateBusinessResult(input.result, { conversationVisible: dispatch.execution?.runtime?.mode === 'conversation-visible', repair: Boolean(feature?.metadata?.repairFindingId) });
       for (const evidence of evidenceRecords) {
         const metadata = evidence.metadata;
         assert(metadata.projectId === projectId && metadata.runId === runId && metadata.epoch === state.epoch && metadata.generation === state.generation && metadata.featureId === feature.id && metadata.dispatchId === dispatch.dispatchId, 'EVIDENCE_CONTEXT_MISMATCH', 'Evidence does not belong to the active Feature Lease.', { ref: metadata.ref });
         assert(metadata.sourceDigest === dispatch.sourceDigest && metadata.policyDigest === state.policyDigest && metadata.pluginSetDigest === state.pluginSetDigest, 'EVIDENCE_BASELINE_MISMATCH', 'Evidence baseline does not match the immutable Dispatch.', { ref: metadata.ref });
       }
-      const changedFiles = [...new Set(input.result.changedFiles ?? [])].map(path => String(path).replaceAll('\\', '/'));
-      const findingIntents = input.result.findings ?? [];
+      const changedFiles = [...new Set(result.changedFiles)].map(path => String(path).replaceAll('\\', '/'));
+      const findingIntents = result.findings ?? [];
       assert(Array.isArray(findingIntents), 'RESULT_FINDINGS_INVALID', 'Result findings must be an array.');
       const findingIds = new Set();
+      const reopenedFindingIds = new Set();
       const findings = findingIntents.map(intent => {
         assert(intent && typeof intent === 'object' && !Array.isArray(intent), 'RESULT_FINDINGS_INVALID', 'Every result finding must be an object.');
-        assert(!findingIds.has(intent?.id) && !state.findings.some(item => item.id === intent?.id), 'FINDING_DUPLICATE', `Finding already exists: ${intent?.id}`);
+        if (feature.metadata?.qualityReview === true || feature.metadata?.stage === 'quality' || feature.metadata?.stage === 'quality-recheck') {
+          assert(Array.isArray(intent.evidence) && intent.evidence.length > 0, 'QUALITY_FINDING_EVIDENCE_REQUIRED', 'Every quality-review Finding requires non-empty evidence.');
+          assert(Array.isArray(intent.affectedPaths) && intent.affectedPaths.length > 0, 'QUALITY_FINDING_PATH_REQUIRED', 'Every actionable quality-review Finding requires at least one affected path.');
+        }
+        const existingFinding = state.findings.find(item => item.id === intent?.id);
+        assert(!findingIds.has(intent?.id), 'FINDING_DUPLICATE', `Finding is duplicated in the same result: ${intent?.id}`);
+        assert(!existingFinding || ((feature.metadata?.qualityReview === true || feature.metadata?.stage === 'quality-recheck') && existingFinding.status === 'resolved'), 'FINDING_DUPLICATE', `Finding already exists: ${intent?.id}`);
         findingIds.add(intent.id);
-        return validateFinding({ ...intent, source: 'review', featureId: feature.id, evidenceRefs: input.evidenceRefs, openedAt: this.now(), status: 'open' });
+        const nextFinding = validateFinding({ ...intent, source: 'review', featureId: feature.id, evidenceRefs: input.evidenceRefs, openedAt: this.now(), status: 'open' });
+        if (existingFinding) {
+          reopenedFindingIds.add(intent.id);
+          nextFinding.history = [...(existingFinding.history ?? []), {
+            openedAt: existingFinding.openedAt,
+            resolvedAt: existingFinding.resolvedAt,
+            resolution: structuredClone(existingFinding.resolution ?? null),
+            resolutionEvidenceRefs: [...(existingFinding.resolutionEvidenceRefs ?? [])],
+          }];
+          nextFinding.reopenedAt = this.now();
+        }
+        return nextFinding;
       });
       const pathWithin = (root, file) => file === root || file.startsWith(`${root.replace(/\/$/, '')}/`);
       for (const file of changedFiles) {
@@ -206,13 +225,15 @@ export class HarnessKernel {
         assert(!feature.forbiddenPaths.some(path => pathWithin(path, file)), 'FEATURE_PATH_FORBIDDEN', `Feature ${feature.id} changed a forbidden path: ${file}`);
       }
       assert(input.resultingSourceDigest, 'RESULTING_SOURCE_DIGEST_REQUIRED', 'Submission requires the resulting workspace source digest.');
-      if (input.result.status === 'completed') assert((input.evidenceRefs ?? []).length > 0, 'COMPLETION_EVIDENCE_REQUIRED', 'Completed Features require content-addressed evidence.');
-      const submission = { submissionId: this.id('submission'), dispatchId: dispatch.dispatchId, leaseId: lease.leaseId, featureId: feature.id, agentId: lease.agentId, epoch: state.epoch, generation: state.generation, inputSourceDigest: dispatch.sourceDigest, outputSourceDigest: input.resultingSourceDigest, changedFiles, result: structuredClone(input.result), evidenceRefs: [...new Set(input.evidenceRefs ?? [])], submittedAt: this.now() };
+      if (result.status === 'completed') assert((input.evidenceRefs ?? []).length > 0, 'COMPLETION_EVIDENCE_REQUIRED', 'Completed Features require content-addressed evidence.');
+      const submission = { submissionId: this.id('submission'), dispatchId: dispatch.dispatchId, leaseId: lease.leaseId, featureId: feature.id, agentId: lease.agentId, epoch: state.epoch, generation: state.generation, inputSourceDigest: dispatch.sourceDigest, outputSourceDigest: input.resultingSourceDigest, changedFiles, result: structuredClone(result), evidenceRefs: [...new Set(input.evidenceRefs ?? [])], submittedAt: this.now() };
       submission.submissionDigest = digestJson(submission);
       state.submissions.push(submission);
       for (const finding of findings) {
-        state.findings.push(finding);
-        event(state, 'finding.opened', { id: finding.id, severity: finding.severity, featureId: feature.id }, this.now);
+        const existingIndex = state.findings.findIndex(item => item.id === finding.id);
+        if (existingIndex >= 0) state.findings[existingIndex] = finding;
+        else state.findings.push(finding);
+        event(state, reopenedFindingIds.has(finding.id) ? 'finding.reopened' : 'finding.opened', { id: finding.id, severity: finding.severity, featureId: feature.id }, this.now);
       }
       state.sourceDigest = submission.outputSourceDigest;
       state.evidenceRefs.push(...submission.evidenceRefs.filter(ref => !state.evidenceRefs.includes(ref)));
@@ -221,30 +242,35 @@ export class HarnessKernel {
       dispatch.status = 'committed';
       dispatch.submissionId = submission.submissionId;
       feature.submissionId = submission.submissionId;
-      if (input.result.status === 'completed') feature.state = 'completed';
+      if (result.status === 'completed') feature.state = 'completed';
       else {
-        const key = `${feature.logicalRoot}:${input.result.failureClass ?? input.result.status}`;
-        const attempt = state.attempts[key] ?? { key, logicalRoot: feature.logicalRoot, failureClass: input.result.failureClass ?? input.result.status, failures: 0, limit: feature.attemptLimit, records: [] };
+        const key = `${feature.logicalRoot}:${result.failureClass ?? result.status}`;
+        const attempt = state.attempts[key] ?? { key, logicalRoot: feature.logicalRoot, failureClass: result.failureClass ?? result.status, failures: 0, limit: feature.attemptLimit, records: [] };
         attempt.failures += 1;
-        attempt.records.push({ dispatchId: dispatch.dispatchId, submissionId: submission.submissionId, at: this.now(), summary: input.result.summary ?? null });
+        attempt.records.push({ dispatchId: dispatch.dispatchId, submissionId: submission.submissionId, at: this.now(), summary: result.summary ?? null });
         attempt.exhausted = attempt.failures >= attempt.limit;
         state.attempts[key] = attempt;
         feature.state = attempt.exhausted ? 'failed-budget' : 'blocked';
-        feature.blocker = structuredClone(input.result.blocker ?? { kind: input.result.failureClass ?? 'execution', summary: input.result.summary ?? 'Feature blocked.' });
+        feature.blocker = structuredClone(result.blocker ?? { kind: result.failureClass ?? 'execution', summary: result.summary ?? 'Feature blocked.' });
       }
       const repairFindingId = feature.metadata?.repairFindingId;
-      if (input.result.status === 'completed' && repairFindingId) {
+      if (result.status === 'completed' && repairFindingId) {
         const finding = state.findings.find(item => item.id === repairFindingId);
         assert(finding?.status === 'open', 'REPAIR_FINDING_NOT_OPEN', `Repair Feature is not bound to an open Finding: ${repairFindingId}`);
         assert(submission.evidenceRefs.length > 0, 'FINDING_RESOLUTION_EVIDENCE_REQUIRED', 'A completed repair Feature requires resolution Evidence.');
+        const hasVerificationReceipt = evidenceRecords.some(record => {
+          try { return JSON.parse(record.bytes.toString('utf8'))?.runtimeEvidence?.verificationReceipts?.length > 0; }
+          catch { return false; }
+        });
+        assert(hasVerificationReceipt, 'REPAIR_VERIFICATION_RECEIPT_REQUIRED', 'A completed repair requires host-preserved verification Receipts.');
         finding.status = 'resolved';
-        finding.resolution = { status: 'fixed', summary: input.result.summary };
+        finding.resolution = { status: 'fixed', summary: result.summary };
         finding.resolutionEvidenceRefs = [...submission.evidenceRefs];
         finding.resolvedAt = this.now();
         event(state, 'finding.resolved', { id: finding.id, repairFeatureId: feature.id, evidenceRefs: submission.evidenceRefs }, this.now);
       }
       const followUps = typeof profile.createFollowUpFeatures === 'function'
-        ? profile.createFollowUpFeatures({ state: structuredClone(state), feature: structuredClone(feature), findings: structuredClone(findings), result: structuredClone(input.result) })
+        ? profile.createFollowUpFeatures({ state: structuredClone(state), feature: structuredClone(feature), findings: structuredClone(findings), result: structuredClone(result) })
         : [];
       if (followUps.length) {
         const existingIds = new Set(state.features.map(item => item.id));

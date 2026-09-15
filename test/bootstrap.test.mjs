@@ -31,7 +31,8 @@ test('bootstrap plan is zero-write and apply is approved, idempotent, and projec
   const decision = { actor: 'project-owner', decision: 'approved', action: 'bootstrap' };
   const applied = await applyBootstrapPlan(plan, { controlRoot, dataRoot, releaseIdentity, commandId: 'bootstrap-engine', authorityDecision: decision });
   assert.equal(applied.receipt.status, 'committed');
-  assert.equal(applied.receipt.readiness.lifecycleReady, true);
+  assert.equal(applied.receipt.readiness.registryReady, true);
+  assert.equal(applied.receipt.readiness.lifecycleReady, false);
   const repeated = await applyBootstrapPlan(plan, { controlRoot, dataRoot, releaseIdentity, commandId: 'bootstrap-engine', authorityDecision: decision });
   assert.equal(repeated.reused, true);
   const missing = await inspectLifecycleReadiness({ controlRoot, dataRoot, releaseIdentity, projectId: 'tabletop-collection', profileId: 'collection-batch', extensionId: 'tabletop-collection-profile' });
@@ -73,7 +74,8 @@ test('bootstrap can explicitly replace a legacy descriptor rejected by the curre
   const upgrade = await createBootstrapPlan(request, { controlRoot, dataRoot, releaseIdentity });
   assert.equal(upgrade.expectedProjectRevision, legacy.revision);
   const applied = await applyBootstrapPlan(upgrade, { controlRoot, dataRoot, releaseIdentity, commandId: 'bootstrap-upgrade', authorityDecision: decision });
-  assert.equal(applied.receipt.readiness.lifecycleReady, true);
+  assert.equal(applied.receipt.readiness.registryReady, true);
+  assert.equal(applied.receipt.readiness.lifecycleReady, false);
   const repaired = JSON.parse(await readFile(descriptorFile, 'utf8'));
   assert.equal(repaired.policy.agentExecutionMode, 'conversation-visible');
   assert.equal(repaired.policy.promptCodecPlugin, 'reference-agent-prompt-codec');

@@ -38,6 +38,19 @@ export class AuthorityStore {
     return state;
   }
 
+  async list(projectId) {
+    const directory = resolve(this.root, 'authority', safeSegment(projectId, 'projectId'));
+    let entries;
+    try { entries = await readdir(directory, { withFileTypes: true }); }
+    catch (error) { if (error.code === 'ENOENT') return []; throw error; }
+    const runs = [];
+    for (const entry of entries.filter(item => item.isDirectory())) {
+      const state = await this.read(projectId, entry.name, { required: false });
+      if (state) runs.push(state);
+    }
+    return runs.sort((left, right) => String(right.updatedAt).localeCompare(String(left.updatedAt)));
+  }
+
   async create(initialState, { commandId, payload = {} }) {
     const projectId = safeSegment(initialState.projectId, 'projectId');
     const runId = safeSegment(initialState.runId, 'runId');

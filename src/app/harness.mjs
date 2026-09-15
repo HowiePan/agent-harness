@@ -1,9 +1,10 @@
 import { resolve } from 'node:path';
+import { mkdir, rm } from 'node:fs/promises';
 import { atomicWriteJson } from '../kernel/atomic-io.mjs';
 import { AuthorityStore } from '../kernel/authority-store.mjs';
 import { EvidenceStore } from '../kernel/evidence-store.mjs';
 import { buildDispatchPacket, HarnessKernel } from '../kernel/kernel.mjs';
-import { digestJson, sha256 } from '../canonical.mjs';
+import { digestJson, newId, sha256 } from '../canonical.mjs';
 import { assert } from '../errors.mjs';
 import { PluginHost } from '../plugins/host.mjs';
 import { createConflictScheduler } from '../plugins/scheduler/conflict-scheduler.mjs';
@@ -21,12 +22,15 @@ import { createLifecycleCommandPlan, validateLifecycleCommandPlan } from '../lif
 import { loadReleaseIdentity } from '../release-identity.mjs';
 import { captureWorkspace, diffWorkspaceSnapshots } from '../workspace-snapshot.mjs';
 import { resolveProjectWorkspace } from '../workspace-identity.mjs';
-import { assertHarnessWritePath, harnessControlRoot } from '../write-boundary.mjs';
+import { assertHarnessWritePath, harnessControlRoot, harnessProjectRoot } from '../write-boundary.mjs';
 import { RunCoordinator } from '../coordinator/run-coordinator.mjs';
 import { AUTO_CONCURRENCY, AUTO_CONCURRENCY_LIMIT, resolveConcurrencyLimit } from '../concurrency.mjs';
-import { ProjectGateRunner } from '../gates/project-gate-runner.mjs';
+import { ProjectGateRunner, inspectProjectGateCapabilities } from '../gates/project-gate-runner.mjs';
 import { assertAgentRuntimeCompatible, assertRuntimeTransportReceipt } from '../plugins/runtime/execution-policy.mjs';
 import { assertFreshVisibleObservation, createVisibleHostAdapter, isVisibleHostAdapter } from '../plugins/runtime/visible-host-adapter.mjs';
+import { validateBusinessResult } from '../result-contract.mjs';
+import { sealExecutionReadinessReport, verifyExecutionReadinessReport } from '../execution-readiness.mjs';
+import { readActiveRelease, resolveActiveRuntimeRoot } from '../registry/active-generation.mjs';
 
 export const defaultDataRoot = (controlRoot = harnessControlRoot()) => resolve(controlRoot, '.agent-harness-data');
 
@@ -42,6 +46,8 @@ export const createHarness = async ({ controlRoot: controlRootInput, dataRoot: d
   const controlRoot = harnessControlRoot(controlRootInput);
   const dataRoot = dataRootInput ?? defaultDataRoot(controlRoot);
   const controlledDataRoot = assertHarnessWritePath(dataRoot, 'Harness dataRoot', controlRoot);
+  const activeRelease = await readActiveRelease(controlledDataRoot, controlRoot);
+  const activeRuntimeRoot = activeRelease ? await resolveActiveRuntimeRoot(controlledDataRoot, controlRoot) : null;
   releaseIdentity ??= await loadReleaseIdentity();
   const currentReleaseIdentity = { version: releaseIdentity?.version, artifactDigest: releaseIdentity?.artifactDigest ?? null };
   assert(/^\d+\.\d+\.\d+$/.test(currentReleaseIdentity.version ?? ''), 'HARNESS_RELEASE_IDENTITY_INVALID', 'Harness release identity requires a semantic version.');
@@ -128,6 +134,119 @@ export const createHarness = async ({ controlRoot: controlRootInput, dataRoot: d
     extensionSet: { installed: extensionSet.installed, digest: extensionSet.digest },
     releaseIdentity: Object.freeze(structuredClone(currentReleaseIdentity)),
 
+    async createExecutionReadinessReport(planInput, { onGateProgress = null, probeWrite = true, ttlMs = 60000 } = {}) {
+      const createdAt = kernel.now();
+      const issues = error => [{ code: error.code ?? 'UNEXPECTED_ERROR', message: error.message }];
+      const checks = [];
+      let plan;
+      let project;
+      let runtimePolicy;
+      let existingState = null;
+      const add = (id, ready, details = {}, found = []) => checks.push({ id, ready, details: structuredClone(details), issues: structuredClone(found) });
+      try { plan = validateLifecycleCommandPlan(planInput); add('plan', true, { planDigest: plan.planDigest }); }
+      catch (error) { add('plan', false, {}, issues(error)); }
+      if (plan) {
+        try {
+          project = await projectRegistry.get(plan.project.id);
+          assert(project.revision === plan.project.revision && project.descriptorDigest === plan.project.descriptorDigest, 'LIFECYCLE_PLAN_PROJECT_STALE', 'Lifecycle Command Plan is stale for the current Project Descriptor.');
+          add('project', true, { projectId: project.id, revision: project.revision, descriptorDigest: project.descriptorDigest });
+        } catch (error) { add('project', false, {}, issues(error)); }
+        try {
+          assert(currentReleaseIdentity.version === plan.harness.version && currentReleaseIdentity.artifactDigest === plan.harness.artifactDigest, 'LIFECYCLE_PLAN_RELEASE_STALE', 'Lifecycle Command Plan is stale for the running Harness release.');
+          if (strictProjectIdentity) {
+            assert(activeRelease, 'INSTALLATION_RELEASE_NOT_ACTIVATED', 'Production lifecycle execution requires an activated immutable release.');
+            assert(activeRelease.release?.version === plan.harness.version && activeRelease.release?.artifactDigest === plan.harness.artifactDigest, 'ACTIVE_RELEASE_IDENTITY_MISMATCH', 'Active immutable release does not match the Lifecycle Plan.');
+            assert(resolve(harnessProjectRoot()) === resolve(activeRuntimeRoot), 'ACTIVE_RUNTIME_ENTRYPOINT_MISMATCH', 'Lifecycle execution must run from the activated immutable runtime entrypoint.');
+          }
+          add('release', true, { active: Boolean(activeRelease), runtimeRoot: activeRuntimeRoot });
+        } catch (error) { add('release', false, { active: Boolean(activeRelease), runtimeRoot: activeRuntimeRoot }, issues(error)); }
+      }
+      if (plan && project) {
+        const conflicts = plan.authority.activeRunConflicts ?? [];
+        add('run-lineage', conflicts.length === 0, { conflicts }, conflicts.map(conflict => ({ code: 'ACTIVE_LOGICAL_RUN_CONFLICT', message: `Run ${conflict.runId} (${conflict.status}, revision ${conflict.revision}) must be explicitly superseded or selected before a replacement Run can start.` })));
+        try {
+          existingState = await authorityStore.read(plan.project.id, plan.run.runId, { required: false });
+          const activeLeaseCount = existingState?.leases.filter(lease => lease.status === 'active').length ?? 0;
+          const snapshot = await captureWorkspace(plan.run.executionWorkspaceRoot, { excluded: project.workspace.excluded ?? [] });
+          const expectedSourceDigest = existingState?.sourceDigest ?? plan.run.sourceDigest;
+          assert(snapshot.digest === expectedSourceDigest || activeLeaseCount > 0, 'EXECUTION_WORKSPACE_SOURCE_STALE', 'Execution workspace no longer matches the planned or authoritative source digest.', { expectedSourceDigest, actualSourceDigest: snapshot.digest });
+          add('workspace-source', true, { expectedSourceDigest, actualSourceDigest: snapshot.digest, activeLeaseCount, activeLeaseMayOwnUncommittedChanges: activeLeaseCount > 0 && snapshot.digest !== expectedSourceDigest });
+        } catch (error) { add('workspace-source', false, {}, issues(error)); }
+        try {
+          const required = project.extensions?.find(item => item.id === plan.extension.id);
+          const installed = extensionSet.installed.find(item => item.id === plan.extension.id);
+          assert(required && installed && required.version === plan.extension.version && required.digest === plan.extension.digest && installed.version === plan.extension.version && installed.digest === plan.extension.digest, 'PROJECT_EXTENSION_IDENTITY_MISMATCH', 'Lifecycle Plan Extension identity is not installed and bound exactly.');
+          add('extension', true, { extension: plan.extension });
+        } catch (error) { add('extension', false, {}, issues(error)); }
+        try {
+          const runtimeManifest = pluginHost.get(plan.run.runtimePluginId, 'agent-runtime').manifest;
+          runtimePolicy = assertAgentRuntimeCompatible({ project, manifest: runtimeManifest });
+          add('runtime', true, { id: runtimeManifest.id, version: runtimeManifest.version, mode: runtimePolicy.mode });
+        } catch (error) { add('runtime', false, {}, issues(error)); }
+        try {
+          const prompt = pluginHost.get(project.policy.promptCodecPlugin, 'codec').manifest;
+          assert(prompt.capabilities.includes('agent-prompt'), 'AGENT_PROMPT_CODEC_REQUIRED', 'Project Prompt Codec does not provide agent-prompt capability.');
+          add('prompt-transport', true, { id: prompt.id, version: prompt.version });
+        } catch (error) { add('prompt-transport', false, {}, issues(error)); }
+        if (runtimePolicy?.hostOrchestrated) {
+          const ready = isVisibleHostAdapter(trustedAgentAdapter) && ['inspect', 'spawn', 'wait', 'result'].every(capability => trustedAgentAdapter.capabilities?.[capability] === true);
+          add('visible-host', ready, isVisibleHostAdapter(trustedAgentAdapter) ? { provider: trustedAgentAdapter.provider, adapterVersion: trustedAgentAdapter.adapterVersion, capabilities: trustedAgentAdapter.capabilities } : {}, ready ? [] : [{ code: 'VISIBLE_AGENT_HOST_COORDINATOR_UNAVAILABLE', message: 'Conversation-visible execution requires an injected trusted Host Adapter with inspect, spawn, wait, and structured-result capabilities.' }]);
+        } else add('visible-host', true, { required: false });
+        const activeLeases = existingState?.leases.filter(lease => lease.status === 'active') ?? [];
+        if (!activeLeases.length) add('active-leases', true, { count: 0 });
+        else if (!runtimePolicy?.hostOrchestrated || !isVisibleHostAdapter(trustedAgentAdapter)) {
+          add('active-leases', false, { count: activeLeases.length }, [{ code: 'ACTIVE_LEASE_RESUME_UNAVAILABLE', message: 'Active Leases require their original trusted host coordinator before execution can resume.' }]);
+        } else {
+          const observations = [];
+          const leaseIssues = [];
+          for (const lease of activeLeases) {
+            try {
+              const dispatch = existingState.dispatches.find(item => item.dispatchId === lease.dispatchId);
+              const compiled = await compileDispatchPrompt(existingState, dispatch);
+              const observation = await trustedAgentAdapter.verifyVisibleLease({ dispatch, prompt: compiled.prompt, agentId: lease.agentId, runtimeReceipt: lease.runtimeReceipt });
+              assertFreshVisibleObservation(observation, { now: kernel.now, timeoutMs: lease.heartbeatTimeoutMs ?? 120000 });
+              observations.push({ leaseId: lease.leaseId, dispatchId: lease.dispatchId, agentId: lease.agentId, assertionId: observation.assertionId, observedAt: observation.observedAt });
+            } catch (error) { leaseIssues.push(...issues(error)); }
+          }
+          add('active-leases', leaseIssues.length === 0, { count: activeLeases.length, observations }, leaseIssues);
+        }
+        const requiredGateIds = plan.stopCondition.requiredFinalGates ?? [];
+        if (requiredGateIds.length) {
+          const gateReport = await inspectProjectGateCapabilities({ project, workspaceRoot: plan.run.executionWorkspaceRoot, scope: 'final', gateIds: requiredGateIds, onProgress: onGateProgress });
+          add('gates', gateReport.ready, { gates: gateReport.gates }, gateReport.issues);
+        } else add('gates', true, { required: false });
+      }
+      let writeProbe = { attempted: false, ready: false, cleaned: true };
+      if (probeWrite) {
+        const probeRoot = assertHarnessWritePath(resolve(authorityStore.root, 'tmp', 'preflight'), 'Execution readiness write probe', controlRoot);
+        const probeFile = resolve(probeRoot, `${newId('probe')}.json`);
+        try {
+          await mkdir(probeRoot, { recursive: true });
+          await atomicWriteJson(probeFile, { protocolVersion: '1.0', kind: 'write-probe', createdAt }, { root: authorityStore.root });
+          await rm(probeFile);
+          writeProbe = { attempted: true, ready: true, cleaned: true };
+          add('write-capability', true, writeProbe);
+        } catch (error) {
+          await rm(probeFile, { force: true }).catch(() => {});
+          writeProbe = { attempted: true, ready: false, cleaned: true };
+          add('write-capability', false, writeProbe, issues(error));
+        }
+      } else add('write-capability', false, writeProbe, [{ code: 'WRITE_CAPABILITY_NOT_PROBED', message: 'Execution readiness requires an explicit atomic write probe.' }]);
+      const executionReady = Boolean(plan && project) && checks.every(check => check.ready);
+      return sealExecutionReadinessReport({
+        protocolVersion: '1.0',
+        kind: 'execution-readiness-report',
+        planDigest: plan?.planDigest ?? '0'.repeat(64),
+        project: plan?.project ?? { id: '<invalid>', revision: 1, descriptorDigest: '0'.repeat(64) },
+        release: { version: plan?.harness?.version ?? currentReleaseIdentity.version, artifactDigest: plan?.harness?.artifactDigest ?? currentReleaseIdentity.artifactDigest ?? '0'.repeat(64), active: Boolean(activeRelease), runtimeRoot: activeRuntimeRoot },
+        checks,
+        writeProbe,
+        executionReady,
+        createdAt,
+        expiresAt: new Date(Date.parse(createdAt) + ttlMs).toISOString(),
+      });
+    },
+
     async createLifecyclePlan(input) {
       const project = await projectRegistry.get(input.projectId);
       const workspace = await resolveProjectWorkspace(project, input.executionWorkspaceRoot);
@@ -154,6 +273,9 @@ export const createHarness = async ({ controlRoot: controlRootInput, dataRoot: d
         compiler: extension.operations?.createLifecyclePlan,
       }).run.runId;
       const existing = await authorityStore.read(project.id, derivedRunId, { required: false });
+      const activeRunConflicts = (await authorityStore.list(project.id))
+        .filter(state => state.runId !== derivedRunId && !['closed', 'superseded'].includes(state.status) && state.metadata?.commandIntent?.action === intent.action && state.metadata?.commandIntent?.target === intent.target)
+        .map(state => ({ runId: state.runId, revision: state.revision, status: state.status }));
       const plan = createLifecycleCommandPlan({
         intent,
         project,
@@ -163,6 +285,7 @@ export const createHarness = async ({ controlRoot: controlRootInput, dataRoot: d
         executionWorkspaceRoot: workspace.root,
         authorityRevision: existing?.revision ?? 0,
         existingRunId: existing?.runId ?? null,
+        activeRunConflicts,
         compiler: extension.operations?.createLifecyclePlan,
       });
       if (existing) assert(existing.metadata?.lifecyclePlanDigest === plan.planDigest, 'LIFECYCLE_PLAN_RUN_CONFLICT', 'A Run with the deterministic lifecycle ID exists for a different Command Plan.', { runId: existing.runId, existingPlanDigest: existing.metadata?.lifecyclePlanDigest, planDigest: plan.planDigest });
@@ -171,9 +294,11 @@ export const createHarness = async ({ controlRoot: controlRootInput, dataRoot: d
       return plan;
     },
 
-    async startLifecyclePlan(planInput, { commandId } = {}) {
+    async startLifecyclePlan(planInput, { commandId, preflightReport } = {}) {
       assert(commandId, 'COMMAND_ID_REQUIRED', 'Lifecycle start requires a command ID.');
       const plan = validateLifecycleCommandPlan(planInput);
+      verifyExecutionReadinessReport(preflightReport, { plan, now: kernel.now });
+      assert((plan.authority.activeRunConflicts ?? []).length === 0, 'ACTIVE_LOGICAL_RUN_CONFLICT', 'Lifecycle Plan has unresolved active logical Run conflicts.', { conflicts: plan.authority.activeRunConflicts });
       const project = await projectRegistry.get(plan.project.id);
       assert(project.revision === plan.project.revision && project.descriptorDigest === plan.project.descriptorDigest, 'LIFECYCLE_PLAN_PROJECT_STALE', 'Lifecycle Command Plan is stale for the current Project Descriptor.');
       assert(currentReleaseIdentity.artifactDigest === plan.harness.artifactDigest && currentReleaseIdentity.version === plan.harness.version, 'LIFECYCLE_PLAN_RELEASE_STALE', 'Lifecycle Command Plan is stale for the active Harness release.');
@@ -203,9 +328,9 @@ export const createHarness = async ({ controlRoot: controlRootInput, dataRoot: d
       return { status: state.status === 'closed' ? 'closed' : 'started', planDigest: plan.planDigest, plan, runtimePolicy, state };
     },
 
-    async executeLifecyclePlan(planInput, { commandId, maxConcurrency, maxRounds = 100, forceFreshGates = true, onGateProgress = null } = {}) {
+    async executeLifecyclePlan(planInput, { commandId, preflightReport, maxConcurrency, maxRounds = 100, forceFreshGates = true, onGateProgress = null } = {}) {
       assert(commandId, 'COMMAND_ID_REQUIRED', 'Lifecycle execution requires a command ID.');
-      const started = await api.startLifecyclePlan(planInput, { commandId });
+      const started = await api.startLifecyclePlan(planInput, { commandId, preflightReport });
       if (started.status === 'attention-required') return started;
       const { plan, runtimePolicy } = started;
       let { state } = started;
@@ -219,8 +344,94 @@ export const createHarness = async ({ controlRoot: controlRootInput, dataRoot: d
       const gateRunner = new ProjectGateRunner({ harness: api, onProgress: onGateProgress });
       const gates = await gateRunner.run({ projectId: plan.project.id, runId: plan.run.runId, scope: 'final', forceFresh: forceFreshGates, gateIds: plan.stopCondition.requiredFinalGates ?? [] });
       state = await authorityStore.read(plan.project.id, plan.run.runId);
+      if (!gates.results.every(gate => gate.status === 'passed')) return { status: 'attention-required', reason: 'final-gates-not-passed', planDigest: plan.planDigest, execution, gates, state };
       const closed = await api.kernel.closeRun(plan.project.id, plan.run.runId, {}, { expectedRevision: state.revision, commandId: `${commandId}.close` });
       return { status: 'closed', planDigest: plan.planDigest, execution, gates, state: closed.state };
+    },
+
+    async executeVisibleLifecyclePlan(planInput, { commandId, preflightReport, maxConcurrency, maxRounds = 100, forceFreshGates = true, onGateProgress = null } = {}) {
+      assert(commandId, 'COMMAND_ID_REQUIRED', 'Visible lifecycle execution requires a command ID.');
+      const started = await api.startLifecyclePlan(planInput, { commandId, preflightReport });
+      if (started.status === 'attention-required' || started.status === 'closed') return started;
+      const { plan, runtimePolicy } = started;
+      assert(runtimePolicy.hostOrchestrated, 'VISIBLE_LIFECYCLE_RUNTIME_REQUIRED', 'Visible lifecycle execution requires a host-orchestrated Runtime.');
+      assert(isVisibleHostAdapter(trustedAgentAdapter) && ['spawn', 'wait', 'result'].every(capability => trustedAgentAdapter.capabilities?.[capability]), 'VISIBLE_AGENT_HOST_COORDINATOR_UNAVAILABLE', 'Visible lifecycle execution requires a complete trusted Host Coordinator adapter.');
+      const project = await projectRegistry.get(plan.project.id);
+      const runtimeManifest = pluginHost.get(plan.run.runtimePluginId, 'agent-runtime').manifest;
+      const configuredLimit = resolveConcurrencyLimit(project.policy?.maxConcurrency, project.policy?.maxConcurrency === AUTO_CONCURRENCY ? AUTO_CONCURRENCY_LIMIT : 1);
+      const requestedLimit = resolveConcurrencyLimit(maxConcurrency, configuredLimit);
+      const physicalLimit = runtimeManifest.capabilities.includes('workspace-shared') ? 1 : requestedLimit;
+      let state = started.state;
+      const rounds = [];
+      for (let round = 1; round <= maxRounds; round += 1) {
+        state = await authorityStore.read(plan.project.id, plan.run.runId);
+        if (state.status === 'closed') return { status: 'closed', planDigest: plan.planDigest, rounds, state };
+        const activeLeases = state.leases.filter(lease => lease.status === 'active');
+        if (!activeLeases.length) {
+          let requested = state.dispatches.filter(dispatch => dispatch.status === 'requested');
+          if (!requested.length && !state.features.every(feature => feature.state === 'completed')) {
+            const scheduled = await api.dispatch(plan.project.id, plan.run.runId, { maxConcurrency: physicalLimit, runtimePluginId: plan.run.runtimePluginId }, { expectedRevision: state.revision, commandId: `${commandId}.schedule.${state.revision}` });
+            state = scheduled.state;
+            requested = scheduled.result.dispatches;
+          }
+          for (const dispatch of requested.slice(0, physicalLimit)) {
+            const compiled = await api.readDispatchPacket(plan.project.id, plan.run.runId, dispatch.dispatchId);
+            const spawned = await trustedAgentAdapter.spawn({
+              projectId: plan.project.id,
+              runId: plan.run.runId,
+              dispatchId: dispatch.dispatchId,
+              packetDigest: dispatch.packetDigest,
+              promptDigest: compiled.prompt.promptDigest,
+              prompt: compiled.prompt.text,
+              packet: structuredClone(compiled.packet),
+            });
+            assert(spawned?.agentId && spawned.visibility?.mode === 'user-visible' && spawned.visibility.surface && spawned.visibility.inspectRef, 'VISIBLE_AGENT_HOST_SPAWN_RECEIPT_INVALID', 'Host spawn must return an Agent identity and inspectable user-visible task reference.');
+            state = await authorityStore.read(plan.project.id, plan.run.runId);
+            const runtimeReceipt = {
+              runtimePluginId: plan.run.runtimePluginId,
+              agentId: spawned.agentId,
+              dispatchId: dispatch.dispatchId,
+              packetDigest: dispatch.packetDigest,
+              prompt: { contractVersion: compiled.prompt.contractVersion, codecPluginId: compiled.prompt.codecPluginId, codecPluginVersion: compiled.prompt.codecPluginVersion, packetDigest: compiled.prompt.packetDigest, promptDigest: compiled.prompt.promptDigest },
+              visibility: structuredClone(spawned.visibility),
+              hostSpawnReceipt: structuredClone(spawned.receipt ?? null),
+            };
+            await api.bindDispatch(plan.project.id, plan.run.runId, { dispatchId: dispatch.dispatchId, agentId: spawned.agentId, runtimeReceipt }, { expectedRevision: state.revision, commandId: `${commandId}.bind.${dispatch.dispatchId}` });
+          }
+        }
+        state = await authorityStore.read(plan.project.id, plan.run.runId);
+        const leases = state.leases.filter(lease => lease.status === 'active');
+        if (!leases.length) {
+          if (state.features.every(feature => feature.state === 'completed')) break;
+          rounds.push({ round, status: 'attention-required', reason: state.status });
+          return { status: 'attention-required', reason: state.status, planDigest: plan.planDigest, rounds, state };
+        }
+        for (const lease of leases) {
+          const dispatch = state.dispatches.find(item => item.dispatchId === lease.dispatchId);
+          const waited = await trustedAgentAdapter.wait({ agentId: lease.agentId, dispatchId: lease.dispatchId, visibility: structuredClone(lease.runtimeReceipt.visibility) });
+          state = await authorityStore.read(plan.project.id, plan.run.runId);
+          const heartbeat = await api.recordHeartbeat(plan.project.id, plan.run.runId, { leaseId: lease.leaseId, dispatchId: lease.dispatchId, agentId: lease.agentId, progress: waited?.progress ?? waited?.status ?? 'completed' }, { expectedRevision: state.revision, commandId: `${commandId}.heartbeat.${lease.dispatchId}.${state.revision}` });
+          state = heartbeat.state;
+          if (!['completed', 'failed', 'blocked'].includes(waited?.status)) continue;
+          const transported = await trustedAgentAdapter.result({ agentId: lease.agentId, dispatchId: lease.dispatchId, visibility: structuredClone(lease.runtimeReceipt.visibility) });
+          assert(transported?.result, 'VISIBLE_AGENT_STRUCTURED_RESULT_REQUIRED', 'Host result transport must return a structured Agent result.');
+          const submitted = await api.recordResult(plan.project.id, plan.run.runId, dispatch.dispatchId, transported.result, { commandId: `${commandId}.submit.${dispatch.dispatchId}`, runtimeEvidence: { ...(transported.runtimeEvidence ?? {}), hostWaitReceipt: waited?.receipt ?? null, hostResultReceipt: transported.receipt ?? null } });
+          state = submitted.state;
+        }
+        rounds.push({ round, status: 'progressed', revision: state.revision, physicalLimit });
+      }
+      state = await authorityStore.read(plan.project.id, plan.run.runId);
+      if (!state.features.every(feature => feature.state === 'completed')) return { status: 'attention-required', reason: 'visible-coordinator-round-limit', planDigest: plan.planDigest, rounds, state };
+      const gateRunner = new ProjectGateRunner({ harness: api, onProgress: onGateProgress });
+      const gates = plan.stopCondition.requiredFinalGates?.length
+        ? await gateRunner.run({ projectId: plan.project.id, runId: plan.run.runId, scope: 'final', forceFresh: forceFreshGates, gateIds: plan.stopCondition.requiredFinalGates })
+        : { results: [], state };
+      state = await authorityStore.read(plan.project.id, plan.run.runId);
+      if (!gates.results.every(gate => gate.status === 'passed')) return { status: 'attention-required', reason: 'final-gates-not-passed', planDigest: plan.planDigest, rounds, gates, state };
+      const closure = api.profileRegistry.get(state.profile.id).canClose(state);
+      if (!closure.ok) return { status: 'attention-required', reason: closure.reason, planDigest: plan.planDigest, rounds, gates, state };
+      const closed = await api.kernel.closeRun(plan.project.id, plan.run.runId, {}, { expectedRevision: state.revision, commandId: `${commandId}.close` });
+      return { status: 'closed', planDigest: plan.planDigest, rounds, gates, state: closed.state };
     },
 
     registerPlugin(manifest, instance) { return pluginHost.register(manifest, instance); },
@@ -404,7 +615,13 @@ export const createHarness = async ({ controlRoot: controlRootInput, dataRoot: d
       const dispatch = state.dispatches.find(item => item.dispatchId === dispatchId);
       const lease = state.leases.find(item => item.dispatchId === dispatchId && item.status === 'active');
       assert(dispatch && lease, 'ACTIVE_LEASE_REQUIRED', `Dispatch does not have an active Lease: ${dispatchId}`);
-      if (dispatch.execution?.runtime?.mode === 'conversation-visible') {
+      const conversationVisible = dispatch.execution?.runtime?.mode === 'conversation-visible';
+      const feature = state.features.find(item => item.id === dispatch.featureId);
+      const validatedResult = validateBusinessResult(result, { conversationVisible, repair: Boolean(feature?.metadata?.repairFindingId) });
+      if (feature?.metadata?.repairFindingId && validatedResult.status === 'completed') {
+        assert(Array.isArray(runtimeEvidence?.verificationReceipts) && runtimeEvidence.verificationReceipts.length > 0, 'REPAIR_VERIFICATION_RECEIPT_REQUIRED', 'A completed repair requires at least one host-preserved verification Receipt.');
+      }
+      if (conversationVisible) {
         assert(Number(lease.heartbeatCount ?? 0) > 0, 'VISIBLE_AGENT_HEARTBEAT_REQUIRED', 'Conversation-visible Agent result requires at least one recorded host heartbeat.');
         const timeoutMs = Number(lease.heartbeatTimeoutMs ?? 120000);
         assert(Date.parse(kernel.now()) - Date.parse(lease.lastHeartbeatAt) < timeoutMs, 'VISIBLE_AGENT_HEARTBEAT_EXPIRED', 'Conversation-visible Agent heartbeat expired before result recording.');
@@ -417,9 +634,9 @@ export const createHarness = async ({ controlRoot: controlRootInput, dataRoot: d
       const cumulativeChangedFiles = diffWorkspaceSnapshots(sourceSnapshot, resultingSnapshot);
       const interveningFiles = new Set(state.submissions.filter(submission => submission.inputSourceDigest === dispatch.sourceDigest && !submission.supersededAt).flatMap(submission => submission.changedFiles ?? []));
       const actualChangedFiles = cumulativeChangedFiles.filter(path => !interveningFiles.has(path));
-      const claimedChangedFiles = [...new Set(result.changedFiles ?? [])].map(path => String(path).replaceAll('\\', '/')).sort();
-      if (result.changedFiles) assert(digestJson(claimedChangedFiles) === digestJson(actualChangedFiles), 'RESULT_CHANGED_FILES_MISMATCH', 'Runtime changed-files claim does not match the workspace snapshot diff.', { claimedChangedFiles, actualChangedFiles });
-      const verifiedResult = { ...structuredClone(result), changedFiles: actualChangedFiles };
+      const claimedChangedFiles = [...new Set(validatedResult.changedFiles)].map(path => String(path).replaceAll('\\', '/')).sort();
+      assert(digestJson(claimedChangedFiles) === digestJson(actualChangedFiles), 'RESULT_CHANGED_FILES_MISMATCH', 'Runtime changed-files claim does not match the workspace snapshot diff.', { claimedChangedFiles, actualChangedFiles });
+      const verifiedResult = { ...validatedResult, changedFiles: actualChangedFiles };
       await atomicWriteJson(dispatch.outputRef, verifiedResult, { root: authorityStore.root });
       const preservedRuntimeEvidence = runtimeEvidence ? JSON.parse(JSON.stringify(runtimeEvidence)) : null;
       const evidence = await evidenceStore.put({ result: verifiedResult, runtimeEvidence: preservedRuntimeEvidence, inputSourceDigest: dispatch.sourceDigest, outputSourceDigest: resultingSnapshot.digest, sourceSnapshotRef: dispatch.sourceSnapshotRef }, { ...evidenceMetadata, mediaType: 'application/json', projectId, runId, epoch: state.epoch, generation: state.generation, featureId: dispatch.featureId, dispatchId, sourceDigest: dispatch.sourceDigest, artifactDigest: state.artifactDigest, policyDigest: state.policyDigest, pluginSetDigest: state.pluginSetDigest, labels: ['agent-result'] });

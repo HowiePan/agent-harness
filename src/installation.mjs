@@ -29,3 +29,20 @@ export const initializeHarnessInstallation = async ({ controlRoot, now = () => n
   await atomicWriteJson(markerPath, marker, { root });
   return { root, markerPath, marker };
 };
+
+export const activateHarnessInstallationRuntime = async ({ controlRoot, runtimeRoot: runtimeRootInput, now = () => new Date().toISOString() }) => {
+  const root = resolve(controlRoot);
+  const runtimeRoot = resolve(runtimeRootInput);
+  assert(root !== runtimeRoot && insideOrEqual(root, runtimeRoot), 'HARNESS_RUNTIME_OUTSIDE_CONTROL_ROOT', 'The activated runtime must be a child of the standalone control root.', { root, runtimeRoot });
+  const markerPath = resolve(root, installationMarkerName);
+  const existing = await readJson(markerPath, null);
+  const marker = {
+    protocolVersion: '1.0',
+    runtimeRoot: relative(root, runtimeRoot).replaceAll('\\', '/'),
+    dataRoot: '.agent-harness-data',
+    temporaryRoot: '.tmp',
+    initializedAt: existing?.initializedAt ?? now(),
+  };
+  await atomicWriteJson(markerPath, marker, { root });
+  return { root, markerPath, marker };
+};
