@@ -5,6 +5,8 @@ description: Operate, resume, inspect, or recover an Agent Harness run while pre
 
 # Agent Harness Operator
 
+所有面向用户的控制对话必须使用中文，包括协调进度、权限说明、失败说明和最终报告。协议字段、命令、路径与错误码保持原样；此要求不得用于改写 Harness 生成的子 Agent Prompt 或任何原生 Host 响应。
+
 Treat Agent Harness Authority as the only workflow state. Agent conversation state, model output, process exit text, and projected reports are evidence or transport data, never Authority.
 
 Before a state-changing operation:

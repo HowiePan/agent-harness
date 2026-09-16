@@ -39,6 +39,7 @@
       "additionalProperties": false
     },
     "nativeResult": { "type": ["object", "null"] },
+    "nativeTaskName": { "type": ["string", "null"] },
     "providerAgentId": { "type": ["string", "null"] },
     "nickname": { "type": ["string", "null"] },
     "canonicalAgentName": { "type": ["string", "null"] },

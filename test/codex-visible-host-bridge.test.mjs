@@ -17,7 +17,7 @@ const businessResult = {
   made: [], notMade: [], changedFiles: [], observations: [], findings: [], followUpFeatures: [], failureClass: null, blocker: null,
 };
 
-const setup = async (t, { spawnResult = { agent_id: 'provider-agent-1', nickname: 'Ada' }, interruptStops = true } = {}) => {
+const setup = async (t, { spawnResult = undefined, interruptStops = true } = {}) => {
   const controlRoot = resolve(process.cwd());
   const parent = resolve(harnessTemporaryRoot(), 'codex-visible-host-bridge');
   await mkdir(parent, { recursive: true });
@@ -34,13 +34,14 @@ const setup = async (t, { spawnResult = { agent_id: 'provider-agent-1', nickname
       assert.equal(request.tool, 'collaboration.spawn_agent');
       assert.equal(request.arguments.fork_turns, 'none');
       assert.equal(request.arguments.message, 'exact prompt\nwith newline');
-      tasks.set(`/root/${request.arguments.task_name}`, 'running');
-      return structuredClone(spawnResult);
+      const result = structuredClone(spawnResult ?? { task_name: `/root/${request.arguments.task_name}` });
+      tasks.set(typeof result.task_name === 'string' ? result.task_name : `/root/${request.arguments.task_name}`, 'running');
+      return result;
     }
     if (request.operation === 'wait') return { message: 'Agent completed.', timed_out: false };
     if (request.operation === 'interrupt') {
       assert.equal(request.tool, 'collaboration.interrupt_agent');
-      if (interruptStops && tasks.has(request.arguments.target)) tasks.set(request.arguments.target, 'idle');
+      if (interruptStops && tasks.has(request.arguments.target)) tasks.set(request.arguments.target, 'interrupted');
       return { agent_name: request.arguments.target, previous_status: 'running' };
     }
     assert.equal(request.tool, 'collaboration.list_agents');
@@ -60,8 +61,7 @@ test('Codex collaboration adapter binds the real native envelope, canonical task
   assert.equal(reconciled.ready, true);
   const spawned = await host.adapter.spawn(spawnInput);
   assert.match(spawned.agentId, /^\/root\/ah_/);
-  assert.equal(spawned.receipt.providerAgentId, 'provider-agent-1');
-  assert.equal(spawned.receipt.nickname, 'Ada');
+  assert.equal(spawned.receipt.nativeTaskName, spawned.agentId);
   const runtimeReceipt = { visibility: spawned.visibility, hostSpawnReceipt: spawned.receipt };
   const observation = await host.adapter.verifyVisibleLease({ dispatch: { dispatchId: 'dispatch-1', packetDigest: 'a'.repeat(64) }, prompt: { promptDigest: 'b'.repeat(64) }, agentId: spawned.agentId, runtimeReceipt });
   assert.equal(observation.verified, true);
@@ -74,13 +74,46 @@ test('Codex collaboration adapter binds the real native envelope, canonical task
   assert.equal(transported.runtimeEvidence.verificationReceipts.length, 1);
   assert.equal((await host.journal.read(spawned.receipt.effectId)).state, 'settled');
   assert.deepEqual(fixture.requests.map(request => request.operation), ['inspect', 'spawn', 'inspect', 'inspect', 'wait', 'inspect', 'inspect']);
+  assert.deepEqual(Object.keys(fixture.requests.find(request => request.operation === 'spawn')).slice(0, 4), ['protocolVersion', 'kind', 'tool', 'arguments']);
 });
 
-test('legacy task_name spawn envelope fails closed and the spawned Agent is interrupted before return', async t => {
-  const fixture = await setup(t, { spawnResult: { task_name: '/root/legacy-task' } });
+test('native failed, interrupted, blocked, and output-less completed states become committable terminal results', async t => {
+  for (const [nativeStatus, expected] of [
+    [{ failed: 'provider failed the child task' }, { status: 'failed', failureClass: 'runtime-provider', code: 'CODEX_COLLABORATION_AGENT_FAILED' }],
+    ['interrupted', { status: 'failed', failureClass: 'runtime-interrupted', code: 'CODEX_COLLABORATION_AGENT_INTERRUPTED' }],
+    ['blocked', { status: 'blocked', failureClass: 'runtime-blocked', code: 'CODEX_COLLABORATION_AGENT_BLOCKED' }],
+    ['completed', { status: 'failed', failureClass: 'runtime-contract', code: 'CODEX_COLLABORATION_RESULT_UNAVAILABLE' }],
+  ]) {
+    const fixture = await setup(t);
+    const host = fixture.create(`terminal-${expected.code}`);
+    const spawned = await host.adapter.spawn({ ...spawnInput, dispatchId: `dispatch-${expected.code}` });
+    const runtimeReceipt = { visibility: spawned.visibility, hostSpawnReceipt: spawned.receipt };
+    await host.adapter.confirm({ ...spawnInput, dispatchId: `dispatch-${expected.code}`, agentId: spawned.agentId, runtimeReceipt });
+    fixture.tasks.set(spawned.agentId, nativeStatus);
+    const waited = await host.adapter.wait({ agentId: spawned.agentId, dispatchId: `dispatch-${expected.code}`, runtimeReceipt });
+    assert.equal(waited.status, expected.status);
+    const transported = await host.adapter.result({ agentId: spawned.agentId, dispatchId: `dispatch-${expected.code}`, runtimeReceipt });
+    assert.equal(transported.result.status, expected.status);
+    assert.equal(transported.result.failureClass, expected.failureClass);
+    assert.equal(transported.result.blocker.code, expected.code);
+    assert.equal((await host.journal.read(spawned.receipt.effectId)).state, 'settled');
+  }
+});
+
+test('legacy provider identity spawn envelope fails closed and the spawned Agent is interrupted before return', async t => {
+  const fixture = await setup(t, { spawnResult: { agent_id: 'provider-agent-1', nickname: 'Ada' } });
   const host = fixture.create();
   await assert.rejects(() => host.adapter.spawn(spawnInput), error => error.code === 'CODEX_COLLABORATION_SPAWN_RESULT_INVALID' && error.details?.containment?.disposition === 'interrupted');
   assert.equal(fixture.requests.filter(request => request.operation === 'interrupt').length, 1);
+  assert.equal((await host.journal.list())[0].state, 'contained');
+});
+
+test('spawn task identity mismatch fails closed and contains the returned Agent', async t => {
+  const fixture = await setup(t, { spawnResult: { task_name: '/root/unrelated-task' } });
+  const host = fixture.create();
+  await assert.rejects(() => host.adapter.spawn(spawnInput), error => error.code === 'CODEX_COLLABORATION_TASK_NAME_MISMATCH' && error.details?.containment?.disposition === 'interrupted');
+  assert.equal(fixture.requests.filter(request => request.operation === 'interrupt').length, 1);
+  assert.equal(fixture.tasks.get('/root/unrelated-task'), 'interrupted');
   assert.equal((await host.journal.list())[0].state, 'contained');
 });
 
@@ -95,7 +128,7 @@ test('preflight reconciliation contains a crash-window Agent before any later sp
   const restarted = fixture.create('restarted-session');
   const reconciled = await restarted.adapter.reconcile({ activeEffectIds: [] });
   assert.equal(reconciled.ready, true);
-  assert.equal(fixture.tasks.get(`/root/${taskName}`), 'idle');
+  assert.equal(fixture.tasks.get(`/root/${taskName}`), 'interrupted');
   assert.equal((await restarted.journal.unresolved()).length, 0);
   assert.equal(fixture.requests.filter(item => item.operation === 'interrupt').length, 1);
 });

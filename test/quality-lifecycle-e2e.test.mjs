@@ -36,13 +36,14 @@ const finding = {
   conflictKeys: ['fixture-readme'],
 };
 
-const createHost = ({ workspace, failFirstWait = false, failFirstInspect = false, failFirstConfirm = false, repeatFindingOnce = false }) => {
+const createHost = ({ workspace, failFirstWait = false, failFirstInspect = false, failFirstConfirm = false, failFirstResult = false, repeatFindingOnce = false }) => {
   const agents = new Map();
-  const stats = { spawnCount: 0, containCount: 0 };
+  const stats = { spawnCount: 0, containCount: 0, terminalCount: 0, maxActive: 0 };
   let sequence = 0;
   let shouldFailWait = failFirstWait;
   let shouldFailInspect = failFirstInspect;
   let shouldFailConfirm = failFirstConfirm;
+  let shouldFailResult = failFirstResult;
   let shouldRepeatFinding = repeatFindingOnce;
   const adapter = createVisibleHostAdapter({
     provider: 'quality-e2e-host',
@@ -81,6 +82,7 @@ const createHost = ({ workspace, failFirstWait = false, failFirstInspect = false
       const agentId = `visible-e2e-${++sequence}`;
       const visibility = { mode: 'user-visible', surface: 'codex-task', inspectRef: `task:${agentId}` };
       agents.set(agentId, { ...structuredClone(input), visibility, repaired: false });
+      stats.maxActive = Math.max(stats.maxActive, agents.size);
       return { agentId, visibility, receipt: { operation: 'spawn', agentId } };
     },
     confirmVisibleLease: async input => {
@@ -109,9 +111,26 @@ const createHost = ({ workspace, failFirstWait = false, failFirstInspect = false
     readVisibleResult: async input => {
       const task = agents.get(input.agentId);
       assert(task);
+      const finish = output => {
+        agents.delete(input.agentId);
+        stats.terminalCount += 1;
+        return output;
+      };
       const stage = task.packet.feature.metadata.stage;
       if (stage === 'quality') {
-        return { result: result({ summary: 'Initial full review found one defect.', findings: [finding] }), receipt: { operation: 'result', stage } };
+        if (shouldFailResult) {
+          shouldFailResult = false;
+          return finish({
+            result: {
+              ...result({ summary: 'Visible Agent failed before completing the review.', checkpoint: 'runtime-failure' }),
+              status: 'failed',
+              failureClass: 'runtime-provider',
+              blocker: { kind: 'runtime-provider', summary: 'Visible Agent failed before completing the review.', resumeWhen: null, code: 'SIMULATED_VISIBLE_AGENT_FAILED' },
+            },
+            receipt: { operation: 'result', stage },
+          });
+        }
+        return finish({ result: result({ summary: 'Initial full review found one defect.', findings: [finding] }), receipt: { operation: 'result', stage } });
       }
       if (stage === 'quality-repair') {
         if (!task.repaired) {
@@ -119,24 +138,24 @@ const createHost = ({ workspace, failFirstWait = false, failFirstInspect = false
           await writeFile(resolve(workspace, 'README.md'), `${current.trimEnd()}\nverified repair\n`, 'utf8');
           task.repaired = true;
         }
-        return {
+        return finish({
           result: result({ summary: 'Finding repaired and verified.', changedFiles: ['README.md'], checkpoint: 'repair-verification' }),
           runtimeEvidence: { verificationReceipts: [{ id: 'focused-check', status: 'passed', evidence: ['README.md'] }] },
           receipt: { operation: 'result', stage },
-        };
+        });
       }
       assert.equal(stage, 'quality-recheck');
       if (shouldRepeatFinding) {
         shouldRepeatFinding = false;
-        return { result: result({ summary: 'First re-review found the same defect again.', findings: [finding], checkpoint: 'recheck' }), receipt: { operation: 'result', stage } };
+        return finish({ result: result({ summary: 'First re-review found the same defect again.', findings: [finding], checkpoint: 'recheck' }), receipt: { operation: 'result', stage } });
       }
-      return { result: result({ summary: 'Post-repair full re-review is clean.', checkpoint: 'recheck' }), receipt: { operation: 'result', stage } };
+      return finish({ result: result({ summary: 'Post-repair full re-review is clean.', checkpoint: 'recheck' }), receipt: { operation: 'result', stage } });
     },
   });
   return { adapter, agents, stats };
 };
 
-const setup = async ({ failFirstWait = false, failFirstInspect = false, failFirstConfirm = false, repeatFindingOnce = false } = {}) => {
+const setup = async ({ failFirstWait = false, failFirstInspect = false, failFirstConfirm = false, failFirstResult = false, repeatFindingOnce = false } = {}) => {
   const controlRoot = resolve(process.cwd());
   const parent = resolve(harnessTemporaryRoot(), 'quality-lifecycle-e2e');
   await mkdir(parent, { recursive: true });
@@ -147,7 +166,7 @@ const setup = async ({ failFirstWait = false, failFirstInspect = false, failFirs
   await writeFile(resolve(workspace, 'README.md'), '# Quality fixture\n', 'utf8');
   const engine = await loadExtensionPack('./src/consumers/cardworld-engine.mjs', { cwd: controlRoot, controlRoot });
   const runtime = await loadExtensionPack('./src/extensions/codex-runtime.mjs', { cwd: controlRoot, controlRoot });
-  const host = createHost({ workspace, failFirstWait, failFirstInspect, failFirstConfirm, repeatFindingOnce });
+  const host = createHost({ workspace, failFirstWait, failFirstInspect, failFirstConfirm, failFirstResult, repeatFindingOnce });
   const create = () => createHarness({ controlRoot, dataRoot, releaseIdentity, strictProjectIdentity: false, extensions: [engine, runtime], agentAdapter: host.adapter });
   const harness = await create();
   const descriptor = createCardWorldProjectDescriptor({ workspaceRoot: workspace, harness: releaseIdentity });
@@ -215,6 +234,22 @@ test('spawn-before-bind failure contains the prior Agent and never opens the nex
   const state = await fixture.harness.authorityStore.read(fixture.plan.project.id, fixture.plan.run.runId);
   assert.equal(state.leases.filter(lease => lease.status === 'active').length, 0);
   assert.equal(state.dispatches.filter(dispatch => dispatch.status === 'requested').length, 1);
+});
+
+test('terminal Agent failure is committed and blocks the lifecycle before any next Agent starts', async t => {
+  const fixture = await setup({ failFirstResult: true });
+  t.after(() => rm(fixture.root, { recursive: true, force: true }));
+  const preflight = await fixture.harness.createExecutionReadinessReport(fixture.plan);
+  const stopped = await fixture.harness.executeVisibleLifecyclePlan(fixture.plan, { commandId: 'quality-terminal-stop', preflightReport: preflight, maxConcurrency: 10 });
+  assert.equal(stopped.status, 'attention-required');
+  assert.equal(stopped.reason, 'all-remaining-blocked');
+  assert.equal(fixture.host.stats.spawnCount, 1);
+  assert.equal(fixture.host.stats.terminalCount, 1);
+  assert.equal(fixture.host.stats.maxActive, 1);
+  assert.equal(stopped.rounds.filter(round => Object.hasOwn(round, 'physicalLimit')).every(round => round.physicalLimit === 1), true);
+  assert.equal(stopped.state.submissions.length, 1);
+  assert.equal(stopped.state.submissions[0].result.status, 'failed');
+  assert.equal(stopped.state.leases.filter(lease => lease.status === 'active').length, 0);
 });
 
 test('post-bind confirmation failure preserves the active Lease for reattachment without interrupting its Agent', async t => {

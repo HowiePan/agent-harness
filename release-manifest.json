@@ -217,8 +217,8 @@
     },
     {
       "path": "integrations/codex/agent-harness-codex/hooks/pseudo-command-router.mjs",
-      "sha256": "78c4aae016f88ced7a07184eebb684924fca3d034f4be413177c18e378960002",
-      "size": 13969
+      "sha256": "6094f59b00cdcbc846757b26cfd0399ec4a90d93b8f266a2c2a970837eed157c",
+      "size": 14288
     },
     {
       "path": "integrations/codex/agent-harness-codex/lib/active-release-binding.mjs",
@@ -227,13 +227,13 @@
     },
     {
       "path": "integrations/codex/agent-harness-codex/lib/codex-collaboration-host-adapter.mjs",
-      "sha256": "4fa35ae7b1ada10337b819afb2d5a3768da4ddc9f40241b9de3c12273c1f32e8",
-      "size": 22302
+      "sha256": "ba3c02a43b4a86793b3eccaaf4f9cf815e0c7fffb9adfc05cc9f31c526a3d2cd",
+      "size": 24814
     },
     {
       "path": "integrations/codex/agent-harness-codex/lib/codex-host-effect-journal.mjs",
-      "sha256": "68287e151b362a1c5f4e4357d918abbabe82436057529919d8f12237731f4af0",
-      "size": 6687
+      "sha256": "31fcc95f86234ed9f79ceb63f51b1767a9d35d4f965c62bec0ce71fb5786af0f",
+      "size": 6709
     },
     {
       "path": "integrations/codex/agent-harness-codex/lib/stdio-host-exchange.mjs",
@@ -252,8 +252,8 @@
     },
     {
       "path": "integrations/codex/agent-harness-codex/references/visible-host-adapter-contract.md",
-      "sha256": "48176f1f9b43433717b25bc0f9bb6f791b99068bda39f4b01039967cc770d976",
-      "size": 5065
+      "sha256": "62ae771e4221b825ed8225f9e9af9ce210828abe95992daa738f95faa40b1cdf",
+      "size": 5848
     },
     {
       "path": "integrations/codex/agent-harness-codex/scripts/configure-bindings.mjs",
@@ -272,8 +272,8 @@
     },
     {
       "path": "integrations/codex/agent-harness-codex/skills/agent-harness-command/SKILL.md",
-      "sha256": "cc726d95470712771a9f8300bed673febf3d49e53bd75ece8c4121b68e2f3a4e",
-      "size": 10366
+      "sha256": "c2776b7c89b56e2c6f15c6bdb314e894125fc4a67735af4c8bb2f7ed7b1b2378",
+      "size": 11031
     },
     {
       "path": "integrations/codex/agent-harness-codex/skills/agent-harness-extension-author/references/extension-contract.md",
@@ -297,8 +297,8 @@
     },
     {
       "path": "integrations/codex/agent-harness-codex/skills/agent-harness-operator/SKILL.md",
-      "sha256": "22d2bc85fdcd41a34a84b4ea8702ac2123612314e4aafc7e120195b249195354",
-      "size": 7046
+      "sha256": "0880b60722f5e4ea74c42edf7774d1660d6cb73cf074782d7e9b2d04c33860e8",
+      "size": 7317
     },
     {
       "path": "LICENSE",
@@ -362,8 +362,8 @@
     },
     {
       "path": "schemas/codex-host-effect.schema.json",
-      "sha256": "f0e13f82c44a9b4fd2f1a1f995745e3d354c191de9e3e75b6a1788a9f71d9804",
-      "size": 3071
+      "sha256": "f43671f08516976c789251498b7972a25a479baae319cb062d404116e7051bb2",
+      "size": 3125
     },
     {
       "path": "schemas/codex-runtime-result.schema.json",
@@ -991,7 +991,7 @@
       "size": 3735
     }
   ],
-  "packageDigest": "59d990ddca1643ecd14606f91bf024dabcb77a0bbe396e48c3bb9b570e2e4d3f",
+  "packageDigest": "fd4c048b5859352b72044e51c82517b5f9cb595bc8bad59372a6339d23e7ec68",
   "metadataFiles": [
     "release-manifest.json",
     "sbom.spdx.json"

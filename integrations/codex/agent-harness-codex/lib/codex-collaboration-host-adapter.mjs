@@ -5,10 +5,15 @@ import { CodexHostEffectJournal } from './codex-host-effect-journal.mjs';
 
 const contractBody = Object.freeze({
   id: 'codex-collaboration-native',
-  version: '1.1.0',
+  version: '1.3.0',
   operations: Object.freeze({
-    spawn: Object.freeze({ tool: 'collaboration.spawn_agent', result: Object.freeze(['agent_id', 'nickname']) }),
-    list: Object.freeze({ tool: 'collaboration.list_agents', result: Object.freeze(['agents']), agent: Object.freeze(['agent_name', 'agent_status']) }),
+    spawn: Object.freeze({ tool: 'collaboration.spawn_agent', result: Object.freeze(['task_name']) }),
+    list: Object.freeze({
+      tool: 'collaboration.list_agents',
+      result: Object.freeze(['agents']),
+      agent: Object.freeze(['agent_name', 'agent_status']),
+      statuses: Object.freeze(['pending', 'running', 'waiting', 'idle', 'blocked', 'interrupted', 'failed', 'completed', '{failed:string}', '{completed:string}']),
+    }),
     wait: Object.freeze({ tool: 'collaboration.wait_agent', result: Object.freeze(['message', 'timed_out']) }),
     interrupt: Object.freeze({ tool: 'collaboration.interrupt_agent', arguments: Object.freeze(['target']) }),
   }),
@@ -22,15 +27,15 @@ export const CODEX_COLLABORATION_NATIVE_CONTRACT = Object.freeze({
 
 const completedStatus = value => value && typeof value === 'object' && !Array.isArray(value) && typeof value.completed === 'string';
 const failedStatus = value => value && typeof value === 'object' && !Array.isArray(value) && typeof value.failed === 'string';
-const terminalNativeStatus = value => completedStatus(value) || failedStatus(value) || ['idle', 'failed', 'completed'].includes(value);
+const terminalNativeStatus = value => completedStatus(value) || failedStatus(value) || ['idle', 'failed', 'completed', 'interrupted'].includes(value);
 const normalizedStatus = value => {
   if (completedStatus(value)) return 'completed';
   if (failedStatus(value)) return 'failed';
   if (value === 'pending') return 'queued';
   if (value === 'running' || value === 'waiting') return 'running';
   if (value === 'idle' || value === 'blocked') return 'blocked';
-  if (value === 'failed') return 'failed';
-  if (value === 'completed') return 'completed';
+  if (value === 'failed' || value === 'interrupted') return 'failed';
+  if (value === 'completed') return 'failed';
   throw Object.assign(new Error('Codex collaboration returned an unsupported Agent status.'), { code: 'CODEX_COLLABORATION_STATUS_INVALID' });
 };
 
@@ -65,7 +70,8 @@ const taskFromSnapshot = (result, agentId) => {
 };
 
 const taskForEffect = (tasks, effect) => {
-  const identities = new Set([effect.canonicalAgentName, effect.taskName].filter(Boolean));
+  const returnedTaskName = typeof effect.nativeResult?.task_name === 'string' ? effect.nativeResult.task_name : null;
+  const identities = new Set([effect.canonicalAgentName, effect.nativeTaskName, returnedTaskName, effect.taskName].filter(Boolean));
   const matches = tasks.filter(task => identities.has(task.agent_name) || task.agent_name.endsWith(`/${effect.taskName}`));
   if (matches.length > 1) throw Object.assign(new Error(`Codex collaboration task is ambiguous for Host Effect: ${effect.effectId}`), { code: 'CODEX_COLLABORATION_AGENT_AMBIGUOUS' });
   return matches[0] ?? null;
@@ -78,8 +84,8 @@ const spawnReceiptDigest = receipt => {
 };
 
 const assertSpawnReceipt = (receipt, expected) => {
-  exactKeys(receipt, ['protocolVersion', 'kind', 'provider', 'adapterVersion', 'contract', 'sessionId', 'effectId', 'requestId', 'requestDigest', 'providerAgentId', 'nickname', 'requestedTaskName', 'agentId', 'projectId', 'runId', 'dispatchId', 'packetDigest', 'promptDigest', 'visibility', 'createdAt', 'receiptDigest'], 'CODEX_COLLABORATION_SPAWN_RECEIPT_INVALID', 'Codex collaboration spawn Receipt is invalid.');
-  if (receipt.protocolVersion !== '1.0' || receipt.kind !== 'codex-collaboration-spawn-receipt' || receipt.provider !== 'codex-host' || receipt.adapterVersion !== '1.1.0') throw Object.assign(new Error('Codex collaboration spawn Receipt identity is invalid.'), { code: 'CODEX_COLLABORATION_SPAWN_RECEIPT_INVALID' });
+  exactKeys(receipt, ['protocolVersion', 'kind', 'provider', 'adapterVersion', 'contract', 'sessionId', 'effectId', 'requestId', 'requestDigest', 'nativeTaskName', 'requestedTaskName', 'agentId', 'projectId', 'runId', 'dispatchId', 'packetDigest', 'promptDigest', 'visibility', 'createdAt', 'receiptDigest'], 'CODEX_COLLABORATION_SPAWN_RECEIPT_INVALID', 'Codex collaboration spawn Receipt is invalid.');
+  if (receipt.protocolVersion !== '1.0' || receipt.kind !== 'codex-collaboration-spawn-receipt' || receipt.provider !== 'codex-host' || receipt.adapterVersion !== '1.3.0') throw Object.assign(new Error('Codex collaboration spawn Receipt identity is invalid.'), { code: 'CODEX_COLLABORATION_SPAWN_RECEIPT_INVALID' });
   if (digestJson(receipt.contract) !== digestJson(CODEX_COLLABORATION_NATIVE_CONTRACT)) throw Object.assign(new Error('Codex collaboration spawn Receipt contract is invalid.'), { code: 'CODEX_COLLABORATION_SPAWN_RECEIPT_CONTRACT_MISMATCH' });
   if (receipt.receiptDigest !== spawnReceiptDigest(receipt)) throw Object.assign(new Error('Codex collaboration spawn Receipt digest is invalid.'), { code: 'CODEX_COLLABORATION_SPAWN_RECEIPT_DIGEST_MISMATCH' });
   for (const key of ['agentId', 'dispatchId', 'packetDigest', 'promptDigest']) if (receipt[key] !== expected[key]) throw Object.assign(new Error(`Codex collaboration spawn Receipt ${key} does not match the active Dispatch.`), { code: 'CODEX_COLLABORATION_SPAWN_RECEIPT_BINDING_MISMATCH' });
@@ -87,10 +93,41 @@ const assertSpawnReceipt = (receipt, expected) => {
   return receipt;
 };
 
-const parseCompletedResult = (task, agentId) => {
-  if (!completedStatus(task.agent_status)) throw Object.assign(new Error(`Codex collaboration task has no completed structured result: ${agentId}`), { code: 'CODEX_COLLABORATION_RESULT_UNAVAILABLE' });
-  try { return JSON.parse(task.agent_status.completed); }
-  catch (error) { throw Object.assign(new Error('Codex collaboration Agent final output must be one strict JSON object with no prose or Markdown.', { cause: error }), { code: 'CODEX_COLLABORATION_RESULT_JSON_INVALID' }); }
+const hostFailureResult = ({ agentId, status, summary, failureClass, code }) => ({
+  status,
+  summary,
+  checkpoints: [{ id: 'codex-collaboration-terminal-status', status, summary, evidence: [`codex-collaboration:${agentId}:${code}`] }],
+  made: [],
+  notMade: [],
+  changedFiles: [],
+  observations: [],
+  findings: [],
+  followUpFeatures: [],
+  failureClass,
+  blocker: { kind: failureClass, summary, resumeWhen: null, code },
+});
+
+const parseTerminalResult = (task, agentId) => {
+  if (completedStatus(task.agent_status)) {
+    try { return JSON.parse(task.agent_status.completed); }
+    catch (error) { throw Object.assign(new Error('Codex collaboration Agent final output must be one strict JSON object with no prose or Markdown.', { cause: error }), { code: 'CODEX_COLLABORATION_RESULT_JSON_INVALID' }); }
+  }
+  if (failedStatus(task.agent_status)) {
+    return hostFailureResult({ agentId, status: 'failed', summary: task.agent_status.failed || `Codex collaboration Agent failed: ${agentId}`, failureClass: 'runtime-provider', code: 'CODEX_COLLABORATION_AGENT_FAILED' });
+  }
+  if (task.agent_status === 'interrupted') {
+    return hostFailureResult({ agentId, status: 'failed', summary: `Codex collaboration Agent was interrupted: ${agentId}`, failureClass: 'runtime-interrupted', code: 'CODEX_COLLABORATION_AGENT_INTERRUPTED' });
+  }
+  if (task.agent_status === 'failed') {
+    return hostFailureResult({ agentId, status: 'failed', summary: `Codex collaboration Agent failed without a provider message: ${agentId}`, failureClass: 'runtime-provider', code: 'CODEX_COLLABORATION_AGENT_FAILED' });
+  }
+  if (task.agent_status === 'idle' || task.agent_status === 'blocked') {
+    return hostFailureResult({ agentId, status: 'blocked', summary: `Codex collaboration Agent is ${task.agent_status}: ${agentId}`, failureClass: 'runtime-blocked', code: 'CODEX_COLLABORATION_AGENT_BLOCKED' });
+  }
+  if (task.agent_status === 'completed') {
+    return hostFailureResult({ agentId, status: 'failed', summary: `Codex collaboration Agent completed without a structured result: ${agentId}`, failureClass: 'runtime-contract', code: 'CODEX_COLLABORATION_RESULT_UNAVAILABLE' });
+  }
+  throw Object.assign(new Error(`Codex collaboration task has no terminal result: ${agentId}`), { code: 'CODEX_COLLABORATION_RESULT_UNAVAILABLE' });
 };
 
 export const createCodexCollaborationHostAdapter = ({ exchange, controlRoot, dataRoot, sessionId = `codex_collaboration_${randomUUID()}`, now = () => new Date().toISOString(), waitTimeoutMs = 60000 } = {}) => {
@@ -103,7 +140,10 @@ export const createCodexCollaborationHostAdapter = ({ exchange, controlRoot, dat
 
   const createRequest = ({ operation, tool, arguments: args, binding = null }) => {
     const requestId = `host_request_${randomUUID()}`;
-    const body = { protocolVersion: '1.0', kind: 'codex-visible-host-request', sessionId, requestId, operation, tool, arguments: structuredClone(args), binding: binding ? structuredClone(binding) : null, createdAt: now() };
+    // Put the native tool and arguments first in the emitted JSON. The current
+    // long-lived Windows host channel uses a PTY, so this keeps the exact call payload
+    // ahead of the large prompt and away from accidental terminal-wrap transcription.
+    const body = { protocolVersion: '1.0', kind: 'codex-visible-host-request', tool, arguments: structuredClone(args), sessionId, requestId, operation, binding: binding ? structuredClone(binding) : null, createdAt: now() };
     return Object.freeze({ ...body, requestDigest: digestJson(body) });
   };
 
@@ -165,7 +205,7 @@ export const createCodexCollaborationHostAdapter = ({ exchange, controlRoot, dat
     return {
       ready: issues.length === 0,
       provider: 'codex-host',
-      adapterVersion: '1.1.0',
+      adapterVersion: '1.3.0',
       contract: structuredClone(CODEX_COLLABORATION_NATIVE_CONTRACT),
       assertionId: listed.request.requestDigest,
       observedAt: now(),
@@ -175,7 +215,7 @@ export const createCodexCollaborationHostAdapter = ({ exchange, controlRoot, dat
   };
 
   const adapter = createCodexVisibleHostAdapter({
-    adapterVersion: '1.1.0',
+    adapterVersion: '1.3.0',
     reconcileVisibleHostEffects: reconcile,
     spawnVisibleAgent: async input => {
       const binding = {
@@ -194,16 +234,16 @@ export const createCodexCollaborationHostAdapter = ({ exchange, controlRoot, dat
       try {
         const result = await exchange(request);
         effect = await transition(effect, 'spawn-responded', { nativeResult: structuredClone(result) }, 'spawn-responded');
-        exactKeys(result, ['agent_id', 'nickname'], 'CODEX_COLLABORATION_SPAWN_RESULT_INVALID', 'Codex collaboration spawn_agent result has an invalid envelope.');
-        const providerAgentId = nonEmpty(result.agent_id, 'CODEX_COLLABORATION_AGENT_ID_REQUIRED', 'Codex collaboration spawn_agent did not return a provider Agent identity.');
-        const nickname = nonEmpty(result.nickname, 'CODEX_COLLABORATION_NICKNAME_REQUIRED', 'Codex collaboration spawn_agent did not return a nickname.');
+        exactKeys(result, ['task_name'], 'CODEX_COLLABORATION_SPAWN_RESULT_INVALID', 'Codex collaboration spawn_agent result has an invalid envelope.');
+        const nativeTaskName = nonEmpty(result.task_name, 'CODEX_COLLABORATION_TASK_NAME_REQUIRED', 'Codex collaboration spawn_agent did not return a canonical task name.');
+        if (nativeTaskName !== taskName && !nativeTaskName.endsWith(`/${taskName}`)) throw Object.assign(new Error('Codex collaboration spawn_agent returned a task name that does not match the requested task.'), { code: 'CODEX_COLLABORATION_TASK_NAME_MISMATCH', details: { requestedTaskName: taskName, nativeTaskName } });
         const listed = await listAll({ effectId: effect.effectId, ...binding });
-        const matches = listed.tasks.filter(task => task.agent_name === taskName || task.agent_name.endsWith(`/${taskName}`));
-        if (matches.length !== 1) throw Object.assign(new Error(`Codex collaboration did not expose one canonical task for ${taskName}.`), { code: matches.length ? 'CODEX_COLLABORATION_AGENT_AMBIGUOUS' : 'CODEX_COLLABORATION_AGENT_NOT_FOUND' });
+        const matches = listed.tasks.filter(task => task.agent_name === nativeTaskName);
+        if (matches.length !== 1) throw Object.assign(new Error(`Codex collaboration did not expose the returned canonical task ${nativeTaskName}.`), { code: matches.length ? 'CODEX_COLLABORATION_AGENT_AMBIGUOUS' : 'CODEX_COLLABORATION_AGENT_NOT_FOUND' });
         const agentId = matches[0].agent_name;
-        effect = await transition(effect, 'agent-observed', { providerAgentId, nickname, canonicalAgentName: agentId }, 'agent-observed');
+        effect = await transition(effect, 'agent-observed', { nativeTaskName, canonicalAgentName: agentId }, 'agent-observed');
         const visibility = { mode: 'user-visible', surface: 'codex-collaboration-tree', inspectRef: agentId };
-        const receiptBody = { protocolVersion: '1.0', kind: 'codex-collaboration-spawn-receipt', provider: 'codex-host', adapterVersion: '1.1.0', contract: structuredClone(CODEX_COLLABORATION_NATIVE_CONTRACT), sessionId, effectId: effect.effectId, requestId: request.requestId, requestDigest: request.requestDigest, providerAgentId, nickname, requestedTaskName: taskName, agentId, ...binding, visibility, createdAt: now() };
+        const receiptBody = { protocolVersion: '1.0', kind: 'codex-collaboration-spawn-receipt', provider: 'codex-host', adapterVersion: '1.3.0', contract: structuredClone(CODEX_COLLABORATION_NATIVE_CONTRACT), sessionId, effectId: effect.effectId, requestId: request.requestId, requestDigest: request.requestDigest, nativeTaskName, requestedTaskName: taskName, agentId, ...binding, visibility, createdAt: now() };
         const receipt = { ...receiptBody, receiptDigest: spawnReceiptDigest(receiptBody) };
         receipts.set(effect.effectId, receipt);
         return { agentId, visibility, receipt };
@@ -249,7 +289,7 @@ export const createCodexCollaborationHostAdapter = ({ exchange, controlRoot, dat
     readVisibleResult: async input => {
       const receipt = assertSpawnReceipt(input?.runtimeReceipt?.hostSpawnReceipt, { agentId: input.agentId, dispatchId: input.dispatchId, packetDigest: input.runtimeReceipt?.hostSpawnReceipt?.packetDigest, promptDigest: input.runtimeReceipt?.hostSpawnReceipt?.promptDigest, surface: input.runtimeReceipt?.visibility?.surface, inspectRef: input.runtimeReceipt?.visibility?.inspectRef });
       const observed = await inspect({ agentId: input.agentId, expected: { effectId: receipt.effectId, dispatchId: input.dispatchId } });
-      const result = parseCompletedResult(observed.task, input.agentId);
+      const result = parseTerminalResult(observed.task, input.agentId);
       const resultDigest = digestJson(result);
       let effect = await journal.read(receipt.effectId, { required: true });
       if (effect.state === 'lease-bound') effect = await transition(effect, 'settled', { outcome: { disposition: 'result-observed', resultDigest, observationRequestDigest: observed.request.requestDigest } }, 'settled');

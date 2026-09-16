@@ -83,7 +83,7 @@ export class CodexHostEffectJournal {
         protocolVersion: '1.0', kind: 'codex-collaboration-host-effect', effectId, revision: 1, state: 'spawn-requested',
         contract: structuredClone(this.contract), sessionId: request.sessionId, requestId: request.requestId, requestDigest: request.requestDigest,
         operation: request.operation, tool: request.tool, taskName, binding: structuredClone(binding), nativeResult: null,
-        providerAgentId: null, nickname: null, canonicalAgentName: null, outcome: null,
+        nativeTaskName: null, providerAgentId: null, nickname: null, canonicalAgentName: null, outcome: null,
         commands: { [commandId]: receipt }, createdAt: committedAt, updatedAt: committedAt,
       };
       const effect = seal(body);

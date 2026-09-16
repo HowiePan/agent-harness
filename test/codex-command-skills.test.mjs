@@ -57,8 +57,9 @@ test('Codex plugin exposes one explicit-project pseudo-command router', async ()
   assert(!actual.some(name => name.startsWith('collection-') || name.startsWith('harness-')));
 
   const skillPath = resolve(skillsRoot, 'agent-harness-command', 'SKILL.md');
-  const [skill, metadata, hooks] = await Promise.all([
+  const [skill, operatorSkill, metadata, hooks] = await Promise.all([
     readFile(skillPath, 'utf8'),
+    readFile(resolve(skillsRoot, 'agent-harness-operator', 'SKILL.md'), 'utf8'),
     readFile(resolve(skillsRoot, 'agent-harness-command', 'agents', 'openai.yaml'), 'utf8'),
     readFile(resolve(pluginRoot, 'hooks', 'hooks.json'), 'utf8'),
   ]);
@@ -67,6 +68,9 @@ test('Codex plugin exposes one explicit-project pseudo-command router', async ()
   assert.match(skill, /h:where/);
   assert.match(skill, /h:report/);
   assert.match(skill, /commandManifest/);
+  assert.match(skill, /所有面向用户的控制对话必须使用中文/);
+  assert.match(skill, /不得为了中文输出而翻译、改写或补充 Harness 生成的子 Agent Prompt/);
+  assert.match(operatorSkill, /所有面向用户的控制对话必须使用中文/);
   assert.match(metadata, /allow_implicit_invocation: true/);
   assert.match(metadata, /h:report/);
   assert.match(hooks, /UserPromptSubmit/);
@@ -125,6 +129,10 @@ test('binding configuration makes project selection and Harness location determi
     assert.match(context, /"coordinationIntent":/);
     assert.match(context, /--intent/);
     assert.match(context, /不得搜索磁盘/);
+    assert.match(context, /所有面向用户的控制对话使用中文/);
+    assert.match(context, /不得翻译或改写子 Agent Prompt/);
+    assert.match(context, /tty:true/);
+    assert.match(context, /4096/);
     const routed = JSON.parse(context.slice(context.indexOf('解析结果：') + '解析结果：'.length));
     const sealed = decodeVisibleLifecycleIntent(routed.coordinationIntent);
     assert.deepEqual(sealed.command, { action: 'req', target: 'V3.8.4', arguments: ['expand-to-plan'] });
