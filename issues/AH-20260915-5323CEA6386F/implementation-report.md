@@ -62,3 +62,16 @@
 - 未删除、移动或归档任何旧 Harness。
 
 这些步骤需要用户对准确目标另行授权，并且真实产品 Host canary 只能在新 active Release 和新插件安装完成后执行。
+
+## 2026-09-16 宿主兼容性回归补充
+
+首次本地发布后，真实 CardWorld 新任务在 Coordinator 发出首个 `collaboration.list_agents` 请求时停止。任务留存元数据确认该任务运行在 `multi_agent_version: "v1"`，而 Harness Host Effect Journal 的观察、收容和重附着契约要求 V2 的 `list_agents` 与 `interrupt_agent`；这不是 `spawn_agent` 返回包修复回退，也没有创建 Run 或残留 Host Effect。
+
+本次补充修复把宿主前置条件明确冻结为 Codex Multi-Agent V2：
+
+- 已通过官方 `codex features enable multi_agent_v2` 命令启用本机 V2，`codex features list` 显示 `multi_agent=true`、`multi_agent_v2=true`。该设置只对新任务生效。
+- Command Skill 和 Hook 在启动 Coordinator 前检查 `collaboration.spawn_agent/list_agents/wait_agent/interrupt_agent` 四项实际工具；缺任一项以 `CODEX_MULTI_AGENT_V2_REQUIRED` 提前停止，不再先启动长驻进程。
+- 禁止将 `multi_agent_v1`、独立任务 API 或其他 Agent 接口当作兼容回退；V1 无法提供本 Issue 要求的列举观察与中断后终态证明。
+- 本地插件发布检查新增宿主能力 Gate；未启用 V2 时拒绝安装/重装，并给出官方启用命令。
+
+补充验证：`npm test` 191/191、`npm run check`、clean-room、pack dry-run、residue、Skill validator 和 plugin validator 均通过。补充源码仍需由用户提交后，才能按干净提交约束重建 active Release 并同版本重装插件；当前已安装插件在新任务中可先使用已启用的 V2 宿主能力进行真实 canary。

@@ -5,6 +5,7 @@ import { resolve } from 'node:path';
 import {
   createPluginMutationPlan,
   inspectMarketplaceConfiguration,
+  inspectCodexHostFeatures,
   inspectPluginInstallation,
   runLocalPluginRelease,
   validateLocalReleaseConfiguration,
@@ -21,6 +22,7 @@ const marketplace = {
   plugins: [{ name: 'agent-harness-codex', source: { source: 'local', path: './integrations/codex/agent-harness-codex' }, policy: { installation: 'AVAILABLE', authentication: 'ON_INSTALL' } }],
 };
 const sourcePackageDigest = JSON.parse(readFileSync(resolve(root, 'release-manifest.json'), 'utf8')).packageDigest;
+const codexFeatures = 'multi_agent                              stable             true\nmulti_agent_v2                           stable             true\n';
 
 const config = () => validateLocalReleaseConfiguration({ root, packageJson, packageLock, pluginManifest, marketplace });
 const installedPlugin = current => ({
@@ -91,6 +93,18 @@ test('installed plugin inspection binds source and verifies final version and en
   );
 });
 
+test('Codex host feature inspection requires native Multi-Agent V2', () => {
+  assert.deepEqual(inspectCodexHostFeatures(codexFeatures), { contract: 'multi-agent-v2', multiAgent: true, multiAgentV2: true });
+  assert.throws(
+    () => inspectCodexHostFeatures('multi_agent stable true\nmulti_agent_v2 stable false\n'),
+    error => error?.code === 'LOCAL_RELEASE_MULTI_AGENT_V2_REQUIRED',
+  );
+  assert.throws(
+    () => inspectCodexHostFeatures('multi_agent stable false\nmulti_agent_v2 stable true\n'),
+    error => error?.code === 'LOCAL_RELEASE_MULTI_AGENT_DISABLED',
+  );
+});
+
 test('mutation plan always adds and verifies, and clears cache before same-version reinstall', () => {
   const current = config();
   assert.deepEqual(
@@ -149,6 +163,7 @@ test('check mode verifies a clean commit and installed local plugin without runn
     if (executable === 'git' && args.join(' ') === 'rev-parse --show-toplevel') return { stdout: `${root}\n` };
     if (executable === 'git' && args.join(' ') === 'rev-parse HEAD') return { stdout: `${commit}\n` };
     if (executable === 'git' && args[0] === 'status') return { stdout: '' };
+    if (executable === 'codex' && args.join(' ') === 'features list') return { stdout: codexFeatures };
     if (executable === 'codex' && args[1] === 'marketplace') return { json: { marketplaces: [{ name: current.marketplaceName, root }] } };
     if (executable === 'codex' && args[1] === 'list') return { json: { installed: [installedPlugin(current)], available: [] } };
     throw new Error(`Unexpected command: ${executable} ${args.join(' ')}`);
@@ -168,6 +183,7 @@ test('check mode rejects a stale installed-cache binding even when plugin metada
     if (executable === 'git' && args.join(' ') === 'rev-parse --show-toplevel') return { stdout: `${root}\n` };
     if (executable === 'git' && args.join(' ') === 'rev-parse HEAD') return { stdout: `${commit}\n` };
     if (executable === 'git' && args[0] === 'status') return { stdout: '' };
+    if (executable === 'codex' && args.join(' ') === 'features list') return { stdout: codexFeatures };
     if (executable === 'codex' && args[1] === 'marketplace') return { json: { marketplaces: [{ name: current.marketplaceName, root }] } };
     if (executable === 'codex' && args[1] === 'list') return { json: { installed: [installedPlugin(current)], available: [] } };
     throw new Error(`Unexpected command: ${executable} ${args.join(' ')}`);

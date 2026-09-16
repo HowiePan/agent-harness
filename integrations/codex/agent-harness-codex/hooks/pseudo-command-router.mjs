@@ -177,7 +177,7 @@ export const hookResponse = async (input, options = {}) => {
     coordinatorEntrypoint: bindings.harness.coordinatorEntrypoint,
   });
   const intent = { ...parsed, project, harness: bindings.harness, workspaceRoot: project.workspaceRoot, workspaceIdentity: project.workspaceIdentity, executionWorkspaceRoot: workspace.executionWorkspaceRoot, workspaceMatch: workspace.kind, cwd, commandId: coordinationIntent.commandId, coordinationIntent: encodeVisibleLifecycleIntent(coordinationIntent), coordinationIntentDigest: coordinationIntent.intentDigest };
-  return contextResponse(`检测到 Agent Harness 伪命令。把它作为确定性的 Command Intent，而不是自由提示词；动作和预设仍由已绑定 Extension 的 commandManifest 解析。使用 $agent-harness-command；只使用已绑定的 coordinatorEntrypoint，并把 coordinationIntent 作为 --intent 的单一参数启动同进程 plan/preflight/visible lifecycle Coordinator。逐项原样执行它请求的 collaboration 工具，原样回传工具结果；不得自行构造 Host 响应。不得根据目标格式猜项目，不得搜索磁盘，不得把参数当作 shell。解析结果：${JSON.stringify(intent)}`);
+  return contextResponse(`检测到 Agent Harness 伪命令。把它作为确定性的 Command Intent，而不是自由提示词；动作和预设仍由已绑定 Extension 的 commandManifest 解析。使用 $agent-harness-command；启动任何进程前先确认当前任务同时提供 collaboration.spawn_agent/list_agents/wait_agent/interrupt_agent。缺任一项即以 CODEX_MULTI_AGENT_V2_REQUIRED 停止，并提示执行 codex features enable multi_agent_v2 后新建任务；multi_agent_v1 或其他任务接口不得替代。能力满足后，只使用已绑定的 coordinatorEntrypoint，并把 coordinationIntent 作为 --intent 的单一参数启动同进程 plan/preflight/visible lifecycle Coordinator。逐项原样执行它请求的 collaboration 工具，原样回传工具结果；不得自行构造 Host 响应。不得根据目标格式猜项目，不得搜索磁盘，不得把参数当作 shell。解析结果：${JSON.stringify(intent)}`);
 };
 
 const main = async () => {

@@ -16,6 +16,7 @@ export const LOCAL_RELEASE_WORKFLOW_VERSION = '1.0';
 export const EXPECTED_PLUGIN_NAME = 'agent-harness-codex';
 export const EXPECTED_MARKETPLACE_NAME = 'agent-harness-local';
 export const EXPECTED_PLUGIN_RELATIVE_PATH = 'integrations/codex/agent-harness-codex';
+export const REQUIRED_CODEX_MULTI_AGENT_CONTRACT = 'multi-agent-v2';
 
 const stripWindowsDevicePrefix = value => value.replace(/^\\\\\?\\/, '');
 const comparablePath = value => stripWindowsDevicePrefix(resolve(value)).replaceAll('\\', '/').toLowerCase();
@@ -154,6 +155,18 @@ export const inspectPluginInstallation = ({ payload, config, requireInstalled = 
     assert(installed.installPolicy === 'AVAILABLE' && installed.authPolicy === 'ON_INSTALL', 'LOCAL_RELEASE_PLUGIN_POLICY_MISMATCH', 'Installed plugin policy does not match the frozen marketplace policy.');
   }
   return Object.freeze({ installed: true, version: installed.version, enabled: installed.enabled === true, source: installed.source.path });
+};
+
+export const inspectCodexHostFeatures = output => {
+  assert(typeof output === 'string', 'LOCAL_RELEASE_CODEX_FEATURES_INVALID', 'codex features list returned an invalid payload.');
+  const features = new Map();
+  for (const line of output.split(/\r?\n/u)) {
+    const match = line.match(/^\s*(multi_agent(?:_v2)?)\s+\S+\s+(true|false)\s*$/u);
+    if (match) features.set(match[1], match[2] === 'true');
+  }
+  assert(features.get('multi_agent') === true, 'LOCAL_RELEASE_MULTI_AGENT_DISABLED', 'Codex native multi-agent support must be enabled before installing Agent Harness. Run `codex features enable multi_agent`, then create a new task.');
+  assert(features.get('multi_agent_v2') === true, 'LOCAL_RELEASE_MULTI_AGENT_V2_REQUIRED', 'Agent Harness requires Codex Multi-Agent V2 because its Host Effect protocol depends on collaboration.list_agents and collaboration.interrupt_agent. Run `codex features enable multi_agent_v2`, then create a new task.');
+  return Object.freeze({ contract: REQUIRED_CODEX_MULTI_AGENT_CONTRACT, multiAgent: true, multiAgentV2: true });
 };
 
 export const createPluginMutationPlan = ({ marketplaceConfigured, pluginInstalled, config }) => {
@@ -306,6 +319,9 @@ export const runLocalPluginRelease = async ({ root: rootInput, mode, npmCli, run
   const bindings = await bindingsLoader({ root, config });
   assert(bindings.release?.packageDigest === releaseIdentity.artifactDigest, 'LOCAL_RELEASE_ACTIVE_RUNTIME_STALE', 'The active bound runtime does not match the source release artifact. Build and explicitly activate the exact candidate before reinstalling the plugin.', { sourcePackageDigest: releaseIdentity.artifactDigest, activePackageDigest: bindings.release?.packageDigest ?? null });
 
+  const codexFeatures = await runner('codex', ['features', 'list']);
+  const hostCapabilities = inspectCodexHostFeatures(codexFeatures.stdout);
+
   const marketplaceList = await runner('codex', ['plugin', 'marketplace', 'list', '--json'], { json: true });
   let marketplaceState = inspectMarketplaceConfiguration({ payload: marketplaceList.json, marketplaceName: config.marketplaceName, root });
   let pluginState = Object.freeze({ installed: false });
@@ -327,6 +343,7 @@ export const runLocalPluginRelease = async ({ root: rootInput, mode, npmCli, run
     source,
     release: { version: config.version, packageDigest: releaseIdentity.artifactDigest },
     plugin: { id: config.pluginId, source: config.pluginRoot },
+    hostCapabilities,
     bindings,
     installedBindings,
     mutationPlan,
