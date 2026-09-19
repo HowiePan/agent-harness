@@ -85,7 +85,12 @@ test('CardWorld action plans use action-specific stages, paths, stop conditions,
   }
   const quality = createCardWorldLifecyclePlan({ intent: { action: 'quality', target: 'V-next', scope: 'quality', sourcePolicy: 'review-and-repair' }, project, runId: 'quality-v-next', sourceDigest: 'a'.repeat(64) });
   assert.deepEqual(quality.run.features[0].allowedPaths, []);
+  assert.equal(quality.run.features[0].metadata.sourcePolicy, 'read-only');
+  assert.equal(quality.run.features[0].metadata.qualityFindingPolicy, 'repair-and-rereview');
   assert.equal(quality.stopCondition.type, 'quality-run-complete');
+  const reviewOnly = createCardWorldLifecyclePlan({ intent: { action: 'quality', target: 'V-next', scope: 'quality', sourcePolicy: 'read-only' }, project, runId: 'quality-review-only-v-next', sourceDigest: 'a'.repeat(64) });
+  assert.equal(reviewOnly.run.features[0].metadata.sourcePolicy, 'read-only');
+  assert.equal(reviewOnly.run.features[0].metadata.qualityFindingPolicy, 'record-only');
   const deliver = createCardWorldLifecyclePlan({ intent: { action: 'deliver', target: 'V-next', scope: 'delivery-receipt' }, project, runId: 'deliver-v-next', sourceDigest: 'a'.repeat(64) });
   assert.equal(deliver.run.profileConfig.requireFinalQualityReview, true);
   assert.equal(deliver.run.profileConfig.requireUserCodeReview, true);

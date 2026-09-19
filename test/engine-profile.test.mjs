@@ -4,7 +4,16 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { buildDispatchPacket } from '../src/kernel/kernel.mjs';
 import { RunCoordinator } from '../src/coordinator/run-coordinator.mjs';
+import { engineDeliveryProfile } from '../src/profiles/engine-delivery.mjs';
 import { command, dispatchAndBind, feature, makeFixture, recordResult, startRun } from './test-support.mjs';
+
+test('quality Finding policy cannot grant workspace writes to the review Feature', () => {
+  const review = feature('quality/full-sweep', { stage: 'quality', sourcePolicy: 'review-and-repair', qualityReview: true, qualityFindingPolicy: 'repair-and-rereview' }, { ownerRole: 'reviewer', allowedPaths: [] });
+  assert.throws(() => engineDeliveryProfile.validateRun({ features: [review] }), error => error.code === 'QUALITY_REVIEW_WRITE_POLICY_INVALID');
+  review.metadata.sourcePolicy = 'read-only';
+  review.allowedPaths = ['src'];
+  assert.throws(() => engineDeliveryProfile.validateRun({ features: [review] }), error => error.code === 'QUALITY_REVIEW_WRITE_POLICY_INVALID');
+});
 
 test('engine profile keeps canonical requirement single-line before implementation fan-out', async t => {
   const fixture = await makeFixture({ profiles: ['engine-delivery'] }); t.after(() => fixture.cleanup());
@@ -76,7 +85,7 @@ test('review findings returned by a Runtime are atomically opened with submissio
 test('quality findings become independently schedulable repair Features', async t => {
   const fixture = await makeFixture({ profiles: ['engine-delivery'], policy: { runtimePlugins: ['test-runtime'], defaultRuntimePlugin: 'test-runtime', maxConcurrency: 'auto' } });
   t.after(() => fixture.cleanup());
-  const review = feature('quality/full-sweep', { stage: 'quality', sourcePolicy: 'review-and-repair' }, { ownerRole: 'reviewer', allowedPaths: ['src', 'tests'] });
+  const review = feature('quality/full-sweep', { stage: 'quality', sourcePolicy: 'read-only', qualityReview: true, qualityFindingPolicy: 'repair-and-rereview' }, { ownerRole: 'reviewer', allowedPaths: [] });
   await startRun(fixture, { profileId: 'engine-delivery', profileConfig: { requireCanonicalDecision: false, requireUserCodeReview: false }, features: [review] });
   const bound = await dispatchAndBind(fixture, 'run');
   const findings = [
@@ -84,6 +93,7 @@ test('quality findings become independently schedulable repair Features', async 
     ['P1-4', 'P1', 'src/d.rs'], ['P2-1', 'P2', 'tests/a.rs'], ['P2-2', 'P2', 'tests/b.rs'],
   ].map(([id, severity, affectedPath]) => ({ id, severity, summary: `${id} needs repair`, evidence: [`${affectedPath}:1`], affectedPaths: [affectedPath] }));
   const reviewed = await recordResult(fixture, 'run', bound.dispatch, { status: 'completed', summary: 'review found six actionable findings', changedFiles: [], findings });
+  assert.deepEqual(reviewed.state.features[0].allowedPaths, []);
   assert.equal(reviewed.state.features.filter(item => item.metadata.stage === 'quality-repair').length, 6);
   assert.equal(reviewed.state.findings.filter(item => item.status === 'open').length, 6);
   const tick = await new RunCoordinator({ harness: fixture.harness }).tick({ projectId: fixture.projectId, runId: 'run' });

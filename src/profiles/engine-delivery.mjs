@@ -1,6 +1,6 @@
 import { assert } from '../errors.mjs';
 import { approvalSatisfied } from '../workflows/primitives.mjs';
-import { createQualityFollowUpFeatures, hasCurrentCleanQualityReview } from './quality-loop.mjs';
+import { createQualityFollowUpFeatures, hasCurrentCleanQualityReview, validateQualityReviewPolicies } from './quality-loop.mjs';
 
 export const ENGINE_STAGES = Object.freeze([
   'requirement-intake', 'canonical-requirement', 'version-planning', 'implementation',
@@ -23,6 +23,7 @@ export const engineDeliveryProfile = Object.freeze({
   },
 
   validateRun(state) {
+    validateQualityReviewPolicies(state.features);
     for (const feature of state.features) {
       const stage = feature.metadata.stage;
       assert(ENGINE_STAGES.includes(stage), 'ENGINE_STAGE_INVALID', `Engine Feature ${feature.id} has an invalid stage: ${stage}`);

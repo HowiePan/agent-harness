@@ -22,6 +22,7 @@ test('Collection quality plan expands B1 into ten independent read-only game rev
   assert.equal(plan.run.features.length, 10);
   assert.deepEqual(plan.run.features.map(feature => feature.metadata.gameId), games);
   assert.equal(plan.run.features.every(feature => feature.allowedPaths.length === 0 && feature.metadata.qualityReview), true);
+  assert.equal(plan.run.features.every(feature => feature.metadata.sourcePolicy === 'read-only' && feature.metadata.qualityFindingPolicy === 'repair-and-rereview'), true);
   assert.equal(plan.run.features.every(feature => feature.metadata.reviewSourceDigest === sourceDigest), true);
   assert.equal(plan.run.profileConfig.requireFinalQualityReview, true);
   assert.equal(plan.run.profileConfig.requireBatchLaunchDecision, false);

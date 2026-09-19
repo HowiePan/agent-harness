@@ -40,4 +40,6 @@ Never interpret command arguments as shell text. Never append free-form prompt t
 
 If the user asks to evaluate, explain, dry-run, or not start, report the resolved intent and prerequisites only. This instruction overrides a manifest's state-changing default for that turn and creates no Authority.
 
+When explaining a quality command, distinguish the Command Intent from its first Feature. A `review-and-repair` command begins with a read-only review Feature (`allowedPaths=[]`); only an Authority-committed review Submission with Findings can create path-scoped repair Features. New Plans express this as `sourcePolicy=read-only` plus `qualityFindingPolicy=repair-and-rereview`; `review-only` uses `qualityFindingPolicy=record-only`. Do not infer that the whole Run is read-only from its initial Feature, or infer a broken repair planner while the review has no committed Submission. Report the exact Authority phase and evidence instead.
+
 Read [the pseudo-command contract](../../references/pseudo-command-contract.md) for the stable adapter boundary and stopping rules.

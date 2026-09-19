@@ -121,6 +121,8 @@ npm run release:plugin
 
 Hook 只解析单行、最长 512 字符、至多一个预设参数的信封，不启动流程，也不把参数交给 shell。未知项目、动作或预设、绑定与 Registry 不一致、Extension 摘要不匹配、前置证据不足都会 fail closed。用户明确说“只评估”“不要启动”或 `dry-run` 时，只返回解析结果和前置条件，不写 Authority；要做 Engine 只读源码质量审查则显式使用 `h:engine quality V3.8.4 review-only`。
 
+`quality` 默认 `full` 的首个 review Feature 对业务源码只读（`sourcePolicy=read-only`、`allowedPaths=[]`），但其 `qualityFindingPolicy=repair-and-rereview` 表示已提交的 Finding 会生成独立、按 `affectedPaths` 限权的修复 Feature，随后复审。`review-only` 则使用 `qualityFindingPolicy=record-only`，只登记 Finding、不安排修复。不能仅看初始 Feature 的只读权限就把整条 `full` 生命周期判为只审查；也不能在审查 Submission 尚未进入 Authority 时声称修复阶段未生成是计划缺陷。
+
 CLI 的底层问题登记入口为 `issue record --input <json|-> --command-id <id>`。稳定故障码可通过 `correlation` 生成与观察时间无关的 incident fingerprint。不可变 Intake 写入后，使用 `issue triage` 另行记录带 revision、批准 Decision、关系和 resolution Evidence 的分诊状态；`issue list`/`issue status` 都是零写入查询。初始化类故障归类为 `deployment-incident`，不伪造 Defect Bundle 所需的 Descriptor 或 Authority 身份。
 
 1. `run status` 读取 revision、epoch、generation、Feature、Lease 和 finding。

@@ -1,0 +1,70 @@
+{
+  "protocolVersion": "1.0",
+  "projectAlias": "engine",
+  "project": {
+    "projectId": "cardworld-engine",
+    "profileId": "engine-delivery",
+    "extensionId": "cardworld-engine-profile"
+  },
+  "observedAt": "2026-09-16T13:44:39.159Z",
+  "summary": "Agent Harness resolved a review-and-repair quality command into a read-only Feature, so the required repair phase was not started.",
+  "severity": "P1",
+  "environment": {
+    "command": "h:engine quality V3.8.4",
+    "executionMode": "conversation-visible",
+    "scope": "Agent Harness lifecycle planning"
+  },
+  "expected": {
+    "policy": "review-and-repair",
+    "lifecycle": "The quality lifecycle should review findings, execute or schedule the declared repair work, rerun validation, and close only after the repair-aware stop condition is satisfied."
+  },
+  "actual": {
+    "plan": "The generated Feature had allowedPaths=[] and explicitly prohibited workspace writes.",
+    "consequence": "Only the review stage ran; no repair stage was started.",
+    "inconsistency": "The plan metadata declared sourcePolicy review-and-repair while its Feature contract was read-only."
+  },
+  "reproduction": {
+    "steps": [
+      "Run h:engine quality V3.8.4 in the bound engine workspace.",
+      "Inspect the generated lifecycle plan and Feature acceptance data.",
+      "Observe sourcePolicy review-and-repair together with allowedPaths=[] and a no-workspace-writes requirement.",
+      "Observe that the lifecycle reports review findings without entering a repair phase."
+    ]
+  },
+  "conversation": {
+    "source": "current-thread",
+    "excerpts": [
+      {
+        "role": "user",
+        "text": "h:engine quality V3.8.4"
+      },
+      {
+        "role": "user",
+        "text": "不对呀，这个流程应该是包含了修复流程的呀"
+      },
+      {
+        "role": "assistant",
+        "text": "The observed plan used sourcePolicy review-and-repair but generated a read-only Feature with allowedPaths=[] and a no-workspace-writes acceptance clause; the repair phase was not started."
+      },
+      {
+        "role": "user",
+        "text": "只需要记录Agent Harness是问题就好了，重新执行一遍h:report engine吧"
+      }
+    ]
+  },
+  "missingEvidence": [
+    "The authoritative manifest/descriptor diff explaining why review-and-repair resolved to a read-only Feature was not available in the conversation.",
+    "A formal lifecycle completion event confirming repair-phase execution was not observed."
+  ],
+  "sanitization": {
+    "confirmed": true,
+    "removed": [
+      "machine-specific absolute paths",
+      "control-root paths",
+      "run and dispatch identifiers",
+      "prompt and artifact digests",
+      "workspace-specific temporary paths"
+    ]
+  },
+  "intakeDigest": "7c7b43e926d2255f5e51c5d67046824748093e140d384d3ba29deb818f813f40"
+}

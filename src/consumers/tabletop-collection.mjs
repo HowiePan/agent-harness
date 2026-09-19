@@ -225,12 +225,12 @@ export const createTabletopCollectionLifecyclePlan = ({ intent, project, runId, 
     gatePlan: gateIds,
     metadata: {
       scope: intent.scope,
-      sourcePolicy: qualityReview ? 'review-and-repair' : readOnly ? 'read-only' : 'write',
+      sourcePolicy: qualityReview || readOnly ? 'read-only' : 'write',
       stage: action,
       batchId: intent.target,
       gameId,
       ruleStatus: batch.ruleStatus ?? 'rule-ready',
-      ...(qualityReview ? { qualityReview: true, qualityRoot: `collection:${intent.target}:${gameId}`, reviewRound: 1, reviewSourceDigest: sourceDigest, qualityContext: { batchId: intent.target, gameId, ruleStatus: batch.ruleStatus ?? 'rule-ready' } } : {}),
+      ...(qualityReview ? { qualityReview: true, qualityFindingPolicy: 'repair-and-rereview', qualityRoot: `collection:${intent.target}:${gameId}`, reviewRound: 1, reviewSourceDigest: sourceDigest, qualityContext: { batchId: intent.target, gameId, ruleStatus: batch.ruleStatus ?? 'rule-ready' } } : {}),
     },
   });
   let features;

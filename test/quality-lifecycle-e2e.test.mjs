@@ -155,7 +155,7 @@ const createHost = ({ workspace, failFirstWait = false, failFirstInspect = false
   return { adapter, agents, stats };
 };
 
-const setup = async ({ failFirstWait = false, failFirstInspect = false, failFirstConfirm = false, failFirstResult = false, repeatFindingOnce = false } = {}) => {
+const setup = async ({ failFirstWait = false, failFirstInspect = false, failFirstConfirm = false, failFirstResult = false, repeatFindingOnce = false, preset = 'full' } = {}) => {
   const controlRoot = resolve(process.cwd());
   const parent = resolve(harnessTemporaryRoot(), 'quality-lifecycle-e2e');
   await mkdir(parent, { recursive: true });
@@ -173,7 +173,7 @@ const setup = async ({ failFirstWait = false, failFirstInspect = false, failFirs
   descriptor.gateRecipes = [];
   descriptor.extensions = descriptor.extensions.map(item => ({ ...item, digest: item.id === engine.id ? engine.digest : runtime.digest }));
   await harness.projectRegistry.register(descriptor, { expectedRevision: 0, commandId: 'quality-e2e-project' });
-  const plan = await harness.createLifecyclePlan({ projectId: descriptor.id, action: 'quality', target: 'V3.8.4', arguments: ['full'], extensionId: engine.id, executionWorkspaceRoot: workspace });
+  const plan = await harness.createLifecyclePlan({ projectId: descriptor.id, action: 'quality', target: 'V3.8.4', arguments: [preset], extensionId: engine.id, executionWorkspaceRoot: workspace });
   return { root, workspace, dataRoot, host, create, harness, plan };
 };
 
@@ -194,11 +194,30 @@ const assertClosedQualityLoop = state => {
 test('visible quality lifecycle completes review, verified repair, fresh re-review, and closure', async t => {
   const fixture = await setup();
   t.after(() => rm(fixture.root, { recursive: true, force: true }));
+  assert.equal(fixture.plan.run.features[0].metadata.sourcePolicy, 'read-only');
+  assert.equal(fixture.plan.run.features[0].metadata.qualityFindingPolicy, 'repair-and-rereview');
   const preflight = await fixture.harness.createExecutionReadinessReport(fixture.plan);
   assert.equal(preflight.executionReady, true);
   const completed = await fixture.harness.executeVisibleLifecyclePlan(fixture.plan, { commandId: 'quality-e2e', preflightReport: preflight, maxConcurrency: 10 });
   assert.equal(completed.rounds.every(round => round.physicalLimit === 1), true);
   assertClosedQualityLoop(completed.state);
+});
+
+test('review-only quality records findings without scheduling repairs or changing source', async t => {
+  const fixture = await setup({ preset: 'review-only' });
+  t.after(() => rm(fixture.root, { recursive: true, force: true }));
+  assert.equal(fixture.plan.run.features[0].metadata.qualityFindingPolicy, 'record-only');
+  const before = await readFile(resolve(fixture.workspace, 'README.md'), 'utf8');
+  const preflight = await fixture.harness.createExecutionReadinessReport(fixture.plan);
+  assert.equal(preflight.executionReady, true);
+  const stopped = await fixture.harness.executeVisibleLifecyclePlan(fixture.plan, { commandId: 'quality-review-only-e2e', preflightReport: preflight });
+  assert.equal(stopped.status, 'attention-required');
+  assert.equal(stopped.reason, 'current-source-clean-quality-review-required');
+  assert.deepEqual(stopped.state.features.map(feature => feature.metadata.stage), ['quality']);
+  assert.equal(stopped.state.findings.length, 1);
+  assert.equal(stopped.state.findings[0].status, 'open');
+  assert.equal(fixture.host.stats.spawnCount, 1);
+  assert.equal(await readFile(resolve(fixture.workspace, 'README.md'), 'utf8'), before);
 });
 
 test('visible quality lifecycle resumes an attested active Lease after coordinator restart', async t => {

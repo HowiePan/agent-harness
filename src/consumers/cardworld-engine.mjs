@@ -176,7 +176,7 @@ const actionPaths = Object.freeze({
   deliver: [],
 });
 
-const makeEngineFeature = ({ action, target, stage, dependsOn = [], allowedPaths, sourcePolicy = 'write', ownerRole = 'operator', qualityReview = false, sourceDigest }) => ({
+const makeEngineFeature = ({ action, target, stage, dependsOn = [], allowedPaths, sourcePolicy = 'write', qualityFindingPolicy = 'repair-and-rereview', ownerRole = 'operator', qualityReview = false, sourceDigest }) => ({
   id: `${action}/${target}`,
   executionClass: 'agent-reasoning',
   kind: action,
@@ -209,6 +209,7 @@ const makeEngineFeature = ({ action, target, stage, dependsOn = [], allowedPaths
     allowDynamicDecomposition: !qualityReview && allowedPaths.length > 0,
     ...(qualityReview ? {
       qualityReview: true,
+      qualityFindingPolicy,
       qualityRoot: `engine:${target}`,
       reviewRound: 1,
       reviewSourceDigest: sourceDigest,
@@ -244,13 +245,13 @@ export const createCardWorldLifecyclePlan = ({ intent, project, runId, sourceDig
       ['docs', 'docs-closeout', actionPaths.docs, 'write'],
     ];
     features = chain.map(([action, stage, allowedPaths, sourcePolicy], index) => makeEngineFeature({ action, target: intent.target, stage, allowedPaths, sourcePolicy, dependsOn: index ? [`${chain[index - 1][0]}/${intent.target}`] : [] }));
-    features.push(makeEngineFeature({ action: 'quality', target: intent.target, stage: 'quality', allowedPaths: [], sourcePolicy: 'review-and-repair', ownerRole: 'reviewer', qualityReview: true, sourceDigest, dependsOn: [`docs/${intent.target}`] }));
+    features.push(makeEngineFeature({ action: 'quality', target: intent.target, stage: 'quality', allowedPaths: [], sourcePolicy: 'read-only', ownerRole: 'reviewer', qualityReview: true, sourceDigest, dependsOn: [`docs/${intent.target}`] }));
     features.push(makeEngineFeature({ action: 'review', target: intent.target, stage: 'user-code-review', allowedPaths: [], sourcePolicy: 'read-only', ownerRole: 'reviewer', dependsOn: [`quality/${intent.target}`] }));
     features.push(makeEngineFeature({ action: 'deliver', target: intent.target, stage: 'delivery-receipt', allowedPaths: [], sourcePolicy: 'read-only', dependsOn: [`review/${intent.target}`] }));
   } else if (quality) {
-    features = [makeEngineFeature({ action: 'quality', target: intent.target, stage: 'quality', allowedPaths: [], sourcePolicy: intent.sourcePolicy ?? 'review-and-repair', ownerRole: 'reviewer', qualityReview: true, sourceDigest })];
+    features = [makeEngineFeature({ action: 'quality', target: intent.target, stage: 'quality', allowedPaths: [], sourcePolicy: 'read-only', qualityFindingPolicy: intent.sourcePolicy === 'read-only' ? 'record-only' : 'repair-and-rereview', ownerRole: 'reviewer', qualityReview: true, sourceDigest })];
   } else if (intent.action === 'deliver') {
-    const finalQuality = makeEngineFeature({ action: 'quality', target: intent.target, stage: 'quality', allowedPaths: [], sourcePolicy: 'review-and-repair', ownerRole: 'reviewer', qualityReview: true, sourceDigest });
+    const finalQuality = makeEngineFeature({ action: 'quality', target: intent.target, stage: 'quality', allowedPaths: [], sourcePolicy: 'read-only', ownerRole: 'reviewer', qualityReview: true, sourceDigest });
     const delivery = makeEngineFeature({ action: 'deliver', target: intent.target, stage: 'delivery-receipt', allowedPaths: [], sourcePolicy: 'read-only', dependsOn: [finalQuality.id] });
     features = [finalQuality, delivery];
   } else if (intent.action === 'requirements' && intent.scope !== 'version-planning') {

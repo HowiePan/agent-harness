@@ -1,6 +1,6 @@
 import { assert } from '../errors.mjs';
 import { approvalSatisfied, orderedBarrier } from '../workflows/primitives.mjs';
-import { createQualityFollowUpFeatures, hasCurrentCleanQualityReview } from './quality-loop.mjs';
+import { createQualityFollowUpFeatures, hasCurrentCleanQualityReview, validateQualityReviewPolicies } from './quality-loop.mjs';
 
 export const collectionBatchProfile = Object.freeze({
   id: 'collection-batch',
@@ -32,6 +32,7 @@ export const collectionBatchProfile = Object.freeze({
   },
 
   validateRun(state) {
+    validateQualityReviewPolicies(state.features);
     const owners = new Map();
     for (const feature of state.features) {
       assert(feature.metadata.batchId, 'FEATURE_BATCH_REQUIRED', `Collection Feature ${feature.id} requires metadata.batchId.`);

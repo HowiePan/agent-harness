@@ -70,6 +70,7 @@ test('Codex plugin exposes one explicit-project pseudo-command router', async ()
   assert.match(skill, /commandManifest/);
   assert.match(skill, /所有面向用户的控制对话必须使用中文/);
   assert.match(skill, /不得为了中文输出而翻译、改写或补充 Harness 生成的子 Agent Prompt/);
+  assert.match(skill, /qualityFindingPolicy=repair-and-rereview/);
   assert.match(operatorSkill, /所有面向用户的控制对话必须使用中文/);
   assert.match(metadata, /allow_implicit_invocation: true/);
   assert.match(metadata, /h:report/);
@@ -303,6 +304,9 @@ test('each project alias can bind and validate an independent workspace', async 
 });
 
 test('the same pseudo actions resolve through the explicitly selected Extension command manifest', () => {
+  const defaultEngineQuality = resolveCommandIntent(cardWorldCommandManifest, { action: 'quality', target: 'V3.8.4', arguments: [] });
+  assert.equal(defaultEngineQuality.preset, 'full');
+  assert.equal(defaultEngineQuality.sourcePolicy, 'review-and-repair');
   const engineQuality = resolveCommandIntent(cardWorldCommandManifest, { action: 'quality', target: 'V3.8.4', arguments: ['review-only'] });
   assert.equal(engineQuality.profileId, 'engine-delivery');
   assert.equal(engineQuality.sourcePolicy, 'read-only');

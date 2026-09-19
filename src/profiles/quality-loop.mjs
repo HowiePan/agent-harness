@@ -1,4 +1,5 @@
 import { sha256 } from '../canonical.mjs';
+import { assert } from '../errors.mjs';
 
 const unique = values => [...new Set(values ?? [])];
 const cleanReviewSubmission = (state, feature) => {
@@ -9,6 +10,15 @@ const cleanReviewSubmission = (state, feature) => {
 export const hasCurrentCleanQualityReview = (state, qualityRoot = null) => state.features
   .filter(feature => feature.metadata?.qualityReview === true && (!qualityRoot || feature.metadata.qualityRoot === qualityRoot))
   .some(feature => feature.state === 'completed' && cleanReviewSubmission(state, feature));
+
+export const validateQualityReviewPolicies = features => {
+  for (const feature of features) {
+    const policy = feature.metadata?.qualityFindingPolicy;
+    if (policy === undefined) continue; // Existing versioned plans use sourcePolicy.
+    assert(feature.metadata.qualityReview === true && ['repair-and-rereview', 'record-only'].includes(policy), 'QUALITY_FINDING_POLICY_INVALID', `Quality Feature ${feature.id} has an invalid Finding follow-up policy.`);
+    assert(feature.metadata.sourcePolicy === 'read-only' && feature.allowedPaths.length === 0, 'QUALITY_REVIEW_WRITE_POLICY_INVALID', `Quality Feature ${feature.id} must remain read-only; repair belongs to a separate Feature.`);
+  }
+};
 
 const repairsForFindings = ({ feature, findings }) => findings.map(finding => {
   const qualityRoot = feature.metadata.qualityRoot ?? feature.logicalRoot;
@@ -85,7 +95,8 @@ const nextRecheck = ({ state, feature }) => {
     metadata: {
       ...structuredClone(feature.metadata.qualityContext ?? {}),
       stage: 'quality-recheck',
-      sourcePolicy: 'review-and-repair',
+      sourcePolicy: 'read-only',
+      qualityFindingPolicy: 'repair-and-rereview',
       qualityReview: true,
       qualityRoot: root,
       reviewRound,
@@ -96,7 +107,16 @@ const nextRecheck = ({ state, feature }) => {
 };
 
 export const createQualityFollowUpFeatures = ({ state, feature, findings, result }) => {
-  if ((feature.metadata?.qualityReview === true || feature.metadata?.stage === 'quality') && feature.metadata?.sourcePolicy === 'review-and-repair') return repairsForFindings({ feature: { ...feature, metadata: { ...feature.metadata, qualityRoot: feature.metadata.qualityRoot ?? feature.logicalRoot, reviewRound: feature.metadata.reviewRound ?? 1 } }, findings });
+  if (feature.metadata?.qualityReview === true || feature.metadata?.stage === 'quality') {
+    // Pre-policy plans used sourcePolicy for the whole lifecycle. Keep them
+    // readable, but new plans separate this review's write boundary from the
+    // policy for findings emitted after it completes.
+    const policy = feature.metadata?.qualityFindingPolicy
+      ?? (feature.metadata?.sourcePolicy === 'review-and-repair' ? 'repair-and-rereview' : 'record-only');
+    assert(['repair-and-rereview', 'record-only'].includes(policy), 'QUALITY_FINDING_POLICY_INVALID', 'Quality review has an unknown Finding follow-up policy.');
+    if (policy === 'repair-and-rereview') return repairsForFindings({ feature: { ...feature, metadata: { ...feature.metadata, qualityRoot: feature.metadata.qualityRoot ?? feature.logicalRoot, reviewRound: feature.metadata.reviewRound ?? 1 } }, findings });
+    return [];
+  }
   if (feature.metadata?.repairFindingId && result?.status === 'completed') return nextRecheck({ state, feature });
   return [];
 };
