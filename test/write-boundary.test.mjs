@@ -5,7 +5,7 @@ import { access, mkdir, rm, symlink, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { promisify } from 'node:util';
 import { assertHarnessWritePath, AuthorityStore, computeAuthorityDigest, createHarness, defaultDataRoot, digestJson, EvidenceStore, GateCache, harnessControlRoot, harnessProjectRoot, harnessTemporaryRoot, loadReleaseIdentity, ProjectRegistry, sha256, temporaryEnvironment, verifyReleaseManifest } from '../src/index.mjs';
-import { createCodexCliRuntime } from '../src/plugins/runtime/codex-cli-runtime.mjs';
+import { createCodexCliRuntime } from '../integrations/codex/runtime/codex-cli-runtime.mjs';
 
 const executeFile = promisify(execFile);
 
@@ -73,7 +73,7 @@ test('doctor validates the write boundary without creating its data root', async
   const projectRoot = harnessProjectRoot();
   const target = resolve(projectRoot, '.tmp', `doctor-no-write-${process.pid}`);
   await assert.rejects(() => access(target), error => error.code === 'ENOENT');
-  const { stdout } = await executeFile(process.execPath, [resolve(projectRoot, 'src', 'cli.mjs'), 'doctor', '--data-root', target], { cwd: projectRoot, windowsHide: true });
+  const { stdout } = await executeFile(process.execPath, [resolve(projectRoot, 'bin', 'agent-harness.mjs'), 'doctor', '--data-root', target], { cwd: projectRoot, windowsHide: true });
   const result = JSON.parse(stdout);
   assert.equal(result.ok, true);
   assert.equal(result.initialized, false);
@@ -88,7 +88,7 @@ test('project list is read-only when the data root does not exist', async () => 
   const projectRoot = harnessProjectRoot();
   const target = resolve(projectRoot, '.tmp', `project-list-no-write-${process.pid}`);
   await assert.rejects(() => access(target), error => error.code === 'ENOENT');
-  const { stdout } = await executeFile(process.execPath, [resolve(projectRoot, 'src', 'cli.mjs'), 'project', 'list', '--data-root', target], { cwd: projectRoot, windowsHide: true });
+  const { stdout } = await executeFile(process.execPath, [resolve(projectRoot, 'bin', 'agent-harness.mjs'), 'project', 'list', '--data-root', target], { cwd: projectRoot, windowsHide: true });
   assert.deepEqual(JSON.parse(stdout), { ok: true, projects: [] });
   await assert.rejects(() => access(target), error => error.code === 'ENOENT');
 });
@@ -98,7 +98,7 @@ test('run status fails without initializing a missing data root', async () => {
   const target = resolve(projectRoot, '.tmp', `run-status-no-write-${process.pid}`);
   await assert.rejects(() => access(target), error => error.code === 'ENOENT');
   await assert.rejects(
-    () => executeFile(process.execPath, [resolve(projectRoot, 'src', 'cli.mjs'), 'run', 'status', '--project', 'missing', '--run', 'missing', '--data-root', target], { cwd: projectRoot, windowsHide: true }),
+    () => executeFile(process.execPath, [resolve(projectRoot, 'bin', 'agent-harness.mjs'), 'run', 'status', '--project', 'missing', '--run', 'missing', '--data-root', target], { cwd: projectRoot, windowsHide: true }),
     error => /RUN_NOT_FOUND/.test(error.stderr),
   );
   await assert.rejects(() => access(target), error => error.code === 'ENOENT');
@@ -113,14 +113,14 @@ test('project list and run status do not import registered Extension code', asyn
   const extension = { id: 'side-effect-probe', version: '1.0.0', digest: 'a'.repeat(64), entry: 'missing-side-effect-probe.mjs', registeredAt: '2026-09-13T00:00:00.000Z' };
   const registryBody = { protocolVersion: '1.0', revision: 1, extensions: [extension], commands: {} };
   await writeFile(resolve(registryDirectory, 'extensions.json'), `${JSON.stringify({ ...registryBody, registryDigest: digestJson(registryBody) })}\n`, 'utf8');
-  const listed = await executeFile(process.execPath, [resolve(projectRoot, 'src', 'cli.mjs'), 'project', 'list', '--data-root', target], { cwd: projectRoot, windowsHide: true });
+  const listed = await executeFile(process.execPath, [resolve(projectRoot, 'bin', 'agent-harness.mjs'), 'project', 'list', '--data-root', target], { cwd: projectRoot, windowsHide: true });
   assert.deepEqual(JSON.parse(listed.stdout), { ok: true, projects: [] });
   const stateBody = { projectId: 'project', runId: 'run', profile: { id: 'side-effect-profile' }, revision: 1, commands: {} };
   const state = { ...stateBody, authorityDigest: computeAuthorityDigest(stateBody) };
   const authorityFile = resolve(target, 'authority', 'project', 'run', 'run.json');
   await mkdir(resolve(authorityFile, '..'), { recursive: true });
   await writeFile(authorityFile, `${JSON.stringify(state)}\n`, 'utf8');
-  const status = JSON.parse((await executeFile(process.execPath, [resolve(projectRoot, 'src', 'cli.mjs'), 'run', 'status', '--project', 'project', '--run', 'run', '--data-root', target], { cwd: projectRoot, windowsHide: true })).stdout);
+  const status = JSON.parse((await executeFile(process.execPath, [resolve(projectRoot, 'bin', 'agent-harness.mjs'), 'run', 'status', '--project', 'project', '--run', 'run', '--data-root', target], { cwd: projectRoot, windowsHide: true })).stdout);
   assert.equal(status.authority.authorityDigest, state.authorityDigest);
   assert.equal(status.projection, null);
 });
@@ -139,7 +139,7 @@ test('doctor reports lifecycle readiness only when all persisted roots and regis
   const commandReceipt = { commandId: 'fixture-register', payloadDigest: digestJson(descriptorInput), revision: 1, committedAt: '2026-09-13T00:00:00.000Z', authorityDecision: null };
   const descriptorBody = { ...descriptorInput, protocolVersion: '1.0', revision: 1, updatedAt: '2026-09-13T00:00:00.000Z', commands: { 'fixture-register': commandReceipt } };
   await writeFile(resolve(projectDirectory, 'fixture-project.json'), `${JSON.stringify({ ...descriptorBody, descriptorDigest: digestJson(descriptorBody) })}\n`, 'utf8');
-  const { stdout } = await executeFile(process.execPath, [resolve(projectRoot, 'src', 'cli.mjs'), 'doctor', '--data-root', target], { cwd: projectRoot, windowsHide: true });
+  const { stdout } = await executeFile(process.execPath, [resolve(projectRoot, 'bin', 'agent-harness.mjs'), 'doctor', '--data-root', target], { cwd: projectRoot, windowsHide: true });
   const result = JSON.parse(stdout);
   assert.equal(result.initialized, true);
   assert.equal(result.registryReady, true);

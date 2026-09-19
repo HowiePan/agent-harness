@@ -2,7 +2,7 @@ import { cp, mkdir, mkdtemp, readdir, rm, rmdir, writeFile } from 'node:fs/promi
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawn } from 'node:child_process';
-import { temporaryEnvironment } from '../src/write-boundary.mjs';
+import { temporaryEnvironment } from '../src/common/write-boundary.mjs';
 
 const source = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const scratch = resolve(source, '.tmp', 'clean-room');
@@ -25,7 +25,8 @@ try {
   }
   await mkdir(processTemporary, { recursive: true });
   await run(['scripts/check-project.mjs']);
-  const tests = (await readdir(resolve(project, 'test'))).filter(name => name.endsWith('.test.mjs')).sort().map(name => `test/${name}`);
+  const discoverTests = async (directory, prefix = 'test') => (await Promise.all((await readdir(directory, { withFileTypes: true })).map(async entry => entry.isDirectory() ? discoverTests(resolve(directory, entry.name), `${prefix}/${entry.name}`) : entry.name.endsWith('.test.mjs') ? [`${prefix}/${entry.name}`] : []))).flat();
+  const tests = (await discoverTests(resolve(project, 'test'))).sort();
   await run(['--test', '--test-isolation=none', '--test-concurrency=1', ...tests]);
   const npmCli = process.env.npm_execpath;
   if (!npmCli) throw new Error('check:clean-room must be started through npm so npm_execpath is available.');
@@ -40,6 +41,7 @@ try {
   const setupProbe = `import { resolve } from 'node:path'; import { createHarness, ExtensionRegistry, initializeHarnessInstallation } from 'agent-harness'; let rejected = false; try { await createHarness(); } catch (error) { rejected = error.code === 'HARNESS_CONTROL_ROOT_REQUIRED'; } if (!rejected) throw new Error('packaged runtime accepted an implicit node_modules control root'); const controlRoot = process.cwd(); await initializeHarnessInstallation({ controlRoot }); const dataRoot = resolve(controlRoot, '.agent-harness-data'); const registry = new ExtensionRegistry({ controlRoot, dataRoot }); const receipt = await registry.register('agent-harness/consumers/cardworld-engine', { expectedRevision: 0, commandId: 'clean-room-install', authorityDecision: { actor: 'clean-room-test', decision: 'approved' } }); if (!receipt.digest) throw new Error('packaged extension was not bound to an artifact digest'); const harness = await createHarness({ controlRoot, dataRoot }); if (harness.controlRoot !== controlRoot || harness.extensionSet.installed.length !== 0) throw new Error('packaged standalone control root is invalid');`;
   const restartProbe = `import { rm } from 'node:fs/promises'; import { resolve } from 'node:path'; import { createHarness, ExtensionRegistry } from 'agent-harness'; const controlRoot = process.cwd(); const dataRoot = resolve(controlRoot, '.agent-harness-data'); const registry = new ExtensionRegistry({ controlRoot, dataRoot }); const extensions = await registry.loadInstalled(); if (extensions.length !== 1 || extensions[0].id !== 'cardworld-engine-profile' || !extensions[0].digest) throw new Error('registered extension did not survive a process restart'); const harness = await createHarness({ controlRoot, dataRoot, extensions }); if (harness.extensionSet.installed[0]?.digest !== extensions[0].digest) throw new Error('restarted Harness did not install the registered artifact'); await rm(dataRoot, { recursive: true, force: true });`;
   await run(['--input-type=module', '--eval', setupProbe], { cwd: deployment });
+  await run(['--input-type=module', '--eval', "import { extensionPack } from 'agent-harness/extensions/legacy-compat'; if (extensionPack.id !== 'legacy-compatibility' || extensionPack.recoveryImporters.length !== 2) throw new Error('packaged Legacy Importer integration is missing');"], { cwd: deployment });
   await run(['--input-type=module', '--eval', restartProbe], { cwd: deployment });
   console.log(JSON.stringify({ ok: true, source, cleanRoom: project, note: 'temporary clean room removed after verification' }, null, 2));
 } finally {

@@ -1,6 +1,6 @@
-import { assert } from '../errors.mjs';
-import { EXECUTION_CLASSES, assertExecutionClass } from '../execution-boundary.mjs';
-import { slash } from '../paths.mjs';
+import { assert } from '../common/errors.mjs';
+import { EXECUTION_CLASSES, assertExecutionClass } from '../platform/execution/boundary.mjs';
+import { slash } from '../common/paths.mjs';
 
 const unique = values => [...new Set(values ?? [])];
 const list = value => unique(Array.isArray(value) ? value.map(String) : []);

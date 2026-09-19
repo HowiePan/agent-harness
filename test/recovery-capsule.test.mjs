@@ -2,10 +2,10 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { access, mkdir, readFile, symlink, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
-import { digestJson } from '../src/canonical.mjs';
-import { extensionPack as legacyCompatibilityExtension } from '../src/extensions/legacy-compat.mjs';
-import { CardWorldLegacyImporter } from '../src/recovery/cardworld-importer.mjs';
-import { createRecoveryCapsule } from '../src/recovery/capsule.mjs';
+import { digestJson } from '../src/common/canonical.mjs';
+import { extensionPack as legacyCompatibilityExtension } from '../integrations/legacy-consumers/legacy-compat.mjs';
+import { CardWorldLegacyImporter } from '../integrations/legacy-consumers/cardworld/importer.mjs';
+import { createRecoveryCapsule } from '../src/platform/recovery/capsule.mjs';
 import { makeFixture, startRun } from './test-support.mjs';
 
 const rewriteJson = async (file, mutate) => {

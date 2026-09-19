@@ -7,8 +7,8 @@ import { PassThrough } from 'node:stream';
 import { createCodexCollaborationHostAdapter } from '../integrations/codex/agent-harness-codex/lib/codex-collaboration-host-adapter.mjs';
 import { createStdioHostExchange } from '../integrations/codex/agent-harness-codex/lib/stdio-host-exchange.mjs';
 import { createVisibleLifecycleIntent, decodeVisibleLifecycleIntent, encodeVisibleLifecycleIntent, validateVisibleLifecycleIntent } from '../integrations/codex/agent-harness-codex/lib/visible-lifecycle-intent.mjs';
-import { digestJson } from '../src/canonical.mjs';
-import { harnessTemporaryRoot } from '../src/write-boundary.mjs';
+import { digestJson } from '../src/common/canonical.mjs';
+import { harnessTemporaryRoot } from '../src/common/write-boundary.mjs';
 
 const businessResult = {
   status: 'completed',

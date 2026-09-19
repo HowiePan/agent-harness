@@ -1,9 +1,9 @@
 import { mkdir, readFile, stat } from 'node:fs/promises';
 import { resolve } from 'node:path';
-import { canonicalize, digestJson, sha256, withoutKeys } from '../canonical.mjs';
-import { assert } from '../errors.mjs';
+import { canonicalize, digestJson, sha256, withoutKeys } from '../common/canonical.mjs';
+import { assert } from '../common/errors.mjs';
 import { atomicWrite, atomicWriteJson, readJson } from './atomic-io.mjs';
-import { assertHarnessWritePath } from '../write-boundary.mjs';
+import { assertHarnessWritePath } from '../common/write-boundary.mjs';
 
 const toBytes = value => Buffer.isBuffer(value) ? value : typeof value === 'string' ? Buffer.from(value) : Buffer.from(canonicalize(value));
 

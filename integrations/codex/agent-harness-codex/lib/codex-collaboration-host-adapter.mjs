@@ -1,8 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
-import { createCodexVisibleHostAdapter } from '../../../../src/plugins/runtime/codex-runtime.mjs';
-import { digestJson } from '../../../../src/canonical.mjs';
-import { assertJsonSchema } from '../../../../src/json-schema.mjs';
+import { createCodexVisibleHostAdapter } from '../../runtime/codex-runtime.mjs';
+import { digestJson } from '../../../../src/common/canonical.mjs';
+import { assertJsonSchema } from '../../../../src/common/json-schema.mjs';
 import { CodexHostEffectJournal } from './codex-host-effect-journal.mjs';
 
 const codexResultSchema = JSON.parse(readFileSync(new URL('../../../../schemas/codex-runtime-result.schema.json', import.meta.url), 'utf8'));

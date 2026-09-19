@@ -1,4 +1,4 @@
-import { assert } from '../errors.mjs';
+import { assert } from '../common/errors.mjs';
 
 export const QUALITY_SEVERITIES = Object.freeze(['P0', 'P1', 'P2', 'P3']);
 

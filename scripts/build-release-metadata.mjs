@@ -1,7 +1,7 @@
 import { readFile, readdir, stat, writeFile } from 'node:fs/promises';
 import { dirname, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { digestJson, sha256 } from '../src/canonical.mjs';
+import { digestJson, sha256 } from '../src/common/canonical.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const included = ['bin', 'src', 'schemas', 'profiles', 'plugins', '.agents', 'integrations', 'docs', 'examples', 'scripts/check-context-budget.mjs', 'scripts/workflow-canary.mjs', 'scripts/workspace-canary.mjs', 'package.json', 'README.md', 'CONTRIBUTING.md', 'SECURITY.md', 'LICENSE'];

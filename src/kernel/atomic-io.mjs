@@ -1,8 +1,8 @@
 import { mkdir, open, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
-import { canonicalize } from '../canonical.mjs';
-import { HarnessError } from '../errors.mjs';
-import { assertInside, assertNoLinkPath } from '../paths.mjs';
+import { canonicalize } from '../common/canonical.mjs';
+import { HarnessError } from '../common/errors.mjs';
+import { assertInside, assertNoLinkPath } from '../common/paths.mjs';
 
 const wait = milliseconds => new Promise(resolveWait => setTimeout(resolveWait, milliseconds));
 

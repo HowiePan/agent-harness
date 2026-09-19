@@ -1,0 +1,28 @@
+import { defineExtensionPack } from '../../../src/platform/extensions/contract.mjs';
+import { CODEX_CLI_RUNTIME_MANIFEST, CODEX_ISOLATED_RUNTIME_MANIFEST, createCodexCliRuntime } from '../runtime/codex-cli-runtime.mjs';
+import { createIsolatedWorkspaceProvider } from '../../../src/platform/plugins/runtime/isolated-workspace.mjs';
+
+export { CODEX_CLI_RUNTIME_MANIFEST, CODEX_ISOLATED_RUNTIME_MANIFEST, createCodexCliRuntime } from '../runtime/codex-cli-runtime.mjs';
+
+export const extensionPack = defineExtensionPack({
+  id: 'codex-headless-runtime',
+  version: '1.0.0',
+  plugins: [
+    {
+      manifest: CODEX_CLI_RUNTIME_MANIFEST,
+      create: ({ resolveProject, dataRoot, controlRoot }) => createCodexCliRuntime({ resolveProject, runtimeRoot: dataRoot, controlRoot, manifest: CODEX_CLI_RUNTIME_MANIFEST }),
+    },
+    {
+      manifest: CODEX_ISOLATED_RUNTIME_MANIFEST,
+      create: ({ resolveProject, dataRoot, controlRoot }) => createCodexCliRuntime({
+        resolveProject,
+        runtimeRoot: dataRoot,
+        controlRoot,
+        manifest: CODEX_ISOLATED_RUNTIME_MANIFEST,
+        workspaceProvider: createIsolatedWorkspaceProvider({ manifestId: CODEX_ISOLATED_RUNTIME_MANIFEST.id, controlRoot }),
+      }),
+    },
+  ],
+});
+
+export default extensionPack;

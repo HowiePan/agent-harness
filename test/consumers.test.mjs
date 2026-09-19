@@ -10,8 +10,8 @@ import {
   createCardWorldProjectDescriptor,
   createTabletopCollectionProjectDescriptor,
   tabletopCollectionCommandManifest,
-} from '../src/consumers/index.mjs';
-import { resolveLifecycleExecutionPolicy } from '../src/plugins/runtime/execution-policy.mjs';
+} from '../src/flows/index.mjs';
+import { resolveLifecycleExecutionPolicy } from '../src/platform/plugins/runtime/execution-policy.mjs';
 
 test('CardWorld consumer compiles one canonical requirement and project-owned delivery Features', () => {
   const descriptor = createCardWorldProjectDescriptor({ workspaceRoot: process.cwd(), remote: 'https://github.com/HowiePan/CardWorld.git' });

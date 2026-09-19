@@ -2,9 +2,9 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { mkdir, mkdtemp, rm } from 'node:fs/promises';
 import { resolve } from 'node:path';
-import { digestJson } from '../src/canonical.mjs';
-import { RunLineageStore, resolveRunLineage, verifyRunLineageResolution } from '../src/lineage.mjs';
-import { harnessTemporaryRoot } from '../src/write-boundary.mjs';
+import { digestJson } from '../src/common/canonical.mjs';
+import { RunLineageStore, resolveRunLineage, verifyRunLineageResolution } from '../src/application/lineage.mjs';
+import { harnessTemporaryRoot } from '../src/common/write-boundary.mjs';
 
 const now = '2026-09-15T12:00:00.000Z';
 const plan = {

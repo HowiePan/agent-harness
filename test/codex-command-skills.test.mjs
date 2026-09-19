@@ -6,9 +6,9 @@ import { dirname, resolve } from 'node:path';
 import { configureBindings } from '../integrations/codex/agent-harness-codex/scripts/configure-bindings.mjs';
 import { hookResponse, loadBindings, parsePseudoCommand } from '../integrations/codex/agent-harness-codex/hooks/pseudo-command-router.mjs';
 import { decodeVisibleLifecycleIntent } from '../integrations/codex/agent-harness-codex/lib/visible-lifecycle-intent.mjs';
-import { resolveCommandIntent } from '../src/extensions/command-contract.mjs';
-import { cardWorldCommandManifest, tabletopCollectionCommandManifest } from '../src/consumers/index.mjs';
-import { digestJson, sha256 } from '../src/canonical.mjs';
+import { resolveCommandIntent } from '../src/platform/extensions/command-contract.mjs';
+import { cardWorldCommandManifest, tabletopCollectionCommandManifest } from '../src/flows/index.mjs';
+import { digestJson, sha256 } from '../src/common/canonical.mjs';
 
 const pluginRoot = resolve('integrations', 'codex', 'agent-harness-codex');
 const skillsRoot = resolve(pluginRoot, 'skills');
@@ -53,7 +53,7 @@ const createActiveReleaseFixture = async controlRoot => {
 
 test('Codex plugin exposes one explicit-project pseudo-command router', async () => {
   const actual = (await readdir(skillsRoot, { withFileTypes: true })).filter(entry => entry.isDirectory()).map(entry => entry.name).sort();
-  assert.deepEqual(actual, ['agent-harness-command', 'agent-harness-extension-author', 'agent-harness-operator']);
+  assert.deepEqual(actual, ['agent-harness-command', 'agent-harness-extension-author', 'agent-harness-flow-author', 'agent-harness-operator', 'agent-harness-workspace-author']);
   assert(!actual.some(name => name.startsWith('collection-') || name.startsWith('harness-')));
 
   const skillPath = resolve(skillsRoot, 'agent-harness-command', 'SKILL.md');

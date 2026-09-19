@@ -1,16 +1,16 @@
 import { resolve } from 'node:path';
-import { digestJson, newId } from '../canonical.mjs';
-import { assert, fail } from '../errors.mjs';
-import { safeSegment } from '../paths.mjs';
-import { assertHardRecoveryDecision, hardRecoveryCapability } from '../recovery/authorization.mjs';
-import { readRecoveryVerification } from '../recovery/verification.mjs';
-import { readRecoveryResolution } from '../recovery/resolution.mjs';
+import { digestJson, newId } from '../common/canonical.mjs';
+import { assert, fail } from '../common/errors.mjs';
+import { safeSegment } from '../common/paths.mjs';
+import { assertHardRecoveryDecision, hardRecoveryCapability } from '../platform/recovery/authorization.mjs';
+import { readRecoveryVerification } from '../platform/recovery/verification.mjs';
+import { readRecoveryResolution } from '../platform/recovery/resolution.mjs';
 import { atomicWriteJson } from './atomic-io.mjs';
 import { qualityCanClose, validateFinding } from './quality.mjs';
-import { assertArtifactRebaseDecision } from '../maintenance/upgrade-authorization.mjs';
+import { assertArtifactRebaseDecision } from '../platform/maintenance/upgrade-authorization.mjs';
 import { buildRunReceipt, writeRunReceipt } from './receipts.mjs';
 import { scheduleFeatures, validateWorkGraph } from './work-graph.mjs';
-import { validateBusinessResult, validateProfileResult } from '../result-contract.mjs';
+import { validateBusinessResult, validateProfileResult } from '../platform/execution/result-contract.mjs';
 
 const activeLease = lease => ['requested', 'active'].includes(lease.status);
 const activeDispatch = dispatch => ['requested', 'assigned'].includes(dispatch.status);

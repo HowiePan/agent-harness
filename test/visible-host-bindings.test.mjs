@@ -1,11 +1,11 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { defineExtensionPack } from '../src/extensions/contract.mjs';
-import { createCallbackRuntime } from '../src/plugins/runtime/callback-runtime.mjs';
-import { createVisibleHostAdapter } from '../src/plugins/runtime/visible-host-adapter.mjs';
-import { assertVisibleHostReceiptOwner, createVisibleHostBindings } from '../src/plugins/runtime/visible-host-bindings.mjs';
-import { validateBusinessResult, VISIBLE_AGENT_RESULT_CONTRACT_VERSION } from '../src/result-contract.mjs';
-import { featureDeliveryProfile } from '../src/profiles/feature-delivery.mjs';
+import { defineExtensionPack } from '../src/platform/extensions/contract.mjs';
+import { createCallbackRuntime } from '../src/platform/plugins/runtime/callback-runtime.mjs';
+import { createVisibleHostAdapter } from '../src/platform/plugins/runtime/visible-host-adapter.mjs';
+import { assertVisibleHostReceiptOwner, createVisibleHostBindings } from '../src/platform/plugins/runtime/visible-host-bindings.mjs';
+import { validateBusinessResult, VISIBLE_AGENT_RESULT_CONTRACT_VERSION } from '../src/platform/execution/result-contract.mjs';
+import { featureDeliveryProfile } from '../src/flow-kit/profiles/feature-delivery.mjs';
 import { command, dispatchAndBind, makeFixture, startRun } from './test-support.mjs';
 
 const manifest = id => ({ id, kind: 'agent-runtime', version: '1.0.0', capabilities: ['spawn', 'wait', 'send', 'heartbeat', 'interrupt', 'user-visible', 'host-orchestrated', 'workspace-shared'], permissions: ['agent.conversation'] });

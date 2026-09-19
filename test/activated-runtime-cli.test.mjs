@@ -5,7 +5,7 @@ import { execFile as execFileCallback } from 'node:child_process';
 import { promisify } from 'node:util';
 import { dirname, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { harnessTemporaryRoot } from '../src/write-boundary.mjs';
+import { harnessTemporaryRoot } from '../src/common/write-boundary.mjs';
 
 const execFile = promisify(execFileCallback);
 
@@ -32,11 +32,11 @@ test('activated immutable runtime CLI can use its parent standalone control root
   await writeFile(resolve(workspaceRoot, 'README.md'), 'fixture\n', 'utf8');
 
   const api = await import(pathToFileURL(resolve(controlRoot, 'src', 'index.mjs')).href);
-  const consumer = await import(pathToFileURL(resolve(controlRoot, 'src', 'consumers', 'cardworld-engine.mjs')).href);
+  const consumer = await import(pathToFileURL(resolve(controlRoot, 'src', 'flows', 'delivery-lifecycle', 'index.mjs')).href);
   const releaseIdentity = await api.loadReleaseIdentity({ root: controlRoot });
   const extensions = new api.ExtensionRegistry({ controlRoot, dataRoot });
-  const profile = await extensions.register(resolve(controlRoot, 'src', 'consumers', 'cardworld-engine.mjs'), { expectedRevision: 0, commandId: 'profile', authorityDecision: { actor: 'test', decision: 'approved' } });
-  const runtime = await extensions.register(resolve(controlRoot, 'src', 'extensions', 'codex-runtime.mjs'), { expectedRevision: 1, commandId: 'runtime', authorityDecision: { actor: 'test', decision: 'approved' } });
+  const profile = await extensions.register(resolve(controlRoot, 'src', 'flows', 'delivery-lifecycle', 'index.mjs'), { expectedRevision: 0, commandId: 'profile', authorityDecision: { actor: 'test', decision: 'approved' } });
+  const runtime = await extensions.register(resolve(controlRoot, 'integrations', 'codex', 'extensions', 'codex-runtime.mjs'), { expectedRevision: 1, commandId: 'runtime', authorityDecision: { actor: 'test', decision: 'approved' } });
   const projects = new api.ProjectRegistry({ root: dataRoot, controlRoot });
   const descriptor = consumer.createCardWorldProjectDescriptor({ workspaceRoot, harness: { version: releaseIdentity.version, artifactDigest: releaseIdentity.artifactDigest } });
   descriptor.extensions = descriptor.extensions.map(item => ({ ...item, digest: item.id === profile.id ? profile.digest : runtime.digest }));

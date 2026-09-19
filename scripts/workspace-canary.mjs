@@ -4,8 +4,8 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import { createExecutionAuthorizationAdapter, createHarness, createInMemoryRuntime, defineMemorySpace, digestJson, harnessTemporaryRoot, loadExtensionPack, REFERENCE_MEMORY_PROVIDER, RunCoordinator, sealLifecycleExecutionGrant, workspaceDecisionContext, workspaceFromProjectDescriptor, WorkspaceRegistry } from '../src/index.mjs';
 import { parsePseudoCommand } from '../integrations/codex/agent-harness-codex/hooks/pseudo-command-router.mjs';
-import { createCardWorldProjectDescriptor } from '../src/consumers/cardworld-engine.mjs';
-import { createTabletopCollectionProjectDescriptor } from '../src/consumers/tabletop-collection.mjs';
+import { createCardWorldProjectDescriptor } from '../src/flows/delivery-lifecycle/index.mjs';
+import { createTabletopCollectionProjectDescriptor } from '../src/flows/batch-production/index.mjs';
 
 // Exercise the legacy Engine and Collection closure path in the same command Gate.
 await import('./workflow-canary.mjs');
@@ -39,7 +39,15 @@ const handler = async packet => {
     const result = await harness.readPinnedSourceForDispatch(packet.projectId, packet.runId, packet.dispatchId, source.sourceId, file.path);
     return { text: result.bytes.toString('utf8'), ref: `${source.sourceId}/${file.path}`, file };
   };
-  if (nodeId === 'ingest') {
+  if (nodeId === 'brief') {
+    const sources = await Promise.all(manifest.sources.map(source => pinned(source)));
+    const path = packet.feature.metadata.outputPath;
+    const content = `# Audit Trail source brief\n\n${sources.map(source => `- ${source.ref}: ${source.text.trim()}`).join('\n')}\n`;
+    await mkdir(dirname(resolve(outputRoot, path)), { recursive: true });
+    await writeFile(resolve(outputRoot, path), content);
+    changedFiles = [path];
+    outputs = { document: out('document-ref-v1', { path, sha256: digestJson(content) }, sources.map(source => source.ref)) };
+  } else if (nodeId === 'ingest') {
     const source = manifest.sources.find(item => item.sourceId === packet.feature.metadata.sourceIds[0]);
     const read = await pinned(source);
     outputs = { facts: out('source-facts-v1', { text: read.text, sourceId: source.sourceId }, [read.ref]) };
@@ -83,10 +91,11 @@ const handler = async packet => {
 
 const approve = (descriptor, current = null) => ({ actor: 'workspace-canary', decision: 'approved', action: 'workspace-register', expiresAt: '2099-09-19T00:00:00.000Z', context: workspaceDecisionContext({ input: descriptor, current }) });
 const registry = new WorkspaceRegistry({ root: dataRoot, controlRoot: process.cwd() });
-const requirements = await loadExtensionPack('./src/consumers/requirements-design.mjs', { cwd: process.cwd(), controlRoot: process.cwd() });
-const qa = await loadExtensionPack('./src/consumers/knowledge-qa.mjs', { cwd: process.cwd(), controlRoot: process.cwd() });
-const profile = await loadExtensionPack('./src/extensions/composable-workflow.mjs', { cwd: process.cwd(), controlRoot: process.cwd() });
-const extensions = [requirements, qa, profile];
+const requirements = await loadExtensionPack('./src/flows/requirements-design/index.mjs', { cwd: process.cwd(), controlRoot: process.cwd() });
+const qa = await loadExtensionPack('./src/flows/knowledge-qa/index.mjs', { cwd: process.cwd(), controlRoot: process.cwd() });
+const sourceBrief = await loadExtensionPack('./examples/onboarding/source-brief/index.mjs', { cwd: process.cwd(), controlRoot: process.cwd() });
+const profile = await loadExtensionPack('./src/platform/extensions/composable-workflow.mjs', { cwd: process.cwd(), controlRoot: process.cwd() });
+const extensions = [requirements, qa, sourceBrief, profile];
 const runtimeManifest = { id: runtimeId, kind: 'agent-runtime', version: '1.0.0', capabilities: ['spawn', 'wait', 'send', 'heartbeat', 'interrupt', 'headless', 'workspace-shared'], permissions: [] };
 
 const makeWorkspace = async (workspaceId, withRequirements) => {
@@ -105,7 +114,7 @@ const makeWorkspace = async (workspaceId, withRequirements) => {
   const descriptor = {
     schemaVersion: '1.0', workspaceId, alias: workspaceId,
     profiles: ['composable-workflow'], extensions: extensions.map(extension => ({ id: extension.id, version: extension.version, digest: extension.digest })),
-    workflows: [qa, ...(withRequirements ? [requirements] : [])].map(extension => ({ id: extension.workflows[0].id, version: extension.workflows[0].version, artifactDigest: extension.workflows[0].artifactDigest, extensionId: extension.id, profileId: 'composable-workflow', allowedProjectIds: [...projectIds], defaultProjectScope: [...projectIds], executionTargetId: 'output' })),
+    workflows: [qa, ...(withRequirements ? [requirements, sourceBrief] : [])].map(extension => ({ id: extension.workflows[0].id, version: extension.workflows[0].version, artifactDigest: extension.workflows[0].artifactDigest, extensionId: extension.id, profileId: 'composable-workflow', allowedProjectIds: [...projectIds], defaultProjectScope: [...projectIds], executionTargetId: 'output' })),
     projects: [{ id: frontId, sourceIds: [`${workspaceId}-common`, `${workspaceId}-frontend`], executionTargetIds: ['output'] }, { id: backId, sourceIds: [`${workspaceId}-common`, `${workspaceId}-backend`], executionTargetIds: ['output'] }],
     sources: [
       { sourceId: `${workspaceId}-common`, type: 'document', root: docs, ownerProjectId: frontId, sharedProjectIds: [backId], allowedReceivers: [runtimeId] },
@@ -177,8 +186,8 @@ const runCommand = async (command, workflowInput, { expectClosed = true } = {}) 
 try {
   const alpha = await makeWorkspace('alpha', true);
   const beta = await makeWorkspace('beta', false);
-  const engineExtension = await loadExtensionPack('./src/consumers/cardworld-engine.mjs', { cwd: process.cwd(), controlRoot: process.cwd() });
-  const collectionExtension = await loadExtensionPack('./src/consumers/tabletop-collection.mjs', { cwd: process.cwd(), controlRoot: process.cwd() });
+  const engineExtension = await loadExtensionPack('./src/flows/delivery-lifecycle/index.mjs', { cwd: process.cwd(), controlRoot: process.cwd() });
+  const collectionExtension = await loadExtensionPack('./src/flows/batch-production/index.mjs', { cwd: process.cwd(), controlRoot: process.cwd() });
   const engineRoot = resolve(root, 'engine-output');
   const collectionRoot = resolve(root, 'collection-output');
   for (const path of [engineRoot, collectionRoot]) { await mkdir(resolve(path, '.git'), { recursive: true }); await writeFile(resolve(path, 'README.md'), 'Canary output\n'); }
@@ -195,6 +204,9 @@ try {
   const requirement = await runCommand('h:alpha flow requirements-design analyze audit-trail', { outputPaths: { requirements: 'docs/requirements.md', design: 'docs/design.md' } });
   assert((await readFile(resolve(alpha.outputRoot, 'docs/requirements.md'), 'utf8')).includes('Audit Trail'));
   assert((await readFile(resolve(alpha.outputRoot, 'docs/design.md'), 'utf8')).includes('recordAudit'));
+  const brief = await runCommand('h:alpha flow source-brief summarize audit-trail', { outputPaths: { brief: 'docs/brief.md' } });
+  assert.equal(brief.result.status, 'closed');
+  assert((await readFile(resolve(alpha.outputRoot, 'docs/brief.md'), 'utf8')).includes('recordAudit'));
   const review = requirement.result.state.submissions.find(submission => requirement.result.state.features.find(feature => feature.id === submission.featureId)?.metadata.workflow.nodeId === 'review');
   const commonSpace = requirement.plan.intent.workflowInput.memorySpaces.find(space => space.domainId.endsWith(':common'));
   const staged = await alpha.harness.memoryStore.stageFromSubmission({ space: commonSpace, projectId: requirement.plan.project.id, runId: requirement.result.state.runId, submissionId: review.submissionId, commandId: 'alpha-stage-common', expectedRevision: 0 });

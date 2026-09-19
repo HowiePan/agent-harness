@@ -2,7 +2,7 @@ import { spawn } from 'node:child_process';
 import { mkdir, rm, rmdir } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { assertHarnessWritePath, temporaryEnvironment } from '../src/write-boundary.mjs';
+import { assertHarnessWritePath, temporaryEnvironment } from '../src/common/write-boundary.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const temporary = assertHarnessWritePath(resolve(root, '.tmp', `pack-${process.pid}-${Date.now()}`), 'pack temporary directory');

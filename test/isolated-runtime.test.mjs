@@ -4,7 +4,7 @@ import { access, readFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { RunCoordinator } from '../src/index.mjs';
-import { extensionPack as codexRuntimeExtension } from '../src/extensions/codex-headless-runtime.mjs';
+import { extensionPack as codexRuntimeExtension } from '../integrations/codex/extensions/codex-headless-runtime.mjs';
 import { feature, makeFixture, startRun } from './test-support.mjs';
 
 const probe = resolve(dirname(fileURLToPath(import.meta.url)), 'fixtures', 'isolated-codex-probe.mjs');

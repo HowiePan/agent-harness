@@ -3,9 +3,9 @@ import { rmSync } from 'node:fs';
 import { access, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { dirname, isAbsolute, relative, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { digestJson, sha256 } from '../src/canonical.mjs';
-import { assert } from '../src/errors.mjs';
-import { assertHarnessWritePath, temporaryEnvironment } from '../src/write-boundary.mjs';
+import { digestJson, sha256 } from '../src/common/canonical.mjs';
+import { assert } from '../src/common/errors.mjs';
+import { assertHarnessWritePath, temporaryEnvironment } from '../src/common/write-boundary.mjs';
 
 const sourceRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const take = name => {

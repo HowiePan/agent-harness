@@ -2,12 +2,13 @@ import { spawn } from 'node:child_process';
 import { mkdir, readdir, rm, rmdir } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { assertHarnessWritePath, temporaryEnvironment } from '../src/write-boundary.mjs';
+import { assertHarnessWritePath, temporaryEnvironment } from '../src/common/write-boundary.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const mode = process.argv[2] ?? 'all';
+const discover = async (directory, prefix = 'test') => (await Promise.all((await readdir(directory, { withFileTypes: true })).map(async entry => entry.isDirectory() ? discover(resolve(directory, entry.name), `${prefix}/${entry.name}`) : entry.name.endsWith('.test.mjs') ? [`${prefix}/${entry.name}`] : []))).flat();
 const selections = {
-  all: (await readdir(resolve(root, 'test'))).filter(name => name.endsWith('.test.mjs')).sort().map(name => `test/${name}`),
+  all: (await discover(resolve(root, 'test'))).sort(),
   conformance: ['test/conformance.test.mjs'],
   canary: ['test/canary.test.mjs'],
 };

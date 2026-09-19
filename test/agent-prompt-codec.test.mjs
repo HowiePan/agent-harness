@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { digestJson, sha256 } from '../src/canonical.mjs';
-import { AGENT_PROMPT_CONTRACT_VERSION, compileAgentPrompt, createAgentPromptCodec, REFERENCE_AGENT_PROMPT_CODEC_MANIFEST } from '../src/plugins/codec/agent-prompt-codec.mjs';
-import { validatePluginInstance, validatePluginManifest } from '../src/plugins/contracts.mjs';
+import { digestJson, sha256 } from '../src/common/canonical.mjs';
+import { AGENT_PROMPT_CONTRACT_VERSION, compileAgentPrompt, createAgentPromptCodec, REFERENCE_AGENT_PROMPT_CODEC_MANIFEST } from '../src/platform/plugins/codec/agent-prompt-codec.mjs';
+import { validatePluginInstance, validatePluginManifest } from '../src/platform/plugins/contracts.mjs';
 
 const packet = () => ({
   protocolVersion: '1.0',

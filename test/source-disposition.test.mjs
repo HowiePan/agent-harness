@@ -3,7 +3,7 @@ import test from 'node:test';
 import { mkdir, readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { recordLegacySourceUnavailable, verifyLegacySourceDisposition } from '../src/index.mjs';
-import { digestJson, withoutKeys } from '../src/canonical.mjs';
+import { digestJson, withoutKeys } from '../src/common/canonical.mjs';
 import { makeFixture } from './test-support.mjs';
 
 const importer = { id: 'legacy-probe', version: '1.0.0' };

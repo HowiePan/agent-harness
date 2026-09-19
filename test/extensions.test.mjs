@@ -3,7 +3,7 @@ import test from 'node:test';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { createHarness, createStaticModelRouter, defineExtensionPack, digestJson, ExtensionRegistry, loadExtensionPack, projectDescriptorInput, projectDescriptorSchemas, projectExecutionPolicyDecisionContext, ProjectRegistry, sha256, validateJsonSchema } from '../src/index.mjs';
-import { extensionPack as engineDeliveryExtension } from '../src/consumers/cardworld-engine.mjs';
+import { extensionPack as engineDeliveryExtension } from '../src/flows/delivery-lifecycle/index.mjs';
 import { makeFixture, startRun } from './test-support.mjs';
 
 test('default application installs no consumer, provider, or legacy extension', async t => {

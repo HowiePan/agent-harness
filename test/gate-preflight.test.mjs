@@ -2,8 +2,8 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
-import { inspectProjectGateCapabilities } from '../src/gates/project-gate-runner.mjs';
-import { harnessTemporaryRoot } from '../src/write-boundary.mjs';
+import { inspectProjectGateCapabilities } from '../src/platform/workflow/gates/project-gate-runner.mjs';
+import { harnessTemporaryRoot } from '../src/common/write-boundary.mjs';
 
 test('Gate preflight aggregates observer, recipe, script, package-script, and sandbox blockers', async t => {
   const parent = resolve(harnessTemporaryRoot(), 'gate-preflight');

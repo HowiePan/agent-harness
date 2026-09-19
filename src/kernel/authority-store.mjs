@@ -1,10 +1,10 @@
 import { mkdir, readdir } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
-import { digestJson, newId, withoutKeys } from '../canonical.mjs';
-import { assert, fail } from '../errors.mjs';
-import { safeSegment } from '../paths.mjs';
+import { digestJson, newId, withoutKeys } from '../common/canonical.mjs';
+import { assert, fail } from '../common/errors.mjs';
+import { safeSegment } from '../common/paths.mjs';
 import { atomicWriteJson, readJson, withDirectoryLock } from './atomic-io.mjs';
-import { assertHarnessWritePath } from '../write-boundary.mjs';
+import { assertHarnessWritePath } from '../common/write-boundary.mjs';
 
 const authorityDigest = state => digestJson(withoutKeys(state, ['authorityDigest']));
 

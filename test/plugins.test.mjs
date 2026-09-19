@@ -51,7 +51,7 @@ test('Artifact Provider verifies every packaged file digest', async t => {
   const fixture = await makeFixture(); t.after(() => fixture.cleanup());
   const artifactRoot = resolve(fixture.root, 'artifacts'); await mkdir(artifactRoot);
   await writeFile(resolve(artifactRoot, 'bundle.bin'), 'artifact');
-  const { sha256 } = await import('../src/canonical.mjs');
+  const { sha256 } = await import('../src/common/canonical.mjs');
   await writeFile(resolve(artifactRoot, 'manifest.json'), JSON.stringify({ version: '1.2.3', artifacts: [{ path: 'bundle.bin', sha256: sha256('artifact') }] }));
   const manifest = { id: 'artifact-provider', kind: 'artifact-provider', version: '1.0.0', capabilities: ['local'], permissions: ['artifact.read'] };
   const provider = createLocalArtifactProvider({ manifest, allowedRoot: artifactRoot });

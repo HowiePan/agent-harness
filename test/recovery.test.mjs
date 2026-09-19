@@ -2,9 +2,9 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { CardWorldLegacyImporter } from '../src/recovery/cardworld-importer.mjs';
-import { CollectionLegacyImporter } from '../src/recovery/collection-importer.mjs';
-import { extensionPack as legacyCompatibilityExtension } from '../src/extensions/legacy-compat.mjs';
+import { CardWorldLegacyImporter } from '../integrations/legacy-consumers/cardworld/importer.mjs';
+import { CollectionLegacyImporter } from '../integrations/legacy-consumers/collection/importer.mjs';
+import { extensionPack as legacyCompatibilityExtension } from '../integrations/legacy-consumers/legacy-compat.mjs';
 import { makeFixture, startRun } from './test-support.mjs';
 
 const fixtures = resolve(dirname(fileURLToPath(import.meta.url)), 'fixtures', 'legacy');

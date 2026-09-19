@@ -1,2 +1,2 @@
 #!/usr/bin/env node
-import '../src/cli.mjs';
+import '../src/interfaces/cli/index.mjs';

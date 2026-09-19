@@ -2,11 +2,11 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
-import { createHarness } from '../src/app/harness.mjs';
-import { createCardWorldProjectDescriptor } from '../src/consumers/cardworld-engine.mjs';
-import { loadExtensionPack } from '../src/extensions/contract.mjs';
-import { createVisibleHostAdapter } from '../src/plugins/runtime/visible-host-adapter.mjs';
-import { harnessTemporaryRoot } from '../src/write-boundary.mjs';
+import { createHarness } from '../src/application/harness.mjs';
+import { createCardWorldProjectDescriptor } from '../src/flows/delivery-lifecycle/index.mjs';
+import { loadExtensionPack } from '../src/platform/extensions/contract.mjs';
+import { createVisibleHostAdapter } from '../src/platform/plugins/runtime/visible-host-adapter.mjs';
+import { harnessTemporaryRoot } from '../src/common/write-boundary.mjs';
 
 const releaseIdentity = { version: '1.0.0', artifactDigest: 'a'.repeat(64), verified: true };
 
@@ -164,8 +164,8 @@ const setup = async ({ failFirstWait = false, failFirstInspect = false, failFirs
   const dataRoot = resolve(root, 'data');
   await mkdir(resolve(workspace, '.git'), { recursive: true });
   await writeFile(resolve(workspace, 'README.md'), '# Quality fixture\n', 'utf8');
-  const engine = await loadExtensionPack('./src/consumers/cardworld-engine.mjs', { cwd: controlRoot, controlRoot });
-  const runtime = await loadExtensionPack('./src/extensions/codex-runtime.mjs', { cwd: controlRoot, controlRoot });
+  const engine = await loadExtensionPack('./src/flows/delivery-lifecycle/index.mjs', { cwd: controlRoot, controlRoot });
+  const runtime = await loadExtensionPack('./integrations/codex/extensions/codex-runtime.mjs', { cwd: controlRoot, controlRoot });
   const host = createHost({ workspace, failFirstWait, failFirstInspect, failFirstConfirm, failFirstResult, repeatFindingOnce });
   const create = () => createHarness({ controlRoot, dataRoot, releaseIdentity, strictProjectIdentity: false, extensions: [engine, runtime], agentAdapter: host.adapter });
   const harness = await create();

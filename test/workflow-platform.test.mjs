@@ -3,8 +3,8 @@ import test from 'node:test';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { assertSourceManifestCurrent, captureSourceManifest, compileWorkflowFeatures, defineMemorySpace, defineWorkflowDefinition, digestJson, harnessTemporaryRoot, MemoryStore, readPinnedSource, readSourceForDispatch, runWorkflowInstanceSet, searchSourceForDispatch, WorkflowAdmissionStore } from '../src/index.mjs';
-import { resolveLifecycleExecutionPolicy } from '../src/plugins/runtime/execution-policy.mjs';
-import { composableWorkflowProfile } from '../src/profiles/composable-workflow.mjs';
+import { resolveLifecycleExecutionPolicy } from '../src/platform/plugins/runtime/execution-policy.mjs';
+import { composableWorkflowProfile } from '../src/platform/workflow/profiles/composable-workflow.mjs';
 import { parsePseudoCommand } from '../integrations/codex/agent-harness-codex/hooks/pseudo-command-router.mjs';
 
 const rootBase = resolve(harnessTemporaryRoot(), 'workflow-platform-tests');

@@ -2,12 +2,12 @@ import { spawn } from 'node:child_process';
 import { cp, mkdir, mkdtemp, readFile, readdir, rm, rmdir, stat, writeFile } from 'node:fs/promises';
 import { dirname, isAbsolute, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { sha256 } from '../src/canonical.mjs';
-import { assert } from '../src/errors.mjs';
-import { sealReleaseCandidateReceipt } from '../src/maintenance/release-receipt.mjs';
-import { assertNoLinkPath } from '../src/paths.mjs';
-import { verifyReleaseManifest } from '../src/release-identity.mjs';
-import { assertHarnessWritePath, temporaryEnvironment } from '../src/write-boundary.mjs';
+import { sha256 } from '../src/common/canonical.mjs';
+import { assert } from '../src/common/errors.mjs';
+import { sealReleaseCandidateReceipt } from '../src/platform/maintenance/release-receipt.mjs';
+import { assertNoLinkPath } from '../src/common/paths.mjs';
+import { verifyReleaseManifest } from '../src/application/release-identity.mjs';
+import { assertHarnessWritePath, temporaryEnvironment } from '../src/common/write-boundary.mjs';
 import { parseLastJsonDocument } from './parse-json-output.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -49,7 +49,7 @@ const validateSkills = async packageRoot => {
   const manifest = JSON.parse(await readFile(resolve(pluginRoot, '.codex-plugin', 'plugin.json'), 'utf8'));
   assert(manifest.name === 'agent-harness-codex' && manifest.version === '1.0.0' && manifest.skills === './skills/', 'RELEASE_CODEX_PLUGIN_INVALID', 'Packaged Codex plugin manifest is invalid.');
   const skillsRoot = resolve(pluginRoot, 'skills');
-  const expected = ['agent-harness-command', 'agent-harness-extension-author', 'agent-harness-operator'];
+  const expected = ['agent-harness-command', 'agent-harness-extension-author', 'agent-harness-flow-author', 'agent-harness-operator', 'agent-harness-workspace-author'];
   const actual = (await readdir(skillsRoot, { withFileTypes: true })).filter(entry => entry.isDirectory()).map(entry => entry.name).sort();
   assert(JSON.stringify(actual) === JSON.stringify(expected), 'RELEASE_SKILL_SET_INVALID', 'Packaged Codex plugin must contain only the generic command router and operator/extension Skills.', { expected, actual });
   for (const name of expected) {

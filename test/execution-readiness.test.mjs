@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { sealExecutionReadinessReport, verifyExecutionReadinessReport } from '../src/execution-readiness.mjs';
-import { runLineageResolutionDigest } from '../src/lineage.mjs';
+import { sealExecutionReadinessReport, verifyExecutionReadinessReport } from '../src/application/execution-readiness.mjs';
+import { runLineageResolutionDigest } from '../src/application/lineage.mjs';
 
 const plan = {
   planDigest: 'a'.repeat(64),

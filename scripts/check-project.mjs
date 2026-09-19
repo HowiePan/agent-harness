@@ -1,16 +1,20 @@
 import { access, readFile, readdir } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { validatePluginManifest } from '../src/plugins/contracts.mjs';
-import { digestJson } from '../src/canonical.mjs';
-import { assertSchemaDefinition, validateJsonSchema } from '../src/json-schema.mjs';
-import { createCardWorldProjectDescriptor } from '../src/consumers/cardworld-engine.mjs';
-import { createTabletopCollectionProjectDescriptor } from '../src/consumers/tabletop-collection.mjs';
+import { validatePluginManifest } from '../src/platform/plugins/contracts.mjs';
+import { digestJson } from '../src/common/canonical.mjs';
+import { assertSchemaDefinition, validateJsonSchema } from '../src/common/json-schema.mjs';
+import { createCardWorldProjectDescriptor } from '../src/flows/delivery-lifecycle/index.mjs';
+import { createTabletopCollectionProjectDescriptor } from '../src/flows/batch-production/index.mjs';
 import { validateReleaseVersionContract } from './release-version-contract.mjs';
+import { checkFlowStructure } from './check-flow-structure.mjs';
+import { checkCurrentDocs } from './check-current-docs.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const packageJson = JSON.parse(await readFile(resolve(root, 'package.json'), 'utf8'));
 const errors = [];
+errors.push(...await checkFlowStructure(root));
+errors.push(...await checkCurrentDocs(root));
 const schemas = new Map();
 if (packageJson.version !== '1.0.0') errors.push('package version must be 1.0.0');
 if (packageJson.license !== 'UNLICENSED') errors.push('package license must match the owner-approved all-rights-reserved policy');
@@ -101,7 +105,7 @@ const walk = async directory => {
   }
 };
 await walk(resolve(root, 'src', 'kernel'));
-for (const file of [resolve(root, 'src', 'index.mjs'), resolve(root, 'src', 'app', 'harness.mjs'), resolve(root, 'src', 'cli.mjs'), resolve(root, 'src', 'plugins', 'index.mjs'), resolve(root, 'src', 'profiles', 'index.mjs'), resolve(root, 'src', 'recovery', 'index.mjs')]) {
+for (const file of [resolve(root, 'src', 'index.mjs'), resolve(root, 'src', 'application', 'harness.mjs'), resolve(root, 'src', 'interfaces', 'cli', 'index.mjs'), resolve(root, 'src', 'platform', 'plugins', 'index.mjs'), resolve(root, 'src', 'platform', 'workflow', 'profiles', 'index.mjs'), resolve(root, 'src', 'platform', 'recovery', 'index.mjs')]) {
   const text = await readFile(file, 'utf8');
   if (banned.test(text)) errors.push(`business/provider term leaked into default composition: ${file.slice(root.length + 1)}`);
 }
@@ -129,4 +133,4 @@ for (const name of await readdir(skillsRoot)) {
 if (errors.length) {
   console.error(errors.join('\n'));
   process.exitCode = 1;
-} else console.log(JSON.stringify({ ok: true, version: packageJson.version, checked: ['exports', 'schema-definitions', 'schema-references', 'descriptor-inputs', 'descriptor-registry-round-trip', 'profiles', 'plugins', 'extensions', 'skills', 'kernel-boundary', 'default-composition', 'write-boundary', 'zero-runtime-dependencies'] }, null, 2));
+} else console.log(JSON.stringify({ ok: true, version: packageJson.version, checked: ['exports', 'schema-definitions', 'schema-references', 'descriptor-inputs', 'descriptor-registry-round-trip', 'profiles', 'plugins', 'extensions', 'skills', 'flow-structure', 'current-docs', 'kernel-boundary', 'default-composition', 'write-boundary', 'zero-runtime-dependencies'] }, null, 2));

@@ -2,10 +2,10 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { dirname, resolve } from 'node:path';
 import { access, mkdir, readFile, writeFile } from 'node:fs/promises';
-import { adaptCodexStructuredOutputSchema, createCodexCliRuntime, resolveCodexExecutionPolicy, validateCodexStructuredOutputSchema } from '../src/plugins/runtime/codex-cli-runtime.mjs';
-import { businessResultFromRuntime } from '../src/coordinator/run-coordinator.mjs';
-import { compileAgentPrompt } from '../src/plugins/codec/agent-prompt-codec.mjs';
-import { createAgentRuntimeLaunchCapability } from '../src/execution-authorization.mjs';
+import { adaptCodexStructuredOutputSchema, createCodexCliRuntime, resolveCodexExecutionPolicy, validateCodexStructuredOutputSchema } from '../integrations/codex/runtime/codex-cli-runtime.mjs';
+import { businessResultFromRuntime } from '../src/platform/workflow/coordinator/run-coordinator.mjs';
+import { compileAgentPrompt } from '../src/platform/plugins/codec/agent-prompt-codec.mjs';
+import { createAgentRuntimeLaunchCapability } from '../src/platform/execution/authorization.mjs';
 import { makeFixture } from './test-support.mjs';
 
 const runtimePacket = (fixture, dispatchId, extra = {}) => ({

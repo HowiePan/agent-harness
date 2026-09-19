@@ -2,14 +2,14 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { execFile as execFileCallback } from 'node:child_process';
 import { promisify } from 'node:util';
-import { compileAgentPrompt } from '../src/plugins/codec/agent-prompt-codec.mjs';
-import { createCodexCliRuntime } from '../src/plugins/runtime/codex-cli-runtime.mjs';
+import { compileAgentPrompt } from '../src/platform/plugins/codec/agent-prompt-codec.mjs';
+import { createCodexCliRuntime } from '../integrations/codex/runtime/codex-cli-runtime.mjs';
 import {
   createExecutionAuthorizationAdapter,
   sealLifecycleExecutionGrant,
   verifyHeadlessExecutionGrant,
-} from '../src/execution-authorization.mjs';
-import { createHarness } from '../src/app/harness.mjs';
+} from '../src/platform/execution/authorization.mjs';
+import { createHarness } from '../src/application/harness.mjs';
 import { makeFixture } from './test-support.mjs';
 
 const execFile = promisify(execFileCallback);

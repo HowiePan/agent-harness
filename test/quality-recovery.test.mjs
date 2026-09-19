@@ -2,8 +2,8 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
-import { extensionPack as legacyCompatibilityExtension } from '../src/extensions/legacy-compat.mjs';
-import { recoveryResolutionMediaType, sealRecoveryResolution } from '../src/recovery/resolution.mjs';
+import { extensionPack as legacyCompatibilityExtension } from '../integrations/legacy-consumers/legacy-compat.mjs';
+import { recoveryResolutionMediaType, sealRecoveryResolution } from '../src/platform/recovery/resolution.mjs';
 import { command, dispatchAndBind, makeFixture, recordResult, startRun } from './test-support.mjs';
 
 const authorizeRecovery = async (fixture, state, suffix = 'recovery', decisionOverrides = {}) => {

@@ -13,8 +13,8 @@ const fixture = async () => {
   await mkdir(sourceRoot, { recursive: true });
   await writeFile(resolve(targetRoot, 'README.md'), 'workspace output\n');
   await writeFile(resolve(sourceRoot, 'main.mjs'), 'export const answer = 42;\n');
-  const qa = await loadExtensionPack('./src/consumers/knowledge-qa.mjs', { cwd: process.cwd(), controlRoot: process.cwd() });
-  const profile = await loadExtensionPack('./src/extensions/composable-workflow.mjs', { cwd: process.cwd(), controlRoot: process.cwd() });
+  const qa = await loadExtensionPack('./src/flows/knowledge-qa/index.mjs', { cwd: process.cwd(), controlRoot: process.cwd() });
+  const profile = await loadExtensionPack('./src/platform/extensions/composable-workflow.mjs', { cwd: process.cwd(), controlRoot: process.cwd() });
   const workflow = qa.workflows[0];
   const descriptor = {
     schemaVersion: '1.0', workspaceId: 'atlas', alias: 'atlas', profiles: ['composable-workflow'],

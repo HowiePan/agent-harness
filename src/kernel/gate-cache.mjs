@@ -1,9 +1,9 @@
 import { mkdir, readdir } from 'node:fs/promises';
 import { resolve } from 'node:path';
-import { digestJson } from '../canonical.mjs';
-import { assert } from '../errors.mjs';
+import { digestJson } from '../common/canonical.mjs';
+import { assert } from '../common/errors.mjs';
 import { atomicWriteJson, readJson } from './atomic-io.mjs';
-import { assertHarnessWritePath } from '../write-boundary.mjs';
+import { assertHarnessWritePath } from '../common/write-boundary.mjs';
 
 export const gateCacheKey = input => digestJson({ gateId: input.gateId, specDigest: input.specDigest, sourceDigest: input.sourceDigest, toolchainDigest: input.toolchainDigest, lockDigest: input.lockDigest ?? null, environmentDigest: input.environmentDigest, pluginDigest: input.pluginDigest });
 

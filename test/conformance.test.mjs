@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { resolve } from 'node:path';
 import { createInMemoryRuntime, createProcessRuntime, DEFAULT_PROCESS_OUTPUTS, PluginHost } from '../src/index.mjs';
-import { createCodexRuntime } from '../src/plugins/runtime/codex-runtime.mjs';
+import { createCodexRuntime } from '../integrations/codex/runtime/codex-runtime.mjs';
 import { makeFixture } from './test-support.mjs';
 
 const memoryManifest = { id: 'memory-non-codex-runtime', kind: 'agent-runtime', version: '1.0.0', capabilities: ['spawn', 'wait', 'send', 'heartbeat', 'interrupt', 'headless'], permissions: [] };

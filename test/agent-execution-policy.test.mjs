@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { extensionPack as codexRuntimeExtension } from '../src/extensions/codex-runtime.mjs';
-import { RunCoordinator } from '../src/coordinator/run-coordinator.mjs';
-import { assertAgentRuntimeCompatible, assertRuntimeTransportReceipt, resolveLifecycleExecutionPolicy } from '../src/plugins/runtime/execution-policy.mjs';
-import { createVisibleHostAdapter } from '../src/plugins/runtime/visible-host-adapter.mjs';
-import { validatePluginManifest } from '../src/plugins/contracts.mjs';
+import { extensionPack as codexRuntimeExtension } from '../integrations/codex/extensions/codex-runtime.mjs';
+import { RunCoordinator } from '../src/platform/workflow/coordinator/run-coordinator.mjs';
+import { assertAgentRuntimeCompatible, assertRuntimeTransportReceipt, resolveLifecycleExecutionPolicy } from '../src/platform/plugins/runtime/execution-policy.mjs';
+import { createVisibleHostAdapter } from '../src/platform/plugins/runtime/visible-host-adapter.mjs';
+import { validatePluginManifest } from '../src/platform/plugins/contracts.mjs';
 import { command, feature, makeFixture, startRun } from './test-support.mjs';
 
 const visibleManifest = {

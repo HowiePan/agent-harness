@@ -1,6 +1,6 @@
 import { resolve } from 'node:path';
-import { digestJson } from '../canonical.mjs';
-import { safeSegment } from '../paths.mjs';
+import { digestJson } from '../common/canonical.mjs';
+import { safeSegment } from '../common/paths.mjs';
 import { atomicWriteJson } from './atomic-io.mjs';
 
 export const buildRunReceipt = state => {

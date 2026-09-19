@@ -1,14 +1,14 @@
 #!/usr/bin/env node
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { createHarness } from '../../../../src/app/harness.mjs';
-import { ExtensionRegistry } from '../../../../src/extensions/registry.mjs';
-import { loadReleaseIdentity } from '../../../../src/release-identity.mjs';
+import { createHarness } from '../../../../src/application/harness.mjs';
+import { ExtensionRegistry } from '../../../../src/platform/extensions/registry.mjs';
+import { loadReleaseIdentity } from '../../../../src/application/release-identity.mjs';
 import { validateActiveReleaseBinding } from '../lib/active-release-binding.mjs';
 import { createCodexCollaborationHostAdapter } from '../lib/codex-collaboration-host-adapter.mjs';
 import { createStdioHostExchange } from '../lib/stdio-host-exchange.mjs';
 import { decodeVisibleLifecycleIntent } from '../lib/visible-lifecycle-intent.mjs';
-import { captureSourceManifest } from '../../../../src/workflows/source-manifest.mjs';
+import { captureSourceManifest } from '../../../../src/platform/workflow/source-manifest.mjs';
 
 const samePath = (left, right) => process.platform === 'win32'
   ? resolve(left).toLowerCase() === resolve(right).toLowerCase()

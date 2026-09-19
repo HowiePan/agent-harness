@@ -1,12 +1,12 @@
 import { readFileSync } from 'node:fs';
 import { mkdir, readdir } from 'node:fs/promises';
 import { resolve } from 'node:path';
-import { digestJson, withoutKeys } from '../../../../src/canonical.mjs';
-import { assert } from '../../../../src/errors.mjs';
-import { assertJsonSchema } from '../../../../src/json-schema.mjs';
+import { digestJson, withoutKeys } from '../../../../src/common/canonical.mjs';
+import { assert } from '../../../../src/common/errors.mjs';
+import { assertJsonSchema } from '../../../../src/common/json-schema.mjs';
 import { atomicWriteJson, readJson, withDirectoryLock } from '../../../../src/kernel/atomic-io.mjs';
-import { safeSegment } from '../../../../src/paths.mjs';
-import { assertHarnessWritePath } from '../../../../src/write-boundary.mjs';
+import { safeSegment } from '../../../../src/common/paths.mjs';
+import { assertHarnessWritePath } from '../../../../src/common/write-boundary.mjs';
 
 const schema = JSON.parse(readFileSync(new URL('../../../../schemas/codex-host-effect.schema.json', import.meta.url), 'utf8'));
 const terminalStates = new Set(['settled', 'contained']);
