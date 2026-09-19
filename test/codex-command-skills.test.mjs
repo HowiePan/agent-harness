@@ -64,7 +64,7 @@ test('Codex plugin exposes one explicit-project pseudo-command router', async ()
     readFile(resolve(pluginRoot, 'hooks', 'hooks.json'), 'utf8'),
   ]);
   assert.match(skill, /^---\nname: agent-harness-command\n/);
-  assert.match(skill, /h:<project-alias> <action> <target> \[preset\]/);
+  assert.match(skill, /h:<workspace-or-legacy-project-alias> <action> <target> \[preset\]/);
   assert.match(skill, /h:where/);
   assert.match(skill, /h:report/);
   assert.match(skill, /commandManifest/);
@@ -161,6 +161,32 @@ test('binding configuration makes project selection and Harness location determi
   } finally {
     await rm(fixture, { recursive: true, force: true });
   }
+});
+
+test('Workspace aliases route exact Workflow and member Project scope into a sealed visible intent', async () => {
+  const fixture = await createTemporaryFixture('agent-harness-workspace-binding-');
+  try {
+    const installedPlugin = resolve(fixture, 'plugin');
+    const controlRoot = resolve(fixture, 'harness');
+    const workspaceRoot = resolve(fixture, 'output');
+    await createActiveReleaseFixture(controlRoot);
+    await mkdir(installedPlugin, { recursive: true });
+    await mkdir(workspaceRoot, { recursive: true });
+    const digest = 'a'.repeat(64);
+    await configureBindings({ pluginRoot: installedPlugin, controlRoot, entrypoint: 'runtime/bin/agent-harness.mjs', dataRoot: 'data', workspaceSpecs: [`alpha|alpha|output|${workspaceRoot}`], workflowSpecs: [`alpha|knowledge-qa|1.0.0|${digest}|composable-workflow|knowledge-qa-workflow`] });
+    const parsed = parsePseudoCommand('h:alpha flow knowledge-qa ask audit --projects frontend,backend');
+    assert.deepEqual(parsed.projectIds, ['frontend', 'backend']);
+    const routed = await hookResponse({ prompt: 'h:alpha flow knowledge-qa ask audit --project frontend', cwd: workspaceRoot }, { pluginRoot: installedPlugin });
+    const context = routed.hookSpecificOutput.additionalContext;
+    const payload = JSON.parse(context.slice(context.indexOf('解析结果：') + '解析结果：'.length));
+    const intent = decodeVisibleLifecycleIntent(payload.coordinationIntent);
+    assert.deepEqual(intent.project.projectIds, ['frontend']);
+    assert.equal(intent.project.workspaceId, 'alpha');
+    assert.equal(intent.project.projectId, 'ws.alpha.output');
+    assert.equal(intent.project.workflowDigest, digest);
+    assert.match((await hookResponse({ prompt: 'h:flows alpha', cwd: workspaceRoot }, { pluginRoot: installedPlugin })).hookSpecificOutput.additionalContext, /knowledge-qa/);
+    assert.equal(parsePseudoCommand('h:alpha ask audit --projects frontend,frontend').kind, 'invalid');
+  } finally { await rm(fixture, { recursive: true, force: true }); }
 });
 
 test('router recovers its exact install-root binding when a restarted Hook omits runtime environment variables', async () => {

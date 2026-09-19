@@ -4,16 +4,22 @@ import { resolve } from 'node:path';
 import { createHarness, defaultDataRoot } from './app/harness.mjs';
 import { applyBootstrapPlan, createBootstrapPlan } from './bootstrap.mjs';
 import { newId } from './canonical.mjs';
+import { safeSegment } from './paths.mjs';
 import { ProjectGateRunner } from './gates/project-gate-runner.mjs';
 import { loadExtensionPack } from './extensions/contract.mjs';
 import { ExtensionRegistry } from './extensions/registry.mjs';
 import { initializeHarnessInstallation } from './installation.mjs';
 import { loadReleaseIdentity } from './release-identity.mjs';
 import { ProjectRegistry } from './registry/project-registry.mjs';
+import { WorkspaceRegistry } from './workspaces/workspace-registry.mjs';
 import { inspectLifecycleReadiness, readRunStatus } from './readiness.mjs';
 import { assertHarnessWritePath, harnessControlRoot, harnessProjectRoot } from './write-boundary.mjs';
 import { verifyDefectBundle } from './maintenance/defect-bundle.mjs';
 import { recordIssueIntake } from './maintenance/issue-intake.mjs';
+import { captureSourceManifest } from './workflows/source-manifest.mjs';
+import { readSourceForDispatch, searchSourceForDispatch } from './workflows/source-tool.mjs';
+import { MemoryStore } from './memory/memory-store.mjs';
+import { AuthorityStore } from './kernel/authority-store.mjs';
 import { listIssueRecords, readIssueTriage, recordIssueTriage } from './maintenance/issue-triage.mjs';
 import { applyReleaseActivationPlan, createReleaseActivationPlan } from './maintenance/release-activation.mjs';
 
@@ -49,7 +55,7 @@ const subject = argv[1];
 
 const help = () => console.log(`Agent Harness V1.0.0
 
-Global options: [--control-root <path>] [--data-root <path>] [--extension <module>]... [--harness-digest <sha256>]
+Global options: [--control-root <path>] [--data-root <path>] [--memory-root <path>] [--extension <module>]... [--harness-digest <sha256>]
 
 agent-harness installation init --control-root <standalone-path>
 agent-harness doctor [--control-root <path>] [--data-root <path>]
@@ -60,6 +66,17 @@ agent-harness project register --descriptor <json>
 agent-harness project register --id <id> --workspace <absolute-path> --profiles <id,id> --agent-execution-mode <conversation-visible|headless> --runtime <plugin-id>
 agent-harness project descriptor --extension <module> --input <json>
 agent-harness project list
+agent-harness workspace register --input <json|-> --expected-revision <n> --command-id <id> --decision <json>
+agent-harness workspace list|show [--workspace-id <id>]
+agent-harness workspace rollback --workspace-id <id> --revision <n> --command-id <id> --decision <json>
+agent-harness workflow list --project <id>
+agent-harness source capture --input <json|->
+agent-harness source read --project <id> --run <id> --dispatch <id> --source <id> --path <relative-path>
+agent-harness source search --project <id> --run <id> --dispatch <id> --query <literal> [--max <n>]
+agent-harness memory query --input <json|-> [--memory-root <path>]
+agent-harness memory propose|stage|promote|revoke|reject --input <json|-> --expected-revision <n> --command-id <id> [--memory-root <path>]
+agent-harness memory recover [--memory-root <path>]
+agent-harness memory export|import --input <json|-> [--command-id <id>] [--expected-revision <n>]
 agent-harness features compile --extension <module> --input <json>
 agent-harness run start --project <id> --run <id> --profile <id> --features <json> [--config <json>] [--execution-workspace <absolute-path>]
 agent-harness run status --project <id> --run <id>
@@ -80,6 +97,7 @@ agent-harness run recovery-rollback --project <id> --run <id> --snapshot-ref <ev
 agent-harness run close --project <id> --run <id>
 agent-harness run supersede --project <id> --run <id> --replacement-run <id> --plan-digest <digest> [--reason <text>]
 agent-harness lifecycle plan --input <json|-> [--control-root <path>] [--data-root <path>]
+agent-harness lifecycle preflight|start --workspace-id <id> ...
 agent-harness lifecycle preflight --plan <json|-> [--no-write-probe]
 agent-harness lifecycle start --plan <json|-> --preflight <json> --command-id <id>
 agent-harness release activation-plan [--control-root <path>] [--data-root <path>] [--project <id>] [--project-descriptor <json>]...
@@ -140,6 +158,9 @@ if (command === 'issue' && subject === 'triage') {
   process.exit(0);
 }
 const dataRoot = resolve(take('--data-root') ?? defaultDataRoot(controlRoot));
+const scopedWorkspaceId = take('--workspace-id') ?? null;
+if (scopedWorkspaceId) safeSegment(scopedWorkspaceId, 'workspaceId');
+const runDataRoot = scopedWorkspaceId ? resolve(dataRoot, 'workspaces', scopedWorkspaceId) : dataRoot;
 const releaseIdentity = await loadReleaseIdentity({ artifactDigest: take('--harness-digest') });
 const extensionRegistry = new ExtensionRegistry({ dataRoot, controlRoot });
 
@@ -220,9 +241,51 @@ if (command === 'project' && subject === 'list') {
   console.log(JSON.stringify({ ok: true, projects }, null, 2));
   process.exit(0);
 }
+if (command === 'workspace' && ['register', 'list', 'show', 'rollback'].includes(subject)) {
+  const registry = new WorkspaceRegistry({ root: dataRoot, controlRoot });
+  if (subject === 'list') console.log(JSON.stringify({ ok: true, workspaces: await registry.list() }, null, 2));
+  if (subject === 'show') console.log(JSON.stringify({ ok: true, workspace: await registry.get(take('--workspace-id')) }, null, 2));
+  if (subject === 'register') console.log(JSON.stringify({ ok: true, workspace: await registry.register(await jsonInput('--input'), { expectedRevision: Number(take('--expected-revision') ?? 0), commandId: take('--command-id'), authorityDecision: await jsonFile(take('--decision')) }) }, null, 2));
+  if (subject === 'rollback') console.log(JSON.stringify({ ok: true, workspace: await registry.rollback(take('--workspace-id'), Number(take('--revision')), { commandId: take('--command-id'), authorityDecision: await jsonFile(take('--decision')) }) }, null, 2));
+  process.exit(0);
+}
+if (command === 'source' && subject === 'capture') {
+  const manifest = await captureSourceManifest(await jsonInput('--input'));
+  console.log(JSON.stringify({ ok: true, manifest }, null, 2));
+  process.exit(0);
+}
+if (command === 'source' && ['read', 'search'].includes(subject)) {
+  const authorityStore = new AuthorityStore({ root: runDataRoot, controlRoot });
+  const scopedHarness = scopedWorkspaceId ? await createHarness({ controlRoot, dataRoot, workspaceId: scopedWorkspaceId, releaseIdentity, initializeStorage: false }) : null;
+  const scope = { authorityStore, projectId: take('--project'), runId: take('--run'), dispatchId: take('--dispatch'), ...(scopedHarness ? { readPinned: args => scopedHarness.readPinnedSourceForDispatch(args.projectId, args.runId, args.dispatchId, args.sourceId, args.path) } : {}) };
+  const result = subject === 'read'
+    ? await readSourceForDispatch({ ...scope, sourceId: take('--source'), path: take('--path') })
+    : await searchSourceForDispatch({ ...scope, query: take('--query'), maxMatches: optionalNumber('--max') ?? 50 });
+  console.log(JSON.stringify({ ok: true, result }, null, 2));
+  process.exit(0);
+}
+if (command === 'memory') {
+  const authorityStore = new AuthorityStore({ root: runDataRoot, controlRoot });
+  const memory = new MemoryStore({ controlRoot, root: take('--memory-root') ?? resolve(runDataRoot, 'memory'), authorityStore });
+  const input = subject === 'recover' ? null : await jsonInput('--input');
+  const options = { ...input, commandId: take('--command-id'), expectedRevision: optionalNumber('--expected-revision') };
+  const result = subject === 'query' ? await memory.query(input)
+    : subject === 'propose' ? await memory.propose(options)
+    : subject === 'stage' ? await memory.stageFromSubmission(options)
+    : subject === 'promote' ? await memory.promote(options)
+    : subject === 'revoke' ? await memory.revoke(options)
+    : subject === 'reject' ? await memory.rejectAnswer(options)
+    : subject === 'export' ? await memory.exportVerified(input)
+    : subject === 'import' ? await memory.importUnverified(options)
+    : subject === 'recover' ? await memory.recoverPendingPromotions()
+    : null;
+  if (result === null) throw Object.assign(new Error(`Unknown memory command: ${subject}`), { code: 'COMMAND_UNKNOWN' });
+  console.log(JSON.stringify({ ok: true, result }, null, 2));
+  process.exit(0);
+}
 
 if (command === 'run' && subject === 'status') {
-  console.log(JSON.stringify({ ok: true, ...(await readRunStatus({ controlRoot, dataRoot, projectId: take('--project'), runId: take('--run') })) }, null, 2));
+  console.log(JSON.stringify({ ok: true, ...(await readRunStatus({ controlRoot, dataRoot: runDataRoot, projectId: take('--project'), runId: take('--run') })) }, null, 2));
   process.exit(0);
 }
 
@@ -235,9 +298,17 @@ for (const pack of explicitExtensions) {
   extensionsById.set(pack.id, pack);
 }
 const extensions = [...extensionsById.values()];
+if (command === 'workflow' && subject === 'list') {
+  const project = await new ProjectRegistry({ root: runDataRoot, controlRoot, workspaceRegistry: new WorkspaceRegistry({ root: dataRoot, controlRoot }), workspaceId: scopedWorkspaceId }).get(take('--project'));
+  const workflows = extensions.flatMap(extension => (extension.workflows ?? []).map(workflow => ({ id: workflow.id, version: workflow.version, artifactDigest: workflow.artifactDigest, profileId: workflow.profileId, extensionId: extension.id, actions: Object.keys(extension.commandManifest?.actions ?? {}) })))
+    .filter(workflow => (project.extensions ?? []).some(extension => extension.id === workflow.extensionId) && (!project.workflows?.length || project.workflows.some(bound => bound.id === workflow.id && bound.artifactDigest === workflow.artifactDigest)));
+  console.log(JSON.stringify({ ok: true, projectId: project.id, workflows }, null, 2));
+  process.exit(0);
+}
 if (command === 'lifecycle' && subject === 'plan') {
   const input = await jsonInput('--input');
-  const harness = await createHarness({ controlRoot, dataRoot, extensions, releaseIdentity, initializeStorage: false });
+  const selectedWorkspace = input.workspaceId ?? scopedWorkspaceId ?? (input.workspaceAlias ? (await new WorkspaceRegistry({ root: dataRoot, controlRoot }).resolveAlias(input.workspaceAlias)).workspaceId : null);
+  const harness = await createHarness({ controlRoot, dataRoot, workspaceId: selectedWorkspace, memoryRoot: take('--memory-root'), extensions, releaseIdentity, initializeStorage: false });
   const plan = await harness.createLifecyclePlan(input);
   console.log(JSON.stringify({ ok: true, plan }, null, 2));
   process.exit(0);
@@ -267,7 +338,7 @@ if (command === 'features' && subject === 'compile') {
 }
 
   const readOnlyHarness = command === 'recovery' && ['assess', 'plan'].includes(subject);
-  const harness = await createHarness({ controlRoot, dataRoot, extensions, releaseIdentity, initializeStorage: !readOnlyHarness });
+  const harness = await createHarness({ controlRoot, dataRoot, workspaceId: scopedWorkspaceId, memoryRoot: take('--memory-root'), extensions, releaseIdentity, initializeStorage: !readOnlyHarness });
   if (command === 'project' && subject === 'register') {
     const runtimePluginId = take('--runtime');
     const rawInput = take('--descriptor') ? await jsonFile(take('--descriptor')) : { id: take('--id'), workspace: { root: resolve(take('--workspace')) }, profiles: String(take('--profiles') ?? '').split(',').filter(Boolean), policy: { agentExecutionMode: take('--agent-execution-mode'), defaultRuntimePlugin: runtimePluginId, runtimePlugins: runtimePluginId ? [runtimePluginId] : [], promptCodecPlugin: take('--prompt-codec') } };
@@ -365,7 +436,7 @@ if (command === 'features' && subject === 'compile') {
     console.log(JSON.stringify({ ok: true, ...output.result, revision: output.state.revision }, null, 2));
   } else if (command === 'evidence' && subject === 'add') {
     const state = await harness.authorityStore.read(take('--project'), take('--run'));
-    const evidence = await harness.evidenceStore.put(await readFile(resolve(take('--file'))), { projectId: state.projectId, runId: state.runId, epoch: state.epoch, generation: state.generation, featureId: take('--feature') ?? null, dispatchId: take('--dispatch') ?? null, sourceDigest: state.sourceDigest, artifactDigest: state.artifactDigest, policyDigest: state.policyDigest, pluginSetDigest: state.pluginSetDigest, mediaType: take('--media-type') ?? 'application/octet-stream', labels: String(take('--labels') ?? '').split(',').filter(Boolean) });
+    const evidence = await harness.evidenceStore.put(await readFile(resolve(take('--file'))), { projectId: state.projectId, ...(state.metadata?.workspaceRef ? { workspaceRef: state.metadata.workspaceRef } : {}), runId: state.runId, epoch: state.epoch, generation: state.generation, featureId: take('--feature') ?? null, dispatchId: take('--dispatch') ?? null, sourceDigest: state.sourceDigest, artifactDigest: state.artifactDigest, policyDigest: state.policyDigest, pluginSetDigest: state.pluginSetDigest, mediaType: take('--media-type') ?? 'application/octet-stream', labels: String(take('--labels') ?? '').split(',').filter(Boolean) });
     console.log(JSON.stringify({ ok: true, evidence }, null, 2));
   } else if (command === 'recovery' && subject === 'assess') {
     const report = await harness.recovery.assess(take('--importer'), { legacyRoot: resolve(take('--legacy-root')) });

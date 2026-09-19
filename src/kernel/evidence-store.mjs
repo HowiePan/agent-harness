@@ -30,6 +30,7 @@ export class EvidenceStore {
       mediaType: metadata.mediaType ?? 'application/octet-stream',
       createdAt: metadata.createdAt ?? this.now(),
       projectId: metadata.projectId,
+      ...(metadata.workspaceRef ? { workspaceRef: structuredClone(metadata.workspaceRef) } : {}),
       runId: metadata.runId,
       epoch: metadata.epoch,
       generation: metadata.generation,

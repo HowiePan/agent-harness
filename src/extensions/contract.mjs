@@ -7,6 +7,7 @@ import { assert } from '../errors.mjs';
 import { assertInside, assertNoLinkPath } from '../paths.mjs';
 import { defineCommandManifest } from './command-contract.mjs';
 import { EXTENSION_OPERATION_CLASSES } from '../execution-boundary.mjs';
+import { defineWorkflowDefinition } from '../workflows/definition.mjs';
 
 const semanticVersion = /^\d+\.\d+\.\d+$/;
 const verifiedArtifactPacks = new WeakSet();
@@ -29,7 +30,9 @@ export const defineExtensionPack = input => {
     ...(input.digest ? { digest: input.digest } : {}),
     profiles: Object.freeze([...(input.profiles ?? [])]),
     plugins: Object.freeze([...(input.plugins ?? [])]),
+    resourceProviders: Object.freeze([...(input.resourceProviders ?? [])]),
     recoveryImporters: Object.freeze([...(input.recoveryImporters ?? [])]),
+    workflows: Object.freeze((input.workflows ?? []).map(defineWorkflowDefinition)),
     operations: Object.freeze(operations),
     operationManifest: Object.freeze(operationManifest),
     ...(input.commandManifest ? { commandManifest: defineCommandManifest(input.commandManifest) } : {}),
@@ -38,13 +41,14 @@ export const defineExtensionPack = input => {
   for (const plugin of pack.plugins) {
     assert(plugin?.manifest && typeof plugin.create === 'function', 'EXTENSION_PLUGIN_INVALID', `Extension Pack ${pack.id} contains an invalid plugin registration.`);
   }
+  for (const provider of pack.resourceProviders) assert(provider?.ref?.id && semanticVersion.test(provider.ref.version ?? '') && /^[a-f0-9]{64}$/.test(provider.ref.artifactDigest ?? '') && typeof provider.create === 'function', 'EXTENSION_RESOURCE_PROVIDER_INVALID', `Extension Pack ${pack.id} contains an invalid Resource Provider.`);
   for (const operation of Object.values(pack.operations)) assert(typeof operation === 'function', 'EXTENSION_OPERATION_INVALID', `Extension Pack ${pack.id} operations must be functions.`);
   return Object.freeze(pack);
 };
 
 export const extensionIdentity = pack => ({ id: pack.id, version: pack.version, ...(pack.digest ? { digest: pack.digest } : {}) });
 
-export const installExtensionPacks = async (packs, { profileRegistry, pluginHost, factoryContext = {}, requireVerifiedArtifacts = false }) => {
+export const installExtensionPacks = async (packs, { profileRegistry, pluginHost, resourceProviderRegistry = null, factoryContext = {}, requireVerifiedArtifacts = false }) => {
   const installed = [];
   const importers = [];
   const ids = new Set();
@@ -58,6 +62,10 @@ export const installExtensionPacks = async (packs, { profileRegistry, pluginHost
     for (const plugin of pack.plugins) {
       const agentAdapter = typeof resolveAgentAdapter === 'function' ? resolveAgentAdapter(plugin.manifest.id) : sharedContext.agentAdapter;
       pluginHost.register(plugin.manifest, await plugin.create(Object.freeze({ ...sharedContext, agentAdapter })));
+    }
+    for (const provider of pack.resourceProviders) {
+      assert(resourceProviderRegistry, 'RESOURCE_PROVIDER_REGISTRY_REQUIRED', 'Resource Provider installation requires a Registry.');
+      resourceProviderRegistry.register(provider.ref, await provider.create(Object.freeze(sharedContext)));
     }
     importers.push(...pack.recoveryImporters);
     installed.push(extensionIdentity(pack));

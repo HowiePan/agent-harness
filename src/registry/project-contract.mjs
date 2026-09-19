@@ -6,7 +6,7 @@ import { resolveLifecycleExecutionPolicy } from '../plugins/runtime/execution-po
 
 const inputSchema = JSON.parse(readFileSync(new URL('../../schemas/project-descriptor-input.schema.json', import.meta.url), 'utf8'));
 const recordSchema = JSON.parse(readFileSync(new URL('../../schemas/project-descriptor.schema.json', import.meta.url), 'utf8'));
-const inputKeys = Object.freeze(['id', 'harness', 'workspace', 'profiles', 'extensions', 'policy', 'gateRecipes', 'artifactProviders']);
+const inputKeys = Object.freeze(['id', 'harness', 'workspace', 'profiles', 'extensions', 'workflows', 'policy', 'gateRecipes', 'artifactProviders']);
 const inputKeySet = new Set(inputKeys);
 
 const assertPlainObject = (value, code, message) => assert(value && typeof value === 'object' && !Array.isArray(value), code, message);
@@ -28,6 +28,13 @@ export const assertProjectDescriptorInput = (input, { strictIdentity = true } = 
   assert((input.gateRecipes ?? []).every(value => value && typeof value === 'object' && !Array.isArray(value)), 'PROJECT_GATE_RECIPES_INVALID', 'Every Project gate recipe must be an object.');
   for (const recipe of input.gateRecipes ?? []) assertExecutionClass(recipe.executionClass, EXECUTION_CLASSES.DETERMINISTIC_PROCESS, { code: 'GATE_EXECUTION_CLASS_INVALID', subject: `Gate Recipe ${recipe.id ?? '<unknown>'}` });
   assert(Array.isArray(input.artifactProviders ?? []), 'PROJECT_ARTIFACT_PROVIDERS_INVALID', 'Project Descriptor artifactProviders must be an array.');
+  assert(Array.isArray(input.workflows ?? []), 'PROJECT_WORKFLOWS_INVALID', 'Project Descriptor workflows must be an array.');
+  const workflowIds = new Set();
+  for (const workflow of input.workflows ?? []) {
+    assert(workflow?.id && /^\d+\.\d+\.\d+$/.test(workflow.version ?? '') && /^[a-f0-9]{64}$/.test(workflow.artifactDigest ?? '') && workflow.extensionId, 'PROJECT_WORKFLOW_INVALID', 'Workflow binding requires ID, version, digest, and Extension ID.');
+    assert(!workflowIds.has(workflow.id), 'PROJECT_WORKFLOW_DUPLICATE', `Duplicate workflow ${workflow.id}.`);
+    workflowIds.add(workflow.id);
+  }
   assert((input.artifactProviders ?? []).every(value => typeof value === 'string'), 'PROJECT_ARTIFACT_PROVIDERS_INVALID', 'Every Project artifact provider must be a string ID.');
   if (strictIdentity) {
     const result = validateJsonSchema(input, inputSchema);

@@ -5,9 +5,10 @@ import { assert } from '../errors.mjs';
 import { safeSegment } from '../paths.mjs';
 import { atomicWriteJson, readJson, withDirectoryLock } from '../kernel/atomic-io.mjs';
 import { assertHarnessWritePath, harnessControlRoot } from '../write-boundary.mjs';
-import { assertProjectDescriptorInput, assertProjectDescriptorRecord } from './project-contract.mjs';
+import { assertProjectDescriptorInput, assertProjectDescriptorRecord, projectDescriptorInput } from './project-contract.mjs';
 import { resolveActiveRegistryRoot } from './active-generation.mjs';
 import { activeReleaseFile } from './active-generation.mjs';
+import { parseWorkspaceProjectionId, projectDescriptorFromWorkspace } from '../workspaces/workspace-registry.mjs';
 
 const executionPolicySnapshot = descriptor => ({
   agentExecutionMode: descriptor?.policy?.agentExecutionMode ?? null,
@@ -42,18 +43,22 @@ export const projectExecutionPolicyDecisionContext = ({ current = null, input, e
 });
 
 export class ProjectRegistry {
-  constructor({ root, controlRoot, now = () => new Date().toISOString(), strictIdentity = true }) {
+  constructor({ root, controlRoot, now = () => new Date().toISOString(), strictIdentity = true, workspaceRegistry = null, workspaceId = null }) {
     this.controlRoot = harnessControlRoot(controlRoot);
     this.root = assertHarnessWritePath(root, 'Project Registry root', this.controlRoot);
     this.legacyDirectory = resolve(this.root, 'registry', 'projects');
     this.now = now;
     this.strictIdentity = strictIdentity;
+    this.workspaceRegistry = workspaceRegistry;
+    this.workspaceId = workspaceId;
   }
 
   async directoryPath() { return resolve(await resolveActiveRegistryRoot(this.root, this.controlRoot), 'projects'); }
   async file(id) { return resolve(await this.directoryPath(), `${safeSegment(id, 'projectId')}.json`); }
 
   async register(input, { expectedRevision = 0, commandId, authorityDecision = null } = {}) {
+    assert(!this.workspaceId, 'WORKSPACE_PROJECT_REGISTRATION_DENIED', 'Workspace Harness Project projections are governed by Workspace Registry.');
+    assert(!parseWorkspaceProjectionId(input?.id), 'WORKSPACE_PROJECT_PROJECTION_READ_ONLY', 'Workspace Project projections are governed by Workspace Registry.');
     assert(!(await readJson(activeReleaseFile(this.root), null)), 'ACTIVE_RELEASE_IMMUTABLE', 'Active release generations are immutable; use release activation to update Project Descriptors.');
     assert(input.id && input.workspace?.root && isAbsolute(input.workspace.root), 'PROJECT_DESCRIPTOR_INVALID', 'Project Descriptor requires an ID and absolute workspace root.');
     const workspaceRoot = resolve(input.workspace.root);
@@ -92,8 +97,8 @@ export class ProjectRegistry {
       assert((current?.revision ?? 0) === expectedRevision, 'PROJECT_REVISION_CONFLICT', 'Project Descriptor revision changed.', { expected: expectedRevision, actual: current?.revision ?? 0 });
       assertExecutionPolicyDecision({ current, input, expectedRevision, authorityDecision, now: this.now });
       if (current) {
-        const priorHighImpact = digestJson({ harness: current.harness ?? null, workspace: current.workspace, profiles: current.profiles, extensions: current.extensions ?? [], policy: current.policy ?? {}, gateRecipes: current.gateRecipes ?? [], artifactProviders: current.artifactProviders ?? [] });
-        const nextHighImpact = digestJson({ harness: input.harness ?? null, workspace: input.workspace, profiles: input.profiles, extensions: input.extensions ?? [], policy: input.policy ?? {}, gateRecipes: input.gateRecipes ?? [], artifactProviders: input.artifactProviders ?? [] });
+        const priorHighImpact = digestJson({ harness: current.harness ?? null, workspace: current.workspace, profiles: current.profiles, extensions: current.extensions ?? [], workflows: current.workflows ?? [], policy: current.policy ?? {}, gateRecipes: current.gateRecipes ?? [], artifactProviders: current.artifactProviders ?? [] });
+        const nextHighImpact = digestJson({ harness: input.harness ?? null, workspace: input.workspace, profiles: input.profiles, extensions: input.extensions ?? [], workflows: input.workflows ?? [], policy: input.policy ?? {}, gateRecipes: input.gateRecipes ?? [], artifactProviders: input.artifactProviders ?? [] });
         if (priorHighImpact !== nextHighImpact) assert(authorityDecision?.actor && authorityDecision?.decision === 'approved', 'PROJECT_AUTHORITY_DECISION_REQUIRED', 'High-impact Project Descriptor changes require an approved Authority Decision.');
       }
       const at = this.now();
@@ -108,6 +113,15 @@ export class ProjectRegistry {
   }
 
   async get(id) {
+    const projection = parseWorkspaceProjectionId(id);
+    if (projection) {
+      assert(this.workspaceRegistry && (!this.workspaceId || this.workspaceId === projection.workspaceId), 'WORKSPACE_PROJECT_SCOPE_DENIED', 'Workspace projection is outside the active Harness Workspace.');
+      const workspace = await this.workspaceRegistry.get(projection.workspaceId);
+      const descriptor = projectDescriptorFromWorkspace(workspace, projection.targetId);
+      assertProjectDescriptorInput(projectDescriptorInput(descriptor), { strictIdentity: this.strictIdentity });
+      return descriptor;
+    }
+    assert(!this.workspaceId, 'WORKSPACE_PROJECT_SCOPE_DENIED', 'Workspace Harness cannot read a legacy Project outside its namespace.');
     const descriptor = await readJson(await this.file(id));
     assert(descriptor.descriptorDigest === digestJson(withoutKeys(descriptor, ['descriptorDigest'])), 'PROJECT_DESCRIPTOR_DIGEST_MISMATCH', 'Project Descriptor digest mismatch.');
     assertProjectDescriptorRecord(descriptor, { strictIdentity: this.strictIdentity });

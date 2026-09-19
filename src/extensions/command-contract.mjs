@@ -40,7 +40,7 @@ export const defineCommandManifest = input => {
     assert(presets[defaultPreset], 'COMMAND_DEFAULT_PRESET_UNKNOWN', `Command action ${id} has an unknown default preset: ${defaultPreset}`);
     actions[id] = { ...structuredClone(action), aliases: actionAliases, defaultPreset, presets };
   }
-  return freeze({ protocolVersion: '1.0', id: input.id, profileId: input.profileId, actions });
+  return freeze({ protocolVersion: '1.0', id: input.id, profileId: input.profileId, ...(input.workflowId ? { workflowId: input.workflowId } : {}), actions });
 };
 
 export const resolveCommandIntent = (manifestInput, { action: requestedAction, target, arguments: inputArguments = [] } = {}) => {
@@ -69,6 +69,7 @@ export const resolveCommandIntent = (manifestInput, { action: requestedAction, t
     protocolVersion: '1.0',
     manifestId: manifest.id,
     profileId: manifest.profileId,
+    ...(manifest.workflowId ? { workflowId: manifest.workflowId } : {}),
     action: actionId,
     requestedAction,
     target: target.trim(),

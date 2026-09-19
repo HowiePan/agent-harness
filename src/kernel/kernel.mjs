@@ -29,6 +29,14 @@ export const buildDispatchPacket = (state, dispatch, feature) => ({
   gates: structuredClone(dispatch.gateSnapshot ?? state.gates),
   execution: structuredClone(dispatch.execution ?? {}),
   ...(state.metadata?.workspace ? { workspace: structuredClone(state.metadata.workspace) } : {}),
+  ...(state.metadata?.workspaceRef ? { workspaceRef: structuredClone(state.metadata.workspaceRef) } : {}),
+  ...(state.metadata?.sourceToolBinding ? { sourceToolBinding: structuredClone(state.metadata.sourceToolBinding) } : {}),
+  ...(state.profile.id === 'composable-workflow' ? { workflowContext: {
+    workflow: structuredClone(state.metadata?.workflow ?? null),
+    sourceManifest: structuredClone(state.metadata?.sourceManifest ?? null),
+    memorySnapshot: structuredClone(state.metadata?.memorySnapshot ?? null),
+    upstreamOutputs: Object.fromEntries(feature.dependsOn.map(id => [id, structuredClone([...state.submissions].reverse().find(submission => submission.featureId === id && !submission.supersededAt)?.result?.outputs ?? {})])),
+  } } : {}),
 });
 
 const event = (state, type, payload, now) => {
@@ -191,6 +199,7 @@ export class HarnessKernel {
       for (const evidence of evidenceRecords) {
         const metadata = evidence.metadata;
         assert(metadata.projectId === projectId && metadata.runId === runId && metadata.epoch === state.epoch && metadata.generation === state.generation && metadata.featureId === feature.id && metadata.dispatchId === dispatch.dispatchId, 'EVIDENCE_CONTEXT_MISMATCH', 'Evidence does not belong to the active Feature Lease.', { ref: metadata.ref });
+        if (state.metadata?.workspaceRef) assert(digestJson(metadata.workspaceRef) === digestJson(state.metadata.workspaceRef), 'EVIDENCE_WORKSPACE_MISMATCH', 'Evidence belongs to another Workspace revision or scope.');
         assert(metadata.sourceDigest === dispatch.sourceDigest && metadata.policyDigest === state.policyDigest && metadata.pluginSetDigest === state.pluginSetDigest, 'EVIDENCE_BASELINE_MISMATCH', 'Evidence baseline does not match the immutable Dispatch.', { ref: metadata.ref });
       }
       const changedFiles = [...new Set(result.changedFiles)].map(path => String(path).replaceAll('\\', '/'));

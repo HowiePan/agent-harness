@@ -141,7 +141,7 @@ export class ProjectGateRunner {
         executorReceipt = await host.invoke(manifest.id, 'execute', spec);
         const after = await captureWorkspace(workspaceRoot, { excluded: project.workspace.excluded ?? [] });
         status = after.digest === before.digest ? executorReceipt.payload.status : 'failed';
-        const evidence = await this.harness.evidenceStore.put({ recipe, executorReceipt, sourceBefore: before.digest, sourceAfter: after.digest, sourceDrift: after.digest !== before.digest }, { mediaType: 'application/json', projectId, runId, epoch: state.epoch, generation: state.generation, sourceDigest: state.sourceDigest, artifactDigest: state.artifactDigest, policyDigest: state.policyDigest, pluginSetDigest: state.pluginSetDigest, toolchainDigest, gateSpecDigest: specDigest, labels: ['gate-result', `gate:${recipe.id}`] });
+        const evidence = await this.harness.evidenceStore.put({ recipe, executorReceipt, sourceBefore: before.digest, sourceAfter: after.digest, sourceDrift: after.digest !== before.digest }, { mediaType: 'application/json', projectId, ...(state.metadata?.workspaceRef ? { workspaceRef: state.metadata.workspaceRef } : {}), runId, epoch: state.epoch, generation: state.generation, sourceDigest: state.sourceDigest, artifactDigest: state.artifactDigest, policyDigest: state.policyDigest, pluginSetDigest: state.pluginSetDigest, toolchainDigest, gateSpecDigest: specDigest, labels: ['gate-result', `gate:${recipe.id}`] });
         evidenceRefs = [evidence.ref];
         if (status === 'passed') await this.cache.put(cacheKey, { status, evidenceRefs });
       }

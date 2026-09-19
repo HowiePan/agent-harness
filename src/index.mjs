@@ -35,4 +35,6 @@ export { validateBusinessResult, validateProfileResult, VISIBLE_AGENT_RESULT_CON
 export { readActiveRelease, resolveActiveRuntimeRoot } from './registry/active-generation.mjs';
 export { applyReleaseActivationPlan, createReleaseActivationPlan, releaseActivationPlanDigest, verifyReleaseActivationPlan } from './maintenance/release-activation.mjs';
 export * from './workflows/index.mjs';
+export * from './memory/index.mjs';
+export * from './workspaces/index.mjs';
 export { assertHarnessWritePath, harnessControlRoot, harnessProjectRoot, harnessTemporaryRoot, installationMarkerName, temporaryEnvironment } from './write-boundary.mjs';

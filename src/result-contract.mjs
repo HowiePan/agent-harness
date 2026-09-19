@@ -12,6 +12,8 @@ export const validateBusinessResult = (input, { conversationVisible = false, rep
     code: conversationVisible ? 'VISIBLE_RESULT_SCHEMA_INVALID' : 'RESULT_SCHEMA_INVALID',
     label: conversationVisible ? 'Conversation-visible Agent result' : 'Agent result',
   });
+  assert(Buffer.byteLength(JSON.stringify(result.outputs ?? {})) <= 256 * 1024, 'RESULT_OUTPUT_BUDGET_EXCEEDED', 'Typed node outputs exceed 256 KiB.');
+  for (const [portId, output] of Object.entries(result.outputs ?? {})) assert(/^[a-z][a-z0-9.-]{0,63}$/.test(portId) && output.schemaId, 'RESULT_OUTPUT_PORT_INVALID', 'Typed node output port is invalid.');
   if (repair && result.status === 'completed') {
     assert(Array.isArray(result.checkpoints) && result.checkpoints.length > 0, 'REPAIR_CHECKPOINT_REQUIRED', 'A completed repair requires at least one verification checkpoint.');
     assert(result.checkpoints.every(checkpoint => ['passed', 'completed'].includes(checkpoint.status) && Array.isArray(checkpoint.evidence) && checkpoint.evidence.length > 0), 'REPAIR_CHECKPOINT_EVIDENCE_REQUIRED', 'Every completed repair checkpoint must pass and cite non-empty evidence.');

@@ -26,3 +26,5 @@ Rule Readiness → Batch Barrier → 批内 Feature Graph → Game Harness Accep
 共享：Authority、Evidence、Feature/Lease/Attempt、DAG/冲突调度、Barrier、Approval、Review Epoch、Artifact Pin/Rebase、Docs Closeout、Receipt 与恢复框架。
 
 差异：状态机顺序、角色、Gate Recipe、批次/游戏投影、共享能力 ownership、Artifact 影响策略和用户报告。差异保留在 Profile/Policy/Descriptor；只有旧格式解析留在各自 Legacy Importer。
+
+流程节点与实例配置化的原始设计见 [可组合流程抽象方案](workflow-composition-proposal.md)。现有实现、命令级闭环和适用边界见 [可组合流程与记忆平台实现记录](workflow-platform-implementation.md)。

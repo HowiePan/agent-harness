@@ -32,9 +32,11 @@ const renderIssue = (issueId, intake) => {
     `- 级别：${intake.severity}\n` +
     `- 观察时间：${intake.observedAt}\n` +
     `- 项目别名：${intake.projectAlias}\n` +
+    (intake.workspace ? `- Workspace：${intake.workspace.workspaceId} (${intake.workspace.alias})\n- 成员项目：${intake.workspace.projectIds.join(', ') || '未指定'}\n` : '') +
     `- Project：${intake.project.projectId}\n` +
     `- Profile：${intake.project.profileId}\n` +
     `- Extension：${intake.project.extensionId}\n` +
+    (intake.workflow ? `- Workflow：${intake.workflow.id}@${intake.workflow.version}#${intake.workflow.artifactDigest}\n${intake.workflow.runId ? `- Run：${intake.workflow.runId}\n` : ''}` : '') +
     `- Intake 摘要：${intake.intakeDigest}\n\n` +
     `## 期望\n${jsonBlock(intake.expected)}\n` +
     `## 实际\n${jsonBlock(intake.actual)}\n` +
@@ -58,7 +60,7 @@ export const createIssueIntake = input => {
   const sensitive = collectSensitiveContent(input);
   assert(sensitive.length === 0, 'ISSUE_INTAKE_SENSITIVE_CONTENT_REJECTED', 'Issue Intake contains sensitive field names or recognizable credential material.', { sensitive });
   const body = structuredClone(withoutKeys(input, ['intakeDigest', 'incidentFingerprint']));
-  if (body.correlation) body.incidentFingerprint = digestJson({ project: body.project, correlation: body.correlation });
+  if (body.correlation) body.incidentFingerprint = digestJson(body.workspace ? { workspace: body.workspace, project: body.project, workflow: body.workflow ?? null, correlation: body.correlation } : { project: body.project, correlation: body.correlation });
   assert(Buffer.byteLength(JSON.stringify(body)) <= 512 * 1024, 'ISSUE_INTAKE_SIZE_LIMIT_EXCEEDED', 'Issue Intake exceeds the 512 KiB limit.');
   return { ...body, intakeDigest: digestJson(body) };
 };

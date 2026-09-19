@@ -54,7 +54,7 @@ export class RecoveryCoordinator {
       fileCount: verified.manifest.fileCount, totalBytes: verified.manifest.totalBytes,
     });
     const evidence = await this.#kernel.evidenceStore.put(receipt, {
-      mediaType: recoveryVerificationMediaType, projectId, runId, epoch: state.epoch, generation: state.generation,
+      mediaType: recoveryVerificationMediaType, projectId, ...(state.metadata?.workspaceRef ? { workspaceRef: state.metadata.workspaceRef } : {}), runId, epoch: state.epoch, generation: state.generation,
       sourceDigest: state.sourceDigest, artifactDigest: state.artifactDigest, policyDigest: state.policyDigest,
       pluginSetDigest: state.pluginSetDigest, labels: ['recovery-capsule-verification'],
     });
@@ -93,7 +93,7 @@ export class RecoveryCoordinator {
     });
     assertRecoveryResolution(receipt, { projectId, runId, state, verification, now: this.#kernel.now });
     const evidence = await this.#kernel.evidenceStore.put(receipt, {
-      mediaType: recoveryResolutionMediaType, projectId, runId, epoch: state.epoch, generation: state.generation,
+      mediaType: recoveryResolutionMediaType, projectId, ...(state.metadata?.workspaceRef ? { workspaceRef: state.metadata.workspaceRef } : {}), runId, epoch: state.epoch, generation: state.generation,
       sourceDigest: state.sourceDigest, artifactDigest: state.artifactDigest, policyDigest: state.policyDigest,
       pluginSetDigest: state.pluginSetDigest, labels: ['recovery-resolution'],
     });
@@ -127,7 +127,7 @@ export class RecoveryCoordinator {
     if (resolutionRef) await readRecoveryResolution(this.#kernel.evidenceStore, resolutionRef, { projectId, runId, state: current, verification, now: this.#kernel.now });
     else assertHardRecoveryDecision(current, decisionId, verification, this.#kernel.now);
     const rollbackSnapshot = await this.#kernel.evidenceStore.put(current, {
-      mediaType: 'application/json', projectId, runId, epoch: current.epoch, generation: current.generation,
+      mediaType: 'application/json', projectId, ...(current.metadata?.workspaceRef ? { workspaceRef: current.metadata.workspaceRef } : {}), runId, epoch: current.epoch, generation: current.generation,
       sourceDigest: current.sourceDigest, artifactDigest: current.artifactDigest, policyDigest: current.policyDigest,
       pluginSetDigest: current.pluginSetDigest, labels: ['recovery-rollback-snapshot'],
     });

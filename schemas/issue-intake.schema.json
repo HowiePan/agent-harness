@@ -7,6 +7,8 @@
   "properties": {
     "protocolVersion": { "const": "1.0" },
     "projectAlias": { "type": "string", "pattern": "^[a-z][a-z0-9-]{0,31}$" },
+    "workspace": { "type": "object", "required": ["workspaceId", "alias", "projectIds"], "properties": { "workspaceId": { "type": "string", "minLength": 1 }, "alias": { "type": "string", "minLength": 1 }, "revision": { "type": "integer", "minimum": 1 }, "descriptorDigest": { "type": "string", "pattern": "^[a-f0-9]{64}$" }, "projectIds": { "type": "array", "items": { "type": "string", "minLength": 1 }, "uniqueItems": true } }, "additionalProperties": false },
+    "workflow": { "type": "object", "required": ["id", "version", "artifactDigest"], "properties": { "id": { "type": "string", "minLength": 1 }, "version": { "type": "string", "pattern": "^\\d+\\.\\d+\\.\\d+$" }, "artifactDigest": { "type": "string", "pattern": "^[a-f0-9]{64}$" }, "runId": { "type": "string", "minLength": 1 } }, "additionalProperties": false },
     "project": {
       "type": "object",
       "required": ["projectId", "profileId", "extensionId"],

@@ -38,7 +38,10 @@ const parseArguments = input => {
     workspaceRoot: takeOptional('--workspace-root'),
     entrypoint: take('--entrypoint'),
     dataRoot: take('--data-root'),
+    memoryRoot: takeOptional('--memory-root'),
     projectSpecs: takeAll('--project'),
+    workspaceSpecs: takeAll('--workspace'),
+    workflowSpecs: takeAll('--workflow'),
   };
   if (args.length) throw new Error(`Unknown arguments: ${args.join(' ')}`);
   return parsed;
@@ -55,13 +58,17 @@ export const configureBindings = async input => {
   const workspaceRoot = input.workspaceRoot ? resolve(input.workspaceRoot) : null;
   const entrypoint = resolve(controlRoot, input.entrypoint);
   const dataRoot = resolve(controlRoot, input.dataRoot);
+  const memoryRoot = input.memoryRoot ? resolve(controlRoot, input.memoryRoot) : null;
   const projectSpecs = input.projectSpecs ?? [];
-  if (!inside(controlRoot, entrypoint) || !inside(controlRoot, dataRoot)) throw new Error('entrypoint and dataRoot must stay inside controlRoot.');
+  const workspaceSpecs = input.workspaceSpecs ?? [];
+  const workflowSpecs = input.workflowSpecs ?? [];
+  if (!inside(controlRoot, entrypoint) || !inside(controlRoot, dataRoot) || (memoryRoot && !inside(controlRoot, memoryRoot))) throw new Error('entrypoint, dataRoot, and memoryRoot must stay inside controlRoot.');
   await Promise.all([access(controlRoot), access(entrypoint)]);
   const activeRelease = await validateActiveReleaseBinding({ controlRoot, dataRoot, entrypoint, verifyAllFiles: true });
   const release = { version: activeRelease.version, artifactDigest: activeRelease.artifactDigest, generationId: activeRelease.generationId, pointerDigest: activeRelease.pointerDigest };
 
   const projects = {};
+  const workspaces = {};
   for (const spec of projectSpecs) {
     const [alias, projectId, profileId, extensionId, projectWorkspaceInput, extra] = spec.split('|');
     const projectWorkspaceRoot = projectWorkspaceInput ? resolve(projectWorkspaceInput) : workspaceRoot;
@@ -70,13 +77,30 @@ export const configureBindings = async input => {
     const workspaceIdentity = await resolveGitWorkspaceIdentity(projectWorkspaceRoot);
     projects[alias] = { projectId, profileId, extensionId, workspaceRoot: projectWorkspaceRoot, ...(workspaceIdentity ? { workspaceIdentity } : {}) };
   }
-  if (!Object.keys(projects).length) throw new Error('At least one --project alias is required.');
+  for (const spec of workspaceSpecs) {
+    const [alias, workspaceId, executionTargetId, workspaceRootInput, extra] = spec.split('|');
+    const workspaceRoot = workspaceRootInput ? resolve(workspaceRootInput) : null;
+    if (extra !== undefined || ![alias, workspaceId, executionTargetId].every(value => /^[a-z][a-z0-9-]{0,31}$/.test(value ?? '')) || !workspaceRoot || projects[alias] || workspaces[alias]) throw new Error(`Invalid --workspace value: ${spec}`);
+    await access(workspaceRoot);
+    const workspaceIdentity = await resolveGitWorkspaceIdentity(workspaceRoot);
+    workspaces[alias] = { workspaceId, executionTargetId, workspaceRoot, ...(workspaceIdentity ? { workspaceIdentity } : {}) };
+  }
+  for (const spec of workflowSpecs) {
+    const [alias, id, version, artifactDigest, profileId, extensionId, extra] = spec.split('|');
+    const binding = projects[alias] ?? workspaces[alias];
+    if (extra !== undefined || !binding || !/^[a-z][a-z0-9-]{0,31}$/.test(id ?? '') || !/^\d+\.\d+\.\d+$/.test(version ?? '') || !/^[a-f0-9]{64}$/.test(artifactDigest ?? '') || !profileId || !extensionId) throw new Error(`Invalid --workflow value: ${spec}`);
+    binding.workflows ??= [];
+    if (binding.workflows.some(workflow => workflow.id === id)) throw new Error(`Duplicate workflow binding: ${alias}/${id}`);
+    binding.workflows.push({ id, version, artifactDigest, profileId, extensionId });
+  }
+  if (!Object.keys(projects).length && !Object.keys(workspaces).length) throw new Error('At least one --project or --workspace alias is required.');
+  if (Object.values(workspaces).some(workspace => !workspace.workflows?.length)) throw new Error('Each Workspace alias requires at least one --workflow binding.');
 
   const directory = resolve(pluginRoot, '.plugin-data');
   const target = resolve(directory, 'bindings.json');
   const temporary = resolve(directory, `bindings.${process.pid}.tmp`);
   await mkdir(directory, { recursive: true });
-  const document = { protocolVersion: '1.0', harness: { controlRoot, entrypoint, dataRoot, release }, projects };
+  const document = { protocolVersion: '1.0', harness: { controlRoot, entrypoint, dataRoot, ...(memoryRoot ? { memoryRoot } : {}), release }, projects, workspaces };
   await writeFile(temporary, `${JSON.stringify(document, null, 2)}\n`, { encoding: 'utf8', flag: 'wx' });
   try {
     await rename(temporary, target);

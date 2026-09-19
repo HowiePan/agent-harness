@@ -17,6 +17,7 @@ Agent Harness 负责把需求、工作图、Agent 执行、确定性 Gate、审�
 - 中性 Feature Delivery、CardWorld Engine Delivery、Collection Batch Production Profile；
 - CardWorld 与 Collection 旧状态只读评估和新 Epoch 导入；
 - 三类业务项目零驻留 Canary，包含 Collection 10 游戏逻辑并行与隔离工作区物理并发。
+- 版本化可组合 Workflow、受限多来源检索、跨 Run 记忆、独立实例准入，以及 Engine/Collection 与两个新样板流程的命令级合成闭环。
 
 V1.0.0 不迁移旧源码，也不让业务仓保存 Harness 运行状态。旧 Harness 的真实恢复、入口切换与归档是独立高影响 Gate；删除资格可以由 Harness 验证，但删除动作只能由用户明确决定和批准。
 
@@ -39,6 +40,10 @@ V1.0.0 不迁移旧源码，也不让业务仓保存 Harness 运行状态。旧 
 - [协议与不变量](docs/protocol.md)
 - [插件 SDK](docs/plugin-sdk.md)
 - [Profile 设计](docs/profiles.md)
+- [可组合流程与记忆平台实现及准出记录](docs/workflow-platform-implementation.md)
+- [Harness Workspace 顶层边界设计](docs/workspace-platform-design.md)
+- [Harness Workspace 平台最终开发方案](docs/workspace-platform-development-plan.md)
+- [Harness Workspace 平台实施与操作记录](docs/workspace-platform-implementation.md)
 - [CardWorld Consumer](docs/consumers/cardworld.md)
 - [Collection Consumer](docs/consumers/tabletop-collection.md)
 - [Legacy Characterization](docs/compatibility/legacy-characterization.md)

@@ -1,4 +1,5 @@
 import { resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { mkdir, rm } from 'node:fs/promises';
 import { atomicWriteJson } from '../kernel/atomic-io.mjs';
 import { AuthorityStore } from '../kernel/authority-store.mjs';
@@ -15,6 +16,9 @@ import { createAuthorityStoragePlugin } from '../plugins/storage/authority-stora
 import { featureDeliveryProfile } from '../profiles/feature-delivery.mjs';
 import { ProfileRegistry } from '../profiles/registry.mjs';
 import { ProjectRegistry } from '../registry/project-registry.mjs';
+import { WorkspaceRegistry, parseWorkspaceProjectionId, workspaceProjectionId } from '../workspaces/workspace-registry.mjs';
+import { ResourceProviderRegistry } from '../workspaces/resource-provider.mjs';
+import { createWorkspaceMemoryBroker } from '../workspaces/memory-broker.mjs';
 import { RecoveryCoordinator } from '../recovery/coordinator.mjs';
 import { installExtensionPacks } from '../extensions/contract.mjs';
 import { resolveCommandIntent } from '../extensions/command-contract.mjs';
@@ -22,6 +26,8 @@ import { createLifecycleCommandPlan, validateLifecycleCommandPlan } from '../lif
 import { loadReleaseIdentity } from '../release-identity.mjs';
 import { captureWorkspace, diffWorkspaceSnapshots } from '../workspace-snapshot.mjs';
 import { resolveProjectWorkspace } from '../workspace-identity.mjs';
+import { MemoryStore } from '../memory/memory-store.mjs';
+import { captureSourceManifest, verifySourceManifest, assertSourceManifestCurrent, readPinnedSource } from '../workflows/source-manifest.mjs';
 import { assertHarnessWritePath, harnessControlRoot, harnessProjectRoot } from '../write-boundary.mjs';
 import { RunCoordinator } from '../coordinator/run-coordinator.mjs';
 import { AUTO_CONCURRENCY, AUTO_CONCURRENCY_LIMIT, resolveConcurrencyLimit } from '../concurrency.mjs';
@@ -52,12 +58,15 @@ const manifests = Object.freeze({
   storage: { id: 'reference-file-storage', kind: 'storage-provider', version: '1.0.0', capabilities: ['expected-revision', 'idempotency', 'atomic-write', 'recovery'], permissions: ['state.write'] },
 });
 
-export const createHarness = async ({ controlRoot: controlRootInput, dataRoot: dataRootInput, now, id, releaseIdentity, strictProjectIdentity = true, initializeStorage = true, allowedPluginPermissions = ['state.write', 'agent.conversation', 'workspace.read', 'workspace.write', 'gate.execute', 'artifact.read'], extraProfiles = [], extensions = [], agentAdapter = null, agentAdapters = {}, executionAuthorizationAdapter = null } = {}) => {
+export const createHarness = async ({ controlRoot: controlRootInput, dataRoot: dataRootInput, workspaceId = null, memoryRoot = null, now, id, releaseIdentity, strictProjectIdentity = true, initializeStorage = true, allowedPluginPermissions = ['state.write', 'agent.conversation', 'workspace.read', 'workspace.write', 'gate.execute', 'artifact.read'], extraProfiles = [], extensions = [], agentAdapter = null, agentAdapters = {}, executionAuthorizationAdapter = null } = {}) => {
   const controlRoot = harnessControlRoot(controlRootInput);
-  const dataRoot = dataRootInput ?? defaultDataRoot(controlRoot);
+  const globalDataRoot = assertHarnessWritePath(dataRootInput ?? defaultDataRoot(controlRoot), 'Harness global dataRoot', controlRoot);
+  const workspaceRegistry = new WorkspaceRegistry({ root: globalDataRoot, controlRoot, now });
+  if (workspaceId) assert(/^[a-z][a-z0-9-]{0,31}$/.test(workspaceId), 'WORKSPACE_ID_INVALID', 'Workspace ID is invalid.');
+  const dataRoot = workspaceId ? resolve(globalDataRoot, 'workspaces', workspaceId) : globalDataRoot;
   const controlledDataRoot = assertHarnessWritePath(dataRoot, 'Harness dataRoot', controlRoot);
-  const activeRelease = await readActiveRelease(controlledDataRoot, controlRoot);
-  const activeRuntimeRoot = activeRelease ? await resolveActiveRuntimeRoot(controlledDataRoot, controlRoot) : null;
+  const activeRelease = await readActiveRelease(globalDataRoot, controlRoot);
+  const activeRuntimeRoot = activeRelease ? await resolveActiveRuntimeRoot(globalDataRoot, controlRoot) : null;
   releaseIdentity ??= await loadReleaseIdentity();
   const currentReleaseIdentity = { version: releaseIdentity?.version, artifactDigest: releaseIdentity?.artifactDigest ?? null };
   assert(/^\d+\.\d+\.\d+$/.test(currentReleaseIdentity.version ?? ''), 'HARNESS_RELEASE_IDENTITY_INVALID', 'Harness release identity requires a semantic version.');
@@ -66,6 +75,9 @@ export const createHarness = async ({ controlRoot: controlRootInput, dataRoot: d
   const authorityStore = new AuthorityStore({ root: controlledDataRoot, controlRoot, now });
   if (initializeStorage) await authorityStore.init();
   const evidenceStore = new EvidenceStore({ root: authorityStore.root, controlRoot, now });
+  const memoryStore = new MemoryStore({ controlRoot, root: memoryRoot ?? resolve(authorityStore.root, 'memory'), authorityStore, now });
+  const resourceProviders = new ResourceProviderRegistry({ memoryStore });
+  const workspaceMemoryBroker = workspaceId ? createWorkspaceMemoryBroker({ workspaceId, workspaceRegistry, providerRegistry: resourceProviders, memoryStore, authorityStore }) : null;
   const lineageStore = new RunLineageStore({ root: authorityStore.root, controlRoot, now });
   const visibleHostBindings = createVisibleHostBindings({ agentAdapter, agentAdapters });
   const resolveVisibleHostAdapter = runtimePluginId => visibleHostBindings.resolve(runtimePluginId);
@@ -82,10 +94,12 @@ export const createHarness = async ({ controlRoot: controlRootInput, dataRoot: d
   pluginHost.register(manifests.promptCodec, createAgentPromptCodec({ manifest: manifests.promptCodec }));
   pluginHost.register(manifests.model, createStaticModelRouter({ manifest: manifests.model, routes: [] }));
   pluginHost.register(manifests.storage, createAuthorityStoragePlugin({ manifest: manifests.storage, store: authorityStore }));
-  const projectRegistry = new ProjectRegistry({ root: authorityStore.root, controlRoot, now, strictIdentity: strictProjectIdentity });
+  const projectRegistry = new ProjectRegistry({ root: authorityStore.root, controlRoot, now, strictIdentity: strictProjectIdentity, workspaceRegistry, workspaceId });
+  const workspacePlanToken = Symbol('workspace-plan-token');
   const extensionSet = await installExtensionPacks(extensions, {
     profileRegistry,
     pluginHost,
+    resourceProviderRegistry: resourceProviders,
     factoryContext: { controlRoot, dataRoot: authorityStore.root, resolveProject: projectId => projectRegistry.get(projectId), now, resolveAgentAdapter: resolveVisibleHostAdapter },
     requireVerifiedArtifacts: strictProjectIdentity,
   });
@@ -155,15 +169,35 @@ export const createHarness = async ({ controlRoot: controlRootInput, dataRoot: d
   const verifyRunExecutionAuthorization = async ({ project, state, manifest }) => {
     const lifecycleExecution = state.metadata?.lifecycleExecution;
     const action = state.metadata?.commandIntent?.action;
-    const policy = assertAgentRuntimeCompatible({ project, manifest, action, runtimePluginId: lifecycleExecution?.runtimePluginId ?? manifest.id, agentExecutionMode: lifecycleExecution?.agentExecutionMode });
+    const policy = assertAgentRuntimeCompatible({ project, manifest, action, workflowId: state.metadata?.workflow?.id, runtimePluginId: lifecycleExecution?.runtimePluginId ?? manifest.id, agentExecutionMode: lifecycleExecution?.agentExecutionMode });
     if (policy.mode !== 'headless') return { policy, constraints: executionConstraints, grant: null, verification: null };
     assert(lifecycleExecution?.executionConstraintDigest === executionConstraints.constraintDigest, 'EXECUTION_CONSTRAINT_STALE', 'Run was authorized under different trusted execution constraints.');
-    const currentPolicyDigest = digestJson({ profiles: project.profiles, extensions: project.extensions ?? [], policy: project.policy ?? {}, gateRecipes: project.gateRecipes ?? [], artifactProviders: project.artifactProviders ?? [] });
-    assert(currentPolicyDigest === state.policyDigest, 'RUN_EXECUTION_POLICY_STALE', 'Project execution policy changed after this Run was authorized.');
+    const currentPolicyDigest = digestJson({ profiles: project.profiles, extensions: project.extensions ?? [], ...(project.workflows ? { workflows: project.workflows } : {}), policy: project.policy ?? {}, gateRecipes: project.gateRecipes ?? [], artifactProviders: project.artifactProviders ?? [] });
+    if (!state.metadata?.workspaceRef) assert(currentPolicyDigest === state.policyDigest, 'RUN_EXECUTION_POLICY_STALE', 'Project execution policy changed after this Run was authorized.');
     const pinnedProject = { ...project, revision: lifecycleExecution.executionGrant?.context?.projectRevision, descriptorDigest: state.metadata?.projectDescriptorDigest };
     const context = grantContextFor({ project: pinnedProject, intent: state.metadata?.commandIntent ?? null, runId: state.runId, runtimePluginId: manifest.id, runtimeVersion: manifest.version, executionWorkspaceRoot: state.metadata?.workspace?.root ?? project.workspace.root, sourceDigest: lifecycleExecution.authorizationSourceDigest, harnessArtifactDigest: lifecycleExecution.harnessArtifactDigest, extensionDigest: lifecycleExecution.extensionDigest, constraintDigest: lifecycleExecution.executionConstraintDigest });
     const authorized = await verifyHeadlessExecutionGrant({ adapter: trustedExecutionAuthorizationAdapter, grant: lifecycleExecution.executionGrant, context, manifest, now: kernel.now });
     return { policy, ...authorized };
+  };
+
+  const assertWorkspaceRunAccess = async (state, receiverId = null) => {
+    const ref = state.metadata?.workspaceRef;
+    if (!ref) return null;
+    assert(workspaceId === ref.workspaceId, 'WORKSPACE_RUN_SCOPE_DENIED', 'Run belongs to another Workspace.');
+    const current = await workspaceRegistry.get(ref.workspaceId);
+    const binding = current.workflows.find(item => item.id === ref.workflowId);
+    const target = current.executionTargets.find(item => item.id === ref.executionTargetId);
+    assert(binding && binding.executionTargetId === ref.executionTargetId && target && ref.projectIds.every(id => binding.allowedProjectIds.includes(id) && target.projectIds.includes(id)), 'WORKSPACE_RUN_ACCESS_REVOKED', 'Workflow, Project, or execution target access was revoked.');
+    for (const source of state.metadata?.sourceManifest?.sources ?? []) {
+      const configured = current.sources.find(item => item.sourceId === source.sourceId);
+      assert(configured && resolve(configured.root) === resolve(source.root) && ref.projectIds.some(id => current.projects.find(project => project.id === id)?.sourceIds.includes(source.sourceId)) && (!receiverId || configured.allowedReceivers.includes(receiverId)), 'WORKSPACE_SOURCE_ACCESS_REVOKED', `Source ${source.sourceId} access was revoked.`);
+    }
+    for (const id of ref.resourceIds ?? []) {
+      const resource = current.resources.find(item => item.id === id);
+      assert(resource && (resource.scope === 'project' ? ref.projectIds.includes(resource.projectId) && resource.readProjectIds.includes(resource.projectId) : ref.projectIds.every(projectId => resource.readProjectIds.includes(projectId))), 'WORKSPACE_RESOURCE_ACCESS_REVOKED', `Resource ${id} access was revoked.`);
+      resourceProviders.resolve(resource);
+    }
+    return current;
   };
 
   const api = {
@@ -172,13 +206,25 @@ export const createHarness = async ({ controlRoot: controlRootInput, dataRoot: d
     authorityStore,
     lineageStore,
     evidenceStore,
+    memoryStore: workspaceMemoryBroker ?? memoryStore,
     profileRegistry,
     pluginHost: publicPluginHost,
     projectRegistry,
+    workspaceRegistry,
+    workspaceId,
     kernel: publicKernel,
     recovery,
     extensionSet: { installed: extensionSet.installed, digest: extensionSet.digest },
     releaseIdentity: Object.freeze(structuredClone(currentReleaseIdentity)),
+
+    async readPinnedSourceForDispatch(projectId, runId, dispatchId, sourceId, path) {
+      const state = await authorityStore.read(projectId, runId);
+      const dispatch = state.dispatches.find(item => item.dispatchId === dispatchId && ['requested', 'assigned'].includes(item.status));
+      assert(dispatch, 'SOURCE_DISPATCH_INVALID', 'Pinned source read requires a live Dispatch.');
+      await assertWorkspaceRunAccess(state, dispatch.runtimePluginId);
+      assert((dispatch.featureSnapshot?.metadata?.sourceIds ?? []).includes(sourceId), 'SOURCE_FEATURE_SCOPE_DENIED', `Feature cannot read source ${sourceId}.`);
+      return readPinnedSource(state.metadata.sourceManifest, { sourceId, path, receiverId: dispatch.runtimePluginId });
+    },
 
     async createExecutionReadinessReport(planInput, { onGateProgress = null, probeWrite = true, ttlMs = 60000 } = {}) {
       const createdAt = kernel.now();
@@ -232,7 +278,7 @@ export const createHarness = async ({ controlRoot: controlRootInput, dataRoot: d
         } catch (error) { add('extension', false, {}, issues(error)); }
         try {
           runtimeManifest = pluginHost.get(plan.run.runtimePluginId, 'agent-runtime').manifest;
-          runtimePolicy = assertAgentRuntimeCompatible({ project, manifest: runtimeManifest, action: plan.intent.action, runtimePluginId: plan.run.runtimePluginId, agentExecutionMode: plan.run.agentExecutionMode });
+          runtimePolicy = assertAgentRuntimeCompatible({ project, manifest: runtimeManifest, action: plan.intent.action, workflowId: plan.workflow?.id, runtimePluginId: plan.run.runtimePluginId, agentExecutionMode: plan.run.agentExecutionMode });
           add('runtime', true, { id: runtimeManifest.id, version: runtimeManifest.version, mode: runtimePolicy.mode });
         } catch (error) { add('runtime', false, {}, issues(error)); }
         try {
@@ -331,22 +377,72 @@ export const createHarness = async ({ controlRoot: controlRootInput, dataRoot: d
       });
     },
 
+    async createWorkspaceLifecyclePlan(input) {
+      const selectedWorkspaceId = input.workspaceId ?? (await workspaceRegistry.resolveAlias(input.workspaceAlias)).workspaceId;
+      assert(!workspaceId || workspaceId === selectedWorkspaceId, 'WORKSPACE_HARNESS_SCOPE_DENIED', 'Harness is bound to another Workspace.');
+      assert(workspaceId === selectedWorkspaceId, 'WORKSPACE_HARNESS_REQUIRED', 'Create a Harness scoped to the selected Workspace before planning.');
+      const workspace = await workspaceRegistry.get(selectedWorkspaceId);
+      if (input.workspaceAlias) assert(workspace.alias === input.workspaceAlias, 'WORKSPACE_ALIAS_STALE', 'Workspace alias changed.');
+      const binding = input.workflowId ? workspace.workflows.find(item => item.id === input.workflowId) : workspace.workflows.length === 1 ? workspace.workflows[0] : null;
+      assert(binding, input.workflowId ? 'WORKSPACE_WORKFLOW_UNKNOWN' : 'WORKSPACE_WORKFLOW_AMBIGUOUS', 'Select a bound Workspace Workflow explicitly.');
+      const projectIds = input.projectIds ?? binding.defaultProjectScope;
+      assert(Array.isArray(projectIds) && projectIds.length > 0 && new Set(projectIds).size === projectIds.length && projectIds.every(id => binding.allowedProjectIds.includes(id)), 'WORKSPACE_PROJECT_SCOPE_DENIED', 'Selected Projects are outside the Workflow Binding.');
+      const targetId = input.executionTargetId ?? binding.executionTargetId;
+      assert(targetId === binding.executionTargetId, 'WORKSPACE_TARGET_DENIED', 'Workflow Binding fixes the execution target.');
+      const target = workspace.executionTargets.find(item => item.id === targetId);
+      assert(projectIds.every(id => target.projectIds.includes(id)), 'WORKSPACE_TARGET_PROJECT_DENIED', 'Execution target cannot serve the selected Projects.');
+      const projectionId = workspaceProjectionId(workspace.workspaceId, targetId);
+      const workflowInput = structuredClone(input.workflowInput ?? {});
+      assert(!['sourceManifest', 'memorySpaces', 'memorySnapshot', 'workspaceRef'].some(key => Object.hasOwn(workflowInput, key)), 'WORKSPACE_MANAGED_INPUT_DENIED', 'Sources, resources, and Workspace identity are resolved from approved bindings.');
+      const selectedSources = workspace.sources.filter(source => projectIds.some(projectId => workspace.projects.find(project => project.id === projectId).sourceIds.includes(source.sourceId)));
+      const selectedResources = workspace.resources.filter(resource => resource.kind === 'memory' && (resource.scope === 'project' ? projectIds.includes(resource.projectId) && resource.readProjectIds.includes(resource.projectId) : projectIds.every(id => resource.readProjectIds.includes(id))) && (resource.scope !== 'workflow' && resource.scope !== 'source' && resource.scope !== 'session' || resource.workflowId === binding.id) && (resource.scope !== 'source' || selectedSources.some(source => source.sourceId === resource.sourceId)));
+      const workspaceRef = { workspaceId: workspace.workspaceId, revision: workspace.revision, descriptorDigest: workspace.descriptorDigest, alias: workspace.alias, workflowId: binding.id, projectIds: [...projectIds].sort(), executionTargetId: targetId, resourceIds: selectedResources.map(resource => resource.id).sort() };
+      if (selectedSources.length) {
+        workflowInput.sourceManifest = await captureSourceManifest({ projectId: projectionId, workspaceRef, projectIds, sources: selectedSources });
+        workflowInput.memorySpaces = selectedResources.map(resource => resourceProviders.resolve(resource).resolveSpace({ binding: resource, workspaceRef, projectId: projectionId, sessionId: workflowInput.sessionId ?? null }));
+      } else assert(!Object.keys(workflowInput).length, 'WORKSPACE_SOURCE_REQUIRED', 'Workflow input requires configured Workspace Sources.');
+      return api.createLifecyclePlan({ ...input, workspaceId: undefined, workspaceAlias: undefined, projectId: projectionId, workflowId: binding.id, extensionId: binding.extensionId, profileId: binding.profileId, executionWorkspaceRoot: target.root, ...(selectedSources.length ? { workflowInput } : {}), workspaceRef, [workspacePlanToken]: true });
+    },
+
     async createLifecyclePlan(input) {
+      if (input.workspaceId || input.workspaceAlias) return api.createWorkspaceLifecyclePlan(input);
+      if (parseWorkspaceProjectionId(input.projectId)) assert(input[workspacePlanToken] === true, 'WORKSPACE_PLAN_ENTRY_REQUIRED', 'Workspace plans must resolve bindings through createWorkspaceLifecyclePlan.');
+      else assert(!input.workspaceRef, 'WORKSPACE_PLAN_ENTRY_REQUIRED', 'Workspace identity requires a Workspace Project.');
       const project = await projectRegistry.get(input.projectId);
       const workspace = await resolveProjectWorkspace(project, input.executionWorkspaceRoot);
-      const extensionId = input.extensionId ?? project.extensions?.find(required => extensionPacks.has(required.id))?.id;
+      const boundCandidates = (project.extensions ?? []).map(required => extensionPacks.get(required.id)).filter(pack => pack?.commandManifest);
+      const workflowCandidates = input.workflowId ? boundCandidates.filter(pack => pack.workflows?.some(workflow => workflow.id === input.workflowId)) : boundCandidates;
+      assert(!input.workflowId || workflowCandidates.length === 1, 'WORKFLOW_SELECTION_INVALID', `Workflow ${input.workflowId} is not uniquely bound to Project ${project.id}.`);
+      assert(input.extensionId || workflowCandidates.length === 1, 'WORKFLOW_SELECTION_REQUIRED', `Project ${project.id} requires an explicit workflow selection.`);
+      const extensionId = input.extensionId ?? workflowCandidates[0]?.id;
       const extension = extensionPacks.get(extensionId);
       assert(extension, 'PROJECT_COMMAND_EXTENSION_MISSING', `No loaded Extension Pack can plan commands for Project ${project.id}.`);
       assert(extension.commandManifest, 'COMMAND_MANIFEST_MISSING', `Extension ${extension.id} does not provide a Command Manifest.`);
+      if (input.workflowId) assert(extension.workflows?.some(workflow => workflow.id === input.workflowId), 'WORKFLOW_EXTENSION_MISMATCH', 'Selected Extension does not provide the requested workflow.');
+      const selectedWorkflow = extension.workflows?.find(workflow => workflow.id === (input.workflowId ?? extension.commandManifest.workflowId));
+      if (project.workflows?.length) {
+        const binding = project.workflows.find(workflow => workflow.id === selectedWorkflow?.id);
+        assert(binding && binding.extensionId === extension.id && binding.version === selectedWorkflow.version && binding.artifactDigest === selectedWorkflow.artifactDigest, 'PROJECT_WORKFLOW_IDENTITY_MISMATCH', 'Project does not bind the exact Workflow Definition.');
+      }
       assert(extension.commandManifest.profileId === input.profileId || !input.profileId, 'COMMAND_PROFILE_MISMATCH', 'Command Profile does not match the selected Extension Manifest.');
-      const intent = resolveCommandIntent(extension.commandManifest, input);
+      const resolvedIntent = resolveCommandIntent(extension.commandManifest, input);
+      const workflowInput = input.workflowInput ? structuredClone(input.workflowInput) : null;
+      if (workflowInput) {
+        assert(workflowInput.sourceManifest, 'WORKFLOW_SOURCE_MANIFEST_REQUIRED', 'Workflow input requires a pinned Source Manifest.');
+        verifySourceManifest(workflowInput.sourceManifest);
+        await assertSourceManifestCurrent(workflowInput.sourceManifest);
+        assert(!Object.hasOwn(workflowInput, 'memorySnapshot'), 'WORKFLOW_MEMORY_SNAPSHOT_FORBIDDEN', 'Memory snapshot is selected by the Harness.');
+        workflowInput.memorySnapshot = await memoryStore.query({ spaces: workflowInput.memorySpaces ?? [], workflowId: resolvedIntent.workflowId, projectId: project.id, manifest: workflowInput.sourceManifest, topic: workflowInput.memoryTopic ?? null, sessionId: workflowInput.sessionId ?? null });
+      }
+      const intent = workflowInput ? { ...structuredClone(resolvedIntent), workflowInput } : resolvedIntent;
       assert(project.profiles.includes(intent.profileId), 'PROJECT_PROFILE_DENIED', `Project ${project.id} does not allow Profile ${intent.profileId}.`);
       const required = project.extensions?.find(item => item.id === extension.id);
       assert(required, 'PROJECT_EXTENSION_NOT_BOUND', `Project ${project.id} does not bind Extension ${extension.id}.`);
       assert(required.version === extension.version && required.digest === extension.digest, 'PROJECT_EXTENSION_IDENTITY_MISMATCH', `Project ${project.id} does not bind the active Extension ${extension.id}.`);
       if (strictProjectIdentity) assert(project.harness?.version === currentReleaseIdentity.version && project.harness?.artifactDigest === currentReleaseIdentity.artifactDigest, 'PROJECT_HARNESS_IDENTITY_MISMATCH', `Project ${project.id} does not bind the active Harness release.`);
       const snapshot = await captureWorkspace(workspace.root, { excluded: project.workspace.excluded ?? [] });
-      const executionPolicy = resolveLifecycleExecutionPolicy({ project, action: intent.action });
+      const sourceToolBinding = workflowInput ? { commandPrefix: [process.execPath, fileURLToPath(new URL('../cli.mjs', import.meta.url)), 'source'], controlRoot, dataRoot: authorityStore.root } : null;
+      const executionPolicy = resolveLifecycleExecutionPolicy({ project, action: intent.action, workflowId: intent.workflowId });
       const runtimeManifest = pluginHost.get(executionPolicy.runtimePluginId, 'agent-runtime').manifest;
       let executionGrant = input.executionGrant ?? null;
       let plan = createLifecycleCommandPlan({
@@ -357,28 +453,36 @@ export const createHarness = async ({ controlRoot: controlRootInput, dataRoot: d
         sourceDigest: snapshot.digest,
         executionWorkspaceRoot: workspace.root,
         workspaceIdentity: workspace.identity ?? { type: 'descriptor-root', root: workspace.root },
+        workspaceRef: input.workspaceRef ?? null,
         executionConstraintDigest: executionConstraints.constraintDigest,
+        sourceToolBinding,
         executionGrant,
         compiler: extension.operations?.createLifecyclePlan,
       });
       if (executionPolicy.mode === 'headless' && executionGrant === null && input.executionAuthorizationEvidence !== undefined && isExecutionAuthorizationAdapter(trustedExecutionAuthorizationAdapter)) {
         const context = grantContextFor({ project, intent, runId: plan.run.runId, runtimePluginId: executionPolicy.runtimePluginId, runtimeVersion: runtimeManifest.version, executionWorkspaceRoot: workspace.root, sourceDigest: snapshot.digest, extensionDigest: extension.digest, constraintDigest: executionConstraints.constraintDigest });
         executionGrant = await issueHeadlessExecutionGrant({ adapter: trustedExecutionAuthorizationAdapter, context, evidence: input.executionAuthorizationEvidence });
-        plan = createLifecycleCommandPlan({ intent, project, extension, releaseIdentity: { ...currentReleaseIdentity, verified: true }, sourceDigest: snapshot.digest, executionWorkspaceRoot: workspace.root, workspaceIdentity: workspace.identity ?? { type: 'descriptor-root', root: workspace.root }, executionConstraintDigest: executionConstraints.constraintDigest, executionGrant, compiler: extension.operations?.createLifecyclePlan });
+        plan = createLifecycleCommandPlan({ intent, project, extension, releaseIdentity: { ...currentReleaseIdentity, verified: true }, sourceDigest: snapshot.digest, executionWorkspaceRoot: workspace.root, workspaceIdentity: workspace.identity ?? { type: 'descriptor-root', root: workspace.root }, workspaceRef: input.workspaceRef ?? null, executionConstraintDigest: executionConstraints.constraintDigest, executionGrant, sourceToolBinding, compiler: extension.operations?.createLifecyclePlan });
       }
-      assertAgentRuntimeCompatible({ project, manifest: runtimeManifest, action: plan.intent.action, runtimePluginId: plan.run.runtimePluginId, agentExecutionMode: plan.run.agentExecutionMode });
+      assertAgentRuntimeCompatible({ project, manifest: runtimeManifest, action: plan.intent.action, workflowId: plan.workflow?.id, runtimePluginId: plan.run.runtimePluginId, agentExecutionMode: plan.run.agentExecutionMode });
       return plan;
     },
 
     async startLifecyclePlan(planInput, { commandId, preflightReport } = {}) {
       assert(commandId, 'COMMAND_ID_REQUIRED', 'Lifecycle start requires a command ID.');
       const plan = validateLifecycleCommandPlan(planInput);
+      if (plan.intent.workflowInput?.sourceManifest) await assertSourceManifestCurrent(plan.intent.workflowInput.sourceManifest);
       verifyExecutionReadinessReport(preflightReport, { plan, now: preflightReport?.createdAt });
       const project = await projectRegistry.get(plan.project.id);
       assert(project.revision === plan.project.revision && project.descriptorDigest === plan.project.descriptorDigest, 'LIFECYCLE_PLAN_PROJECT_STALE', 'Lifecycle Command Plan is stale for the current Project Descriptor.');
+      if (plan.workspaceRef) {
+        const current = await workspaceRegistry.get(plan.workspaceRef.workspaceId);
+        assert(current.revision === plan.workspaceRef.revision && current.descriptorDigest === plan.workspaceRef.descriptorDigest, 'LIFECYCLE_PLAN_WORKSPACE_STALE', 'Workspace changed after planning.');
+        assert(plan.intent.workflowInput?.sourceManifest?.workspaceRef?.descriptorDigest === current.descriptorDigest || !plan.intent.workflowInput, 'LIFECYCLE_PLAN_SOURCE_SCOPE_MISMATCH', 'Source Manifest is not bound to the Workspace revision.');
+      }
       assert(currentReleaseIdentity.artifactDigest === plan.harness.artifactDigest && currentReleaseIdentity.version === plan.harness.version, 'LIFECYCLE_PLAN_RELEASE_STALE', 'Lifecycle Command Plan is stale for the active Harness release.');
       const runtimeManifest = pluginHost.get(plan.run.runtimePluginId, 'agent-runtime').manifest;
-      const runtimePolicy = assertAgentRuntimeCompatible({ project, manifest: runtimeManifest, action: plan.intent.action, runtimePluginId: plan.run.runtimePluginId, agentExecutionMode: plan.run.agentExecutionMode });
+      const runtimePolicy = assertAgentRuntimeCompatible({ project, manifest: runtimeManifest, action: plan.intent.action, workflowId: plan.workflow?.id, runtimePluginId: plan.run.runtimePluginId, agentExecutionMode: plan.run.agentExecutionMode });
       const trustedAgentAdapter = resolveVisibleHostAdapter(plan.run.runtimePluginId);
       await verifyPlanExecutionAuthorization({ project, plan, manifest: runtimeManifest });
       const observedLineage = await lineageStore.read(plan.project.id, plan.logicalTaskKey);
@@ -453,9 +557,13 @@ export const createHarness = async ({ controlRoot: controlRootInput, dataRoot: d
       state = await authorityStore.read(plan.project.id, activeRunId);
       if (!state.features.every(feature => feature.state === 'completed')) return { status: execution.status, planDigest: plan.planDigest, execution, state };
       const gateRunner = new ProjectGateRunner({ harness: api, onProgress: onGateProgress });
-      const gates = await gateRunner.run({ projectId: plan.project.id, runId: activeRunId, scope: 'final', forceFresh: forceFreshGates, gateIds: plan.stopCondition.requiredFinalGates ?? [] });
+      const gates = plan.stopCondition.requiredFinalGates?.length
+        ? await gateRunner.run({ projectId: plan.project.id, runId: activeRunId, scope: 'final', forceFresh: forceFreshGates, gateIds: plan.stopCondition.requiredFinalGates })
+        : { results: [], state };
       state = await authorityStore.read(plan.project.id, activeRunId);
       if (!gates.results.every(gate => gate.status === 'passed')) return { status: 'attention-required', reason: 'final-gates-not-passed', planDigest: plan.planDigest, execution, gates, state };
+      const closure = api.profileRegistry.get(state.profile.id).canClose(state);
+      if (!closure.ok) return { status: 'attention-required', reason: closure.reason, planDigest: plan.planDigest, execution, gates, state };
       const closed = await api.kernel.closeRun(plan.project.id, activeRunId, {}, { expectedRevision: state.revision, commandId: `${commandId}.close` });
       return { status: 'closed', planDigest: plan.planDigest, execution, gates, state: closed.state };
     },
@@ -577,9 +685,10 @@ export const createHarness = async ({ controlRoot: controlRootInput, dataRoot: d
       const dispatch = state.dispatches.find(item => item.dispatchId === dispatchId);
       const lease = state.leases.find(item => item.dispatchId === dispatchId && item.status === 'active');
       assert(dispatch && lease, 'ACTIVE_LEASE_REQUIRED', `Dispatch does not have an active managed Lease: ${dispatchId}`);
+      if (!['interrupt', 'cleanup', 'discard'].includes(method)) await assertWorkspaceRunAccess(state, dispatch.runtimePluginId);
       const manifest = pluginHost.get(dispatch.runtimePluginId, 'agent-runtime').manifest;
       const action = state.metadata?.commandIntent?.action;
-      const runtimePolicy = assertAgentRuntimeCompatible({ project, manifest, action, runtimePluginId: dispatch.runtimePluginId, agentExecutionMode: dispatch.execution?.runtime?.mode });
+      const runtimePolicy = assertAgentRuntimeCompatible({ project, manifest, action, workflowId: state.metadata?.workflow?.id, runtimePluginId: dispatch.runtimePluginId, agentExecutionMode: dispatch.execution?.runtime?.mode });
       assert(runtimePolicy.mode === 'headless', 'VISIBLE_AGENT_HOST_REQUIRED', 'Conversation-visible Agents must be controlled by the interactive host, not through Runtime plugin invocation.');
       if (!['interrupt', 'cleanup', 'discard'].includes(method)) await verifyRunExecutionAuthorization({ project, state, manifest });
       return pluginHost.invoke(dispatch.runtimePluginId, method, { agentId: lease.agentId, ...structuredClone(input) });
@@ -587,7 +696,8 @@ export const createHarness = async ({ controlRoot: controlRootInput, dataRoot: d
 
     async assertRunExecutionAuthorized(projectId, runId) {
       const [project, state] = await Promise.all([projectRegistry.get(projectId), authorityStore.read(projectId, runId)]);
-      const runtimePluginId = state.metadata?.lifecycleExecution?.runtimePluginId ?? resolveLifecycleExecutionPolicy({ project, action: state.metadata?.commandIntent?.action }).runtimePluginId;
+      const runtimePluginId = state.metadata?.lifecycleExecution?.runtimePluginId ?? resolveLifecycleExecutionPolicy({ project, action: state.metadata?.commandIntent?.action, workflowId: state.metadata?.workflow?.id }).runtimePluginId;
+      await assertWorkspaceRunAccess(state, runtimePluginId);
       const manifest = pluginHost.get(runtimePluginId, 'agent-runtime').manifest;
       return verifyRunExecutionAuthorization({ project, state, manifest });
     },
@@ -618,10 +728,10 @@ export const createHarness = async ({ controlRoot: controlRootInput, dataRoot: d
       const snapshot = input.sourceDigest ? null : await captureWorkspace(workspace.root, { excluded: project.workspace.excluded ?? [] });
       const pluginSet = pluginHost.snapshot();
       const installedCompositionDigest = digestJson({ plugins: pluginSet.manifests, extensions: extensionSet.installed });
-      const policyDigest = input.policyDigest ?? digestJson({ profiles: project.profiles, extensions: project.extensions ?? [], policy: project.policy ?? {}, gateRecipes: project.gateRecipes ?? [], artifactProviders: project.artifactProviders ?? [] });
+      const policyDigest = input.policyDigest ?? digestJson({ profiles: project.profiles, extensions: project.extensions ?? [], ...(project.workflows ? { workflows: project.workflows } : {}), policy: project.policy ?? {}, gateRecipes: project.gateRecipes ?? [], artifactProviders: project.artifactProviders ?? [] });
       const commandIntent = input.metadata?.commandIntent ?? null;
       const commandAction = commandIntent?.action;
-      const executionPolicy = resolveLifecycleExecutionPolicy({ project, action: commandAction });
+      const executionPolicy = resolveLifecycleExecutionPolicy({ project, action: commandAction, workflowId: commandIntent?.workflowId });
       if (input.metadata?.lifecycleExecution) {
         assert(input.metadata.lifecycleExecution.runtimePluginId === executionPolicy.runtimePluginId && input.metadata.lifecycleExecution.agentExecutionMode === executionPolicy.mode, 'RUN_EXECUTION_POLICY_MISMATCH', 'Run execution metadata does not match the current Project action execution policy.');
       }
@@ -644,20 +754,22 @@ export const createHarness = async ({ controlRoot: controlRootInput, dataRoot: d
 
     async dispatch(projectId, runId, input, command) {
       const state = await authorityStore.read(projectId, runId);
+      if (state.metadata?.sourceManifest) await assertSourceManifestCurrent(state.metadata.sourceManifest);
       if (state.metadata?.logicalTaskKey) await lineageStore.assertActive(projectId, state.metadata.logicalTaskKey, runId);
       assert(state.revision === command.expectedRevision, 'REVISION_CONFLICT', 'Authority revision changed before scheduling.', { expected: command.expectedRevision, actual: state.revision });
       const project = await projectRegistry.get(projectId);
       const workspaceRoot = state.metadata?.workspace?.root ?? project.workspace.root;
       const action = state.metadata?.commandIntent?.action;
-      const selectedPolicy = resolveLifecycleExecutionPolicy({ project, action });
+      const selectedPolicy = resolveLifecycleExecutionPolicy({ project, action, workflowId: state.metadata?.workflow?.id });
       const runtimePluginId = input.runtimePluginId ?? state.metadata?.lifecycleExecution?.runtimePluginId ?? selectedPolicy.runtimePluginId;
+      await assertWorkspaceRunAccess(state, runtimePluginId);
       assert(runtimePluginId, 'DEFAULT_RUNTIME_REQUIRED', `Project ${projectId} requires an explicit default Runtime.`);
       let runtimeManifest = null;
       let runtimePolicy = null;
       if (runtimePluginId) {
         assert((project.policy?.runtimePlugins ?? [runtimePluginId]).includes(runtimePluginId), 'PROJECT_RUNTIME_DENIED', `Runtime ${runtimePluginId} is not allowed by Project ${projectId}.`);
         runtimeManifest = pluginHost.get(runtimePluginId, 'agent-runtime').manifest;
-        runtimePolicy = assertAgentRuntimeCompatible({ project, manifest: runtimeManifest, action, runtimePluginId, agentExecutionMode: state.metadata?.lifecycleExecution?.agentExecutionMode ?? selectedPolicy.mode });
+        runtimePolicy = assertAgentRuntimeCompatible({ project, manifest: runtimeManifest, action, workflowId: state.metadata?.workflow?.id, runtimePluginId, agentExecutionMode: state.metadata?.lifecycleExecution?.agentExecutionMode ?? selectedPolicy.mode });
         if (runtimePolicy.mode === 'headless') await verifyRunExecutionAuthorization({ project, state, manifest: runtimeManifest });
       }
       const promptCodecPluginId = project.policy?.promptCodecPlugin ?? null;
@@ -671,7 +783,7 @@ export const createHarness = async ({ controlRoot: controlRootInput, dataRoot: d
       const schedulingLimit = runtimeManifest?.capabilities.includes('workspace-shared') ? 1 : requestedLimit;
       const snapshot = await captureWorkspace(workspaceRoot, { excluded: project.workspace.excluded ?? [] });
       assert(snapshot.digest === state.sourceDigest, 'WORKSPACE_SOURCE_DRIFT', 'Workspace changed outside a committed Feature result.', { authoritySourceDigest: state.sourceDigest, workspaceSourceDigest: snapshot.digest });
-      const snapshotEvidence = await evidenceStore.put(snapshot, { mediaType: 'application/json', projectId, runId, epoch: state.epoch, generation: state.generation, sourceDigest: state.sourceDigest, artifactDigest: state.artifactDigest, policyDigest: state.policyDigest, pluginSetDigest: state.pluginSetDigest, labels: ['workspace-snapshot'] });
+      const snapshotEvidence = await evidenceStore.put(snapshot, { mediaType: 'application/json', projectId, ...(state.metadata?.workspaceRef ? { workspaceRef: state.metadata.workspaceRef } : {}), runId, epoch: state.epoch, generation: state.generation, sourceDigest: state.sourceDigest, artifactDigest: state.artifactDigest, policyDigest: state.policyDigest, pluginSetDigest: state.pluginSetDigest, labels: ['workspace-snapshot'] });
       const visibleHeartbeatTimeoutMs = Number(project.policy?.visibleHeartbeatTimeoutMs ?? 120000);
       if (runtimePolicy.mode === 'conversation-visible') assert(Number.isFinite(visibleHeartbeatTimeoutMs) && visibleHeartbeatTimeoutMs > 0, 'VISIBLE_AGENT_HEARTBEAT_TIMEOUT_INVALID', 'Visible Agent heartbeat timeout must be a positive number of milliseconds.');
       const scheduledInput = { ...input, maxConcurrency: schedulingLimit, runtimePluginId, runtimeRequirements: { mode: runtimePolicy.mode, userVisible: runtimePolicy.userVisible, hostOrchestrated: runtimePolicy.hostOrchestrated, ...(runtimePolicy.mode === 'conversation-visible' ? { heartbeatTimeoutMs: visibleHeartbeatTimeoutMs } : {}) }, sourceSnapshotRef: snapshotEvidence.ref };
@@ -706,7 +818,7 @@ export const createHarness = async ({ controlRoot: controlRootInput, dataRoot: d
       assert(dispatch?.status === 'requested', 'DISPATCH_NOT_SPAWNABLE', `Dispatch is not awaiting a Runtime: ${dispatchId}`);
       assert(dispatch.runtimePluginId === runtimePluginId, 'DISPATCH_RUNTIME_MISMATCH', `Dispatch ${dispatchId} is bound to Runtime ${dispatch.runtimePluginId}, not ${runtimePluginId}.`);
       const manifest = pluginHost.get(runtimePluginId, 'agent-runtime').manifest;
-      const runtimePolicy = assertAgentRuntimeCompatible({ project, manifest, action: state.metadata?.commandIntent?.action, runtimePluginId, agentExecutionMode: dispatch.execution?.runtime?.mode });
+      const runtimePolicy = assertAgentRuntimeCompatible({ project, manifest, action: state.metadata?.commandIntent?.action, workflowId: state.metadata?.workflow?.id, runtimePluginId, agentExecutionMode: dispatch.execution?.runtime?.mode });
       assert(!runtimePolicy.hostOrchestrated, 'VISIBLE_AGENT_HOST_REQUIRED', `Runtime ${runtimePluginId} must be started by the interactive host as a visible child Agent.`);
       const authorization = await verifyRunExecutionAuthorization({ project, state, manifest });
       const { packet, prompt } = await compileDispatchPrompt(state, dispatch);
@@ -734,7 +846,7 @@ export const createHarness = async ({ controlRoot: controlRootInput, dataRoot: d
       assert(dispatch?.status === 'requested', 'DISPATCH_NOT_BINDABLE', `Dispatch is not awaiting a Runtime: ${input.dispatchId}`);
       const project = await projectRegistry.get(projectId);
       const manifest = pluginHost.get(dispatch.runtimePluginId, 'agent-runtime').manifest;
-      const runtimePolicy = assertRuntimeTransportReceipt({ project, manifest, receipt: input.runtimeReceipt, action: state.metadata?.commandIntent?.action, runtimePluginId: dispatch.runtimePluginId, agentExecutionMode: dispatch.execution?.runtime?.mode });
+      const runtimePolicy = assertRuntimeTransportReceipt({ project, manifest, receipt: input.runtimeReceipt, action: state.metadata?.commandIntent?.action, workflowId: state.metadata?.workflow?.id, runtimePluginId: dispatch.runtimePluginId, agentExecutionMode: dispatch.execution?.runtime?.mode });
       const trustedAgentAdapter = resolveVisibleHostAdapter(dispatch.runtimePluginId);
       let runtimeReceipt = structuredClone(input.runtimeReceipt);
       if (runtimePolicy.mode === 'conversation-visible') {
@@ -826,7 +938,7 @@ export const createHarness = async ({ controlRoot: controlRootInput, dataRoot: d
       const verifiedResult = { ...validatedResult, changedFiles: actualChangedFiles };
       await atomicWriteJson(dispatch.outputRef, verifiedResult, { root: authorityStore.root });
       const preservedRuntimeEvidence = runtimeEvidence ? JSON.parse(JSON.stringify(runtimeEvidence)) : null;
-      const evidence = await evidenceStore.put({ result: verifiedResult, runtimeEvidence: preservedRuntimeEvidence, inputSourceDigest: dispatch.sourceDigest, outputSourceDigest: resultingSnapshot.digest, sourceSnapshotRef: dispatch.sourceSnapshotRef }, { ...evidenceMetadata, mediaType: 'application/json', projectId, runId, epoch: state.epoch, generation: state.generation, featureId: dispatch.featureId, dispatchId, sourceDigest: dispatch.sourceDigest, artifactDigest: state.artifactDigest, policyDigest: state.policyDigest, pluginSetDigest: state.pluginSetDigest, labels: ['agent-result'] });
+      const evidence = await evidenceStore.put({ result: verifiedResult, runtimeEvidence: preservedRuntimeEvidence, inputSourceDigest: dispatch.sourceDigest, outputSourceDigest: resultingSnapshot.digest, sourceSnapshotRef: dispatch.sourceSnapshotRef }, { ...evidenceMetadata, mediaType: 'application/json', projectId, ...(state.metadata?.workspaceRef ? { workspaceRef: state.metadata.workspaceRef } : {}), runId, epoch: state.epoch, generation: state.generation, featureId: dispatch.featureId, dispatchId, sourceDigest: dispatch.sourceDigest, artifactDigest: state.artifactDigest, policyDigest: state.policyDigest, pluginSetDigest: state.pluginSetDigest, labels: ['agent-result'] });
       return kernel.submit(projectId, runId, { dispatchId, outputRef: dispatch.outputRef, agentId: lease.agentId, packetDigest: dispatch.packetDigest, epoch: state.epoch, generation: state.generation, result: verifiedResult, resultingSourceDigest: resultingSnapshot.digest, evidenceRefs: [evidence.ref] }, { expectedRevision: state.revision, commandId });
     },
 

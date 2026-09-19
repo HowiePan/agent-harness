@@ -152,8 +152,8 @@
     },
     {
       "path": "docs/profiles.md",
-      "sha256": "ab02008a6023b00983016613de4615f27cac601298af880ba488e76fe71201a0",
-      "size": 1730
+      "sha256": "4b9eb1cbd42c6849376b31ac196558379638e5b23016b83a246af9c9a54470d5",
+      "size": 1980
     },
     {
       "path": "docs/project-plan.md",
@@ -191,6 +191,41 @@
       "size": 5690
     },
     {
+      "path": "docs/workflow-composition-proposal.md",
+      "sha256": "5d8d4d5fd387935fdb1a163d898a9c96bb23d90570969a9d7f3f046ff6e82d04",
+      "size": 20909
+    },
+    {
+      "path": "docs/workflow-platform-design-review.md",
+      "sha256": "f827cb3be688f49a8211b294dd942279199937f04a04c6e6c0597fad2cf46656",
+      "size": 6819
+    },
+    {
+      "path": "docs/workflow-platform-implementation.md",
+      "sha256": "f023c2fae18c7fc7418715267c2b12437c0459fdca767b2bd697fcbff33d840b",
+      "size": 7219
+    },
+    {
+      "path": "docs/workflow-platform-refactor-plan.md",
+      "sha256": "230239f9110d7075681bba07fd1d82d20861f0e01fc6ed0090190a64e3c61574",
+      "size": 32080
+    },
+    {
+      "path": "docs/workspace-platform-design.md",
+      "sha256": "c02144cd19bf6596a198c527f424a8f2460fc1649fa945a1c906e46b4cb65c24",
+      "size": 13229
+    },
+    {
+      "path": "docs/workspace-platform-development-plan.md",
+      "sha256": "501b0ac2cc64207a83bde01f035f7834f296c10b5e72b2fe910823e7baaa65ae",
+      "size": 11494
+    },
+    {
+      "path": "docs/workspace-platform-implementation.md",
+      "sha256": "2773a285d346d8fa9a3a7d7146758fd49e45f84b0abb832890151557f5014d11",
+      "size": 7816
+    },
+    {
       "path": "examples/collection-project-input.json",
       "sha256": "4cb79ade7c9e27a342b59738471d36b06599aa4ca97c420261327acaa32db7c9",
       "size": 408
@@ -222,8 +257,8 @@
     },
     {
       "path": "integrations/codex/agent-harness-codex/hooks/pseudo-command-router.mjs",
-      "sha256": "6094f59b00cdcbc846757b26cfd0399ec4a90d93b8f266a2c2a970837eed157c",
-      "size": 14288
+      "sha256": "ef0c04a08837a6810e362f2f011621399ecb4ab339887785560ed420235e5077",
+      "size": 21293
     },
     {
       "path": "integrations/codex/agent-harness-codex/lib/active-release-binding.mjs",
@@ -247,13 +282,13 @@
     },
     {
       "path": "integrations/codex/agent-harness-codex/lib/visible-lifecycle-intent.mjs",
-      "sha256": "491070a6c93aa4059d0f7af50d1887ecb76b19e7a569f749f2afc61ec778366e",
-      "size": 8130
+      "sha256": "a669d974a848dc54c629f39d60029004efca334bd4a2301fdd7a32908a9d86ad",
+      "size": 11104
     },
     {
       "path": "integrations/codex/agent-harness-codex/references/pseudo-command-contract.md",
-      "sha256": "d16ab3110a6721d156b6ea7fd096590daefc32da61dd772a7f19524a66581de3",
-      "size": 7391
+      "sha256": "598e91634d96437482981ee4086f47bba6bb2633ad021ed4b05177f4b206dd6f",
+      "size": 7866
     },
     {
       "path": "integrations/codex/agent-harness-codex/references/visible-host-adapter-contract.md",
@@ -262,8 +297,8 @@
     },
     {
       "path": "integrations/codex/agent-harness-codex/scripts/configure-bindings.mjs",
-      "sha256": "e3e602c3f1fbebdc0c5677a259cf5ffcaed2beccb030e2a554b196faef0a09d5",
-      "size": 4655
+      "sha256": "e4710b47009854a9ba1c398ab00e049f3e644eca7463572ad51792492de7949a",
+      "size": 6740
     },
     {
       "path": "integrations/codex/agent-harness-codex/scripts/plugin-release-workflow.mjs",
@@ -272,8 +307,8 @@
     },
     {
       "path": "integrations/codex/agent-harness-codex/scripts/visible-lifecycle-coordinator.mjs",
-      "sha256": "d9767a13be4449ae88993eee4a56a2784732f0101827b4d7ea56bf9da48c64ce",
-      "size": 4417
+      "sha256": "3fe2c3550de560f306b7e755a2a2e47a3a529cb4a507a5ca6ffdb88acd0b51ed",
+      "size": 7281
     },
     {
       "path": "integrations/codex/agent-harness-codex/skills/agent-harness-command/agents/openai.yaml",
@@ -282,8 +317,8 @@
     },
     {
       "path": "integrations/codex/agent-harness-codex/skills/agent-harness-command/SKILL.md",
-      "sha256": "c12cf83a48137d1da9caac73edf791de07f121a9604c27ba4f64c272662e1579",
-      "size": 11672
+      "sha256": "9d7052b57ef9bd718c99ad4221bce58b3d9b78ef5b62e3deb1cafaba3efcaf8b",
+      "size": 12851
     },
     {
       "path": "integrations/codex/agent-harness-codex/skills/agent-harness-extension-author/references/extension-contract.md",
@@ -317,8 +352,8 @@
     },
     {
       "path": "package.json",
-      "sha256": "3cdd22d6ea46e02d6ab27b2c6f385b370a53f15bf638a2a90a1b9ac79e7c6032",
-      "size": 2697
+      "sha256": "cd0a53753afb3351252525f02a08aba3e9299fff101218cc0672e1802b352d5d",
+      "size": 3172
     },
     {
       "path": "plugins/codex-cli-runtime.plugin.json",
@@ -357,8 +392,8 @@
     },
     {
       "path": "README.md",
-      "sha256": "6f61e5449866e9b20e05f378fdab2ef304693a6602d5e96476483e44988afd82",
-      "size": 9761
+      "sha256": "38acf725c96c61684dd2f09da65ab46c746551dd63f422454f2db162ca3989a7",
+      "size": 10291
     },
     {
       "path": "schemas/authority.schema.json",
@@ -427,8 +462,8 @@
     },
     {
       "path": "schemas/issue-intake.schema.json",
-      "sha256": "16fef065e9f648d3246eba9a157caf9ebe6be0ec768d63d9c1f4d320f5f01851",
-      "size": 3153
+      "sha256": "235fc586d4920d4e54e9aa17487809a02ce4d7b8cfb0792d09f7b1144b26bcd9",
+      "size": 3980
     },
     {
       "path": "schemas/issue-triage-input.schema.json",
@@ -447,8 +482,8 @@
     },
     {
       "path": "schemas/lifecycle-command-plan.schema.json",
-      "sha256": "c3eb1414ff8aa845e393c2c1308a88c967f78146118c628eb4e65b5f2d383396",
-      "size": 3185
+      "sha256": "c210674be91e6d697a612537cdaa8e6f9e3acc2584b29b0cafd6fd8bc4dd5bbf",
+      "size": 4363
     },
     {
       "path": "schemas/lifecycle-execution-grant.schema.json",
@@ -467,13 +502,13 @@
     },
     {
       "path": "schemas/project-descriptor-input.schema.json",
-      "sha256": "c34547ae68333246bfdb970de9afb0ecb761e9516996b1eda1de1e5b6553cfcf",
-      "size": 3921
+      "sha256": "8548f0755393e5b929ed58c0d9347e793984729d9b6dd47a0bd14b0840efaa98",
+      "size": 4358
     },
     {
       "path": "schemas/project-descriptor.schema.json",
-      "sha256": "fb16ccfef85e904583598fe5bbb964c9c1b36cdd35d45bae4fca283091531f77",
-      "size": 5250
+      "sha256": "3d82d97d4c4dd068e405f9cded06c369f144d7eb0085e18b5c5740c22a44e2d8",
+      "size": 5687
     },
     {
       "path": "schemas/recovery-capsule.schema.json",
@@ -497,8 +532,8 @@
     },
     {
       "path": "schemas/result.schema.json",
-      "sha256": "504947fffd6a4639478697d804cfb67140f21fb17ee3aa7ce6b6157b88a5ca50",
-      "size": 3825
+      "sha256": "202e8cbb7230c4f8d8c50cd36f579b093009bade5bfba4f6cf54ccec35fc67bb",
+      "size": 4194
     },
     {
       "path": "schemas/run-lineage-resolution.schema.json",
@@ -517,13 +552,28 @@
     },
     {
       "path": "schemas/visible-agent-result.schema.json",
-      "sha256": "8c6163eb9799de8a03ea3cb720e8bb02c2dbec3f479e2cf2f7406940fab41892",
-      "size": 3847
+      "sha256": "908289743bbd686d2495ec8219d9d3119bdfc899c01852aa615c8e35ac92b577",
+      "size": 4216
+    },
+    {
+      "path": "schemas/workspace-descriptor.schema.json",
+      "sha256": "1ec6796ca0caac62d5cfebc402f2ef9666c126cb1a28730df5f5b88a41643438",
+      "size": 4722
     },
     {
       "path": "scripts/check-context-budget.mjs",
       "sha256": "e06ac6949ccac59ed865da1dc98df50568c5ddae813a9bffd4c76fee42416549",
       "size": 2489
+    },
+    {
+      "path": "scripts/workflow-canary.mjs",
+      "sha256": "8cea145441a8224e5950e620f0407347f86d2f54aea880194333c998dcf7f7a0",
+      "size": 24315
+    },
+    {
+      "path": "scripts/workspace-canary.mjs",
+      "sha256": "850a1be4a9aea727bf6ba3e5200f4d1251bc08e2fd62a366d38d06963b7a6e7f",
+      "size": 33514
     },
     {
       "path": "SECURITY.md",
@@ -532,8 +582,8 @@
     },
     {
       "path": "src/app/harness.mjs",
-      "sha256": "423c52fabea60d7b71460c2d3c7e94c2e1d54e93c9e8d70767a483ec760138bd",
-      "size": 81565
+      "sha256": "37b29b10d50f21e3e6962686c99dfb710c19def07de28a0a980882a5bea3b95e",
+      "size": 95162
     },
     {
       "path": "src/bootstrap.mjs",
@@ -547,8 +597,8 @@
     },
     {
       "path": "src/cli.mjs",
-      "sha256": "d1139ac3d1b44d637b228dcd1a38d94d5ffd3481f8ee6bf9fd8aa9147b3eefd3",
-      "size": 29760
+      "sha256": "8b95ec0104b28601bd0702c3982a52119e8addfdf7231e2b02b5ab41a2843bc7",
+      "size": 36169
     },
     {
       "path": "src/concurrency.mjs",
@@ -557,23 +607,33 @@
     },
     {
       "path": "src/consumers/cardworld-engine.mjs",
-      "sha256": "ff61e49684689710d2ee9c010d538ea073ba05bcf47e414eff93eb9c48aec89d",
-      "size": 17787
+      "sha256": "9536922ba7a78411591c8b502cc868b80e75402a4886c0d140af4bcbfd7107c6",
+      "size": 17757
     },
     {
       "path": "src/consumers/index.mjs",
-      "sha256": "4571412d393bba35ad3380550362ab1e23329355cc4f8c6a416174a24dc0fd12",
-      "size": 83
+      "sha256": "dbbb198d834a34c1c9d79cb3e6610562515b7c9059c1ed91210f4d98b7316ce8",
+      "size": 400
+    },
+    {
+      "path": "src/consumers/knowledge-qa.mjs",
+      "sha256": "712c35bdb7028d0922a4408459c281127201d7a0cefc68427c56daaf382ddd4d",
+      "size": 4897
+    },
+    {
+      "path": "src/consumers/requirements-design.mjs",
+      "sha256": "43031dd400e9a760fcfff8fd268804794fee31790ff9f69300817f92fd6616a9",
+      "size": 5637
     },
     {
       "path": "src/consumers/tabletop-collection.mjs",
-      "sha256": "5b90f2b7943372e9bc32e402969fc7b03032517555e160e579c35bdadb1d5990",
-      "size": 16079
+      "sha256": "91321e59dab07cb93a34c3fa98bf9ee8d8602c99e4ed8f60083d8d368429bfaa",
+      "size": 17040
     },
     {
       "path": "src/coordinator/run-coordinator.mjs",
-      "sha256": "b38f83794517bffee1744d2464efc985ea3b4b19694215c377bbfc7fb17479bb",
-      "size": 7884
+      "sha256": "43f9b5d8da3e51539a343a6b6cdcc7b9c5ae55d6f87c5965a541eb54e8772638",
+      "size": 7968
     },
     {
       "path": "src/errors.mjs",
@@ -607,13 +667,18 @@
     },
     {
       "path": "src/extensions/command-contract.mjs",
-      "sha256": "25b898f97c8d02b556e022f1a78b24cac1aa8877d3ca76aa2cb89372f919750d",
-      "size": 5136
+      "sha256": "29d580676d0cdeeb2798cc47d0ff347a52161cd998642854c167d09896feef37",
+      "size": 5272
+    },
+    {
+      "path": "src/extensions/composable-workflow.mjs",
+      "sha256": "449aaeaccef9e9f63a2957956e3de490936b3e72491cc82ef0a81490622d376c",
+      "size": 312
     },
     {
       "path": "src/extensions/contract.mjs",
-      "sha256": "b7339af7090cb4143b831c715c4b25692e70fa177583f75d8d14cae66a10883c",
-      "size": 11483
+      "sha256": "c7fe6c2c4a9d90dc3ccccf2f9407651db99405628cb9bbead5414c2ca1288519",
+      "size": 12386
     },
     {
       "path": "src/extensions/index.mjs",
@@ -632,13 +697,13 @@
     },
     {
       "path": "src/gates/project-gate-runner.mjs",
-      "sha256": "049f07cfd927f1be16b13fbfcf0be630f7a8b3c78f1af8b09755b24abb87b3d6",
-      "size": 11668
+      "sha256": "9166d9b633a2dc63f9e56d39bf5e4d80bf9bf2c1a33d2bbacca89791d15324a3",
+      "size": 11756
     },
     {
       "path": "src/index.mjs",
-      "sha256": "75f2856b3be4a8c68985143676758b973a66d100c77428e567a305a32bd58122",
-      "size": 2917
+      "sha256": "f660aae5f799b2622ba864fb41db04f99662204658d2d7f9877903715262274d",
+      "size": 2993
     },
     {
       "path": "src/installation.mjs",
@@ -662,8 +727,8 @@
     },
     {
       "path": "src/kernel/evidence-store.mjs",
-      "sha256": "b9764b70943361a629c0a23ca6e50e2470ab2f2e27e8ad31829e663563f61a37",
-      "size": 3362
+      "sha256": "561eb3b02cd3c6b52cc9b96aefe71b2ce13c35152c99df176b45f4dbd4418885",
+      "size": 3460
     },
     {
       "path": "src/kernel/gate-cache.mjs",
@@ -677,8 +742,8 @@
     },
     {
       "path": "src/kernel/kernel.mjs",
-      "sha256": "a08056d1d923a167171f460f9505680475c0d361cb9de5cf76101d32cf7b94db",
-      "size": 44425
+      "sha256": "6e7b0a6221ba944e3297e73e236ce239b7e14fa580efc51dbba3dc760a793d35",
+      "size": 45404
     },
     {
       "path": "src/kernel/quality.mjs",
@@ -687,8 +752,8 @@
     },
     {
       "path": "src/kernel/receipts.mjs",
-      "sha256": "e7b42ea7fb169aaf76d4301ae6edb4226f0ab5c55a305bb4beb951110093d2a7",
-      "size": 1551
+      "sha256": "94fa573bb2935f470715956d28195c6a1bdf5ab4a951c14c3520d3136953770a",
+      "size": 1660
     },
     {
       "path": "src/kernel/work-graph.mjs",
@@ -697,8 +762,8 @@
     },
     {
       "path": "src/lifecycle-command-plan.mjs",
-      "sha256": "d00d01c098eb480a2316b21af8ead156bd9ab806564578e067cd1ad0f44a5131",
-      "size": 8243
+      "sha256": "f8c9bd76c219a8ca9e878cc78fb810487d7476f05a17a0bda4d88579d8e5faf8",
+      "size": 10202
     },
     {
       "path": "src/lineage.mjs",
@@ -717,8 +782,8 @@
     },
     {
       "path": "src/maintenance/issue-intake.mjs",
-      "sha256": "c2e6db93225fae71aac13676bb781d6c1137c0845fda2482c0b8fb1611c8cd59",
-      "size": 7929
+      "sha256": "08df7f935f0d1a67dacdb8225447cee0e0396cf021a2c63ed82ee35052d448cd",
+      "size": 8449
     },
     {
       "path": "src/maintenance/issue-triage.mjs",
@@ -741,6 +806,16 @@
       "size": 1681
     },
     {
+      "path": "src/memory/index.mjs",
+      "sha256": "a9c9852c606c86a1420b0c42c6c8fe76a9de1185abea713a6d926f69ad556dae",
+      "size": 36
+    },
+    {
+      "path": "src/memory/memory-store.mjs",
+      "sha256": "6f1f231e3264bfedeef1c7c121b576e513ca39304c88cafde4f837ddd69aed4e",
+      "size": 21533
+    },
+    {
       "path": "src/paths.mjs",
       "sha256": "d6bdcd9f0b47a25a8e3e781b6be1b8f69c823134af338136482bbff7dccdbe68",
       "size": 2430
@@ -752,8 +827,8 @@
     },
     {
       "path": "src/plugins/codec/agent-prompt-codec.mjs",
-      "sha256": "49a4d3d41fba3863b288cb5614b76e50a2ffde57004dff32c2996166615b40ac",
-      "size": 6371
+      "sha256": "b0b0625dfffa7e7e213b59ed757e10faba1691d641d310d34a83a2d498b81af5",
+      "size": 7479
     },
     {
       "path": "src/plugins/codec/json-codec.mjs",
@@ -832,8 +907,8 @@
     },
     {
       "path": "src/plugins/runtime/execution-policy.mjs",
-      "sha256": "ed52ca3e3619dc41f5fb178b3283bc2b741131ec838c1541d6c5ff54524df420",
-      "size": 6513
+      "sha256": "0ff1e8f950cb687442257083ed4c95a77a0ca9bf29673a870066c4746656f948",
+      "size": 6711
     },
     {
       "path": "src/plugins/runtime/in-memory-runtime.mjs",
@@ -881,6 +956,11 @@
       "size": 6695
     },
     {
+      "path": "src/profiles/composable-workflow.mjs",
+      "sha256": "5399e40f73c67117216d738d693bbed7c7d7bd8699f3515a1a3c200794ca7bb9",
+      "size": 5137
+    },
+    {
       "path": "src/profiles/engine-delivery.mjs",
       "sha256": "5d6112c4c437258c751365bd1545f555cb6864d9b4c883949c661e574e422c71",
       "size": 5461
@@ -892,8 +972,8 @@
     },
     {
       "path": "src/profiles/index.mjs",
-      "sha256": "48961de32450f7165c5ea4e53e5d0e0668bddfc072f67dcddda45d734b16ea65",
-      "size": 115
+      "sha256": "0d42ba76d61a3e6d4258efa3386b0ad927e7a470ca1fd566fa017cab351b454d",
+      "size": 186
     },
     {
       "path": "src/profiles/quality-loop.mjs",
@@ -932,8 +1012,8 @@
     },
     {
       "path": "src/recovery/coordinator.mjs",
-      "sha256": "992d1b1126609173ebbf7c82b07ee3fb9d8587421225368acb8ba6c3422be7f3",
-      "size": 11550
+      "sha256": "605f18b16e2ed8efa73977d443a6d222e7d658426a0a90cda3d2b4ada35b84b0",
+      "size": 11818
     },
     {
       "path": "src/recovery/index.mjs",
@@ -967,13 +1047,13 @@
     },
     {
       "path": "src/registry/project-contract.mjs",
-      "sha256": "b21909c10a2927a78ab7331ec854b32114175ce8c073081a088bbd7f7fb9125d",
-      "size": 4583
+      "sha256": "05c103ea5192fa981ca34b836ccfd5d05e623c880b18b91a8c208b04b2a5fa5d",
+      "size": 5207
     },
     {
       "path": "src/registry/project-registry.mjs",
-      "sha256": "1982e2f8da80fa95105c12d8160b778f81d09ed8ec077f1128d035149a357d3e",
-      "size": 12105
+      "sha256": "994c2af10d2c974e971d9863c97a42d1e2884ee87da998cf484c1ee15d368186",
+      "size": 13493
     },
     {
       "path": "src/release-identity.mjs",
@@ -982,18 +1062,48 @@
     },
     {
       "path": "src/result-contract.mjs",
-      "sha256": "b90249eb937785fa7e87eb7f174cd2e962cd956ecb4b9564a747fe2301b63851",
-      "size": 2005
+      "sha256": "5b835a7f4614864c4e20a862495a0cd05ab2221b7e912ac10e47ecef2a096187",
+      "size": 2363
+    },
+    {
+      "path": "src/workflows/admission-store.mjs",
+      "sha256": "e80559b7edc07a6ed9d7c32a750f7262c16305a8ec8260047d9d6626dfa1eeb6",
+      "size": 6362
+    },
+    {
+      "path": "src/workflows/definition.mjs",
+      "sha256": "67da8ab2fa3b403ff5f9f05fb8163a3b63d7bc3f6e95629768fc807249493cbb",
+      "size": 4843
     },
     {
       "path": "src/workflows/index.mjs",
-      "sha256": "2636dd91baa5b51369b50c6822d0671738095aa0d9832132715c57ac190d5499",
-      "size": 34
+      "sha256": "8c3228cb8d29a624e2c65d37ce897ac8613959eb1c9e41ea1d14ea860aa2b24f",
+      "size": 258
+    },
+    {
+      "path": "src/workflows/instance-set.mjs",
+      "sha256": "d62c2f337da28e595bf89477c7f54e4c5d041f2532d99fda1401575f613cc360",
+      "size": 6118
     },
     {
       "path": "src/workflows/primitives.mjs",
       "sha256": "ca7390f1526c35c62558fcbb554462ae1fa78c03c871ce8e42b7dbe408f9a865",
       "size": 1566
+    },
+    {
+      "path": "src/workflows/reference-feature.mjs",
+      "sha256": "447ecb5c38ba525122f816bf435e0b833ccf3e84da269c0d305c345ba4b29a53",
+      "size": 2682
+    },
+    {
+      "path": "src/workflows/source-manifest.mjs",
+      "sha256": "86db7012d4a93626e356d7361d7ed00d6776f1ae1cc7ee4761b70ca0785da32e",
+      "size": 4835
+    },
+    {
+      "path": "src/workflows/source-tool.mjs",
+      "sha256": "def2f2e221053c9b54ec2ab3281a45814322651b0c4c0d9fc532757e8816e145",
+      "size": 3239
     },
     {
       "path": "src/workspace-identity.mjs",
@@ -1006,12 +1116,32 @@
       "size": 1690
     },
     {
+      "path": "src/workspaces/index.mjs",
+      "sha256": "77d995fabc9522c097772616430115372de1b9de5445d6a3b694feaee21dca36",
+      "size": 120
+    },
+    {
+      "path": "src/workspaces/memory-broker.mjs",
+      "sha256": "15d9c341102e3300f834a46f06c253205f3f45472b5554c045a9d593ee173ef1",
+      "size": 4951
+    },
+    {
+      "path": "src/workspaces/resource-provider.mjs",
+      "sha256": "e3c51eb72a6c7ec71ba4d17a39cf4287c907485cb112f003449efc7eeff5c576",
+      "size": 2214
+    },
+    {
+      "path": "src/workspaces/workspace-registry.mjs",
+      "sha256": "1a1f28f30decbfa3e8befb8e7fc1c4b37a35f4168ef453e353a3746bacf4555d",
+      "size": 19716
+    },
+    {
       "path": "src/write-boundary.mjs",
       "sha256": "673a4ec7c16e820d5a4a2e0fc8c0a8e207327d70999f55ecab45fd8b57a30262",
       "size": 3735
     }
   ],
-  "packageDigest": "dd589bfe121a0c33487dab09fff3313916c67f31a8182d05221660865832d5d1",
+  "packageDigest": "831a1db589f6e1bb5760b7fbd5bf13163cf441b4582fbc7db6f3f83ba42e7ede",
   "metadataFiles": [
     "release-manifest.json",
     "sbom.spdx.json"

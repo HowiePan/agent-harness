@@ -7,6 +7,7 @@ import { defineExtensionPack } from '../extensions/contract.mjs';
 import { defineCommandManifest } from '../extensions/command-contract.mjs';
 import { validateWorkGraph } from '../kernel/work-graph.mjs';
 import { AUTO_CONCURRENCY } from '../concurrency.mjs';
+import { compileWorkflowFeatures, defineWorkflowDefinition } from '../workflows/definition.mjs';
 
 export const CARDWORLD_FINAL_GATE_IDS = Object.freeze([
   'context-budget',
@@ -20,6 +21,7 @@ export const cardWorldCommandManifest = defineCommandManifest({
   protocolVersion: '1.0',
   id: 'engine-delivery-commands',
   profileId: 'engine-delivery',
+  workflowId: 'engine-delivery',
   actions: {
     full: { targetKind: 'version', presets: { default: { scope: 'requirement-intake..delivery-receipt', stateChanging: true } } },
     requirements: {
@@ -218,6 +220,43 @@ const makeEngineFeature = ({ action, target, stage, dependsOn = [], allowedPaths
   },
 });
 
+const engineNode = (id, action, stage, dependsOn = [], options = {}) => ({ id, template: 'engine-stage', action, stage, dependsOn, ...options });
+export const engineWorkflowDefinition = defineWorkflowDefinition({
+  id: 'engine-delivery', version: '1.0.0', profileId: 'engine-delivery',
+  routes: {
+    full: [
+      engineNode('intake', 'requirements-intake', 'requirement-intake'),
+      engineNode('canonical', 'canonical-requirement', 'canonical-requirement', ['intake']),
+      engineNode('plan', 'plan', 'version-planning', ['canonical']),
+      engineNode('implement', 'implement', 'implementation', ['plan']),
+      engineNode('scope', 'scope', 'scope-resolution', ['implement']),
+      engineNode('docs', 'docs', 'docs-closeout', ['scope']),
+      engineNode('quality', 'quality', 'quality', ['docs'], { qualityReview: true }),
+      engineNode('review', 'review', 'user-code-review', ['quality'], { readOnly: true }),
+      engineNode('deliver', 'deliver', 'delivery-receipt', ['review'], { readOnly: true }),
+    ],
+    requirements: [engineNode('intake', 'requirements-intake', 'requirement-intake'), engineNode('canonical', 'canonical-requirement', 'canonical-requirement', ['intake']), engineNode('plan', 'plan', 'version-planning', ['canonical'])],
+    deliver: [engineNode('quality', 'quality', 'quality', [], { qualityReview: true }), engineNode('deliver', 'deliver', 'delivery-receipt', ['quality'], { readOnly: true })],
+    quality: [engineNode('quality', 'quality', 'quality', [], { qualityReview: true })],
+    plan: [engineNode('plan', 'plan', 'version-planning')],
+    implement: [engineNode('implement', 'implement', 'implementation')],
+    scope: [engineNode('scope', 'scope', 'scope-resolution')],
+    docs: [engineNode('docs', 'docs', 'docs-closeout')],
+    review: [engineNode('review', 'review', 'user-code-review', [], { readOnly: true })],
+  },
+});
+
+const engineTemplates = {
+  'engine-stage': ({ context, node, dependsOn }) => {
+    const readOnly = node.readOnly || context.intent.sourcePolicy === 'read-only' || node.qualityReview;
+    const allowedPaths = node.action === 'requirements-intake' || node.action === 'canonical-requirement' ? actionPaths.requirements : actionPaths[node.action];
+    return makeEngineFeature({ action: node.action, target: context.intent.target, stage: node.stage, dependsOn,
+      allowedPaths: readOnly ? [] : allowedPaths, sourcePolicy: readOnly ? 'read-only' : 'write',
+      ownerRole: node.qualityReview || node.action === 'review' ? 'reviewer' : 'operator', qualityReview: Boolean(node.qualityReview),
+      qualityFindingPolicy: context.intent.sourcePolicy === 'read-only' ? 'record-only' : 'repair-and-rereview', sourceDigest: context.sourceDigest });
+  },
+};
+
 /**
  * Compile the action-level plan consumed by the neutral lifecycle executor.
  * This function only returns data; it never touches Authority or the workspace.
@@ -234,43 +273,14 @@ export const createCardWorldLifecyclePlan = ({ intent, project, runId, sourceDig
     requireUserCodeReview: full || intent.action === 'deliver',
     requireFinalQualityReview: full || quality || intent.action === 'deliver',
   };
-  let features;
-  if (full) {
-    const chain = [
-      ['requirements-intake', 'requirement-intake', actionPaths.requirements, 'write'],
-      ['canonical-requirement', 'canonical-requirement', actionPaths.requirements, 'write'],
-      ['plan', 'version-planning', actionPaths.plan, 'write'],
-      ['implement', 'implementation', actionPaths.implement, 'write'],
-      ['scope', 'scope-resolution', actionPaths.scope, 'write'],
-      ['docs', 'docs-closeout', actionPaths.docs, 'write'],
-    ];
-    features = chain.map(([action, stage, allowedPaths, sourcePolicy], index) => makeEngineFeature({ action, target: intent.target, stage, allowedPaths, sourcePolicy, dependsOn: index ? [`${chain[index - 1][0]}/${intent.target}`] : [] }));
-    features.push(makeEngineFeature({ action: 'quality', target: intent.target, stage: 'quality', allowedPaths: [], sourcePolicy: 'read-only', ownerRole: 'reviewer', qualityReview: true, sourceDigest, dependsOn: [`docs/${intent.target}`] }));
-    features.push(makeEngineFeature({ action: 'review', target: intent.target, stage: 'user-code-review', allowedPaths: [], sourcePolicy: 'read-only', ownerRole: 'reviewer', dependsOn: [`quality/${intent.target}`] }));
-    features.push(makeEngineFeature({ action: 'deliver', target: intent.target, stage: 'delivery-receipt', allowedPaths: [], sourcePolicy: 'read-only', dependsOn: [`review/${intent.target}`] }));
-  } else if (quality) {
-    features = [makeEngineFeature({ action: 'quality', target: intent.target, stage: 'quality', allowedPaths: [], sourcePolicy: 'read-only', qualityFindingPolicy: intent.sourcePolicy === 'read-only' ? 'record-only' : 'repair-and-rereview', ownerRole: 'reviewer', qualityReview: true, sourceDigest })];
-  } else if (intent.action === 'deliver') {
-    const finalQuality = makeEngineFeature({ action: 'quality', target: intent.target, stage: 'quality', allowedPaths: [], sourcePolicy: 'read-only', ownerRole: 'reviewer', qualityReview: true, sourceDigest });
-    const delivery = makeEngineFeature({ action: 'deliver', target: intent.target, stage: 'delivery-receipt', allowedPaths: [], sourcePolicy: 'read-only', dependsOn: [finalQuality.id] });
-    features = [finalQuality, delivery];
-  } else if (intent.action === 'requirements' && intent.scope !== 'version-planning') {
-    features = [
-      makeEngineFeature({ action: 'requirements-intake', target: intent.target, stage: 'requirement-intake', allowedPaths: actionPaths.requirements }),
-      makeEngineFeature({ action: 'canonical-requirement', target: intent.target, stage: 'canonical-requirement', allowedPaths: actionPaths.requirements, dependsOn: [`requirements-intake/${intent.target}`] }),
-      makeEngineFeature({ action: 'plan', target: intent.target, stage: 'version-planning', allowedPaths: actionPaths.plan, dependsOn: [`canonical-requirement/${intent.target}`] }),
-    ];
-  } else {
-    const readOnly = intent.sourcePolicy === 'read-only' || ['review', 'deliver'].includes(intent.action);
-    const effectiveAction = intent.action === 'requirements' ? 'plan' : intent.action;
-    features = [makeEngineFeature({ action: effectiveAction, target: intent.target, stage: actionStage[effectiveAction], allowedPaths: readOnly ? [] : actionPaths[effectiveAction], sourcePolicy: readOnly ? 'read-only' : 'write', ownerRole: effectiveAction === 'review' ? 'reviewer' : 'operator' })];
-  }
+  const routeId = intent.action === 'requirements' && intent.scope === 'version-planning' ? 'plan' : intent.action;
+  const features = compileWorkflowFeatures({ definition: engineWorkflowDefinition, routeId, templates: engineTemplates, context: { intent, sourceDigest } });
   for (const feature of features) {
     feature.gatePlan = [...gateIds];
     feature.metadata.scope = intent.scope;
   }
   return {
-    run: { runId, profileId: 'engine-delivery', profileConfig, features },
+    run: { runId, profileId: 'engine-delivery', profileConfig, features, metadata: { workflow: { id: engineWorkflowDefinition.id, version: engineWorkflowDefinition.version, artifactDigest: engineWorkflowDefinition.artifactDigest } } },
     stopCondition: { type: quality ? 'quality-run-complete' : full ? 'engine-full-complete' : 'engine-action-complete', action: intent.action, requiresFeatureCompletion: true, requiresAllFindingsResolved: full || quality || intent.action === 'deliver', requiredFinalGates: gateIds },
     protectedOperations: ['publication', 'commit', 'push', 'legacy-destruction', 'privilege-expansion', 'external-cutover', 'irreversible-migration'],
   };
@@ -280,6 +290,7 @@ export const extensionPack = defineExtensionPack({
   id: 'cardworld-engine-profile',
   version: '1.0.0',
   profiles: [engineDeliveryProfile],
+  workflows: [engineWorkflowDefinition],
   commandManifest: cardWorldCommandManifest,
   operationManifest: {
     createProjectDescriptor: { executionClass: 'pure-planner' },

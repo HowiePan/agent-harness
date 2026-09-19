@@ -1,6 +1,7 @@
 import { isAbsolute } from 'node:path';
 import { assert } from '../errors.mjs';
 import { validateWorkGraph } from '../kernel/work-graph.mjs';
+import { compileWorkflowFeatures, defineWorkflowDefinition } from '../workflows/definition.mjs';
 import { collectionBatchProfile } from '../profiles/collection-batch.mjs';
 import { defineExtensionPack } from '../extensions/contract.mjs';
 import { defineCommandManifest } from '../extensions/command-contract.mjs';
@@ -23,6 +24,7 @@ export const tabletopCollectionCommandManifest = defineCommandManifest({
   protocolVersion: '1.0',
   id: 'batch-production-commands',
   profileId: 'collection-batch',
+  workflowId: 'collection-batch-production',
   actions: {
     full: { targetKind: 'batch-id', presets: { default: { scope: 'rule-readiness..release-receipt', stateChanging: true } } },
     rules: { targetKind: 'batch-id', presets: { default: { scope: 'rule-readiness', stateChanging: true } } },
@@ -183,6 +185,18 @@ export const compileTabletopCollectionFeatureGraph = ({ batchId, games, sharedCa
   return validateWorkGraph([...shared, ...gameFeatures]);
 };
 
+const collectionNode = (id, action, dependsOn = [], options = {}) => ({ id, template: 'collection-stage', action, forEach: 'item', dependsOn, ...options });
+export const collectionWorkflowDefinition = defineWorkflowDefinition({
+  id: 'collection-batch-production', version: '1.0.0', profileId: 'collection-batch',
+  routes: {
+    full: [collectionNode('rules', 'rules'), collectionNode('produce', 'produce', ['rules']), collectionNode('quality', 'quality', ['produce'], { qualityReview: true }), collectionNode('review', 'review', ['quality'], { readOnly: true }), collectionNode('accept', 'accept', ['review'], { readOnly: true })],
+    rules: [collectionNode('rules', 'rules')], launch: [collectionNode('launch', 'launch', [], { readOnly: true })],
+    produce: [collectionNode('produce', 'produce')], quality: [collectionNode('quality', 'quality', [], { qualityReview: true })],
+    review: [collectionNode('review', 'review', [], { readOnly: true })], accept: [collectionNode('accept', 'accept', [], { readOnly: true })],
+    close: [collectionNode('close', 'close', [], { readOnly: true })],
+  },
+});
+
 export const createTabletopCollectionLifecyclePlan = ({ intent, project, runId, sourceDigest }) => {
   const finalGateIds = (project.gateRecipes ?? []).filter(recipe => recipe.scope === 'final' && recipe.required !== false).map(recipe => recipe.id);
   const gateIds = ['full', 'quality', 'close'].includes(intent.action) ? finalGateIds : [];
@@ -233,22 +247,12 @@ export const createTabletopCollectionLifecyclePlan = ({ intent, project, runId, 
       ...(qualityReview ? { qualityReview: true, qualityFindingPolicy: 'repair-and-rereview', qualityRoot: `collection:${intent.target}:${gameId}`, reviewRound: 1, reviewSourceDigest: sourceDigest, qualityContext: { batchId: intent.target, gameId, ruleStatus: batch.ruleStatus ?? 'rule-ready' } } : {}),
     },
   });
-  let features;
-  if (intent.action === 'full') {
-    features = gameIds.flatMap(gameId => {
-      const rules = makeFeature({ action: 'rules', gameId });
-      const produce = makeFeature({ action: 'produce', gameId, dependsOn: [rules.id] });
-      const reviewQuality = makeFeature({ action: 'quality', gameId, dependsOn: [produce.id], qualityReview: true });
-      const independent = makeFeature({ action: 'review', gameId, dependsOn: [reviewQuality.id], readOnly: true });
-      const accept = makeFeature({ action: 'accept', gameId, dependsOn: [independent.id], readOnly: true });
-      return [rules, produce, reviewQuality, independent, accept];
-    });
-  } else {
-    const readOnly = intent.sourcePolicy === 'read-only' || ['review', 'accept', 'close', 'launch'].includes(intent.action);
-    features = gameIds.map(gameId => makeFeature({ action: intent.action, gameId, readOnly, qualityReview: quality }));
-  }
+  const features = compileWorkflowFeatures({ definition: collectionWorkflowDefinition, routeId: intent.action,
+    templates: { 'collection-stage': ({ node, item, dependsOn }) => makeFeature({ action: node.action, gameId: item, dependsOn,
+      readOnly: node.readOnly || intent.sourcePolicy === 'read-only', qualityReview: Boolean(node.qualityReview) }) },
+    context: { intent, sourceDigest }, items: gameIds });
   return {
-    run: { runId, profileId: 'collection-batch', profileConfig, features, runtimePluginId: project.policy?.defaultRuntimePlugin },
+    run: { runId, profileId: 'collection-batch', profileConfig, features, runtimePluginId: project.policy?.defaultRuntimePlugin, metadata: { workflow: { id: collectionWorkflowDefinition.id, version: collectionWorkflowDefinition.version, artifactDigest: collectionWorkflowDefinition.artifactDigest } } },
     stopCondition: { type: intent.action === 'full' ? 'collection-full-complete' : 'collection-action-complete', action: intent.action, requiresFeatureCompletion: true, requiresAllFindingsResolved: ['full', 'quality'].includes(intent.action), requiredFinalGates: gateIds },
     protectedOperations: ['publication', 'commit', 'push', 'legacy-destruction', 'privilege-expansion', 'external-cutover', 'irreversible-migration'],
   };
@@ -258,6 +262,7 @@ export const extensionPack = defineExtensionPack({
   id: 'tabletop-collection-profile',
   version: '1.0.0',
   profiles: [collectionBatchProfile],
+  workflows: [collectionWorkflowDefinition],
   commandManifest: tabletopCollectionCommandManifest,
   operationManifest: {
     createProjectDescriptor: { executionClass: 'pure-planner' },

@@ -7,6 +7,7 @@
   "properties": {
     "status": { "enum": ["completed", "blocked", "failed"] },
     "summary": { "type": "string", "minLength": 1 },
+    "outputs": { "type": "object", "additionalProperties": { "type": "object", "required": ["schemaId", "value", "evidenceRefs"], "properties": { "schemaId": { "type": "string", "minLength": 1 }, "value": { "type": "object" }, "evidenceRefs": { "type": "array", "uniqueItems": true, "items": { "type": "string", "minLength": 1 } } }, "additionalProperties": false } },
     "checkpoints": {
       "type": "array",
       "items": {

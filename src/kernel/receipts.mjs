@@ -8,6 +8,7 @@ export const buildRunReceipt = state => {
     protocolVersion: '1.0',
     kind: 'run-closure',
     projectId: state.projectId,
+    ...(state.metadata?.workspaceRef ? { workspaceRef: structuredClone(state.metadata.workspaceRef) } : {}),
     runId: state.runId,
     profileId: state.profile.id,
     profileVersion: state.profile.version,

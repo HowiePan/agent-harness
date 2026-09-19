@@ -1,5 +1,7 @@
 # Pseudo-command adapter contract
 
+多流程项目可用 `h:flows <project-alias>` 只读发现已绑定的 Workflow，使用 `h:<project-alias> flow <workflow-id> <action> <target> [preset]` 精确启动，使用 `h:report <project-alias> --workflow <workflow-id>` 记录有归属的问题。绑定固定 Workflow ID、版本、摘要、Profile 与 Extension；歧义或不匹配时在创建 Run 前拒绝。流程输入由批准过的 Project Descriptor 提供，Source Manifest 在计划时重新固定。
+
 `h:<project-alias> <action> <target> [preset]` is the portable conversational command envelope. The alias explicitly selects a Project Registry identity; it is installation data rather than a hard-coded project type. The envelope contains no model, provider, Runtime, language, or build-system identity. `h:where [project-alias]` is the read-only binding query. `h:report <project-alias>` is the reserved maintenance intake command.
 
 `h:report` is resolved from installation bindings before Registry or Authority access so it remains available when initialization, permissions, Registry, Descriptor, or Authority is the reported failure. It captures only relevant, sanitized excerpts from the current conversation and calls the bound Harness entrypoint to atomically record an Issue Intake under `<controlRoot>/issues`. The command never creates another conversation and accepts no output path. Conversation text is problem input, not Authority; unavailable evidence is recorded as missing rather than fabricated.

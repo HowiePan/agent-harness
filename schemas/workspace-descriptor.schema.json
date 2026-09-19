@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-harness.local/schemas/workspace-descriptor.schema.json",
+  "title": "Agent Harness Workspace Descriptor Input",
+  "type": "object",
+  "required": ["schemaVersion", "workspaceId", "alias", "profiles", "extensions", "workflows", "projects", "sources", "executionTargets", "resources", "policy", "gateRecipes", "artifactProviders"],
+  "properties": {
+    "schemaVersion": { "const": "1.0" },
+    "workspaceId": { "$ref": "#/$defs/id" },
+    "alias": { "$ref": "#/$defs/id" },
+    "harness": { "type": "object", "required": ["version", "artifactDigest"], "properties": { "version": { "$ref": "#/$defs/version" }, "artifactDigest": { "$ref": "#/$defs/digest" } }, "additionalProperties": false },
+    "profiles": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "type": "string", "minLength": 1 } },
+    "extensions": { "type": "array", "items": { "type": "object", "required": ["id", "version", "digest"], "properties": { "id": { "type": "string", "minLength": 1 }, "version": { "$ref": "#/$defs/version" }, "digest": { "$ref": "#/$defs/digest" } }, "additionalProperties": false } },
+    "workflows": { "type": "array", "minItems": 1, "items": { "type": "object", "required": ["id", "version", "artifactDigest", "extensionId", "profileId", "allowedProjectIds", "defaultProjectScope", "executionTargetId"], "properties": { "id": { "$ref": "#/$defs/id" }, "version": { "$ref": "#/$defs/version" }, "artifactDigest": { "$ref": "#/$defs/digest" }, "extensionId": { "type": "string", "minLength": 1 }, "profileId": { "type": "string", "minLength": 1 }, "allowedProjectIds": { "$ref": "#/$defs/idList" }, "defaultProjectScope": { "$ref": "#/$defs/idList" }, "executionTargetId": { "$ref": "#/$defs/id" } }, "additionalProperties": false } },
+    "projects": { "type": "array", "minItems": 1, "items": { "type": "object", "required": ["id", "sourceIds", "executionTargetIds"], "properties": { "id": { "$ref": "#/$defs/id" }, "sourceIds": { "$ref": "#/$defs/idList" }, "executionTargetIds": { "$ref": "#/$defs/idList" } }, "additionalProperties": false } },
+    "sources": { "type": "array", "items": { "type": "object", "required": ["sourceId", "type", "root", "ownerProjectId", "allowedReceivers"], "properties": { "sourceId": { "$ref": "#/$defs/id" }, "type": { "enum": ["repository", "document"] }, "root": { "type": "string", "minLength": 1 }, "ownerProjectId": { "$ref": "#/$defs/id" }, "sharedProjectIds": { "$ref": "#/$defs/idList" }, "allowedReceivers": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "type": "string", "minLength": 1 } }, "allowedPaths": { "type": "array", "items": { "type": "string", "minLength": 1 } }, "excluded": { "type": "array", "items": { "type": "string", "minLength": 1 } }, "revision": { "type": "string", "minLength": 1 } }, "additionalProperties": false } },
+    "executionTargets": { "type": "array", "minItems": 1, "items": { "type": "object", "required": ["id", "root", "projectIds"], "properties": { "id": { "$ref": "#/$defs/id" }, "root": { "type": "string", "minLength": 1 }, "projectIds": { "$ref": "#/$defs/idList" }, "rootSelector": { "const": "git-worktree" }, "excluded": { "type": "array", "items": { "type": "string", "minLength": 1 } } }, "additionalProperties": false } },
+    "resources": { "type": "array", "items": { "type": "object", "required": ["id", "kind", "scope", "providerRef", "readProjectIds", "writeProjectIds"], "properties": { "id": { "$ref": "#/$defs/id" }, "kind": { "type": "string", "minLength": 1 }, "scope": { "enum": ["workspace", "project", "workflow", "source", "session"] }, "providerRef": { "type": "object", "required": ["id", "version", "artifactDigest"], "properties": { "id": { "type": "string", "minLength": 1 }, "version": { "$ref": "#/$defs/version" }, "artifactDigest": { "$ref": "#/$defs/digest" } }, "additionalProperties": false }, "projectId": { "$ref": "#/$defs/id" }, "workflowId": { "$ref": "#/$defs/id" }, "sourceId": { "$ref": "#/$defs/id" }, "readProjectIds": { "$ref": "#/$defs/idList" }, "writeProjectIds": { "$ref": "#/$defs/idList" }, "lifecycle": { "enum": ["managed", "external-read-only"] } }, "additionalProperties": false } },
+    "policy": { "type": "object" },
+    "gateRecipes": { "type": "array" },
+    "artifactProviders": { "type": "array" }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "id": { "type": "string", "pattern": "^[a-z][a-z0-9-]{0,31}$" },
+    "idList": { "type": "array", "uniqueItems": true, "items": { "$ref": "#/$defs/id" } },
+    "version": { "type": "string", "pattern": "^\\d+\\.\\d+\\.\\d+$" },
+    "digest": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+  }
+}
