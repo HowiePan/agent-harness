@@ -93,7 +93,7 @@ Kernel 只认识通用对象：
 - `conversation-visible`：交互式默认。Runtime 同时声明 `user-visible` 与 `host-orchestrated`、使用宿主原生子 Agent/委派界面、返回可检查任务引用，并且不得申请 `process.spawn`。可信宿主证明必须绑定 Agent、Dispatch 与 Packet，提交前要求新鲜 heartbeat。外部 spawn 先写入可恢复 Host Effect Journal；新发车前必须完成 contract handshake 与未决 Effect reconciliation，失败 Agent 必须 interrupt 后再次观察到 terminal/idle，Authority 已绑定的 Agent 则保留供重附着。缺少任一能力时 fail closed，不允许回退到 CLI 或隐藏进程。
 - `headless`：仅供原始用户请求明确指定、Descriptor allow-policy 明确允许、可信 deny-wins 用户约束允许且宿主签发 command-scoped `LifecycleExecutionGrant` 的 CI、无人值守或兼容执行，不能按 Runtime ID、通用批准或缺失可见宿主推断。Runtime 声明 `headless`；若启动进程，还必须持有 Core 为当前 Grant/Dispatch/Packet 签发的 launch capability，并满足受管输出与 OS sandbox 合同。
 
-Codex、HTTP Agent、Local Model 和 Human Worker 都可以实现同一 Runtime 接口，但“对话可见”是可验证能力，不是供应商名称推断。交互式 Harness 的 Host Coordinator 负责把 Dispatch 投影为可见子 Agent、持续发布状态并记录 heartbeat；阻塞式 Coordinator 不得接管 `host-orchestrated` Runtime。
+Codex、HTTP Agent、Local Model 和 Human Worker 都可以实现同一 Runtime 接口，但“对话可见”是可验证能力，不是供应商名称推断。交互式 Harness 按 Runtime ID 解析可信 Host Adapter；Host Coordinator 负责把 Dispatch 投影为可见子 Agent、持续发布状态并记录 heartbeat；阻塞式 Coordinator 不得接管 `host-orchestrated` Runtime。接入合同见 [可见 Agent 宿主接入合同](host-integration.md)。
 
 ### Model Router
 

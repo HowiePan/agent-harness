@@ -31,7 +31,7 @@ export {
   sealLifecycleExecutionGrant,
   validateLifecycleExecutionGrant,
 } from './execution-authorization.mjs';
-export { validateBusinessResult } from './result-contract.mjs';
+export { validateBusinessResult, validateProfileResult, VISIBLE_AGENT_RESULT_CONTRACT_VERSION } from './result-contract.mjs';
 export { readActiveRelease, resolveActiveRuntimeRoot } from './registry/active-generation.mjs';
 export { applyReleaseActivationPlan, createReleaseActivationPlan, releaseActivationPlanDigest, verifyReleaseActivationPlan } from './maintenance/release-activation.mjs';
 export * from './workflows/index.mjs';

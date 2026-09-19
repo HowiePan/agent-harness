@@ -3,6 +3,7 @@ import { assert } from '../../errors.mjs';
 const semanticVersion = /^\d+\.\d+\.\d+$/;
 const visibleHostAdapterBrand = Symbol('agent-harness.visible-host-adapter');
 export const isVisibleHostAdapter = value => value?.[visibleHostAdapterBrand] === true;
+export const VISIBLE_HOST_ADAPTER_CONTRACT = Object.freeze({ id: 'agent-harness-visible-host', version: '1.0.0' });
 const nonEmpty = (value, code, message) => {
   assert(typeof value === 'string' && value.length > 0, code, message);
   return value;
@@ -69,6 +70,7 @@ export const createVisibleHostAdapter = ({ inspectVisibleAgent, spawnVisibleAgen
 
   return Object.freeze({
     [visibleHostAdapterBrand]: true,
+    contract: VISIBLE_HOST_ADAPTER_CONTRACT,
     provider,
     adapterVersion,
     capabilities: Object.freeze({

@@ -100,6 +100,17 @@ test('native failed, interrupted, blocked, and output-less completed states beco
   }
 });
 
+test('Codex adapter rejects a native result that lacks its provider transport fields', async t => {
+  const fixture = await setup(t);
+  const host = fixture.create('invalid-result-schema');
+  const spawned = await host.adapter.spawn(spawnInput);
+  const runtimeReceipt = { visibility: spawned.visibility, hostSpawnReceipt: spawned.receipt };
+  await host.adapter.confirm({ ...spawnInput, agentId: spawned.agentId, runtimeReceipt });
+  fixture.tasks.set(spawned.agentId, { completed: JSON.stringify({ status: 'completed', summary: 'too little', changedFiles: [] }) });
+  await assert.rejects(() => host.adapter.result({ agentId: spawned.agentId, dispatchId: spawnInput.dispatchId, runtimeReceipt }), error => error.code === 'CODEX_COLLABORATION_RESULT_SCHEMA_INVALID');
+  assert.equal((await host.journal.read(spawned.receipt.effectId)).state, 'lease-bound');
+});
+
 test('legacy provider identity spawn envelope fails closed and the spawned Agent is interrupted before return', async t => {
   const fixture = await setup(t, { spawnResult: { agent_id: 'provider-agent-1', nickname: 'Ada' } });
   const host = fixture.create();

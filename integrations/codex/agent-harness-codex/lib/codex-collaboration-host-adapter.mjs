@@ -1,7 +1,11 @@
 import { randomUUID } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 import { createCodexVisibleHostAdapter } from '../../../../src/plugins/runtime/codex-runtime.mjs';
 import { digestJson } from '../../../../src/canonical.mjs';
+import { assertJsonSchema } from '../../../../src/json-schema.mjs';
 import { CodexHostEffectJournal } from './codex-host-effect-journal.mjs';
+
+const codexResultSchema = JSON.parse(readFileSync(new URL('../../../../schemas/codex-runtime-result.schema.json', import.meta.url), 'utf8'));
 
 const contractBody = Object.freeze({
   id: 'codex-collaboration-native',
@@ -290,6 +294,7 @@ export const createCodexCollaborationHostAdapter = ({ exchange, controlRoot, dat
       const receipt = assertSpawnReceipt(input?.runtimeReceipt?.hostSpawnReceipt, { agentId: input.agentId, dispatchId: input.dispatchId, packetDigest: input.runtimeReceipt?.hostSpawnReceipt?.packetDigest, promptDigest: input.runtimeReceipt?.hostSpawnReceipt?.promptDigest, surface: input.runtimeReceipt?.visibility?.surface, inspectRef: input.runtimeReceipt?.visibility?.inspectRef });
       const observed = await inspect({ agentId: input.agentId, expected: { effectId: receipt.effectId, dispatchId: input.dispatchId } });
       const result = parseTerminalResult(observed.task, input.agentId);
+      assertJsonSchema(result, codexResultSchema, { code: 'CODEX_COLLABORATION_RESULT_SCHEMA_INVALID', label: 'Codex collaboration result' });
       const resultDigest = digestJson(result);
       let effect = await journal.read(receipt.effectId, { required: true });
       if (effect.state === 'lease-bound') effect = await transition(effect, 'settled', { outcome: { disposition: 'result-observed', resultDigest, observationRequestDigest: observed.request.requestDigest } }, 'settled');

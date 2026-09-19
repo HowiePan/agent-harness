@@ -41,7 +41,7 @@ const main = async () => {
       dataRoot: intent.harness.dataRoot,
       releaseIdentity,
       extensions,
-      agentAdapter: host.adapter,
+      agentAdapters: { 'codex-conversation-runtime': host.adapter },
     });
     const plan = await harness.createLifecyclePlan({
       projectId: intent.project.projectId,

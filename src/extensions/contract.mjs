@@ -54,7 +54,11 @@ export const installExtensionPacks = async (packs, { profileRegistry, pluginHost
     assert(!ids.has(pack.id), 'EXTENSION_DUPLICATE', `Extension Pack already installed: ${pack.id}`);
     ids.add(pack.id);
     for (const profile of pack.profiles) profileRegistry.register(profile);
-    for (const plugin of pack.plugins) pluginHost.register(plugin.manifest, await plugin.create(Object.freeze({ ...factoryContext })));
+    const { resolveAgentAdapter, ...sharedContext } = factoryContext;
+    for (const plugin of pack.plugins) {
+      const agentAdapter = typeof resolveAgentAdapter === 'function' ? resolveAgentAdapter(plugin.manifest.id) : sharedContext.agentAdapter;
+      pluginHost.register(plugin.manifest, await plugin.create(Object.freeze({ ...sharedContext, agentAdapter })));
+    }
     importers.push(...pack.recoveryImporters);
     installed.push(extensionIdentity(pack));
   }

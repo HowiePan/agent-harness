@@ -28,7 +28,7 @@ export const createTestExecutionAuthorizationAdapter = (constraintOverrides = {}
   verifyExecutionGrant: ({ grant }) => ({ verified: grant.attestation.provider === 'test-host', provider: 'test-host', assertionId: `verified-${grant.grantId}`, observedAt: new Date().toISOString() }),
 });
 
-export const makeFixture = async ({ projectId = 'project', profiles = ['feature-delivery'], policy = {}, gateRecipes = [], artifactProviders = [], extensions = [], agentAdapter = null, executionAuthorizationAdapter = undefined, allowedPluginPermissions = undefined, releaseIdentity = { version: '1.0.0', artifactDigest: null } } = {}) => {
+export const makeFixture = async ({ projectId = 'project', profiles = ['feature-delivery'], policy = {}, gateRecipes = [], artifactProviders = [], extensions = [], agentAdapter = null, agentAdapters = {}, executionAuthorizationAdapter = undefined, allowedPluginPermissions = undefined, releaseIdentity = { version: '1.0.0', artifactDigest: null } } = {}) => {
   const parent = resolve(harnessTemporaryRoot(), 'tests');
   await mkdir(parent, { recursive: true });
   const root = await mkdtemp(resolve(parent, 'case-'));
@@ -47,7 +47,7 @@ export const makeFixture = async ({ projectId = 'project', profiles = ['feature-
   };
   try {
     const trustedExecutionAuthorizationAdapter = executionAuthorizationAdapter === undefined ? createTestExecutionAuthorizationAdapter() : executionAuthorizationAdapter;
-    const harness = await createHarness({ dataRoot, releaseIdentity, strictProjectIdentity: false, extensions: [...profileExtensions, ...extensions], agentAdapter, executionAuthorizationAdapter: trustedExecutionAuthorizationAdapter, ...(allowedPluginPermissions ? { allowedPluginPermissions } : {}) });
+    const harness = await createHarness({ dataRoot, releaseIdentity, strictProjectIdentity: false, extensions: [...profileExtensions, ...extensions], agentAdapter, agentAdapters, executionAuthorizationAdapter: trustedExecutionAuthorizationAdapter, ...(allowedPluginPermissions ? { allowedPluginPermissions } : {}) });
     const testRuntimeManifest = { id: 'test-runtime', kind: 'agent-runtime', version: '1.0.0', capabilities: ['spawn', 'wait', 'send', 'heartbeat', 'interrupt', 'headless'], permissions: [] };
     harness.registerPlugin(testRuntimeManifest, createInMemoryRuntime({
       manifest: testRuntimeManifest,

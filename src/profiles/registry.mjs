@@ -9,6 +9,7 @@ export class ProfileRegistry {
   register(profile) {
     assert(profile?.id && profile?.version, 'PROFILE_INVALID', 'A Profile requires id and version.');
     for (const method of ['validateConfig', 'validateRun', 'canDispatch', 'canClose', 'project']) assert(typeof profile[method] === 'function', 'PROFILE_CONTRACT_INVALID', `Profile ${profile.id} is missing ${method}.`);
+    if (profile.validateResult !== undefined) assert(typeof profile.validateResult === 'function', 'PROFILE_CONTRACT_INVALID', `Profile ${profile.id} validateResult must be a function.`);
     assert(!this.profiles.has(profile.id), 'PROFILE_DUPLICATE', `Profile already registered: ${profile.id}`);
     this.profiles.set(profile.id, Object.freeze(profile));
     return profile;

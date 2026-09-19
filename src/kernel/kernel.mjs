@@ -10,7 +10,7 @@ import { qualityCanClose, validateFinding } from './quality.mjs';
 import { assertArtifactRebaseDecision } from '../maintenance/upgrade-authorization.mjs';
 import { buildRunReceipt, writeRunReceipt } from './receipts.mjs';
 import { scheduleFeatures, validateWorkGraph } from './work-graph.mjs';
-import { validateBusinessResult } from '../result-contract.mjs';
+import { validateBusinessResult, validateProfileResult } from '../result-contract.mjs';
 
 const activeLease = lease => ['requested', 'active'].includes(lease.status);
 const activeDispatch = dispatch => ['requested', 'assigned'].includes(dispatch.status);
@@ -187,6 +187,7 @@ export class HarnessKernel {
       assert(input.epoch === state.epoch && input.generation === state.generation, 'STALE_SUBMISSION', 'Submission belongs to an older epoch or generation.');
       const feature = state.features.find(item => item.id === lease.featureId);
       const result = validateBusinessResult(input.result, { conversationVisible: dispatch.execution?.runtime?.mode === 'conversation-visible', repair: Boolean(feature?.metadata?.repairFindingId) });
+      validateProfileResult({ profile, state, feature, result });
       for (const evidence of evidenceRecords) {
         const metadata = evidence.metadata;
         assert(metadata.projectId === projectId && metadata.runId === runId && metadata.epoch === state.epoch && metadata.generation === state.generation && metadata.featureId === feature.id && metadata.dispatchId === dispatch.dispatchId, 'EVIDENCE_CONTEXT_MISMATCH', 'Evidence does not belong to the active Feature Lease.', { ref: metadata.ref });
