@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { createHarness } from '../src/application/harness.mjs';
 import { loadExtensionPack } from '../src/platform/extensions/contract.mjs';
 import { createCardWorldProjectDescriptor } from '../src/flows/delivery-lifecycle/index.mjs';
-import { createReleaseActivationPlan, applyReleaseActivationPlan } from '../src/platform/maintenance/release-activation.mjs';
+import { createReleaseActivationPlan, applyReleaseActivationPlan, releaseActivationPlanDigest } from '../src/platform/maintenance/release-activation.mjs';
 import { ExtensionRegistry } from '../src/platform/extensions/registry.mjs';
 import { ProjectRegistry } from '../src/platform/registry/project-registry.mjs';
 import { loadReleaseIdentity } from '../src/application/release-identity.mjs';
@@ -237,4 +237,38 @@ test('release activation stages a complete generation and switches the active po
   assert.equal(activeProject.policy.visibleHeartbeatTimeoutMs, 60000);
   const repeated = await applyReleaseActivationPlan(plan, { controlRoot, dataRoot, releaseIdentity: release, commandId: 'activation-apply', authorityDecision: decision, now: () => '2026-09-14T13:00:02.000Z' });
   assert.equal(repeated.reused, true);
+  await assert.rejects(
+    () => createReleaseActivationPlan({ controlRoot, dataRoot, releaseIdentity: release, extensionReplacements: [{ id: 'missing-extension', entry: 'src/flows/delivery-lifecycle/extension.mjs' }] }),
+    error => error.code === 'RELEASE_ACTIVATION_EXTENSION_NOT_FOUND',
+  );
+  const migratedPlan = await createReleaseActivationPlan({
+    controlRoot,
+    dataRoot,
+    releaseIdentity: release,
+    extensionReplacements: [{ id: extension.id, entry: 'src/flows/delivery-lifecycle/extension.mjs' }],
+  });
+  assert.notEqual(migratedPlan.generationId, plan.generationId);
+  assert.equal(migratedPlan.extensions.find(item => item.id === extension.id).entry, 'src/flows/delivery-lifecycle/extension.mjs');
+  const forgedPlan = structuredClone(migratedPlan);
+  forgedPlan.extensions.find(item => item.id === extension.id).entry = 'integrations/codex/extensions/codex-runtime.mjs';
+  forgedPlan.planDigest = releaseActivationPlanDigest(forgedPlan);
+  await assert.rejects(
+    () => applyReleaseActivationPlan(forgedPlan, {
+      controlRoot,
+      dataRoot,
+      releaseIdentity: release,
+      commandId: 'activation-forged-extension',
+      authorityDecision: { actor: 'test', decision: 'approved', action: 'release-activation', context: { planDigest: forgedPlan.planDigest } },
+    }),
+    error => error.code === 'RELEASE_ACTIVATION_EXTENSION_IDENTITY_MISMATCH',
+  );
+  const migrated = await applyReleaseActivationPlan(migratedPlan, {
+    controlRoot,
+    dataRoot,
+    releaseIdentity: release,
+    commandId: 'activation-migrate-extension',
+    authorityDecision: { actor: 'test', decision: 'approved', action: 'release-activation', context: { planDigest: migratedPlan.planDigest } },
+  });
+  assert.equal(migrated.reused, false);
+  assert.equal((await extensionRegistry.loadOneArtifact(extension.id)).receipt.entry, 'src/flows/delivery-lifecycle/extension.mjs');
 });

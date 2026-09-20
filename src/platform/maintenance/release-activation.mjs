@@ -1,15 +1,15 @@
 import { copyFile, mkdir, readFile, rename, rm } from 'node:fs/promises';
-import { dirname, relative, resolve } from 'node:path';
+import { dirname, isAbsolute, relative, resolve } from 'node:path';
 import { digestJson, withoutKeys } from '../../common/canonical.mjs';
 import { assert } from '../../common/errors.mjs';
-import { inspectExtensionArtifact } from '../extensions/contract.mjs';
+import { loadExtensionPack } from '../extensions/contract.mjs';
 import { ExtensionRegistry } from '../extensions/registry.mjs';
 import { atomicWriteJson, readJson, withDirectoryLock } from '../../kernel/atomic-io.mjs';
 import { ProjectRegistry } from '../registry/project-registry.mjs';
 import { assertProjectDescriptorInput, assertProjectDescriptorRecord, projectDescriptorInput } from '../registry/project-contract.mjs';
 import { activeReleaseFile, readActiveRelease } from '../registry/active-generation.mjs';
 import { assertHarnessWritePath, harnessControlRoot } from '../../common/write-boundary.mjs';
-import { safeSegment } from '../../common/paths.mjs';
+import { assertNoLinkPath, safeSegment } from '../../common/paths.mjs';
 import { verifyReleaseManifest } from '../../application/release-identity.mjs';
 import { activateHarnessInstallationRuntime } from '../../application/installation.mjs';
 
@@ -25,6 +25,12 @@ export const verifyReleaseActivationPlan = input => {
   assert(input.release?.verified === true && /^[a-f0-9]{64}$/.test(input.release.artifactDigest ?? ''), 'RELEASE_ACTIVATION_RELEASE_INVALID', 'Release activation requires a verified candidate release.');
   assert(Array.isArray(input.extensions) && Array.isArray(input.projects), 'RELEASE_ACTIVATION_PLAN_INVALID', 'Release activation plan must include Extension and Project sets.');
   assert(input.runtime?.relativeRoot && input.runtime?.entrypoint === 'bin/agent-harness.mjs', 'RELEASE_ACTIVATION_RUNTIME_INVALID', 'Release activation plan requires an immutable runtime target.');
+  const extensionIds = new Set();
+  for (const extension of input.extensions) {
+    assert(extension?.id && !extensionIds.has(extension.id), 'RELEASE_ACTIVATION_EXTENSION_DUPLICATE', 'Release activation plan contains a duplicate Extension.');
+    assert(typeof extension.entry === 'string' && extension.entry.length > 0 && !isAbsolute(extension.entry) && !extension.entry.includes('\\') && !extension.entry.split('/').includes('..'), 'RELEASE_ACTIVATION_EXTENSION_ENTRY_INVALID', 'Release activation Extension entry must be a relative path inside the candidate.');
+    extensionIds.add(extension.id);
+  }
   const extensionById = new Map(input.extensions.map(extension => [extension.id, extension]));
   for (const project of input.projects) {
     assert(project?.id && Number.isInteger(project.expectedRevision) && /^[a-f0-9]{64}$/.test(project.expectedDescriptorDigest ?? ''), 'RELEASE_ACTIVATION_PROJECT_INVALID', 'Release activation Project identity is invalid.');
@@ -39,13 +45,20 @@ export const verifyReleaseActivationPlan = input => {
   return structuredClone(input);
 };
 
-export const createReleaseActivationPlan = async ({ controlRoot: controlRootInput, dataRoot: dataRootInput, releaseIdentity, projectIds = [], projectDescriptors = [], now = () => new Date().toISOString() } = {}) => {
+export const createReleaseActivationPlan = async ({ controlRoot: controlRootInput, dataRoot: dataRootInput, releaseIdentity, projectIds = [], projectDescriptors = [], extensionReplacements = [], now = () => new Date().toISOString() } = {}) => {
   const controlRoot = harnessControlRoot(controlRootInput);
   const dataRoot = assertHarnessWritePath(dataRootInput, 'Release activation data root', controlRoot);
   assert(releaseIdentity?.verified && releaseIdentity.version && releaseIdentity.artifactDigest, 'RELEASE_ACTIVATION_RELEASE_REQUIRED', 'Release activation requires a verified candidate release identity.');
   const extensionRegistry = new ExtensionRegistry({ controlRoot, dataRoot });
   const projectRegistry = new ProjectRegistry({ root: dataRoot, controlRoot });
   const currentExtensions = await extensionRegistry.list();
+  assert(Array.isArray(extensionReplacements), 'RELEASE_ACTIVATION_EXTENSION_REPLACEMENT_INVALID', 'Extension replacements must be an array.');
+  const replacementById = new Map();
+  for (const replacement of extensionReplacements) {
+    assert(replacement?.id && typeof replacement.entry === 'string' && !replacementById.has(replacement.id), 'RELEASE_ACTIVATION_EXTENSION_REPLACEMENT_INVALID', 'Extension replacements require unique IDs and entry paths.');
+    assert(currentExtensions.extensions.some(extension => extension.id === replacement.id), 'RELEASE_ACTIVATION_EXTENSION_NOT_FOUND', `Extension replacement targets an unregistered ID: ${replacement.id}`);
+    replacementById.set(replacement.id, replacement.entry);
+  }
   const currentProjects = await projectRegistry.listPersistedForReplacement();
   const requestedIds = [...new Set(projectIds)];
   assert(requestedIds.length === projectIds.length, 'RELEASE_ACTIVATION_PROJECT_DUPLICATE', 'Release activation Project selection contains duplicate IDs.');
@@ -67,8 +80,12 @@ export const createReleaseActivationPlan = async ({ controlRoot: controlRootInpu
   }
   const extensions = [];
   for (const current of currentExtensions.extensions) {
-    const artifact = await inspectExtensionArtifact(resolve(controlRoot, current.entry), { controlRoot, expectedDigest: undefined, requireArtifactManifest: true });
-    extensions.push({ id: current.id, version: current.version, entry: current.entry, previousDigest: current.digest, artifactDigest: artifact.digest, registeredAt: current.registeredAt, changed: current.digest !== artifact.digest });
+    const requestedEntry = replacementById.get(current.id) ?? current.entry;
+    const entry = relative(controlRoot, assertNoLinkPath(controlRoot, resolve(controlRoot, requestedEntry), 'Release activation Extension entrypoint')).replaceAll('\\', '/');
+    assert(entry === requestedEntry.replaceAll('\\', '/'), 'RELEASE_ACTIVATION_EXTENSION_ENTRY_INVALID', 'Release activation Extension entry must be a canonical relative path.');
+    const pack = await loadExtensionPack(resolve(controlRoot, entry), { controlRoot, requireArtifactManifest: true });
+    assert(pack.id === current.id && pack.version === current.version, 'RELEASE_ACTIVATION_EXTENSION_IDENTITY_MISMATCH', `Replacement Extension ${current.id} must retain its registered ID and version.`);
+    extensions.push({ id: current.id, version: current.version, entry, previousDigest: current.digest, artifactDigest: pack.digest, registeredAt: current.registeredAt, changed: current.digest !== pack.digest || current.entry !== entry });
   }
   const extensionById = new Map(extensions.map(extension => [extension.id, extension]));
   const projects = selected.map(project => {
@@ -88,7 +105,7 @@ export const createReleaseActivationPlan = async ({ controlRoot: controlRootInpu
     };
   });
   const pointer = await readJson(activeReleaseFile(dataRoot), null);
-  const generationDigest = digestJson({ release: releaseIdentity, extensions: extensions.map(extension => ({ id: extension.id, version: extension.version, digest: extension.artifactDigest })), projects: projects.map(project => ({ id: project.id, descriptor: project.nextDescriptor })) });
+  const generationDigest = digestJson({ release: releaseIdentity, extensions: extensions.map(extension => ({ id: extension.id, version: extension.version, entry: extension.entry, digest: extension.artifactDigest })), projects: projects.map(project => ({ id: project.id, descriptor: project.nextDescriptor })) });
   const body = {
     protocolVersion: '1.0',
     kind: 'release-activation-plan',
@@ -140,6 +157,14 @@ export const applyReleaseActivationPlan = async (planInput, { controlRoot: contr
     const projectRegistry = new ProjectRegistry({ root: dataRoot, controlRoot });
     const currentExtensions = await extensionRegistry.list();
     assert(currentExtensions.revision === plan.expectedExtensionRevision, 'RELEASE_ACTIVATION_EXTENSION_REVISION_CONFLICT', 'Extension Registry changed after the activation plan was created.');
+    assert(plan.extensions.length === currentExtensions.extensions.length, 'RELEASE_ACTIVATION_EXTENSION_SET_MISMATCH', 'Release activation must account for every registered Extension.');
+    for (const extension of plan.extensions) {
+      const current = currentExtensions.extensions.find(item => item.id === extension.id);
+      assert(current?.version === extension.version && current.digest === extension.previousDigest && current.registeredAt === extension.registeredAt, 'RELEASE_ACTIVATION_EXTENSION_CONFLICT', `Extension ${extension.id} changed after the activation plan was created.`);
+      const entry = assertNoLinkPath(controlRoot, resolve(controlRoot, extension.entry), 'Release activation Extension entrypoint');
+      const pack = await loadExtensionPack(entry, { controlRoot, expectedDigest: extension.artifactDigest, requireArtifactManifest: true });
+      assert(pack.id === extension.id && pack.version === extension.version, 'RELEASE_ACTIVATION_EXTENSION_IDENTITY_MISMATCH', `Candidate Extension ${extension.id} does not match its activation plan.`);
+    }
     const currentProjects = await projectRegistry.listPersistedForReplacement();
     for (const expected of plan.projects) {
       const current = currentProjects.find(project => project.id === expected.id);

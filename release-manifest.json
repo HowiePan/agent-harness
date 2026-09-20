@@ -287,8 +287,8 @@
     },
     {
       "path": "docs/reference/commands.md",
-      "sha256": "bc95d770c346870122c9b7587ff8790887fb049a806a7d6339178ca058e05ab5",
-      "size": 1416
+      "sha256": "77475c1b01592a7206593bad0134ac99539fe5e1268c96d579636c0165ae43c8",
+      "size": 1805
     },
     {
       "path": "docs/reference/legacy-compatibility.md",
@@ -1027,8 +1027,8 @@
     },
     {
       "path": "src/interfaces/cli/index.mjs",
-      "sha256": "edb62c1eb79e5118931860c8b13a733a9cb02059623e7a473382afb194003193",
-      "size": 33464
+      "sha256": "6111c3e1fdbea9f4563b6a9be9a27f2ec73a605ecbb38224ff31331603e3b9c3",
+      "size": 33643
     },
     {
       "path": "src/kernel/atomic-io.mjs",
@@ -1137,8 +1137,8 @@
     },
     {
       "path": "src/platform/maintenance/release-activation.mjs",
-      "sha256": "c65d548d7475b5fef52b55fb8b0415ec263c191c52d69e89d6838446ce656448",
-      "size": 19657
+      "sha256": "4e34a73b0e3efd683a1dd0563732c0141e4d11f8108f5921eadab07a40be1413",
+      "size": 22736
     },
     {
       "path": "src/platform/maintenance/release-receipt.mjs",
@@ -1396,7 +1396,7 @@
       "size": 19772
     }
   ],
-  "packageDigest": "3d132aa185450619e6475a93ef536bf2c302d8b246ede0e713e82f393753fa90",
+  "packageDigest": "05eb7102fa32c3c476d56447d7147bd400653358cdc30752da9a99fe00c582b9",
   "metadataFiles": [
     "release-manifest.json",
     "sbom.spdx.json"
