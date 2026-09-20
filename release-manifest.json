@@ -647,13 +647,13 @@
     },
     {
       "path": "scripts/workflow-canary.mjs",
-      "sha256": "dba864ee45d7c034a3ac42433c63af7816eaec8682aef61afc32927082f0b7a3",
-      "size": 24334
+      "sha256": "50c5c131ccf512114bed9e4ce1726b8f4f6f72519f18897f2414293b12f97f48",
+      "size": 24620
     },
     {
       "path": "scripts/workspace-canary.mjs",
-      "sha256": "83c4668ea24840b811d8a8328e63cbbca7ba398237df81898af6dd0efe131e9e",
-      "size": 34577
+      "sha256": "fde5fed044f38ba96680a49fc2f8f0e6106124cd19f2f3bec268b5538c789ab7",
+      "size": 34854
     },
     {
       "path": "SECURITY.md",
@@ -1401,7 +1401,7 @@
       "size": 19772
     }
   ],
-  "packageDigest": "063eb5f4767a69133d5652aa9096838308bac09310ee2019f941c16f81746756",
+  "packageDigest": "d30fd89db3577eb2c66814729835424e539755f120368249cb486f7b07e5c1e2",
   "metadataFiles": [
     "release-manifest.json",
     "sbom.spdx.json"

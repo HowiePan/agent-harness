@@ -5,6 +5,7 @@ import { dirname, isAbsolute, relative, resolve } from 'node:path';
 import { captureSourceManifest, createExecutionAuthorizationAdapter, createHarness, createInMemoryRuntime, defineMemorySpace, digestJson, harnessTemporaryRoot, loadExtensionPack, projectExecutionPolicyDecisionContext, RunCoordinator, runWorkflowInstanceSet, sealLifecycleExecutionGrant } from '../src/index.mjs';
 import { createCardWorldProjectDescriptor } from '../src/flows/delivery-lifecycle/index.mjs';
 import { createTabletopCollectionProjectDescriptor } from '../src/flows/batch-production/index.mjs';
+import { sha256 } from '../src/common/canonical.mjs';
 
 const rootBase = resolve(harnessTemporaryRoot(), 'workflow-canary');
 await mkdir(rootBase, { recursive: true });
@@ -19,6 +20,7 @@ const repoRoot2 = resolve(root, 'input-code-2');
 const dataRoot = resolve(root, 'data');
 const projectId = 'workflow-canary';
 const runtimeId = 'canary-runtime';
+const syntheticWorkspaceReadme = '# Synthetic workflow workspace\n';
 let harness;
 const outputs = [];
 
@@ -41,7 +43,7 @@ const sourceText = async (packet, type) => {
 const out = (schemaId, value, evidenceRefs = []) => ({ schemaId, value, evidenceRefs });
 
 const handler = async packet => {
-  if (!packet.workflowContext) return { status: 'completed', summary: `Canary completed ${packet.feature.metadata.stage}`, changedFiles: [], ...(packet.feature.metadata.qualityReview ? { findings: [] } : {}) };
+  if (!packet.workflowContext) return { status: 'completed', summary: `Canary completed ${packet.feature.metadata.stage}`, changedFiles: [], ...(packet.feature.metadata.qualityReview ? { findings: [], knownFindingDispositions: [] } : {}) };
   const nodeId = packet.feature.metadata.workflow.nodeId;
   const manifest = packet.workflowContext.sourceManifest;
   const upstream = packet.workflowContext.upstreamOutputs;
@@ -115,9 +117,9 @@ const runExistingWorkflows = async ({ engineExtension, collectionExtension }) =>
   const collectionWorkspace = resolve(root, 'collection-output');
   for (const path of [engineWorkspace, collectionWorkspace]) {
     await mkdir(resolve(path, '.git'), { recursive: true });
-    await writeFile(resolve(path, 'README.md'), '# Synthetic workflow workspace\n');
+    await writeFile(resolve(path, 'README.md'), syntheticWorkspaceReadme);
   }
-  const engineDescriptor = createCardWorldProjectDescriptor({ id: 'engine-canary', workspaceRoot: engineWorkspace, runtimePluginId: runtimeId, runtimePluginIds: [runtimeId], agentExecutionMode: 'headless' });
+  const engineDescriptor = createCardWorldProjectDescriptor({ id: 'engine-canary', workspaceRoot: engineWorkspace, runtimePluginId: runtimeId, runtimePluginIds: [runtimeId], agentExecutionMode: 'headless', knownFindingInventories: { v1: { version: '1.0', sources: [{ path: 'README.md', sha256: sha256(syntheticWorkspaceReadme) }], findings: [] } } });
   engineDescriptor.gateRecipes = [];
   engineDescriptor.extensions[0].digest = engineExtension.digest;
   engineDescriptor.workflows = [{ id: engineExtension.workflows[0].id, version: engineExtension.workflows[0].version, artifactDigest: engineExtension.workflows[0].artifactDigest, extensionId: engineExtension.id }];

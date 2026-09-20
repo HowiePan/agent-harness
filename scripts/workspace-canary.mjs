@@ -6,6 +6,7 @@ import { createExecutionAuthorizationAdapter, createHarness, createInMemoryRunti
 import { parsePseudoCommand } from '../integrations/codex/agent-harness-codex/hooks/pseudo-command-router.mjs';
 import { createCardWorldProjectDescriptor } from '../src/flows/delivery-lifecycle/index.mjs';
 import { createTabletopCollectionProjectDescriptor } from '../src/flows/batch-production/index.mjs';
+import { sha256 } from '../src/common/canonical.mjs';
 
 // Exercise the legacy Engine and Collection closure path in the same command Gate.
 await import('./workflow-canary.mjs');
@@ -13,6 +14,7 @@ await import('./workflow-canary.mjs');
 const root = await mkdtemp(resolve(harnessTemporaryRoot(), 'workspace-canary-'));
 const dataRoot = resolve(root, 'data');
 const runtimeId = 'workspace-canary-runtime';
+const legacyWorkspaceReadme = 'Canary output\n';
 const harnesses = new Map();
 const outputRoots = new Map();
 const runs = [];
@@ -28,7 +30,7 @@ const handler = async packet => {
   const harness = harnesses.get(workspaceId);
   const outputRoot = outputRoots.get(workspaceId);
   const context = packet.workflowContext;
-  if (!context) return { status: 'completed', summary: `Workspace Canary ${packet.feature.metadata.stage}`, changedFiles: [], ...(packet.feature.metadata.qualityReview ? { findings: [] } : {}) };
+  if (!context) return { status: 'completed', summary: `Workspace Canary ${packet.feature.metadata.stage}`, changedFiles: [], ...(packet.feature.metadata.qualityReview ? { findings: [], knownFindingDispositions: [] } : {}) };
   const nodeId = packet.feature.metadata.workflow.nodeId;
   const manifest = context.sourceManifest;
   const upstream = context.upstreamOutputs;
@@ -190,8 +192,8 @@ try {
   const collectionExtension = await loadExtensionPack('./src/flows/batch-production/index.mjs', { cwd: process.cwd(), controlRoot: process.cwd() });
   const engineRoot = resolve(root, 'engine-output');
   const collectionRoot = resolve(root, 'collection-output');
-  for (const path of [engineRoot, collectionRoot]) { await mkdir(resolve(path, '.git'), { recursive: true }); await writeFile(resolve(path, 'README.md'), 'Canary output\n'); }
-  const engineDescriptor = createCardWorldProjectDescriptor({ id: 'engine-member', workspaceRoot: engineRoot, runtimePluginId: runtimeId, runtimePluginIds: [runtimeId], agentExecutionMode: 'headless' });
+  for (const path of [engineRoot, collectionRoot]) { await mkdir(resolve(path, '.git'), { recursive: true }); await writeFile(resolve(path, 'README.md'), legacyWorkspaceReadme); }
+  const engineDescriptor = createCardWorldProjectDescriptor({ id: 'engine-member', workspaceRoot: engineRoot, runtimePluginId: runtimeId, runtimePluginIds: [runtimeId], agentExecutionMode: 'headless', knownFindingInventories: { v1: { version: '1.0', sources: [{ path: 'README.md', sha256: sha256(legacyWorkspaceReadme) }], findings: [] } } });
   engineDescriptor.gateRecipes = [];
   engineDescriptor.extensions[0].digest = engineExtension.digest;
   engineDescriptor.workflows = [{ id: engineExtension.workflows[0].id, version: engineExtension.workflows[0].version, artifactDigest: engineExtension.workflows[0].artifactDigest, extensionId: engineExtension.id }];
