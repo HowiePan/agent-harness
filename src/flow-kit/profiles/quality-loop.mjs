@@ -4,7 +4,11 @@ import { assert } from '../../common/errors.mjs';
 const unique = values => [...new Set(values ?? [])];
 const cleanReviewSubmission = (state, feature) => {
   const submission = state.submissions.find(item => item.featureId === feature.id && !item.supersededAt);
-  return Boolean(submission && submission.outputSourceDigest === state.sourceDigest && (submission.result.findings ?? []).length === 0);
+  const inventory = feature.metadata?.knownFindingInventory;
+  if (feature.metadata?.qualityRoot?.startsWith('engine:') && ['quality', 'full', 'deliver'].includes(state.metadata?.commandIntent?.action) && !inventory) return false;
+  const dispositions = submission?.result?.knownFindingDispositions;
+  const inventoryClean = !inventory || (Array.isArray(dispositions) && dispositions.length === inventory.findings.length && dispositions.every(item => item.disposition === 'not-reproduced'));
+  return Boolean(submission && submission.outputSourceDigest === state.sourceDigest && (submission.result.findings ?? []).length === 0 && inventoryClean && !state.findings.some(finding => finding.status !== 'resolved'));
 };
 
 export const hasCurrentCleanQualityReview = (state, qualityRoot = null) => state.features
@@ -50,6 +54,7 @@ const repairsForFindings = ({ feature, findings }) => findings.map(finding => {
     gatePlan: feature.gatePlan,
     metadata: {
       ...structuredClone(feature.metadata.qualityContext ?? {}),
+      qualityContext: structuredClone(feature.metadata.qualityContext ?? {}),
       stage: 'quality-repair',
       sourcePolicy: 'repair',
       qualityRoot,

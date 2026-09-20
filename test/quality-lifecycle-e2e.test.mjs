@@ -11,7 +11,7 @@ import { digestJson, sha256 } from '../src/common/canonical.mjs';
 
 const releaseIdentity = { version: '1.0.0', artifactDigest: 'a'.repeat(64), verified: true };
 
-const result = ({ summary, findings = [], changedFiles = [], checkpoint = 'review' }) => ({
+const result = ({ summary, findings = [], changedFiles = [], checkpoint = 'review', knownFindingDispositions = undefined }) => ({
   status: 'completed',
   summary,
   checkpoints: [{ id: checkpoint, status: 'passed', summary, evidence: [`host:${checkpoint}`] }],
@@ -20,6 +20,7 @@ const result = ({ summary, findings = [], changedFiles = [], checkpoint = 'revie
   changedFiles,
   observations: [],
   findings,
+  ...(knownFindingDispositions ? { knownFindingDispositions } : {}),
   followUpFeatures: [],
   failureClass: null,
   blocker: null,
@@ -36,6 +37,8 @@ const finding = {
   generatedOutputs: [],
   conflictKeys: ['fixture-readme'],
 };
+const openDisposition = [{ id: finding.id, disposition: 'open', evidence: ['README.md:1'] }];
+const cleanDisposition = [{ id: finding.id, disposition: 'not-reproduced', evidence: ['fresh README.md check'] }];
 
 const createHost = ({ workspace, failFirstWait = false, failFirstInspect = false, failFirstConfirm = false, failFirstResult = false, repeatFindingOnce = false, rejectRepairResultWithEdit = false }) => {
   const agents = new Map();
@@ -134,7 +137,7 @@ const createHost = ({ workspace, failFirstWait = false, failFirstInspect = false
             receipt: { operation: 'result', stage },
           });
         }
-        return finish({ result: result({ summary: 'Initial full review found one defect.', findings: [finding] }), receipt: { operation: 'result', stage } });
+        return finish({ result: result({ summary: 'Initial full review found one defect.', findings: [finding], knownFindingDispositions: openDisposition }), receipt: { operation: 'result', stage } });
       }
       if (stage === 'quality-repair') {
         if (!task.repaired) {
@@ -166,9 +169,9 @@ const createHost = ({ workspace, failFirstWait = false, failFirstInspect = false
       assert.equal(stage, 'quality-recheck');
       if (shouldRepeatFinding) {
         shouldRepeatFinding = false;
-        return finish({ result: result({ summary: 'First re-review found the same defect again.', findings: [finding], checkpoint: 'recheck' }), receipt: { operation: 'result', stage } });
+        return finish({ result: result({ summary: 'First re-review found the same defect again.', findings: [finding], knownFindingDispositions: openDisposition, checkpoint: 'recheck' }), receipt: { operation: 'result', stage } });
       }
-      return finish({ result: result({ summary: 'Post-repair full re-review is clean.', checkpoint: 'recheck' }), receipt: { operation: 'result', stage } });
+      return finish({ result: result({ summary: 'Post-repair full re-review is clean.', knownFindingDispositions: cleanDisposition, checkpoint: 'recheck' }), receipt: { operation: 'result', stage } });
     },
   });
   return { adapter, agents, stats };
@@ -188,7 +191,7 @@ const setup = async ({ failFirstWait = false, failFirstInspect = false, failFirs
   const host = createHost({ workspace, failFirstWait, failFirstInspect, failFirstConfirm, failFirstResult, repeatFindingOnce, rejectRepairResultWithEdit });
   const create = () => createHarness({ controlRoot, dataRoot, releaseIdentity, strictProjectIdentity: false, extensions: [engine, runtime], agentAdapter: host.adapter });
   const harness = await create();
-  const descriptor = createCardWorldProjectDescriptor({ workspaceRoot: workspace, harness: releaseIdentity });
+  const descriptor = createCardWorldProjectDescriptor({ workspaceRoot: workspace, harness: releaseIdentity, knownFindingInventories: { 'V3.8.4': { version: '1.0', sources: [{ path: 'README.md', sha256: sha256('# Quality fixture\n') }], findings: [{ id: finding.id, severity: finding.severity, sourcePath: 'README.md' }] } } });
   descriptor.gateRecipes = [];
   descriptor.extensions = descriptor.extensions.map(item => ({ ...item, digest: item.id === engine.id ? engine.digest : runtime.digest }));
   await harness.projectRegistry.register(descriptor, { expectedRevision: 0, commandId: 'quality-e2e-project' });
@@ -273,7 +276,7 @@ test('blocked lineage does not reconcile or contain a live visible Agent', async
   const firstPreflight = await fixture.harness.createExecutionReadinessReport(fixture.plan);
   await assert.rejects(() => fixture.harness.executeVisibleLifecyclePlan(fixture.plan, { commandId: 'blocked-lineage-first', preflightReport: firstPreflight, maxConcurrency: 1 }), error => error.code === 'SIMULATED_HOST_RESTART');
   const before = fixture.host.stats.reconcileCount;
-  await writeFile(resolve(fixture.workspace, 'README.md'), '# Different source\n', 'utf8');
+  await writeFile(resolve(fixture.workspace, 'OTHER.md'), '# Different source\n', 'utf8');
   const nextPlan = await fixture.harness.createLifecyclePlan({ projectId: fixture.plan.project.id, action: 'quality', target: 'V3.8.4', arguments: ['full'], extensionId: fixture.plan.extension.id, executionWorkspaceRoot: fixture.workspace });
   const blocked = await fixture.harness.createExecutionReadinessReport(nextPlan);
   assert.equal(blocked.checks.find(check => check.id === 'run-lineage').details.resolution.reasonCode, 'INCOMPATIBLE_LIVE_LEASE');

@@ -6,6 +6,7 @@ import { safeSegment } from '../common/paths.mjs';
 import { resolveLifecycleExecutionPolicy } from '../platform/plugins/runtime/execution-policy.mjs';
 import { validateLifecycleExecutionGrant } from '../platform/execution/authorization.mjs';
 import { validateWorkGraph } from '../kernel/work-graph.mjs';
+import { assertKnownFindingInventory } from '../platform/execution/known-finding-inventory.mjs';
 
 const schema = JSON.parse(readFileSync(new URL('../../schemas/lifecycle-command-plan.schema.json', import.meta.url), 'utf8'));
 const featureSchema = JSON.parse(readFileSync(new URL('../../schemas/feature.schema.json', import.meta.url), 'utf8'));
@@ -31,6 +32,10 @@ export const deriveLogicalTaskKey = ({ projectId, intent, executionWorkspaceRoot
 export const validateLifecycleCommandPlan = input => {
   assertJsonSchema(input, schema, { schemas, code: 'LIFECYCLE_PLAN_INVALID', label: 'Lifecycle Command Plan' });
   assert(input.planDigest === lifecyclePlanDigest(input), 'LIFECYCLE_PLAN_DIGEST_MISMATCH', 'Lifecycle Command Plan digest does not match its contents.');
+  if (input.intent.knownFindingInventory) {
+    assertKnownFindingInventory(input.intent.knownFindingInventory);
+    assert(input.intent.knownFindingInventory.projectId === input.project.id && input.intent.knownFindingInventory.target === input.intent.target && input.intent.knownFindingInventory.sourceDigest === input.run.sourceDigest, 'QUALITY_FINDING_INVENTORY_BINDING_MISMATCH', 'Known Finding inventory does not bind the planned Project, target, and source.');
+  }
   if (input.workflow) assert(input.intent.workflowId === input.workflow.id && input.run.metadata?.workflow?.artifactDigest === input.workflow.artifactDigest, 'LIFECYCLE_PLAN_WORKFLOW_MISMATCH', 'Lifecycle Plan workflow identity is inconsistent.');
   if (input.workspaceRef) {
     assert(input.project.id === `ws.${input.workspaceRef.workspaceId}.${input.workspaceRef.executionTargetId}` && input.workflow?.id === input.workspaceRef.workflowId, 'LIFECYCLE_PLAN_WORKSPACE_MISMATCH', 'Lifecycle Plan Workspace identity is inconsistent.');

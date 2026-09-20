@@ -210,6 +210,7 @@ export class HarnessKernel {
       assert(Array.isArray(findingIntents), 'RESULT_FINDINGS_INVALID', 'Result findings must be an array.');
       const findingIds = new Set();
       const reopenedFindingIds = new Set();
+      const confirmedFindingIds = new Set();
       const findings = findingIntents.map(intent => {
         assert(intent && typeof intent === 'object' && !Array.isArray(intent), 'RESULT_FINDINGS_INVALID', 'Every result finding must be an object.');
         if (feature.metadata?.qualityReview === true || feature.metadata?.stage === 'quality' || feature.metadata?.stage === 'quality-recheck') {
@@ -217,11 +218,12 @@ export class HarnessKernel {
           assert(Array.isArray(intent.affectedPaths) && intent.affectedPaths.length > 0, 'QUALITY_FINDING_PATH_REQUIRED', 'Every actionable quality-review Finding requires at least one affected path.');
         }
         const existingFinding = state.findings.find(item => item.id === intent?.id);
+        const qualityReview = feature.metadata?.qualityReview === true || feature.metadata?.stage === 'quality-recheck';
         assert(!findingIds.has(intent?.id), 'FINDING_DUPLICATE', `Finding is duplicated in the same result: ${intent?.id}`);
-        assert(!existingFinding || ((feature.metadata?.qualityReview === true || feature.metadata?.stage === 'quality-recheck') && existingFinding.status === 'resolved'), 'FINDING_DUPLICATE', `Finding already exists: ${intent?.id}`);
+        assert(!existingFinding || qualityReview, 'FINDING_DUPLICATE', `Finding already exists: ${intent?.id}`);
         findingIds.add(intent.id);
         const nextFinding = validateFinding({ ...intent, source: 'review', featureId: feature.id, evidenceRefs: input.evidenceRefs, openedAt: this.now(), status: 'open' });
-        if (existingFinding) {
+        if (existingFinding?.status === 'resolved') {
           reopenedFindingIds.add(intent.id);
           nextFinding.history = [...(existingFinding.history ?? []), {
             openedAt: existingFinding.openedAt,
@@ -230,6 +232,11 @@ export class HarnessKernel {
             resolutionEvidenceRefs: [...(existingFinding.resolutionEvidenceRefs ?? [])],
           }];
           nextFinding.reopenedAt = this.now();
+        } else if (existingFinding) {
+          confirmedFindingIds.add(intent.id);
+          nextFinding.openedAt = existingFinding.openedAt;
+          nextFinding.history = structuredClone(existingFinding.history ?? []);
+          nextFinding.confirmedAt = this.now();
         }
         return nextFinding;
       });
@@ -247,7 +254,7 @@ export class HarnessKernel {
         const existingIndex = state.findings.findIndex(item => item.id === finding.id);
         if (existingIndex >= 0) state.findings[existingIndex] = finding;
         else state.findings.push(finding);
-        event(state, reopenedFindingIds.has(finding.id) ? 'finding.reopened' : 'finding.opened', { id: finding.id, severity: finding.severity, featureId: feature.id }, this.now);
+        event(state, reopenedFindingIds.has(finding.id) ? 'finding.reopened' : confirmedFindingIds.has(finding.id) ? 'finding.confirmed' : 'finding.opened', { id: finding.id, severity: finding.severity, featureId: feature.id }, this.now);
       }
       state.sourceDigest = submission.outputSourceDigest;
       state.evidenceRefs.push(...submission.evidenceRefs.filter(ref => !state.evidenceRefs.includes(ref)));

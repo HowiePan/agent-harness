@@ -1,0 +1,64 @@
+{
+  "protocolVersion": "1.0",
+  "projectAlias": "engine",
+  "project": {
+    "projectId": "cardworld-engine",
+    "profileId": "engine-delivery",
+    "extensionId": "cardworld-engine-profile"
+  },
+  "observedAt": "2026-09-20T14:32:24.5003623Z",
+  "summary": "Visible Host transport/reconciliation rejected a completed quality result and blocked review submission and repair dispatch",
+  "severity": "P1",
+  "environment": {
+    "harnessRelease": "1.0.0",
+    "workspace": "F:\\CardWorld"
+  },
+  "expected": {
+    "reviewSubmission": "completed result should be accepted by the bound Host adapter and committed for downstream repair planning",
+    "lifecycle": "quality review should reach the Submission phase or return a deterministic actionable error"
+  },
+  "actual": {
+    "failureCodes": [
+      "CODEX_HOST_RESPONSE_JSON_INVALID",
+      "CODEX_HOST_RESPONSE_BINDING_MISMATCH"
+    ],
+    "lifecycleEffect": "completed review result did not pass Host transport/reconciliation, so Submission and automatic repair could not start"
+  },
+  "reproduction": {
+    "steps": [
+      "Run h:engine quality V3.8.4 with the bound visible Coordinator and Host collaboration adapter.",
+      "Complete the read-only review and return the structured result.",
+      "Observe Host transport/reconciliation failures CODEX_HOST_RESPONSE_JSON_INVALID and CODEX_HOST_RESPONSE_BINDING_MISMATCH while delivering the result.",
+      "Observe that the review Submission is not committed and repair dispatch does not start."
+    ]
+  },
+  "conversation": {
+    "source": "current-thread",
+    "excerpts": [
+      {
+        "role": "user",
+        "text": "审查结果未能通过 Host transport/reconciliation 提交，是 Harness 的问题吗？"
+      },
+      {
+        "role": "assistant",
+        "text": "已观察到 CODEX_HOST_RESPONSE_JSON_INVALID 与 CODEX_HOST_RESPONSE_BINDING_MISMATCH；该传输阻断独立于引擎代码。"
+      }
+    ]
+  },
+  "missingEvidence": [
+    "未取得完整的 Coordinator 原始请求/响应帧及其逐字段校验日志。"
+  ],
+  "correlation": {
+    "category": "integration-incident",
+    "failureCode": "CODEX_HOST_RESPONSE_BINDING_MISMATCH",
+    "scope": "visible-host/reconciliation quality-result submission"
+  },
+  "sanitization": {
+    "confirmed": true,
+    "removed": [
+      "未包含凭据、访问令牌、私钥或无关对话内容。"
+    ]
+  },
+  "incidentFingerprint": "7423592664bae78866ebbae37e7e37e4bb985be30512d7f727b86f916d5ef06a",
+  "intakeDigest": "d5f65d00699bafe86b7502479450d98c65295dd6addf93ae323ae359c9beba33"
+}

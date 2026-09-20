@@ -1,6 +1,6 @@
 /** Build delivery Features from an explicitly installed business variant. */
 export const createDeliveryTemplates = ({ actionPaths, forbiddenPaths, qualityRootPrefix }) => {
-  const makeFeature = ({ action, target, stage, dependsOn = [], allowedPaths, sourcePolicy = 'write', qualityFindingPolicy = 'repair-and-rereview', ownerRole = 'operator', qualityReview = false, sourceDigest }) => ({
+  const makeFeature = ({ action, target, stage, dependsOn = [], allowedPaths, sourcePolicy = 'write', qualityFindingPolicy = 'repair-and-rereview', ownerRole = 'operator', qualityReview = false, sourceDigest, knownFindingInventory = null }) => ({
     id: `${action}/${target}`,
     executionClass: 'agent-reasoning', kind: action, ownerRole,
     logicalRoot: `${action}:${target}`, laneId: qualityReview ? 'quality' : action,
@@ -13,7 +13,7 @@ export const createDeliveryTemplates = ({ actionPaths, forbiddenPaths, qualityRo
     dependsOn, allowedPaths: qualityReview ? [] : [...allowedPaths], forbiddenPaths: [...forbiddenPaths],
     conflictKeys: [`${target}-${qualityReview ? 'quality-review' : action}`], gatePlan: [],
     metadata: { stage, sourcePolicy, target, version: target, allowDynamicDecomposition: !qualityReview && allowedPaths.length > 0,
-      ...(qualityReview ? { qualityReview: true, qualityFindingPolicy, qualityRoot: `${qualityRootPrefix}:${target}`, reviewRound: 1, reviewSourceDigest: sourceDigest, qualityContext: { target, version: target } } : {}),
+      ...(qualityReview ? { qualityReview: true, qualityFindingPolicy, qualityRoot: `${qualityRootPrefix}:${target}`, reviewRound: 1, reviewSourceDigest: sourceDigest, ...(knownFindingInventory ? { knownFindingInventory: structuredClone(knownFindingInventory) } : {}), qualityContext: { target, version: target, ...(knownFindingInventory ? { knownFindingInventory: structuredClone(knownFindingInventory) } : {}) } } : {}),
     },
   });
   return { 'engine-stage': ({ context, node, dependsOn }) => {
@@ -22,6 +22,6 @@ export const createDeliveryTemplates = ({ actionPaths, forbiddenPaths, qualityRo
     return makeFeature({ action: node.action, target: context.intent.target, stage: node.stage, dependsOn,
       allowedPaths: readOnly ? [] : allowedPaths, sourcePolicy: readOnly ? 'read-only' : 'write',
       ownerRole: node.qualityReview || node.action === 'review' ? 'reviewer' : 'operator', qualityReview: Boolean(node.qualityReview),
-      qualityFindingPolicy: context.intent.sourcePolicy === 'read-only' ? 'record-only' : 'repair-and-rereview', sourceDigest: context.sourceDigest });
+      qualityFindingPolicy: context.intent.sourcePolicy === 'read-only' ? 'record-only' : 'repair-and-rereview', sourceDigest: context.sourceDigest, knownFindingInventory: context.intent.knownFindingInventory ?? null });
   } };
 };

@@ -217,6 +217,7 @@ test('Hook-visible lifecycle intents are short-lived, digest-bound, and safe as 
     project: { projectId: 'engine', profileId: 'engine-delivery', extensionId: 'engine-profile' },
     command: { action: 'quality', target: 'V3.8.4', arguments: ['full'] },
     executionWorkspaceRoot: 'F:\\CardWorld',
+    codexSessionId: 'thr_parent_fixture',
     coordinatorEntrypoint: 'F:\\agent-harness\\runtime\\integrations\\codex\\agent-harness-codex\\scripts\\visible-lifecycle-coordinator.mjs',
     now: () => '2026-09-15T00:00:00.000Z',
   });

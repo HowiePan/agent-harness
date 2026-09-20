@@ -1,4 +1,5 @@
 import { compileWorkflowFeatures } from '../../platform/workflow/definition.mjs';
+import { assert } from '../../common/errors.mjs';
 import { engineWorkflowDefinition } from './graph/definition.mjs';
 import { engineTemplates } from './variants/cardworld/feature.mjs';
 
@@ -7,6 +8,7 @@ import { engineTemplates } from './variants/cardworld/feature.mjs';
  * This function only returns data; it never touches Authority or the workspace.
  */
 export const createCardWorldLifecyclePlan = ({ intent, project, runId, sourceDigest }) => {
+  if (['quality', 'full', 'deliver'].includes(intent.action)) assert(intent.knownFindingInventory, 'QUALITY_FINDING_INVENTORY_REQUIRED', 'Engine quality planning requires a pinned known Finding inventory.');
   const finalGateIds = (project.gateRecipes ?? []).filter(recipe => recipe.scope === 'final' && recipe.required !== false).map(recipe => recipe.id);
   const gateIds = ['full', 'quality', 'deliver'].includes(intent.action) ? finalGateIds : [];
   const quality = intent.action === 'quality';

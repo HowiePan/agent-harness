@@ -6,7 +6,9 @@ import { ExtensionRegistry } from '../../../../src/platform/extensions/registry.
 import { loadReleaseIdentity } from '../../../../src/application/release-identity.mjs';
 import { validateActiveReleaseBinding } from '../lib/active-release-binding.mjs';
 import { createCodexCollaborationHostAdapter } from '../lib/codex-collaboration-host-adapter.mjs';
-import { createStdioHostExchange } from '../lib/stdio-host-exchange.mjs';
+import { assertMachineBoundQualityTransport } from '../lib/stdio-host-exchange.mjs';
+import { createHookHostExchange } from '../lib/hook-host-exchange.mjs';
+import { createHostExchangeDiagnosticWriter } from '../lib/host-exchange-diagnostics.mjs';
 import { decodeVisibleLifecycleIntent } from '../lib/visible-lifecycle-intent.mjs';
 import { captureSourceManifest } from '../../../../src/platform/workflow/source-manifest.mjs';
 
@@ -37,10 +39,10 @@ const main = async () => {
   const releaseIdentity = await loadReleaseIdentity({ root: active.runtimeRoot, artifactDigest: active.artifactDigest });
   const extensionRegistry = new ExtensionRegistry({ dataRoot: intent.harness.dataRoot, controlRoot: intent.harness.controlRoot });
   const extensions = await extensionRegistry.loadInstalled();
-  const stdio = createStdioHostExchange();
+  const hostExchange = createHookHostExchange({ controlRoot: intent.harness.controlRoot, dataRoot: intent.harness.dataRoot, codexSessionId: intent.codexSessionId, onRejected: createHostExchangeDiagnosticWriter({ controlRoot: intent.harness.controlRoot, dataRoot: intent.harness.dataRoot }) });
   try {
     const host = createCodexCollaborationHostAdapter({
-      exchange: stdio.exchange,
+      exchange: hostExchange.exchange,
       controlRoot: intent.harness.controlRoot,
       dataRoot: intent.harness.dataRoot,
       memoryRoot: intent.harness.memoryRoot ?? null,
@@ -79,6 +81,7 @@ const main = async () => {
       executionWorkspaceRoot: intent.executionWorkspaceRoot,
     });
     emit({ kind: 'codex-visible-lifecycle-event', phase: 'planned', commandId: intent.commandId, intentDigest: intent.intentDigest, planDigest: plan.planDigest, plan });
+    assertMachineBoundQualityTransport(hostExchange, intent.command.action);
     const onGateProgress = event => emit({ kind: 'codex-visible-lifecycle-event', phase: 'gate-progress', commandId: intent.commandId, planDigest: plan.planDigest, event });
     const preflight = await harness.createExecutionReadinessReport(plan, { onGateProgress });
     emit({ kind: 'codex-visible-lifecycle-event', phase: 'preflight', commandId: intent.commandId, intentDigest: intent.intentDigest, planDigest: plan.planDigest, executionReady: preflight.executionReady, report: preflight });
@@ -90,7 +93,7 @@ const main = async () => {
     emit({ kind: 'codex-visible-lifecycle-event', phase: 'complete', commandId: intent.commandId, intentDigest: intent.intentDigest, planDigest: plan.planDigest, status: result.status, result });
     if (!['closed', 'completed'].includes(result.status)) process.exitCode = 3;
   } finally {
-    stdio.close();
+    hostExchange.close();
   }
 };
 

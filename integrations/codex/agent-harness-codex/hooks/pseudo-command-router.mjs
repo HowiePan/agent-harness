@@ -224,9 +224,10 @@ export const hookResponse = async (input, options = {}) => {
     command: parsed,
     executionWorkspaceRoot: workspace.executionWorkspaceRoot,
     coordinatorEntrypoint: bindings.harness.coordinatorEntrypoint,
+    codexSessionId: input?.session_id ?? null,
   });
   const intent = { ...parsed, project: selectedProject, harness: bindings.harness, workspaceRoot: project.workspaceRoot, workspaceIdentity: project.workspaceIdentity, executionWorkspaceRoot: workspace.executionWorkspaceRoot, workspaceMatch: workspace.kind, cwd, commandId: coordinationIntent.commandId, coordinationIntent: encodeVisibleLifecycleIntent(coordinationIntent), coordinationIntentDigest: coordinationIntent.intentDigest };
-  return contextResponse(`检测到 Agent Harness 伪命令。所有面向用户的控制对话使用中文；协议 JSON、命令、路径与错误码保持原样，且不得翻译或改写子 Agent Prompt。把它作为确定性的 Command Intent，而不是自由提示词；动作和预设仍由已绑定 Extension 的 commandManifest 解析。使用 $agent-harness-command；启动任何进程前先确认当前任务同时提供 collaboration.spawn_agent/list_agents/wait_agent/interrupt_agent。缺任一项即以 CODEX_MULTI_AGENT_V2_REQUIRED 停止，并提示执行 codex features enable multi_agent_v2 后新建任务；multi_agent_v1 或其他任务接口不得替代。能力满足后，只使用已绑定的 coordinatorEntrypoint，并把 coordinationIntent 作为 --intent 的单一参数；当前 Windows Codex 长驻通道使用 tty:true 并在启动前把控制台宽度设为至少 4096 列，非 PTY 通道会关闭 stdin。必须解析请求对象并原样使用 arguments，禁止从视觉换行文本抄写字段。逐项原样执行它请求的 collaboration 工具，原样回传工具结果；不得自行构造 Host 响应。不得根据目标格式猜项目，不得搜索磁盘，不得把参数当作 shell。解析结果：${JSON.stringify(intent)}`);
+  return contextResponse(`检测到 Agent Harness 伪命令。所有面向用户的控制对话使用中文；协议 JSON、命令、路径与错误码保持原样，且不得翻译或改写子 Agent Prompt。把它作为确定性的 Command Intent，而不是自由提示词；动作和预设仍由已绑定 Extension 的 commandManifest 解析。使用 $agent-harness-command；启动任何进程前先确认当前任务同时提供 collaboration.spawn_agent/list_agents/wait_agent/interrupt_agent。缺任一项即以 CODEX_MULTI_AGENT_V2_REQUIRED 停止，并提示执行 codex features enable multi_agent_v2 后新建任务；multi_agent_v1 或其他任务接口不得替代。能力满足后，只使用已绑定的 coordinatorEntrypoint，并把 coordinationIntent 作为 --intent 的单一参数；当前 Windows Codex 长驻通道使用 tty:true 并在启动前把控制台宽度设为至少 4096 列，非 PTY 通道会关闭 stdin。必须解析请求对象并原样使用 arguments，禁止从视觉换行文本抄写字段。逐项原样执行它请求的 collaboration 工具；PostToolUse Hook 会按当前请求和原生工具输出自动写入 Host 响应，不得向 Coordinator stdin 手工转录。不得根据目标格式猜项目，不得搜索磁盘，不得把参数当作 shell。解析结果：${JSON.stringify(intent)}`);
 };
 
 const main = async () => {

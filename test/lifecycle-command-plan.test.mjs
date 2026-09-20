@@ -14,9 +14,18 @@ import { activeReleaseFile } from '../src/platform/registry/active-generation.mj
 import { harnessTemporaryRoot } from '../src/common/write-boundary.mjs';
 import { createTestExecutionAuthorizationAdapter } from './test-support.mjs';
 import { projectExecutionPolicyDecisionContext } from '../src/platform/registry/project-registry.mjs';
-import { digestJson, withoutKeys } from '../src/common/canonical.mjs';
+import { digestJson, sha256, withoutKeys } from '../src/common/canonical.mjs';
+import { createCardWorldLifecyclePlan } from '../src/flows/delivery-lifecycle/planner.mjs';
 
 const releaseIdentity = { version: '1.0.0', artifactDigest: 'a'.repeat(64), verified: true };
+const knownFindingInventories = { 'V3.8.4': { version: '1.0', sources: [{ path: 'README.md', sha256: sha256('fixture\n') }], findings: [] } };
+
+test('quality planning fails closed before Run creation without a pinned inventory', () => {
+  assert.throws(
+    () => createCardWorldLifecyclePlan({ intent: { action: 'quality', target: 'V3.8.4' }, project: { gateRecipes: [] }, runId: 'missing-inventory', sourceDigest: 'a'.repeat(64) }),
+    error => error.code === 'QUALITY_FINDING_INVENTORY_REQUIRED',
+  );
+});
 
 test('lifecycle planning deterministically composes quality/full without conversational approvals', async t => {
   const controlRoot = resolve(process.cwd());
@@ -31,7 +40,7 @@ test('lifecycle planning deterministically composes quality/full without convers
   const extension = await loadExtensionPack('./src/flows/delivery-lifecycle/index.mjs', { cwd: controlRoot, controlRoot });
   const runtimeExtension = await loadExtensionPack('./integrations/codex/extensions/codex-runtime.mjs', { cwd: controlRoot, controlRoot });
   const harness = await createHarness({ controlRoot, dataRoot, releaseIdentity, strictProjectIdentity: false, extensions: [extension, runtimeExtension] });
-  const descriptor = createCardWorldProjectDescriptor({ workspaceRoot, harness: releaseIdentity });
+  const descriptor = createCardWorldProjectDescriptor({ workspaceRoot, harness: releaseIdentity, knownFindingInventories });
   descriptor.extensions = descriptor.extensions.map(item => ({ ...item, digest: item.id === extension.id ? extension.digest : runtimeExtension.digest }));
   await harness.projectRegistry.register(descriptor, { expectedRevision: 0, commandId: 'plan-project-register' });
   const first = await harness.createLifecyclePlan({ projectId: descriptor.id, action: 'quality', target: 'V3.8.4', arguments: ['full'], extensionId: extension.id, executionWorkspaceRoot: workspaceRoot });
@@ -71,7 +80,7 @@ test('headless quality requires one trusted command grant while other Engine act
   const extension = await loadExtensionPack('./src/flows/delivery-lifecycle/index.mjs', { cwd: controlRoot, controlRoot });
   const runtimeExtension = await loadExtensionPack('./integrations/codex/extensions/codex-runtime.mjs', { cwd: controlRoot, controlRoot });
   const headlessExtension = await loadExtensionPack('./integrations/codex/extensions/codex-headless-runtime.mjs', { cwd: controlRoot, controlRoot });
-  const descriptor = createCardWorldProjectDescriptor({ workspaceRoot, harness: releaseIdentity, runtimePluginIds: ['codex-conversation-runtime', 'codex-cli-runtime'], actionExecution: { quality: { agentExecutionMode: 'headless', runtimePluginId: 'codex-cli-runtime' } } });
+  const descriptor = createCardWorldProjectDescriptor({ workspaceRoot, harness: releaseIdentity, knownFindingInventories, runtimePluginIds: ['codex-conversation-runtime', 'codex-cli-runtime'], actionExecution: { quality: { agentExecutionMode: 'headless', runtimePluginId: 'codex-cli-runtime' } } });
   descriptor.gateRecipes = [];
   descriptor.extensions = descriptor.extensions.map(item => ({ ...item, digest: item.id === extension.id ? extension.digest : item.id === runtimeExtension.id ? runtimeExtension.digest : headlessExtension.digest }));
   const harness = await createHarness({ controlRoot, dataRoot, releaseIdentity, strictProjectIdentity: false, extensions: [extension, runtimeExtension, headlessExtension], executionAuthorizationAdapter: createTestExecutionAuthorizationAdapter(), allowedPluginPermissions: ['state.write', 'agent.conversation', 'process.spawn', 'workspace.read', 'workspace.write', 'gate.execute', 'artifact.read'] });
@@ -112,7 +121,7 @@ test('headless quality requires one trusted command grant while other Engine act
   const resumed = await harness.startLifecyclePlan(replanned, { commandId: 'headless-lineage-resume', preflightReport: recoveryPreflight });
   assert.equal(resumed.state.generation, scheduled.state.generation + 1);
   assert.equal(resumed.state.dispatches[0].status, 'superseded');
-  await writeFile(resolve(workspaceRoot, 'README.md'), 'changed fixture\n', 'utf8');
+  await writeFile(resolve(workspaceRoot, 'OTHER.md'), 'changed fixture\n', 'utf8');
   const changedSourcePlan = await harness.createLifecyclePlan({ projectId: descriptor.id, action: 'quality', target: 'V3.8.4', arguments: ['full'], extensionId: extension.id, executionWorkspaceRoot: workspaceRoot, executionAuthorizationEvidence: { explicitUnattended: true } });
   const changedSourcePreflight = await harness.createExecutionReadinessReport(changedSourcePlan);
   await assert.rejects(
@@ -148,7 +157,7 @@ test('lifecycle planning automatically resolves an inactive incompatible logical
   const runtimeExtension = await loadExtensionPack('./integrations/codex/extensions/codex-runtime.mjs', { cwd: controlRoot, controlRoot });
   const headlessExtension = await loadExtensionPack('./integrations/codex/extensions/codex-headless-runtime.mjs', { cwd: controlRoot, controlRoot });
   const harness = await createHarness({ controlRoot, dataRoot, releaseIdentity, strictProjectIdentity: false, extensions: [extension, runtimeExtension, headlessExtension], executionAuthorizationAdapter: createTestExecutionAuthorizationAdapter(), allowedPluginPermissions: ['state.write', 'agent.conversation', 'process.spawn', 'workspace.read', 'workspace.write', 'gate.execute', 'artifact.read'] });
-  const descriptor = createCardWorldProjectDescriptor({ workspaceRoot, harness: releaseIdentity, runtimePluginIds: ['codex-conversation-runtime', 'codex-cli-runtime'], actionExecution: { quality: { agentExecutionMode: 'headless', runtimePluginId: 'codex-cli-runtime' } } });
+  const descriptor = createCardWorldProjectDescriptor({ workspaceRoot, harness: releaseIdentity, knownFindingInventories, runtimePluginIds: ['codex-conversation-runtime', 'codex-cli-runtime'], actionExecution: { quality: { agentExecutionMode: 'headless', runtimePluginId: 'codex-cli-runtime' } } });
   descriptor.gateRecipes = [];
   descriptor.extensions = descriptor.extensions.map(item => ({ ...item, digest: item.id === extension.id ? extension.digest : item.id === runtimeExtension.id ? runtimeExtension.digest : headlessExtension.digest }));
   await harness.projectRegistry.register(descriptor, { expectedRevision: 0, commandId: 'conflict-project-register', authorityDecision: { actor: 'test-user', decision: 'approved', action: 'project-execution-policy-change', expiresAt: '2099-09-15T00:00:00.000Z', context: projectExecutionPolicyDecisionContext({ input: descriptor, expectedRevision: 0 }) } });

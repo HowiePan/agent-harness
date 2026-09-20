@@ -37,6 +37,7 @@ import { assertAgentRuntimeCompatible, assertRuntimeTransportReceipt, resolveLif
 import { assertFreshVisibleObservation, isVisibleHostAdapter } from '../platform/plugins/runtime/visible-host-adapter.mjs';
 import { assertVisibleHostReceiptOwner, createVisibleHostBindings } from '../platform/plugins/runtime/visible-host-bindings.mjs';
 import { assertDispatchResultContract, createDispatchResultContract, validateBusinessResult, validateProfileResult } from '../platform/execution/result-contract.mjs';
+import { sealKnownFindingInventory } from '../platform/execution/known-finding-inventory.mjs';
 import { sealExecutionReadinessReport, verifyExecutionReadinessReport } from './execution-readiness.mjs';
 import { readActiveRelease, resolveActiveRuntimeRoot } from '../platform/registry/active-generation.mjs';
 import { RunLineageStore, resolveRunLineage, verifyRunLineageResolution } from './lineage.mjs';
@@ -437,13 +438,15 @@ export const createHarness = async ({ controlRoot: controlRootInput, dataRoot: d
         assert(!Object.hasOwn(workflowInput, 'memorySnapshot'), 'WORKFLOW_MEMORY_SNAPSHOT_FORBIDDEN', 'Memory snapshot is selected by the Harness.');
         workflowInput.memorySnapshot = await memoryStore.query({ spaces: workflowInput.memorySpaces ?? [], workflowId: resolvedIntent.workflowId, projectId: project.id, manifest: workflowInput.sourceManifest, topic: workflowInput.memoryTopic ?? null, sessionId: workflowInput.sessionId ?? null });
       }
-      const intent = workflowInput ? { ...structuredClone(resolvedIntent), workflowInput } : resolvedIntent;
+      let intent = workflowInput ? { ...structuredClone(resolvedIntent), workflowInput } : resolvedIntent;
       assert(project.profiles.includes(intent.profileId), 'PROJECT_PROFILE_DENIED', `Project ${project.id} does not allow Profile ${intent.profileId}.`);
       const required = project.extensions?.find(item => item.id === extension.id);
       assert(required, 'PROJECT_EXTENSION_NOT_BOUND', `Project ${project.id} does not bind Extension ${extension.id}.`);
       assert(required.version === extension.version && required.digest === extension.digest, 'PROJECT_EXTENSION_IDENTITY_MISMATCH', `Project ${project.id} does not bind the active Extension ${extension.id}.`);
       if (strictProjectIdentity) assert(project.harness?.version === currentReleaseIdentity.version && project.harness?.artifactDigest === currentReleaseIdentity.artifactDigest, 'PROJECT_HARNESS_IDENTITY_MISMATCH', `Project ${project.id} does not bind the active Harness release.`);
       const snapshot = await captureWorkspace(workspace.root, { excluded: project.workspace.excluded ?? [] });
+      const inventoryDeclaration = project.policy?.knownFindingInventories?.[intent.target];
+      if (inventoryDeclaration) intent = { ...intent, knownFindingInventory: sealKnownFindingInventory({ projectId: project.id, target: intent.target, declaration: inventoryDeclaration, snapshot }) };
       const sourceToolBinding = workflowInput ? { commandPrefix: [process.execPath, fileURLToPath(new URL('../interfaces/cli/index.mjs', import.meta.url)), 'source'], controlRoot, dataRoot: authorityStore.root } : null;
       const executionPolicy = resolveLifecycleExecutionPolicy({ project, action: intent.action, workflowId: intent.workflowId });
       const runtimeManifest = pluginHost.get(executionPolicy.runtimePluginId, 'agent-runtime').manifest;

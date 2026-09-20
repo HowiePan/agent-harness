@@ -82,6 +82,27 @@ test('review findings returned by a Runtime are atomically opened with submissio
   assert.equal(output.state.status, 'closure-blocked');
 });
 
+test('a fresh quality review confirms an open Finding without duplicating its identity', async t => {
+  const fixture = await makeFixture({ profiles: ['engine-delivery'] }); t.after(() => fixture.cleanup());
+  await startRun(fixture, {
+    profileId: 'engine-delivery',
+    profileConfig: { requireCanonicalDecision: false, requireUserCodeReview: false },
+    features: [
+      feature('quality/first', { stage: 'quality', qualityReview: true, qualityFindingPolicy: 'record-only', sourcePolicy: 'read-only' }, { ownerRole: 'reviewer', allowedPaths: [] }),
+      feature('quality/second', { stage: 'quality', qualityReview: true, qualityFindingPolicy: 'record-only', sourcePolicy: 'read-only' }, { ownerRole: 'reviewer', allowedPaths: [] }),
+    ],
+  });
+  const finding = { id: 'Q-OPEN', severity: 'P2', summary: 'Still open', evidence: ['src/example.rs:10'], affectedPaths: ['src/example.rs'] };
+  const first = await dispatchAndBind(fixture, 'run');
+  const opened = await recordResult(fixture, 'run', first.dispatch, { status: 'completed', summary: 'First review', changedFiles: [], findings: [finding] });
+  const second = await dispatchAndBind(fixture, 'run');
+  const confirmed = await recordResult(fixture, 'run', second.dispatch, { status: 'completed', summary: 'Second review', changedFiles: [], findings: [{ ...finding, evidence: ['src/example.rs:12'] }] });
+  assert.equal(confirmed.state.findings.length, 1);
+  assert.equal(confirmed.state.findings[0].openedAt, opened.state.findings[0].openedAt);
+  assert.deepEqual(confirmed.state.findings[0].evidence, ['src/example.rs:12']);
+  assert.equal(confirmed.state.events.some(item => item.type === 'finding.confirmed' && item.id === 'Q-OPEN'), true);
+});
+
 test('quality findings become independently schedulable repair Features', async t => {
   const fixture = await makeFixture({ profiles: ['engine-delivery'], policy: { runtimePlugins: ['test-runtime'], defaultRuntimePlugin: 'test-runtime', maxConcurrency: 'auto' } });
   t.after(() => fixture.cleanup());

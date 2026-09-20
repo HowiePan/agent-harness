@@ -1,6 +1,19 @@
 {
   "description": "Resolve explicit project aliases and fixed Agent Harness locations for short pseudo-commands, including h:where and conversation-backed h:report intake.",
   "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "^(Agent|collaboration\\.(spawn_agent|list_agents|wait_agent|interrupt_agent))$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$PLUGIN_ROOT/hooks/post-tool-host-bridge.mjs\"",
+            "commandWindows": "node \"%PLUGIN_ROOT%\\hooks\\post-tool-host-bridge.mjs\"",
+            "timeout": 15
+          }
+        ]
+      }
+    ],
     "UserPromptSubmit": [
       {
         "hooks": [

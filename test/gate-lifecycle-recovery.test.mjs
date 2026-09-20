@@ -9,6 +9,7 @@ import { createInMemoryRuntime } from '../src/platform/plugins/runtime/in-memory
 import { harnessTemporaryRoot } from '../src/common/write-boundary.mjs';
 import { createTestExecutionAuthorizationAdapter } from './test-support.mjs';
 import { projectExecutionPolicyDecisionContext } from '../src/platform/registry/project-registry.mjs';
+import { sha256 } from '../src/common/canonical.mjs';
 
 test('a failed final Gate returns attention and a fresh retry closes the same quality Run', async t => {
   const controlRoot = resolve(process.cwd());
@@ -26,8 +27,8 @@ test('a failed final Gate returns attention and a fresh retry closes the same qu
   const releaseIdentity = { version: '1.0.0', artifactDigest: 'a'.repeat(64), verified: true };
   const harness = await createHarness({ controlRoot, dataRoot, releaseIdentity, strictProjectIdentity: false, extensions: [engine], executionAuthorizationAdapter: createTestExecutionAuthorizationAdapter() });
   const runtimeManifest = { id: 'gate-test-runtime', kind: 'agent-runtime', version: '1.0.0', capabilities: ['spawn', 'wait', 'headless'], permissions: [] };
-  harness.registerPlugin(runtimeManifest, createInMemoryRuntime({ manifest: runtimeManifest, handler: async () => ({ status: 'completed', summary: 'quality review clean', changedFiles: [], findings: [] }) }));
-  const descriptor = createCardWorldProjectDescriptor({ workspaceRoot: workspace, harness: releaseIdentity, runtimePluginId: runtimeManifest.id, runtimeExtension: null, agentExecutionMode: 'headless' });
+  harness.registerPlugin(runtimeManifest, createInMemoryRuntime({ manifest: runtimeManifest, handler: async () => ({ status: 'completed', summary: 'quality review clean', changedFiles: [], findings: [], knownFindingDispositions: [] }) }));
+  const descriptor = createCardWorldProjectDescriptor({ workspaceRoot: workspace, harness: releaseIdentity, runtimePluginId: runtimeManifest.id, runtimeExtension: null, agentExecutionMode: 'headless', knownFindingInventories: { 'V3.8.4': { version: '1.0', sources: [{ path: 'README.md', sha256: sha256('# Gate recovery fixture\n') }], findings: [] } } });
   descriptor.extensions = descriptor.extensions.map(item => ({ ...item, digest: engine.digest }));
   descriptor.gateRecipes = [{
     id: 'quality-gate',

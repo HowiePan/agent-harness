@@ -23,13 +23,14 @@ export const visibleLifecycleIntentDigest = intent => {
   return digestJson(copy);
 };
 
-export const createVisibleLifecycleIntent = ({ harness, project, command, executionWorkspaceRoot, coordinatorEntrypoint, now = () => new Date().toISOString(), ttlMs = 300000 }) => {
+export const createVisibleLifecycleIntent = ({ harness, project, command, executionWorkspaceRoot, coordinatorEntrypoint, codexSessionId = null, now = () => new Date().toISOString(), ttlMs = 300000 }) => {
   if (!Number.isInteger(ttlMs) || ttlMs < 1000 || ttlMs > 600000) throw Object.assign(new Error('Visible lifecycle intent TTL must be between 1 second and 10 minutes.'), { code: 'VISIBLE_LIFECYCLE_INTENT_TTL_INVALID' });
   const createdAt = now();
   const body = {
     protocolVersion: '1.0',
     kind: 'codex-visible-lifecycle-intent',
     commandId: `lifecycle_${randomUUID()}`,
+    ...(codexSessionId ? { codexSessionId: nonEmpty(codexSessionId, 'VISIBLE_LIFECYCLE_SESSION_INVALID', 'Visible lifecycle intent requires a Codex session ID.') } : {}),
     harness: {
       controlRoot: nonEmpty(harness?.controlRoot, 'VISIBLE_LIFECYCLE_CONTROL_ROOT_REQUIRED', 'Visible lifecycle intent requires the bound control root.'),
       dataRoot: nonEmpty(harness?.dataRoot, 'VISIBLE_LIFECYCLE_DATA_ROOT_REQUIRED', 'Visible lifecycle intent requires the bound data root.'),
@@ -59,10 +60,11 @@ export const createVisibleLifecycleIntent = ({ harness, project, command, execut
 
 export const validateVisibleLifecycleIntent = (input, { now = () => new Date().toISOString() } = {}) => {
   const intent = structuredClone(input);
-  const allowed = ['protocolVersion', 'kind', 'commandId', 'harness', 'project', 'command', 'executionWorkspaceRoot', 'createdAt', 'expiresAt', 'intentDigest'];
+  const allowed = ['protocolVersion', 'kind', 'commandId', 'codexSessionId', 'harness', 'project', 'command', 'executionWorkspaceRoot', 'createdAt', 'expiresAt', 'intentDigest'];
   if (!intent || typeof intent !== 'object' || Array.isArray(intent) || Object.keys(intent).some(key => !allowed.includes(key))) throw Object.assign(new Error('Visible lifecycle intent has an invalid envelope.'), { code: 'VISIBLE_LIFECYCLE_INTENT_INVALID' });
   if (intent.protocolVersion !== '1.0' || intent.kind !== 'codex-visible-lifecycle-intent') throw Object.assign(new Error('Visible lifecycle intent protocol is unsupported.'), { code: 'VISIBLE_LIFECYCLE_INTENT_PROTOCOL_UNSUPPORTED' });
   nonEmpty(intent.commandId, 'VISIBLE_LIFECYCLE_COMMAND_ID_REQUIRED', 'Visible lifecycle intent requires a command ID.');
+  if (intent.codexSessionId !== undefined) nonEmpty(intent.codexSessionId, 'VISIBLE_LIFECYCLE_SESSION_INVALID', 'Visible lifecycle Codex session ID is invalid.');
   const harnessKeys = ['controlRoot', 'dataRoot', 'memoryRoot', 'entrypoint', 'coordinatorEntrypoint', 'release'];
   if (!intent.harness || Object.keys(intent.harness).some(key => !harnessKeys.includes(key))) throw Object.assign(new Error('Visible lifecycle Harness binding is invalid.'), { code: 'VISIBLE_LIFECYCLE_HARNESS_BINDING_INVALID' });
   for (const key of ['controlRoot', 'dataRoot', 'entrypoint', 'coordinatorEntrypoint']) nonEmpty(intent.harness[key], 'VISIBLE_LIFECYCLE_HARNESS_BINDING_INVALID', `Visible lifecycle Harness binding requires ${key}.`);

@@ -4,7 +4,7 @@ import { assert } from '../../../common/errors.mjs';
 import { assertDispatchResultContract } from '../../execution/result-contract.mjs';
 import { envelope } from '../contracts.mjs';
 
-export const AGENT_PROMPT_CONTRACT_VERSION = '1.1';
+export const AGENT_PROMPT_CONTRACT_VERSION = '1.2';
 const visibleResultSchema = JSON.parse(readFileSync(new URL('../../../../schemas/visible-agent-result.schema.json', import.meta.url), 'utf8'));
 const businessResultSchema = JSON.parse(readFileSync(new URL('../../../../schemas/result.schema.json', import.meta.url), 'utf8'));
 
@@ -23,7 +23,9 @@ const assertPromptBinding = (packet, manifest) => {
   assert(packet.protocolVersion === '1.0', 'AGENT_PROMPT_PACKET_VERSION_INVALID', `Unsupported Dispatch packet protocol: ${packet.protocolVersion}`);
   const binding = packet.execution?.prompt;
   assert(binding?.pluginId === manifest.id && binding?.pluginVersion === manifest.version, 'AGENT_PROMPT_CODEC_BINDING_MISMATCH', 'Dispatch packet is not bound to the selected Prompt Codec identity.');
-  // Old active Leases must retain their original prompt bytes during reattach.
+  // Legacy 1.0 prompts retain their original format. Version 1.1 cannot be
+  // recompiled by this codec after the result schema changed; stored prompt
+  // bytes remain authoritative for an already bound Lease.
   assert(['1.0', AGENT_PROMPT_CONTRACT_VERSION].includes(binding.contractVersion), 'AGENT_PROMPT_CONTRACT_VERSION_MISMATCH', `Dispatch packet requires unsupported Prompt Contract ${binding?.contractVersion ?? '<missing>'}.`);
   return binding.contractVersion;
 };
@@ -41,6 +43,9 @@ export const compileAgentPrompt = (packetInput, manifest = REFERENCE_AGENT_PROMP
   if (contractVersion === AGENT_PROMPT_CONTRACT_VERSION) assertDispatchResultContract(packet.execution?.result, feature, { conversationVisible: visible });
   const modernResultInstructions = `Return exactly one JSON object as the final answer, with no prose or Markdown. For this Dispatch, the result is validated against the following complete ${visible ? 'conversation-visible' : 'business'} transport shape:\n\n${json(visible ? visibleResultSchema : businessResultSchema)}\n\n- Always return status, a non-empty summary, and the exact changedFiles array.\n- If status is completed, return every declared output port in outputs.<portId> with its schemaId, JSON value, and evidenceRefs. Required ports: ${json(packet.execution?.result?.outputPorts ?? {})}. Value Schemas: ${json(packet.execution?.result?.outputValueSchemas ?? {})}.\n- If status is blocked or failed, provide a stable failureClass and blocker; successful output ports are not required.\n- A read-only Feature must report changedFiles: []. Quality findings require non-empty evidence and affectedPaths.\n- A completed repair must report passing verification checkpoints with non-empty evidence; report only checks actually observed.\n- Optional descriptive arrays need only be present when they contain observed information. Do not invent empty fields or evidence.\n\nThe selected Runtime may impose an additional provider output dialect. Follow its supplied schema exactly when present; Harness still validates the business result and workspace changes.\n`;
   const legacyResultInstructions = `Return exactly one structured JSON object as the final answer, with no prose before or after it. It must conform to the Runtime result schema supplied by the host and must include:\n\n- status: completed, blocked, or failed;\n- summary: concise factual outcome;\n- changedFiles: exact workspace-relative forward-slash paths, with no unchanged or out-of-scope files;\n- checks/evidence fields required by the supplied schema, populated only from observed results;\n- stable failureClass and blocker details when status is blocked or failed;\n- findings or followUpFeatures only when justified by concrete evidence and fully scoped.\n`;
+  const inventoryInstructions = feature.metadata?.knownFindingInventory
+    ? `For this completed quality review, return knownFindingDispositions for every canonical ID in the pinned inventory: ${json(packet.execution?.result?.knownFindingInventory)}. Use canonical IDs only. Mark open only with a matching evidence-backed finding; mark not-reproduced only after a fresh observed check with non-empty evidence. Never infer resolution from historical status.\n`
+    : '';
   const text = `# Agent Harness Dispatch Prompt
 
 Prompt-Contract-Version: ${contractVersion}
@@ -91,7 +96,7 @@ ${json(feature.steps ?? [])}
 
 ## Result contract
 
-${contractVersion === '1.0' ? legacyResultInstructions.trimEnd() : modernResultInstructions.trimEnd()}
+${contractVersion === '1.0' ? legacyResultInstructions.trimEnd() : `${modernResultInstructions.trimEnd()}\n${inventoryInstructions}`.trimEnd()}
 
 Completion is invalid unless all acceptance criteria were checked and the reported changedFiles are accurate.
 

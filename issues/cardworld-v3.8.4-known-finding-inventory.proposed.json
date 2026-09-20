@@ -1,0 +1,23 @@
+{
+  "version": "1.0",
+  "sources": [
+    { "path": "docs/versions/v3/v3.8.4.md", "sha256": "ef8a263eaef894f14534a4e8a132113ceecb3756ca35bea4a0321cae10d07b6a" },
+    { "path": "docs/versions/INDEX.md", "sha256": "8bb55fc0db8de35440fd2a4b6ecefb8f52af782ef0608c83dedd6249de39273d" }
+  ],
+  "findings": [
+    { "id": "R008-FSW-001", "severity": "P1", "sourcePath": "docs/versions/v3/v3.8.4.md" },
+    { "id": "R008-FSW-002", "severity": "P1", "sourcePath": "docs/versions/v3/v3.8.4.md" },
+    { "id": "R008-FSW-003", "severity": "P1", "sourcePath": "docs/versions/v3/v3.8.4.md" },
+    { "id": "R008-FSW-004", "severity": "P1", "sourcePath": "docs/versions/v3/v3.8.4.md" },
+    { "id": "R008-FSW-005", "severity": "P1", "sourcePath": "docs/versions/v3/v3.8.4.md" },
+    { "id": "R008-FSW-006", "severity": "P1", "sourcePath": "docs/versions/v3/v3.8.4.md" },
+    { "id": "V384-R01", "severity": "P1", "sourcePath": "docs/versions/v3/v3.8.4.md" },
+    { "id": "V384-R02", "severity": "P1", "sourcePath": "docs/versions/v3/v3.8.4.md" },
+    { "id": "V384-R03", "severity": "P1", "sourcePath": "docs/versions/v3/v3.8.4.md" },
+    { "id": "V384-R04", "severity": "P1", "sourcePath": "docs/versions/v3/v3.8.4.md" },
+    { "id": "V384-R05", "severity": "P1", "sourcePath": "docs/versions/v3/v3.8.4.md" },
+    { "id": "V384-R06", "severity": "P2", "sourcePath": "docs/versions/v3/v3.8.4.md" },
+    { "id": "V384-R07", "severity": "P2", "sourcePath": "docs/versions/v3/v3.8.4.md" },
+    { "id": "V384-R08", "severity": "P2", "sourcePath": "docs/versions/v3/v3.8.4.md" }
+  ]
+}

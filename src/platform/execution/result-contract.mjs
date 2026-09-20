@@ -2,9 +2,10 @@ import { readFileSync } from 'node:fs';
 import { digestJson } from '../../common/canonical.mjs';
 import { assert } from '../../common/errors.mjs';
 import { assertJsonSchema, assertSchemaDefinition } from '../../common/json-schema.mjs';
+import { assertKnownFindingDispositions, assertKnownFindingInventory } from './known-finding-inventory.mjs';
 
 const businessResultSchema = JSON.parse(readFileSync(new URL('../../../schemas/result.schema.json', import.meta.url), 'utf8'));
-export const VISIBLE_AGENT_RESULT_CONTRACT_VERSION = '1.0';
+export const VISIBLE_AGENT_RESULT_CONTRACT_VERSION = '1.1';
 const visibleResultSchema = JSON.parse(readFileSync(new URL('../../../schemas/visible-agent-result.schema.json', import.meta.url), 'utf8'));
 
 export const createDispatchResultContract = (feature, { conversationVisible = false } = {}) => {
@@ -20,10 +21,13 @@ export const createDispatchResultContract = (feature, { conversationVisible = fa
     outputValueSchemas[portId] = valueSchema;
   }
   const body = {
-    id: 'agent-harness-dispatch-result', version: '1.0', schemaId: schema.$id,
+    id: 'agent-harness-dispatch-result', version: VISIBLE_AGENT_RESULT_CONTRACT_VERSION, schemaId: schema.$id,
     schemaDigest: digestJson(schema), outputPorts, outputValueSchemas,
     qualityReview: feature?.metadata?.qualityReview === true,
     repair: Boolean(feature?.metadata?.repairFindingId),
+    knownFindingInventory: feature?.metadata?.knownFindingInventory
+      ? { inventoryDigest: assertKnownFindingInventory(feature.metadata.knownFindingInventory).inventoryDigest, findings: feature.metadata.knownFindingInventory.findings.map(item => ({ id: item.id, severity: item.severity })) }
+      : null,
   };
   return Object.freeze({ ...body, contractDigest: digestJson(body) });
 };
@@ -57,6 +61,7 @@ export const validateBusinessResult = (input, { conversationVisible = false, rep
     assert(Array.isArray(result.checkpoints) && result.checkpoints.length > 0, 'REPAIR_CHECKPOINT_REQUIRED', 'A completed repair requires at least one verification checkpoint.');
     assert(result.checkpoints.every(checkpoint => ['passed', 'completed'].includes(checkpoint.status) && Array.isArray(checkpoint.evidence) && checkpoint.evidence.length > 0), 'REPAIR_CHECKPOINT_EVIDENCE_REQUIRED', 'Every completed repair checkpoint must pass and cite non-empty evidence.');
   }
+  if (feature?.metadata?.qualityReview === true && feature.metadata.knownFindingInventory) assertKnownFindingDispositions(result, feature.metadata.knownFindingInventory);
   return result;
 };
 
