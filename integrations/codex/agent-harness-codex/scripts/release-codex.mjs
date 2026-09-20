@@ -2,17 +2,15 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { runLocalPluginRelease } from './plugin-release-workflow.mjs';
 
-const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const usage = `Agent Harness local release and Codex plugin reinstall\n\nUsage:\n  npm run release:plugin:check\n  npm run release:plugin\n\nThe apply command creates a verified local Release Candidate, then performs an awaited\nCodex plugin remove/add cycle and verifies the installed version and source. It never\nruns an Agent CLI, git commit/tag/push, npm publish, signing, cutover, or deletion.\n`;
+const root = resolve(dirname(fileURLToPath(import.meta.url)), '../../../..');
+const usage = `Agent Harness Codex channel local release\n\nUsage:\n  npm run release:codex:check\n  npm run release:codex:local\n\nThe local command validates and packs the Core and Codex artifacts, creates a verified\nCore Release Candidate, then removes/adds the local Codex plugin and checks its binding.\nIt does not commit, tag, push, publish, sign, or perform a business cutover.\n`;
 
 const argument = process.argv[2];
-if (argument === '--help' || argument === '-h') {
-  process.stdout.write(usage);
-} else {
+if (argument === '--help' || argument === '-h') process.stdout.write(usage);
+else {
   const mode = argument === '--check' ? 'check' : argument === '--apply' ? 'apply' : null;
   if (!mode || process.argv.length !== 3) {
-    process.stderr.write(usage);
-    process.stderr.write('\nExactly one of --check or --apply is required.\n');
+    process.stderr.write(`${usage}\nExactly one of --check or --apply is required.\n`);
     process.exitCode = 1;
   } else {
     try {

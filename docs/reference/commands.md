@@ -14,3 +14,5 @@ agent-harness issue record|status|list|triage
 ```
 
 写命令使用唯一 `--command-id`；有当前记录时使用 `--expected-revision`。新 Workspace 命令包含 `--workspace-id` 或由输入 Plan 固定。多 Flow 的工作区必须明确选择 Workflow。Codex 适配器支持 `h:<workspace> flow <workflow> <action> <target> [--project <id>|--projects <ids>]`；旧 `h:engine`、`h:collection` 是兼容别名。`h:where` 查看绑定，`h:flows` 列出流程，`h:report <workspace> --workflow <id>` 将问题归到工作区和流程；安装级故障可无 Run 报告。命令绑定只是定位，最终以 Registry 当前精确身份和执行预检为准。
+
+制品和本机插件命令按渠道命名：`npm run pack:core`、`npm run pack:codex`、`npm run release:codex:check`、`npm run release:codex:local`。具体产物及兼容命令见[渠道打包](./packaging.md)。

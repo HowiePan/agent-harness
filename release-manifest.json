@@ -6,24 +6,19 @@
   "license": "UNLICENSED",
   "files": [
     {
-      "path": ".agents/plugins/marketplace.json",
-      "sha256": "33a9772ef4eec258efd8733edfb436f9f21ad3e72dc5af3c06378959458b46cc",
-      "size": 417
-    },
-    {
       "path": "bin/agent-harness.mjs",
       "sha256": "1d6672d4261c2276ffe14f9026b69f19f9d8a86aac75b90114dd8c514ae25e1a",
       "size": 62
     },
     {
       "path": "CONTRIBUTING.md",
-      "sha256": "1702d167205c6c9e4f62689545a896957b5ddee7e336f766029300dd5238f042",
-      "size": 1325
+      "sha256": "ddb73fce55ce27b72a47f88cf6cd100e77f414a38415804f68195596d3dfe88c",
+      "size": 1344
     },
     {
       "path": "docs/architecture/system-design.md",
-      "sha256": "25bcdb1b2baf50557caddc616e036bb48a84dafbfe46c7cb1453132e9def5102",
-      "size": 6207
+      "sha256": "c00e8602b1ed9a85ccd99468f1c0c5e705131b32f1c4a62998b255256609a0f8",
+      "size": 6813
     },
     {
       "path": "docs/flows/batch-production/design.md",
@@ -277,8 +272,8 @@
     },
     {
       "path": "docs/operations/README.md",
-      "sha256": "49cf58d1eab1b72d79899020eafa583be830315f6c1cfa7e0c8b57e8fd5155d8",
-      "size": 1051
+      "sha256": "54162f72a8006440d5835985306046987a64e8892b9124b2e2432feffa657117",
+      "size": 1215
     },
     {
       "path": "docs/overview/project.md",
@@ -287,18 +282,23 @@
     },
     {
       "path": "docs/README.md",
-      "sha256": "66520d007ccaaf61d6ee596ae575cd21a7017737a7882683e53f590d3bd9f810",
-      "size": 1324
+      "sha256": "21645c8bfe7daf4203e6132dfea82783be9f8f06514dbf6d744a539cd4d4820b",
+      "size": 1367
     },
     {
       "path": "docs/reference/commands.md",
-      "sha256": "2326bdbdc060a65c4cabfc7516acdb0aefbcf6ce0c7b64976a37a68b854740d3",
-      "size": 1197
+      "sha256": "bc95d770c346870122c9b7587ff8790887fb049a806a7d6339178ca058e05ab5",
+      "size": 1416
     },
     {
       "path": "docs/reference/legacy-compatibility.md",
       "sha256": "4bce4523c48fbe66df4b49f15a4470767a7d94eb07a8c1f4b75e503befae1f93",
       "size": 1633
+    },
+    {
+      "path": "docs/reference/packaging.md",
+      "sha256": "1b8e2dee0f44e3f783b673e6c18843406c637797ae8484d48c19355205100fda",
+      "size": 1948
     },
     {
       "path": "docs/reference/protocol.md",
@@ -376,116 +376,6 @@
       "size": 161
     },
     {
-      "path": "integrations/codex/agent-harness-codex/.codex-plugin/plugin.json",
-      "sha256": "950ca543fd2296a6545448df7e52ec7ac23c854494461165f79d8314cee228ad",
-      "size": 1243
-    },
-    {
-      "path": "integrations/codex/agent-harness-codex/hooks/hooks.json",
-      "sha256": "f1a15805d635e13ac475f51e56ec478d90e82b87952610fb0aeb195434fd0586",
-      "size": 565
-    },
-    {
-      "path": "integrations/codex/agent-harness-codex/hooks/pseudo-command-router.mjs",
-      "sha256": "ef0c04a08837a6810e362f2f011621399ecb4ab339887785560ed420235e5077",
-      "size": 21293
-    },
-    {
-      "path": "integrations/codex/agent-harness-codex/lib/active-release-binding.mjs",
-      "sha256": "cdf8314cc88c50592f26caeed3ea9940d9b899d5f728f73a8c4ddf236df99883",
-      "size": 5829
-    },
-    {
-      "path": "integrations/codex/agent-harness-codex/lib/codex-collaboration-host-adapter.mjs",
-      "sha256": "f954be9c91550d6e25186b41a2d505699d4839911c5ea7ee5894bb0caef1a18a",
-      "size": 25204
-    },
-    {
-      "path": "integrations/codex/agent-harness-codex/lib/codex-host-effect-journal.mjs",
-      "sha256": "e363b28e12a387686680a85b1e1fa5b81cc576e688c329378f723dbcb8861f31",
-      "size": 6744
-    },
-    {
-      "path": "integrations/codex/agent-harness-codex/lib/stdio-host-exchange.mjs",
-      "sha256": "5050a79c464006f995dd295907a64a9e45255e95f1f45c359aea18bc41e99f2e",
-      "size": 2471
-    },
-    {
-      "path": "integrations/codex/agent-harness-codex/lib/visible-lifecycle-intent.mjs",
-      "sha256": "a669d974a848dc54c629f39d60029004efca334bd4a2301fdd7a32908a9d86ad",
-      "size": 11104
-    },
-    {
-      "path": "integrations/codex/agent-harness-codex/references/pseudo-command-contract.md",
-      "sha256": "598e91634d96437482981ee4086f47bba6bb2633ad021ed4b05177f4b206dd6f",
-      "size": 7866
-    },
-    {
-      "path": "integrations/codex/agent-harness-codex/references/visible-host-adapter-contract.md",
-      "sha256": "190409a2203038b4f49c8930da971998e0cd05d95aa2981f5bec3cecd8af8e9d",
-      "size": 6040
-    },
-    {
-      "path": "integrations/codex/agent-harness-codex/scripts/configure-bindings.mjs",
-      "sha256": "e4710b47009854a9ba1c398ab00e049f3e644eca7463572ad51792492de7949a",
-      "size": 6740
-    },
-    {
-      "path": "integrations/codex/agent-harness-codex/scripts/plugin-release-workflow.mjs",
-      "sha256": "ad2637026147a6f9a6586f534e638906209aa62e3ac1e6a5b0f7dfed5323471f",
-      "size": 33238
-    },
-    {
-      "path": "integrations/codex/agent-harness-codex/scripts/visible-lifecycle-coordinator.mjs",
-      "sha256": "8055df0f2b8e5a9a5d1868911d83a27748931001ed3c22b806f00d023deeb591",
-      "size": 7318
-    },
-    {
-      "path": "integrations/codex/agent-harness-codex/skills/agent-harness-command/agents/openai.yaml",
-      "sha256": "7eb39dd4ac9b291fe26370a285f1d58d009911ca81ce8ab4944c4b7661a4ca30",
-      "size": 294
-    },
-    {
-      "path": "integrations/codex/agent-harness-codex/skills/agent-harness-command/SKILL.md",
-      "sha256": "9d7052b57ef9bd718c99ad4221bce58b3d9b78ef5b62e3deb1cafaba3efcaf8b",
-      "size": 12851
-    },
-    {
-      "path": "integrations/codex/agent-harness-codex/skills/agent-harness-extension-author/references/extension-contract.md",
-      "sha256": "59856f31e5d9f9b8ea7efd7f55a10d33971bd1dcbffb6a50aa06f46d68036022",
-      "size": 6064
-    },
-    {
-      "path": "integrations/codex/agent-harness-codex/skills/agent-harness-extension-author/SKILL.md",
-      "sha256": "387733babc29c7e0e5801f2a9655ba57eb9a1c6b71f73213a0142a4551c52290",
-      "size": 4658
-    },
-    {
-      "path": "integrations/codex/agent-harness-codex/skills/agent-harness-flow-author/SKILL.md",
-      "sha256": "ae275b7aa75fc058a62262034e99f2251b42f0b659e9be564b50636076f84c2f",
-      "size": 1509
-    },
-    {
-      "path": "integrations/codex/agent-harness-codex/skills/agent-harness-operator/agents/openai.yaml",
-      "sha256": "34016c8395bbb9e0c6da97d08c96031ebafbfbf608a0e07d4a695fe6d0025bc2",
-      "size": 311
-    },
-    {
-      "path": "integrations/codex/agent-harness-codex/skills/agent-harness-operator/references/operation-contract.md",
-      "sha256": "dcee1bd65b5f6841e62dedb5535dd80e5c14314687e18e98cf39d5efd110f2ee",
-      "size": 6374
-    },
-    {
-      "path": "integrations/codex/agent-harness-codex/skills/agent-harness-operator/SKILL.md",
-      "sha256": "c6f157774e3b9dee3013af00ca002d6c28844de13b4fa492947273bff6e29305",
-      "size": 7361
-    },
-    {
-      "path": "integrations/codex/agent-harness-codex/skills/agent-harness-workspace-author/SKILL.md",
-      "sha256": "d9f62367a5d98c36bef1320d6b48ee3f28b0e02135b9964e2d5c68945a9226dc",
-      "size": 1478
-    },
-    {
       "path": "integrations/codex/extensions/codex-headless-runtime.mjs",
       "sha256": "67d9da580f9ac5ff5ac7042d25114e26d959195e1fe0c142801be8aeae305605",
       "size": 1269
@@ -542,8 +432,8 @@
     },
     {
       "path": "package.json",
-      "sha256": "ced07ac4f8c67f7f64b236e69b69e1e08294c736a9de87ab412914f15992890a",
-      "size": 3451
+      "sha256": "ac3ae412453c9ed047478a845be58ccd1c0f55917091db845b1206b368410065",
+      "size": 3347
     },
     {
       "path": "plugins/codex-cli-runtime.plugin.json",
@@ -1506,7 +1396,7 @@
       "size": 19772
     }
   ],
-  "packageDigest": "565a63999bfc3653e981527bc22abad67e447f8d6f172e22ae37c87f0b99c8f1",
+  "packageDigest": "3d132aa185450619e6475a93ef536bf2c302d8b246ede0e713e82f393753fa90",
   "metadataFiles": [
     "release-manifest.json",
     "sbom.spdx.json"

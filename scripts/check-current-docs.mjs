@@ -4,7 +4,7 @@ import { dirname, resolve } from 'node:path';
 const requiredPages = [
   'README.md', 'docs/README.md', 'docs/overview/project.md', 'docs/architecture/system-design.md',
   'docs/guides/consumer-quickstart.md', 'docs/guides/flow-authoring.md', 'docs/guides/workspace-configuration.md',
-  'docs/reference/protocol.md', 'docs/reference/sdk.md', 'docs/reference/commands.md', 'docs/operations/README.md',
+  'docs/reference/protocol.md', 'docs/reference/sdk.md', 'docs/reference/commands.md', 'docs/reference/packaging.md', 'docs/operations/README.md',
   'docs/reference/legacy-compatibility.md', 'docs/history/README.md',
   'docs/flows/delivery-lifecycle/design.md', 'docs/flows/batch-production/design.md',
   'docs/flows/requirements-design/design.md', 'docs/flows/knowledge-qa/design.md',

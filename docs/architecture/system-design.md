@@ -51,3 +51,7 @@ commands.mjs              暴露命令时存在
 ## 5. 接入与验证边界
 
 新业务方先定义 Flow Extension 与节点结果合同，再注册 Workspace 的项目、来源、执行目标和资源，安装/绑定制品并配置 Runtime。CLI 或宿主命令必须解析为唯一 Workspace + Workflow；多流程时显式选择。命令级准出从解析开始，经历 Plan、预检、Run、Dispatch/Submission、Gate/Decision，最终检查 `closed` 与回执。测试与 Schema 负责静态和局部合同；完整运行负责跨层闭环。真实业务质量、远端发布和旧状态切换由独立 Gate 批准。
+
+## 6. 渠道制品
+
+通用 Harness npm 包与宿主插件按渠道独立打包。Core Release Manifest 和 SBOM 只枚举通用 npm 包；该包保留已公开的 Codex Runtime/Extension API，但不包含 Codex 宿主插件目录或本地 marketplace。Codex 渠道包单独列出插件文件摘要及精确的 Core `packageDigest`；安装或组合验证必须拒绝摘要不符的 Core。渠道命令、产物路径和本机安装流程见[渠道打包](../reference/packaging.md)。未来宿主须有自己的打包入口、清单和安装验证，不复用 Codex 发布命令来隐式选择渠道。

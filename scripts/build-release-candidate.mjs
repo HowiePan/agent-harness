@@ -107,7 +107,8 @@ try {
   assert(packResult?.filename && packResult.integrity && packResult.shasum && Array.isArray(packResult.files), 'RELEASE_NPM_PACK_RESULT_INVALID', 'npm pack did not return a complete package record.');
   const packedPaths = new Set(packResult.files.map(file => file.path));
   for (const file of manifest.files) assert(packedPaths.has(file.path), 'RELEASE_MANIFEST_FILE_NOT_PACKED', `Release manifest file is missing from the archive: ${file.path}`);
-  for (const file of ['release-manifest.json', 'sbom.spdx.json', 'integrations/codex/agent-harness-codex/.codex-plugin/plugin.json']) assert(packedPaths.has(file), 'RELEASE_REQUIRED_FILE_NOT_PACKED', `Required release file is missing from the archive: ${file}`);
+  for (const file of ['release-manifest.json', 'sbom.spdx.json']) assert(packedPaths.has(file), 'RELEASE_REQUIRED_FILE_NOT_PACKED', `Required release file is missing from the archive: ${file}`);
+  assert(![...packedPaths].some(file => file.startsWith('integrations/codex/agent-harness-codex/') || file.startsWith('.agents/')), 'RELEASE_CODEX_CHANNEL_LEAK', 'Core package must not contain the Codex host plugin or marketplace.');
 
   const archiveSource = resolve(scratch, packResult.filename);
   const archiveBytes = await readFile(archiveSource);
@@ -125,7 +126,7 @@ try {
   const installedRoot = assertNoLinkPath(deployment, resolve(deployment, 'node_modules', 'agent-harness'), 'installed Agent Harness package');
   const installedIdentity = await verifyReleaseManifest({ root: installedRoot, artifactDigest: identity.artifactDigest });
   assert(installedIdentity.version === packageJson.version, 'RELEASE_INSTALLED_VERSION_MISMATCH', 'Installed release candidate version differs from package.json.');
-  await validateSkills(installedRoot);
+  await validateSkills(root);
 
   const receipt = sealReleaseCandidateReceipt({
     protocolVersion: '1.0',

@@ -45,13 +45,6 @@
     "scripts/workflow-canary.mjs",
     "scripts/workspace-canary.mjs",
     "docs/",
-    ".agents/",
-    "integrations/codex/agent-harness-codex/.codex-plugin/",
-    "integrations/codex/agent-harness-codex/hooks/",
-    "integrations/codex/agent-harness-codex/lib/",
-    "integrations/codex/agent-harness-codex/references/",
-    "integrations/codex/agent-harness-codex/scripts/",
-    "integrations/codex/agent-harness-codex/skills/",
     "integrations/codex/runtime/",
     "integrations/codex/plugins/",
     "integrations/codex/extensions/",
@@ -75,9 +68,12 @@
     "check:residue": "node scripts/check-residue.mjs",
     "build:release-metadata": "node scripts/build-release-metadata.mjs",
     "build:release-candidate": "node scripts/build-release-candidate.mjs",
+    "pack:core": "node scripts/pack-core.mjs",
+    "pack:codex": "node scripts/pack-codex.mjs",
+    "check:channels": "node scripts/check-channel-composition.mjs",
     "pack:dry-run": "node scripts/pack-dry-run.mjs",
-    "release:plugin:check": "node scripts/release-plugin.mjs --check",
-    "release:plugin": "node scripts/release-plugin.mjs --apply",
+    "release:codex:check": "node integrations/codex/agent-harness-codex/scripts/release-codex.mjs --check",
+    "release:codex:local": "node integrations/codex/agent-harness-codex/scripts/release-codex.mjs --apply",
     "prepack": "node scripts/check-project.mjs"
   }
 }

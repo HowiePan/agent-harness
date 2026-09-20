@@ -8,7 +8,7 @@ Before opening a change:
 2. Add a minimal synthetic regression test at that boundary.
 3. Keep consumer and provider names out of the default composition and Kernel.
 4. Declare process outputs, budgets, retention, cleanup, and sandbox behavior.
-5. Run `npm run check`, `npm test`, `npm run check:clean-room`, and `npm run pack:dry-run`.
+5. Run `npm run check`, `npm test`, `npm run check:clean-room`, `npm run pack:core`, and `npm run pack:codex`.
 
 Use `schemas/defect-bundle.schema.json` for defects discovered by a consumer. Remove credentials, private prompts, personal paths, and business data before attaching a bundle.
 

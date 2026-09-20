@@ -273,7 +273,7 @@ const loadConfiguration = async root => {
   return validateLocalReleaseConfiguration({ root, packageJson, packageLock, pluginManifest, marketplace });
 };
 
-const npmRun = (runner, npmCli, script) => runner(process.execPath, [npmCli, 'run', script], { json: script === 'build:release-candidate' });
+const npmRun = (runner, npmCli, script) => runner(process.execPath, [npmCli, 'run', script], { json: ['build:release-candidate', 'pack:core', 'pack:codex'].includes(script) });
 const receiptPayload = value => ({ ...value, receiptDigest: digestJson(value) });
 
 const writeWorkflowReceipt = async ({ root, runId, value }) => {
@@ -356,12 +356,20 @@ export const runLocalPluginRelease = async ({ root: rootInput, mode, npmCli, run
   const steps = [];
   let candidate;
   let removed = false;
+  const channelPackages = {};
   try {
-    for (const script of ['check', 'test', 'check:clean-room', 'pack:dry-run', 'check:residue']) {
+    for (const script of ['check', 'test', 'check:clean-room', 'pack:core', 'pack:codex', 'check:residue']) {
       const stageStartedAt = clock().toISOString();
-      await npmRun(runner, npmCli, script);
-      steps.push({ id: script, status: 'passed', startedAt: stageStartedAt, completedAt: clock().toISOString() });
+      const stageResult = await npmRun(runner, npmCli, script);
+      if (script === 'pack:core') assert(stageResult.json?.ok === true && stageResult.json?.channel === 'core' && stageResult.json?.packageDigest === releaseIdentity.artifactDigest, 'LOCAL_RELEASE_CORE_PACKAGE_INVALID', 'Core channel package does not match the verified release manifest.');
+      if (script === 'pack:codex') assert(stageResult.json?.ok === true && stageResult.json?.channel === 'codex' && stageResult.json?.requiredCorePackageDigest === releaseIdentity.artifactDigest, 'LOCAL_RELEASE_CODEX_PACKAGE_INVALID', 'Codex channel package does not bind the verified Core package.');
+      if (script === 'pack:core') channelPackages.core = stageResult.json;
+      if (script === 'pack:codex') channelPackages.codex = stageResult.json;
+      steps.push({ id: script, status: 'passed', startedAt: stageStartedAt, completedAt: clock().toISOString(), ...(stageResult.json?.archiveDigest ? { archiveDigest: stageResult.json.archiveDigest, packageReceipt: stageResult.json.receipt } : {}) });
     }
+    const compositionStartedAt = clock().toISOString();
+    await runner(process.execPath, [resolve(root, 'scripts/check-channel-composition.mjs'), '--core', channelPackages.core.archive, '--codex', channelPackages.codex.archive]);
+    steps.push({ id: 'check:channel-composition', status: 'passed', startedAt: compositionStartedAt, completedAt: clock().toISOString() });
     await assertSourceUnchanged({ runner, root, expectedCommit: source.commit });
     const candidateStartedAt = clock().toISOString();
     const candidateResult = await npmRun(runner, npmCli, 'build:release-candidate');
