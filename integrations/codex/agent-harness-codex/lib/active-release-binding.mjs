@@ -55,16 +55,29 @@ export const validateActiveReleaseBinding = async ({ controlRoot: controlRootInp
   const entryRelative = relative(runtimeRoot, activeEntrypoint).replaceAll('\\', '/');
   const entryRecord = manifest.files.find(item => item.path === entryRelative);
   if (!entryRecord) throw new Error('active runtime entrypoint 未纳入 release manifest。');
+  const channelManifestFile = resolve(runtimeRoot, 'codex-channel-manifest.json');
+  const channel = await readJson(channelManifestFile);
+  const { artifactDigest: channelArtifactDigest, ...channelBody } = channel;
+  if (channel.protocolVersion !== '1.0' || channel.channel !== 'codex' || !Array.isArray(channel.files) || channelArtifactDigest !== digestJson(channelBody) || channel.contentDigest !== digestJson(channel.files) || channel.requiresCore?.packageDigest !== manifest.packageDigest || channel.requiresCore?.version !== manifest.version || channel.layout?.pluginPath !== 'integrations/codex/agent-harness-codex') throw new Error('Codex 渠道清单与 active Core runtime 不匹配。');
   const coordinatorRelative = 'integrations/codex/agent-harness-codex/scripts/visible-lifecycle-coordinator.mjs';
   const coordinatorEntrypoint = resolve(runtimeRoot, coordinatorRelative);
-  const coordinatorRecord = manifest.files.find(item => item.path === coordinatorRelative);
-  if (!coordinatorRecord) throw new Error('active runtime 未包含受验证的 Codex visible lifecycle Coordinator。');
-  const targets = verifyAllFiles ? manifest.files : [entryRecord, coordinatorRecord];
+  if (!channel.files.some(item => item.path === coordinatorRelative)) throw new Error('Codex 渠道清单未包含 visible lifecycle Coordinator。');
+  const channelPaths = new Set();
+  for (const item of channel.files) {
+    const file = resolve(runtimeRoot, item?.path ?? '');
+    if (typeof item?.path !== 'string' || !item.path || isAbsolute(item.path) || !inside(runtimeRoot, file) || channelPaths.has(item.path) || !/^[a-f0-9]{64}$/.test(item.sha256 ?? '') || !Number.isInteger(item.size) || item.size < 0 || !(item.path.startsWith('integrations/codex/agent-harness-codex/') || item.path === '.agents/plugins/marketplace.json')) throw new Error(`Codex 渠道清单文件记录无效：${item?.path ?? '<unknown>'}`);
+    channelPaths.add(item.path);
+  }
+  const targets = verifyAllFiles ? manifest.files : [entryRecord];
   for (const item of targets) {
     const bytes = await readFile(resolve(runtimeRoot, item.path));
     if (bytes.length !== item.size || sha256(bytes) !== item.sha256) throw new Error(`active runtime 文件与 release manifest 不一致：${item.path}`);
   }
+  for (const item of channel.files) {
+    const bytes = await readFile(resolve(runtimeRoot, item.path));
+    if (bytes.length !== item.size || sha256(bytes) !== item.sha256) throw new Error(`Codex 渠道文件与清单不一致：${item.path}`);
+  }
   const registryRoot = resolve(dataRoot, 'registry', 'generations', pointer.generationId);
   if (!(await optionalLstat(resolve(registryRoot, 'extensions.json')))?.isFile() || !(await optionalLstat(resolve(registryRoot, 'projects')))?.isDirectory()) throw new Error(`active Registry generation 不完整：${registryRoot}`);
-  return Object.freeze({ version: manifest.version, artifactDigest: manifest.packageDigest, generationId: pointer.generationId, pointerDigest: pointer.pointerDigest, runtimeRoot, registryRoot, entrypoint: activeEntrypoint, coordinatorEntrypoint });
+  return Object.freeze({ version: manifest.version, artifactDigest: manifest.packageDigest, generationId: pointer.generationId, pointerDigest: pointer.pointerDigest, runtimeRoot, registryRoot, entrypoint: activeEntrypoint, coordinatorEntrypoint, channelArtifactDigest });
 };

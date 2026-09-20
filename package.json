@@ -70,6 +70,7 @@
     "build:release-candidate": "node scripts/build-release-candidate.mjs",
     "pack:core": "node scripts/pack-core.mjs",
     "pack:codex": "node scripts/pack-codex.mjs",
+    "deploy:codex": "node scripts/deploy-codex-overlay.mjs",
     "check:channels": "node scripts/check-channel-composition.mjs",
     "pack:dry-run": "node scripts/pack-dry-run.mjs",
     "release:codex:check": "node integrations/codex/agent-harness-codex/scripts/release-codex.mjs --check",

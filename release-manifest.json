@@ -287,8 +287,8 @@
     },
     {
       "path": "docs/reference/commands.md",
-      "sha256": "77475c1b01592a7206593bad0134ac99539fe5e1268c96d579636c0165ae43c8",
-      "size": 1805
+      "sha256": "d82e842d7e5d30c5e096eeaa1abb3317960b33ade72453f5d0d8516a75b135ed",
+      "size": 1830
     },
     {
       "path": "docs/reference/legacy-compatibility.md",
@@ -297,8 +297,8 @@
     },
     {
       "path": "docs/reference/packaging.md",
-      "sha256": "1b8e2dee0f44e3f783b673e6c18843406c637797ae8484d48c19355205100fda",
-      "size": 1948
+      "sha256": "f1d026e17426c500205ad290c8e0127d171bc31ecfb00609aba19f7e90f13e25",
+      "size": 2136
     },
     {
       "path": "docs/reference/protocol.md",
@@ -432,8 +432,8 @@
     },
     {
       "path": "package.json",
-      "sha256": "ac3ae412453c9ed047478a845be58ccd1c0f55917091db845b1206b368410065",
-      "size": 3347
+      "sha256": "926dbd4b38a87de361daa8e3a24a60aeaf310a844a4f13b86045b852c8ad54f8",
+      "size": 3408
     },
     {
       "path": "plugins/codex-cli-runtime.plugin.json",
@@ -1396,7 +1396,7 @@
       "size": 19772
     }
   ],
-  "packageDigest": "05eb7102fa32c3c476d56447d7147bd400653358cdc30752da9a99fe00c582b9",
+  "packageDigest": "3e6aecb735a88eb3833cc81eb83cfd1316be1d9e4e02afbe4ad6730468133884",
   "metadataFiles": [
     "release-manifest.json",
     "sbom.spdx.json"

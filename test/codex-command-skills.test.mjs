@@ -28,11 +28,10 @@ const createActiveReleaseFixture = async controlRoot => {
   const coordinatorRelative = 'integrations/codex/agent-harness-codex/scripts/visible-lifecycle-coordinator.mjs';
   const coordinatorEntrypoint = resolve(runtimeRoot, coordinatorRelative);
   const coordinatorBytes = Buffer.from('// fixture visible coordinator\n');
-  const files = [
-    { path: entryRelative, sha256: sha256(entryBytes), size: entryBytes.length },
-    { path: coordinatorRelative, sha256: sha256(coordinatorBytes), size: coordinatorBytes.length },
-  ];
+  const files = [{ path: entryRelative, sha256: sha256(entryBytes), size: entryBytes.length }];
   const packageDigest = digestJson(files);
+  const channelFiles = [{ path: coordinatorRelative, sha256: sha256(coordinatorBytes), size: coordinatorBytes.length }];
+  const channelBody = { protocolVersion: '1.0', channel: 'codex', plugin: { name: 'agent-harness-codex', version: '1.0.0' }, requiresCore: { name: 'agent-harness', version: '1.0.0', packageDigest }, layout: { pluginPath: 'integrations/codex/agent-harness-codex', marketplacePath: '.agents/plugins/marketplace.json' }, files: channelFiles, contentDigest: digestJson(channelFiles) };
   const generationId = 'g-fixture';
   await Promise.all([
     mkdir(resolve(runtimeRoot, 'bin'), { recursive: true }),
@@ -43,6 +42,7 @@ const createActiveReleaseFixture = async controlRoot => {
     writeFile(entrypoint, entryBytes),
     writeFile(coordinatorEntrypoint, coordinatorBytes),
     writeFile(resolve(runtimeRoot, 'release-manifest.json'), `${JSON.stringify({ protocolVersion: '1.0', version: '1.0.0', files, packageDigest })}\n`, 'utf8'),
+    writeFile(resolve(runtimeRoot, 'codex-channel-manifest.json'), `${JSON.stringify({ ...channelBody, artifactDigest: digestJson(channelBody) })}\n`, 'utf8'),
     writeFile(resolve(dataRoot, 'registry', 'generations', generationId, 'extensions.json'), '{}\n', 'utf8'),
   ]);
   const pointer = { protocolVersion: '1.0', kind: 'active-release', generationId, release: { version: '1.0.0', artifactDigest: packageDigest, verified: true }, runtimeRoot: runtimeRelative, runtimeEntrypoint: `${runtimeRelative}/${entryRelative}` };
@@ -258,8 +258,28 @@ test('binding fails closed when the active visible Coordinator is missing or cha
   await writeFile(active.coordinatorEntrypoint, '// changed coordinator\n', 'utf8');
   const response = await hookResponse({ prompt: 'h:engine quality V3.8.4', cwd: workspaceRoot }, { pluginRoot: installedPlugin });
   assert.match(response.hookSpecificOutput.additionalContext, /绑定不可用/);
-  assert.match(response.hookSpecificOutput.additionalContext, /active runtime/);
+  assert.match(response.hookSpecificOutput.additionalContext, /Codex 渠道文件/);
   assert.match(response.hookSpecificOutput.additionalContext, /不得启动或修改任何 Harness 状态/);
+});
+
+test('binding rejects a Codex channel overlay for another Core digest', async t => {
+  const fixture = await createTemporaryFixture('agent-harness-channel-binding-');
+  t.after(() => rm(fixture, { recursive: true, force: true }));
+  const controlRoot = resolve(fixture, 'harness');
+  const workspaceRoot = resolve(fixture, 'workspace');
+  const pluginRoot = resolve(fixture, 'plugin');
+  await Promise.all([mkdir(workspaceRoot, { recursive: true }), mkdir(pluginRoot, { recursive: true })]);
+  await createActiveReleaseFixture(controlRoot);
+  const channelFile = resolve(controlRoot, 'runtime', 'codex-channel-manifest.json');
+  const channel = JSON.parse(await readFile(channelFile, 'utf8'));
+  channel.requiresCore.packageDigest = 'f'.repeat(64);
+  delete channel.artifactDigest;
+  channel.artifactDigest = digestJson(channel);
+  await writeFile(channelFile, `${JSON.stringify(channel)}\n`);
+  await assert.rejects(
+    () => configureBindings({ pluginRoot, controlRoot, workspaceRoot, entrypoint: 'runtime/bin/agent-harness.mjs', dataRoot: 'data', projectSpecs: ['engine|cardworld-engine|engine-delivery|cardworld-engine-profile'] }),
+    /Codex 渠道清单与 active Core runtime 不匹配/,
+  );
 });
 
 test('binding accepts only linked worktrees with the configured Git common directory', async t => {

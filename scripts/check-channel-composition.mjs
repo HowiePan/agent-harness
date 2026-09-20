@@ -65,11 +65,22 @@ try {
     await mkdir(dirname(target), { recursive: true });
     await copyFile(source, target);
   }
+  await copyFile(resolve(codexRoot, 'codex-channel-manifest.json'), resolve(coreRoot, 'codex-channel-manifest.json'));
+  const dataRoot = resolve(coreRoot, '.agent-harness-data');
+  const generationId = 'g-channel-probe';
+  await mkdir(resolve(dataRoot, 'registry', 'generations', generationId, 'projects'), { recursive: true });
+  await writeFile(resolve(dataRoot, 'registry', 'generations', generationId, 'extensions.json'), '{}\n');
+  const pointer = { protocolVersion: '1.0', kind: 'active-release', generationId, release: { version: coreIdentity.version, artifactDigest: coreIdentity.artifactDigest, verified: true }, runtimeRoot: '.', runtimeEntrypoint: 'bin/agent-harness.mjs' };
+  pointer.pointerDigest = digestJson(pointer);
+  await writeFile(resolve(dataRoot, 'registry', 'active-release.json'), `${JSON.stringify(pointer)}\n`);
+  const binding = await import(pathToFileURL(resolve(coreRoot, 'integrations/codex/agent-harness-codex/lib/active-release-binding.mjs')).href);
+  const validated = await binding.validateActiveReleaseBinding({ controlRoot: coreRoot, dataRoot, entrypoint: resolve(coreRoot, 'bin/agent-harness.mjs'), verifyAllFiles: true });
+  assert(validated.channelArtifactDigest === artifactDigest, 'CHANNEL_PROBE_BINDING_INVALID', 'Composed Codex channel did not validate against the active Core.');
   const hook = await import(pathToFileURL(resolve(coreRoot, 'integrations/codex/agent-harness-codex/hooks/pseudo-command-router.mjs')).href);
   assert(typeof hook.parsePseudoCommand === 'function', 'CHANNEL_PROBE_HOOK_INVALID', 'Composed Codex Hook did not load against the packaged Core.');
   const parsed = hook.parsePseudoCommand('h:engine quality V3.8.4 review-only');
   assert(parsed.kind === 'command' && parsed.action === 'quality', 'CHANNEL_PROBE_COMMAND_INVALID', 'Composed Codex Hook did not parse a known command.');
-  process.stdout.write(`${JSON.stringify({ ok: true, corePackageDigest: coreIdentity.artifactDigest, codexArtifactDigest: artifactDigest, pluginFiles: channelManifest.files.length, hookLoaded: true }, null, 2)}\n`);
+  process.stdout.write(`${JSON.stringify({ ok: true, corePackageDigest: coreIdentity.artifactDigest, codexArtifactDigest: artifactDigest, pluginFiles: channelManifest.files.length, hookLoaded: true, bindingValidated: true }, null, 2)}\n`);
 } finally {
   await rm(scratch, { recursive: true, force: true });
   await rmdir(scratchRoot).catch(error => { if (!['ENOENT', 'ENOTEMPTY'].includes(error.code)) throw error; });

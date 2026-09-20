@@ -11,6 +11,7 @@ import { readActiveRelease, resolveActiveRegistryRoot, resolveActiveRuntimeRoot 
 import { assertHarnessWritePath } from '../../../../src/common/write-boundary.mjs';
 import { parseLastJsonDocument } from '../../../../scripts/parse-json-output.mjs';
 import { validateReleaseVersionContract } from '../../../../scripts/release-version-contract.mjs';
+import { validateActiveReleaseBinding } from '../lib/active-release-binding.mjs';
 
 export const LOCAL_RELEASE_WORKFLOW_VERSION = '1.0';
 export const EXPECTED_PLUGIN_NAME = 'agent-harness-codex';
@@ -189,6 +190,7 @@ const loadActiveReleaseBinding = async ({ root, dataRoot }) => {
   assert(pointer.release?.version === releaseIdentity.version && pointer.release?.artifactDigest === releaseIdentity.artifactDigest && pointer.release?.verified === true, 'LOCAL_RELEASE_ACTIVE_POINTER_IDENTITY_MISMATCH', 'Active release pointer does not match the verified runtime artifact.', { pointerRelease: pointer.release, runtimeRelease: releaseIdentity });
   const entrypoint = assertNoLinkPath(root, resolve(root, pointer.runtimeEntrypoint ?? ''), 'active Harness runtime entrypoint');
   assert(comparablePath(entrypoint) === comparablePath(resolve(runtimeRoot, 'bin', 'agent-harness.mjs')), 'LOCAL_RELEASE_ACTIVE_ENTRYPOINT_MISMATCH', 'Active release runtimeEntrypoint does not match its verified runtime root.', { entrypoint, runtimeRoot });
+  const channel = await validateActiveReleaseBinding({ controlRoot: root, dataRoot, entrypoint, verifyAllFiles: true });
   return Object.freeze({
     version: releaseIdentity.version,
     packageDigest: releaseIdentity.artifactDigest,
@@ -197,6 +199,7 @@ const loadActiveReleaseBinding = async ({ root, dataRoot }) => {
     runtimeRoot,
     registryRoot,
     entrypoint,
+    channelArtifactDigest: channel.channelArtifactDigest,
   });
 };
 
@@ -358,7 +361,7 @@ export const runLocalPluginRelease = async ({ root: rootInput, mode, npmCli, run
   let removed = false;
   const channelPackages = {};
   try {
-    for (const script of ['check', 'test', 'check:clean-room', 'pack:core', 'pack:codex', 'check:residue']) {
+    for (const script of ['check', 'test', 'workspace:canary', 'check:clean-room', 'pack:core', 'pack:codex', 'check:residue']) {
       const stageStartedAt = clock().toISOString();
       const stageResult = await npmRun(runner, npmCli, script);
       if (script === 'pack:core') assert(stageResult.json?.ok === true && stageResult.json?.channel === 'core' && stageResult.json?.packageDigest === releaseIdentity.artifactDigest, 'LOCAL_RELEASE_CORE_PACKAGE_INVALID', 'Core channel package does not match the verified release manifest.');
@@ -370,6 +373,7 @@ export const runLocalPluginRelease = async ({ root: rootInput, mode, npmCli, run
     const compositionStartedAt = clock().toISOString();
     await runner(process.execPath, [resolve(root, 'scripts/check-channel-composition.mjs'), '--core', channelPackages.core.archive, '--codex', channelPackages.codex.archive]);
     steps.push({ id: 'check:channel-composition', status: 'passed', startedAt: compositionStartedAt, completedAt: clock().toISOString() });
+    assert(bindings.release.channelArtifactDigest === channelPackages.codex.artifactDigest, 'LOCAL_RELEASE_CODEX_CHANNEL_STALE', 'The deployed Codex overlay does not match the source channel package.');
     await assertSourceUnchanged({ runner, root, expectedCommit: source.commit });
     const candidateStartedAt = clock().toISOString();
     const candidateResult = await npmRun(runner, npmCli, 'build:release-candidate');
