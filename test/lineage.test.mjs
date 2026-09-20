@@ -4,6 +4,7 @@ import { mkdir, mkdtemp, rm } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { digestJson } from '../src/common/canonical.mjs';
 import { RunLineageStore, resolveRunLineage, verifyRunLineageResolution } from '../src/application/lineage.mjs';
+import { leaseHealth } from '../src/kernel/kernel.mjs';
 import { harnessTemporaryRoot } from '../src/common/write-boundary.mjs';
 
 const now = '2026-09-15T12:00:00.000Z';
@@ -39,6 +40,13 @@ test('lineage resolver selects every safe lifecycle continuation without user ch
   const blocked = resolveRunLineage({ plan, states: [incompatibleLive], now: () => now });
   assert.equal(blocked.action, 'block');
   assert.equal(blocked.reasonCode, 'INCOMPATIBLE_LIVE_LEASE');
+});
+
+test('legacy visible Leases without a stored timeout expire under the visible heartbeat default', () => {
+  const oldLease = { leaseId: 'legacy-visible', dispatchId: 'dispatch-visible', featureId: 'feature', status: 'active', lastHeartbeatAt: '2026-09-15T11:55:00.000Z' };
+  const oldRun = state({ runId: 'old-visible', planDigest: 'd'.repeat(64), status: 'running', leases: [oldLease], dispatches: [{ dispatchId: 'dispatch-visible', status: 'assigned', execution: { runtime: { mode: 'conversation-visible' } } }] });
+  assert.equal(leaseHealth(oldRun, Date.parse(now))[0].hardExpired, true);
+  assert.equal(resolveRunLineage({ plan, states: [oldRun], now: () => now }).action, 'supersede-and-start');
 });
 
 test('lineage resolution is short-lived and invalidated by any candidate-set or Authority change', () => {

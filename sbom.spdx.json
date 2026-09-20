@@ -3,7 +3,7 @@
   "dataLicense": "CC0-1.0",
   "SPDXID": "SPDXRef-DOCUMENT",
   "name": "agent-harness-1.0.0",
-  "documentNamespace": "https://agent-harness.local/spdx/b05bb7510a46c534889904ec834971456d1ecaff40a65d63a598b2fd68aa8339",
+  "documentNamespace": "https://agent-harness.local/spdx/3cddee4846977c7a09329f3808a6db759f3f1c6454906e05dc2f31894cf2308b",
   "creationInfo": {
     "created": "2026-09-13T00:00:00.000Z",
     "creators": [
@@ -22,7 +22,7 @@
       "checksums": [
         {
           "algorithm": "SHA256",
-          "checksumValue": "b05bb7510a46c534889904ec834971456d1ecaff40a65d63a598b2fd68aa8339"
+          "checksumValue": "3cddee4846977c7a09329f3808a6db759f3f1c6454906e05dc2f31894cf2308b"
         }
       ]
     }

@@ -672,8 +672,8 @@
     },
     {
       "path": "src/application/harness.mjs",
-      "sha256": "25455df9d931cc39031753ed07d84c9c869f6723a5152a7c1f3985afe50aa440",
-      "size": 96197
+      "sha256": "e01551bb3c396854f284c09f13e74b2c48eccd88e33a4ed2bae7a129f7776987",
+      "size": 97098
     },
     {
       "path": "src/application/installation.mjs",
@@ -1037,8 +1037,8 @@
     },
     {
       "path": "src/kernel/authority-store.mjs",
-      "sha256": "805c6fe4350f1fef35ee90e989f5bf55a2eb0f942ee81fe2aa37c9e896c0cddf",
-      "size": 6768
+      "sha256": "dd6321db9f3c135b719740927a67adb6069785f1b76819265dee920fcb024230",
+      "size": 7126
     },
     {
       "path": "src/kernel/evidence-store.mjs",
@@ -1057,8 +1057,8 @@
     },
     {
       "path": "src/kernel/kernel.mjs",
-      "sha256": "29882cc823022aff1043259e562e752d8d5cb56aa414823f241ef5f78289ff08",
-      "size": 45710
+      "sha256": "31dd6262be0095d590f25a787365ce5ab773b091da0a2b6bc668b4c1487415f8",
+      "size": 45916
     },
     {
       "path": "src/kernel/quality.mjs",
@@ -1396,7 +1396,7 @@
       "size": 19772
     }
   ],
-  "packageDigest": "b05bb7510a46c534889904ec834971456d1ecaff40a65d63a598b2fd68aa8339",
+  "packageDigest": "3cddee4846977c7a09329f3808a6db759f3f1c6454906e05dc2f31894cf2308b",
   "metadataFiles": [
     "release-manifest.json",
     "sbom.spdx.json"

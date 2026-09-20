@@ -19,6 +19,14 @@ test('authority transactions enforce revision and command idempotency', async t 
   await assert.rejects(() => store.transact('p', 'r', { expectedRevision: 2, commandId: 'increment', payload: { by: 2 } }, () => null), error => error.code === 'COMMAND_ID_REUSED');
 });
 
+test('authority inventory includes active Runs across Project boundaries', async t => {
+  const fixture = await makeFixture(); t.after(() => fixture.cleanup());
+  const store = new AuthorityStore({ root: fixture.dataRoot }); await store.init();
+  await store.create({ projectId: 'first', runId: 'one' }, { commandId: 'create-first', payload: {} });
+  await store.create({ projectId: 'second', runId: 'two' }, { commandId: 'create-second', payload: {} });
+  assert.deepEqual((await store.listAll()).map(state => `${state.projectId}/${state.runId}`).sort(), ['first/one', 'second/two']);
+});
+
 test('evidence is content addressed and metadata context is independently addressed', async t => {
   const fixture = await makeFixture(); t.after(() => fixture.cleanup());
   const store = new EvidenceStore({ root: fixture.dataRoot });

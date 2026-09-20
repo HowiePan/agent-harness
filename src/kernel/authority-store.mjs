@@ -51,6 +51,14 @@ export class AuthorityStore {
     return runs.sort((left, right) => String(right.updatedAt).localeCompare(String(left.updatedAt)));
   }
 
+  async listAll() {
+    let entries;
+    try { entries = await readdir(resolve(this.root, 'authority'), { withFileTypes: true }); }
+    catch (error) { if (error.code === 'ENOENT') return []; throw error; }
+    const groups = await Promise.all(entries.filter(entry => entry.isDirectory()).map(entry => this.list(entry.name)));
+    return groups.flat();
+  }
+
   async create(initialState, { commandId, payload = {} }) {
     const projectId = safeSegment(initialState.projectId, 'projectId');
     const runId = safeSegment(initialState.runId, 'runId');

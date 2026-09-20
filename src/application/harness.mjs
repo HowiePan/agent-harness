@@ -4,7 +4,7 @@ import { mkdir, rm } from 'node:fs/promises';
 import { atomicWriteJson } from '../kernel/atomic-io.mjs';
 import { AuthorityStore } from '../kernel/authority-store.mjs';
 import { EvidenceStore } from '../kernel/evidence-store.mjs';
-import { buildDispatchPacket, HarnessKernel } from '../kernel/kernel.mjs';
+import { buildDispatchPacket, HarnessKernel, leaseHealth } from '../kernel/kernel.mjs';
 import { digestJson, newId, sha256 } from '../common/canonical.mjs';
 import { assert } from '../common/errors.mjs';
 import { PluginHost } from '../platform/plugins/host.mjs';
@@ -322,19 +322,26 @@ export const createHarness = async ({ controlRoot: controlRootInput, dataRoot: d
           const requiredCapabilities = ['inspect', 'spawn', 'wait', 'result', 'reconcile', 'confirm', 'contain'];
           const ready = isVisibleHostAdapter(trustedAgentAdapter) && requiredCapabilities.every(capability => trustedAgentAdapter.capabilities?.[capability] === true);
           add('visible-host', ready, isVisibleHostAdapter(trustedAgentAdapter) ? { provider: trustedAgentAdapter.provider, adapterVersion: trustedAgentAdapter.adapterVersion, capabilities: trustedAgentAdapter.capabilities, requiredCapabilities } : { requiredCapabilities }, ready ? [] : [{ code: 'VISIBLE_AGENT_HOST_COORDINATOR_UNAVAILABLE', message: 'Conversation-visible execution requires an injected trusted Host Adapter with inspect, spawn, wait, structured-result, reconciliation, Lease confirmation, and containment capabilities.' }]);
-          if (ready) {
+          if (ready && lineageReady) {
             try {
+              const authorityStates = await authorityStore.listAll();
+              const activeEffectIds = authorityStates.flatMap(state => {
+                const expired = new Set(leaseHealth(state, Date.parse(createdAt)).filter(item => item.hardExpired).map(item => item.leaseId));
+                return state.leases.filter(lease => lease.status === 'active' && !expired.has(lease.leaseId))
+                  .map(lease => lease.runtimeReceipt?.hostSpawnReceipt?.effectId).filter(Boolean);
+              });
               const reconciliation = await trustedAgentAdapter.reconcile({
                 projectId: plan.project.id,
                 planDigest: plan.planDigest,
-                activeEffectIds: activeLeases.map(lease => lease.runtimeReceipt?.hostSpawnReceipt?.effectId).filter(Boolean),
+                activeEffectIds,
               });
               assert(reconciliation?.ready === true, 'VISIBLE_AGENT_HOST_RECONCILIATION_FAILED', 'Visible Host Effect reconciliation did not reach a safe state.', { issues: reconciliation?.issues ?? [] });
               assert(typeof reconciliation.provider === 'string' && typeof reconciliation.adapterVersion === 'string' && typeof reconciliation.assertionId === 'string' && typeof reconciliation.observedAt === 'string' && !Number.isNaN(Date.parse(reconciliation.observedAt)), 'VISIBLE_AGENT_HOST_CONTRACT_INVALID', 'Visible Host reconciliation must return a versioned, observable Host Contract assertion.');
               assert(reconciliation.contract?.id && /^\d+\.\d+\.\d+$/.test(reconciliation.contract?.version ?? '') && /^[a-f0-9]{64}$/.test(reconciliation.contract?.digest ?? ''), 'VISIBLE_AGENT_HOST_CONTRACT_INVALID', 'Visible Host reconciliation must bind an exact native Host Contract identity.');
               add('visible-host-contract', true, reconciliation);
             } catch (error) { add('visible-host-contract', false, {}, issues(error)); }
-          } else add('visible-host-contract', false, {}, [{ code: 'VISIBLE_AGENT_HOST_CONTRACT_UNAVAILABLE', message: 'Visible Host Contract reconciliation cannot run without the complete coordinator capability set.' }]);
+          } else if (!lineageReady) add('visible-host-contract', false, {}, [{ code: 'RUN_LINEAGE_BLOCKED', message: 'Visible Host reconciliation is deferred while Run lineage is blocked.' }]);
+          else add('visible-host-contract', false, {}, [{ code: 'VISIBLE_AGENT_HOST_CONTRACT_UNAVAILABLE', message: 'Visible Host Contract reconciliation cannot run without the complete coordinator capability set.' }]);
         } else {
           add('visible-host', true, { required: false });
           add('visible-host-contract', true, { required: false });
@@ -364,7 +371,7 @@ export const createHarness = async ({ controlRoot: controlRootInput, dataRoot: d
         } else add('gates', true, { required: false });
       }
       let writeProbe = { attempted: false, ready: false, cleaned: true };
-      if (probeWrite) {
+      if (probeWrite && lineageResolution?.action !== 'block') {
         const probeRoot = assertHarnessWritePath(resolve(authorityStore.root, 'tmp', 'preflight'), 'Execution readiness write probe', controlRoot);
         const probeFile = resolve(probeRoot, `${newId('probe')}.json`);
         try {
@@ -378,7 +385,8 @@ export const createHarness = async ({ controlRoot: controlRootInput, dataRoot: d
           writeProbe = { attempted: true, ready: false, cleaned: true };
           add('write-capability', false, writeProbe, issues(error));
         }
-      } else add('write-capability', false, writeProbe, [{ code: 'WRITE_CAPABILITY_NOT_PROBED', message: 'Execution readiness requires an explicit atomic write probe.' }]);
+      } else if (lineageResolution?.action === 'block') add('write-capability', false, writeProbe, [{ code: 'RUN_LINEAGE_BLOCKED', message: 'Execution readiness write probe is deferred while Run lineage is blocked.' }]);
+      else add('write-capability', false, writeProbe, [{ code: 'WRITE_CAPABILITY_NOT_PROBED', message: 'Execution readiness requires an explicit atomic write probe.' }]);
       const executionReady = Boolean(plan && project) && checks.every(check => check.ready);
       return sealExecutionReadinessReport({
         protocolVersion: '1.0',

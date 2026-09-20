@@ -17,7 +17,9 @@ const activeDispatch = dispatch => ['requested', 'assigned'].includes(dispatch.s
 
 export const leaseHealth = (state, now = Date.now()) => state.leases.filter(activeLease).map(lease => {
   const elapsedMs = Math.max(0, now - Date.parse(lease.lastHeartbeatAt));
-  const timeoutMs = Number(lease.heartbeatTimeoutMs ?? Number.POSITIVE_INFINITY);
+  const dispatch = state.dispatches.find(item => item.dispatchId === lease.dispatchId);
+  const defaultTimeoutMs = dispatch?.execution?.runtime?.mode === 'conversation-visible' ? 120000 : Number.POSITIVE_INFINITY;
+  const timeoutMs = Number(lease.heartbeatTimeoutMs ?? defaultTimeoutMs);
   const hardExpired = Number.isFinite(timeoutMs) && elapsedMs >= timeoutMs;
   return { leaseId: lease.leaseId, featureId: lease.featureId, elapsedMs, health: hardExpired ? 'expired' : elapsedMs >= 60 * 1000 ? 'warning' : 'healthy', hardExpired };
 });

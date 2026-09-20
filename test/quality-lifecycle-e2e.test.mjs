@@ -39,7 +39,7 @@ const finding = {
 
 const createHost = ({ workspace, failFirstWait = false, failFirstInspect = false, failFirstConfirm = false, failFirstResult = false, repeatFindingOnce = false, rejectRepairResultWithEdit = false }) => {
   const agents = new Map();
-  const stats = { spawnCount: 0, containCount: 0, terminalCount: 0, maxActive: 0 };
+  const stats = { spawnCount: 0, containCount: 0, terminalCount: 0, maxActive: 0, reconcileCount: 0 };
   let sequence = 0;
   let shouldFailWait = failFirstWait;
   let shouldFailInspect = failFirstInspect;
@@ -49,16 +49,19 @@ const createHost = ({ workspace, failFirstWait = false, failFirstInspect = false
   const adapter = createVisibleHostAdapter({
     provider: 'quality-e2e-host',
     adapterVersion: '1.1.0',
-    reconcileVisibleHostEffects: async () => ({
-      ready: true,
-      provider: 'quality-e2e-host',
-      adapterVersion: '1.1.0',
-      contract: { id: 'quality-e2e-native', version: '1.0.0', digest: 'd'.repeat(64) },
-      assertionId: 'quality-e2e-reconciliation',
-      observedAt: new Date().toISOString(),
-      reconciled: [],
-      issues: [],
-    }),
+    reconcileVisibleHostEffects: async () => {
+      stats.reconcileCount += 1;
+      return {
+        ready: true,
+        provider: 'quality-e2e-host',
+        adapterVersion: '1.1.0',
+        contract: { id: 'quality-e2e-native', version: '1.0.0', digest: 'd'.repeat(64) },
+        assertionId: 'quality-e2e-reconciliation',
+        observedAt: new Date().toISOString(),
+        reconciled: [],
+        issues: [],
+      };
+    },
     inspectVisibleAgent: async expected => {
       if (shouldFailInspect) {
         shouldFailInspect = false;
@@ -262,6 +265,23 @@ test('visible quality lifecycle resumes an attested active Lease after coordinat
   assert.equal(resumedPreflight.checks.find(check => check.id === 'active-leases').details.observations.length, 1);
   const completed = await restartedHarness.executeVisibleLifecyclePlan(fixture.plan, { commandId: 'quality-after-restart', preflightReport: resumedPreflight, maxConcurrency: 1 });
   assertClosedQualityLoop(completed.state);
+});
+
+test('blocked lineage does not reconcile or contain a live visible Agent', async t => {
+  const fixture = await setup({ failFirstWait: true });
+  t.after(() => rm(fixture.root, { recursive: true, force: true }));
+  const firstPreflight = await fixture.harness.createExecutionReadinessReport(fixture.plan);
+  await assert.rejects(() => fixture.harness.executeVisibleLifecyclePlan(fixture.plan, { commandId: 'blocked-lineage-first', preflightReport: firstPreflight, maxConcurrency: 1 }), error => error.code === 'SIMULATED_HOST_RESTART');
+  const before = fixture.host.stats.reconcileCount;
+  await writeFile(resolve(fixture.workspace, 'README.md'), '# Different source\n', 'utf8');
+  const nextPlan = await fixture.harness.createLifecyclePlan({ projectId: fixture.plan.project.id, action: 'quality', target: 'V3.8.4', arguments: ['full'], extensionId: fixture.plan.extension.id, executionWorkspaceRoot: fixture.workspace });
+  const blocked = await fixture.harness.createExecutionReadinessReport(nextPlan);
+  assert.equal(blocked.checks.find(check => check.id === 'run-lineage').details.resolution.reasonCode, 'INCOMPATIBLE_LIVE_LEASE');
+  assert.equal(blocked.checks.find(check => check.id === 'visible-host-contract').issues[0].code, 'RUN_LINEAGE_BLOCKED');
+  assert.equal(blocked.checks.find(check => check.id === 'write-capability').issues[0].code, 'RUN_LINEAGE_BLOCKED');
+  assert.equal(blocked.writeProbe.attempted, false);
+  assert.equal(fixture.host.stats.reconcileCount, before);
+  assert.equal(fixture.host.agents.size, 1);
 });
 
 test('spawn-before-bind failure contains the prior Agent and never opens the next Agent', async t => {
