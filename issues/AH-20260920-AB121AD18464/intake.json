@@ -1,0 +1,64 @@
+{
+  "protocolVersion": "1.0",
+  "projectAlias": "engine",
+  "project": {
+    "projectId": "cardworld-engine",
+    "profileId": "engine-delivery",
+    "extensionId": "cardworld-engine-profile"
+  },
+  "observedAt": "2026-09-20T12:05:20.5572323Z",
+  "summary": "V3.8.4 quality review passed all checks but Harness rejected the Agent result schema and could not enter repair closure",
+  "severity": "P1",
+  "expected": {
+    "qualityReview": "A schema-valid structured result should be committed so review findings can create repair Features."
+  },
+  "actual": {
+    "reviewChecks": "Source digest, format, Clippy, full tests, focused V3.8.4 suites, and WASM release boundary passed.",
+    "harnessFailure": "CODEX_COLLABORATION_RESULT_SCHEMA_INVALID: missing checkpoints/made/notMade/observations/failureClass/blocker and invalid finding/followUpFeatures shapes.",
+    "retryFailure": "EXECUTION_READINESS_EXPIRED during reattach retry.",
+    "outcome": "No repair Feature was created and the quality Run did not close."
+  },
+  "reproduction": {
+    "steps": [
+      "Run h:engine quality V3.8.4 in F:\\CardWorld.",
+      "Allow the visible review Agent to complete.",
+      "Observe Coordinator rejection of the returned structured result, then retry and observe readiness expiry."
+    ]
+  },
+  "conversation": {
+    "source": "current-thread",
+    "excerpts": [
+      {
+        "role": "user",
+        "text": "h:engine quality V3.8.4"
+      },
+      {
+        "role": "assistant",
+        "text": "质量评审已完成，但 Harness 未能正式收口；所有检查通过，6 个 P1 与 3 个 P2 仍待处理。"
+      },
+      {
+        "role": "tool",
+        "text": "CODEX_COLLABORATION_RESULT_SCHEMA_INVALID; EXECUTION_READINESS_EXPIRED"
+      }
+    ]
+  },
+  "missingEvidence": [
+    "No committed Authority Submission proving a schema-valid review result.",
+    "No repair Feature or repair dispatch was created."
+  ],
+  "correlation": {
+    "category": "lifecycle-execution",
+    "failureCode": "CODEX_COLLABORATION_RESULT_SCHEMA_INVALID",
+    "scope": "h:engine quality V3.8.4 review-to-repair closure"
+  },
+  "sanitization": {
+    "confirmed": true,
+    "removed": [
+      "Long generated Agent prompt payloads",
+      "Unrelated terminal control sequences",
+      "Duplicate polling output"
+    ]
+  },
+  "incidentFingerprint": "d97a99ef05a608026930805c5eaee4659e1d680a48f899d762ca0b0512518c13",
+  "intakeDigest": "ab121ad18464e021d0ebd370b0f00536ec202dcae0b8003dd226484cf5a8207f"
+}

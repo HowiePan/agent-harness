@@ -1,11 +1,13 @@
 import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { createCodexVisibleHostAdapter } from '../../runtime/codex-runtime.mjs';
-import { digestJson } from '../../../../src/common/canonical.mjs';
+import { digestJson, sha256 } from '../../../../src/common/canonical.mjs';
 import { assertJsonSchema } from '../../../../src/common/json-schema.mjs';
 import { CodexHostEffectJournal } from './codex-host-effect-journal.mjs';
 
-const codexResultSchema = JSON.parse(readFileSync(new URL('../../../../schemas/codex-runtime-result.schema.json', import.meta.url), 'utf8'));
+// The CLI provider schema is a separate, narrower wire dialect. Native visible
+// Agents return the portable visible result, including typed workflow outputs.
+const visibleResultSchema = JSON.parse(readFileSync(new URL('../../../../schemas/visible-agent-result.schema.json', import.meta.url), 'utf8'));
 
 const contractBody = Object.freeze({
   id: 'codex-collaboration-native',
@@ -293,13 +295,37 @@ export const createCodexCollaborationHostAdapter = ({ exchange, controlRoot, dat
     readVisibleResult: async input => {
       const receipt = assertSpawnReceipt(input?.runtimeReceipt?.hostSpawnReceipt, { agentId: input.agentId, dispatchId: input.dispatchId, packetDigest: input.runtimeReceipt?.hostSpawnReceipt?.packetDigest, promptDigest: input.runtimeReceipt?.hostSpawnReceipt?.promptDigest, surface: input.runtimeReceipt?.visibility?.surface, inspectRef: input.runtimeReceipt?.visibility?.inspectRef });
       const observed = await inspect({ agentId: input.agentId, expected: { effectId: receipt.effectId, dispatchId: input.dispatchId } });
-      const result = parseTerminalResult(observed.task, input.agentId);
-      assertJsonSchema(result, codexResultSchema, { code: 'CODEX_COLLABORATION_RESULT_SCHEMA_INVALID', label: 'Codex collaboration result' });
+      let result;
+      let resultRejection = null;
+      try {
+        result = parseTerminalResult(observed.task, input.agentId);
+        assertJsonSchema(result, visibleResultSchema, { code: 'CODEX_COLLABORATION_RESULT_SCHEMA_INVALID', label: 'Codex collaboration result' });
+      } catch (error) {
+        if (!completedStatus(observed.task.agent_status) || !['CODEX_COLLABORATION_RESULT_JSON_INVALID', 'CODEX_COLLABORATION_RESULT_SCHEMA_INVALID'].includes(error.code)) throw error;
+        const rejectionBody = {
+          kind: 'result-rejected-receipt', version: '1.0',
+          agentId: input.agentId, dispatchId: input.dispatchId,
+          packetDigest: receipt.packetDigest, promptDigest: receipt.promptDigest,
+          resultContractDigest: input.runtimeReceipt?.resultContractDigest ?? null,
+          code: error.code,
+          nativeOutputDigest: sha256(observed.task.agent_status.completed),
+          errors: structuredClone(error.details?.errors ?? []),
+          observationRequestDigest: observed.request.requestDigest,
+        };
+        resultRejection = { ...rejectionBody, receiptDigest: digestJson(rejectionBody) };
+        result = hostFailureResult({
+          agentId: input.agentId,
+          status: 'failed',
+          summary: `Codex collaboration Agent returned an invalid structured result: ${error.code}`,
+          failureClass: 'runtime-contract',
+          code: error.code,
+        });
+      }
       const resultDigest = digestJson(result);
       let effect = await journal.read(receipt.effectId, { required: true });
-      if (effect.state === 'lease-bound') effect = await transition(effect, 'settled', { outcome: { disposition: 'result-observed', resultDigest, observationRequestDigest: observed.request.requestDigest } }, 'settled');
+      if (effect.state === 'lease-bound') effect = await transition(effect, 'settled', { outcome: { disposition: resultRejection ? 'result-rejected' : 'result-observed', resultDigest, observationRequestDigest: observed.request.requestDigest, ...(resultRejection ? { rejectionDigest: resultRejection.receiptDigest } : {}) } }, 'settled');
       const verificationReceipts = Array.isArray(result?.checkpoints) ? result.checkpoints.map(checkpoint => ({ provider: 'codex-host', agentId: input.agentId, dispatchId: input.dispatchId, checkpointId: checkpoint?.id ?? null, status: checkpoint?.status ?? null, evidence: structuredClone(checkpoint?.evidence ?? []), resultDigest, observationRequestDigest: observed.request.requestDigest })) : [];
-      return { result, runtimeEvidence: { verificationReceipts }, receipt: { provider: 'codex-host', operation: 'result', agentId: input.agentId, dispatchId: input.dispatchId, effectId: effect.effectId, resultDigest, observationRequestDigest: observed.request.requestDigest } };
+      return { result, runtimeEvidence: { verificationReceipts, ...(resultRejection ? { resultRejection } : {}) }, receipt: { provider: 'codex-host', operation: 'result', agentId: input.agentId, dispatchId: input.dispatchId, effectId: effect.effectId, resultDigest, observationRequestDigest: observed.request.requestDigest, ...(resultRejection ? { rejectionDigest: resultRejection.receiptDigest } : {}) } };
     },
     interruptVisibleAgent: async input => {
       const receipt = input?.runtimeReceipt?.hostSpawnReceipt ?? input?.hostSpawnReceipt;

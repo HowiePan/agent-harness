@@ -100,15 +100,46 @@ test('native failed, interrupted, blocked, and output-less completed states beco
   }
 });
 
-test('Codex adapter rejects a native result that lacks its provider transport fields', async t => {
+test('Codex adapter records invalid native output as a bound terminal failure', async t => {
   const fixture = await setup(t);
   const host = fixture.create('invalid-result-schema');
   const spawned = await host.adapter.spawn(spawnInput);
   const runtimeReceipt = { visibility: spawned.visibility, hostSpawnReceipt: spawned.receipt };
   await host.adapter.confirm({ ...spawnInput, agentId: spawned.agentId, runtimeReceipt });
-  fixture.tasks.set(spawned.agentId, { completed: JSON.stringify({ status: 'completed', summary: 'too little', changedFiles: [] }) });
-  await assert.rejects(() => host.adapter.result({ agentId: spawned.agentId, dispatchId: spawnInput.dispatchId, runtimeReceipt }), error => error.code === 'CODEX_COLLABORATION_RESULT_SCHEMA_INVALID');
-  assert.equal((await host.journal.read(spawned.receipt.effectId)).state, 'lease-bound');
+  fixture.tasks.set(spawned.agentId, { completed: JSON.stringify({ status: 'completed', summary: 'missing changedFiles' }) });
+  const transported = await host.adapter.result({ agentId: spawned.agentId, dispatchId: spawnInput.dispatchId, runtimeReceipt });
+  assert.equal(transported.result.status, 'failed');
+  assert.equal(transported.result.blocker.code, 'CODEX_COLLABORATION_RESULT_SCHEMA_INVALID');
+  assert.match(transported.runtimeEvidence.resultRejection.nativeOutputDigest, /^[a-f0-9]{64}$/);
+  assert.equal(transported.runtimeEvidence.resultRejection.kind, 'result-rejected-receipt');
+  assert.equal(transported.runtimeEvidence.resultRejection.version, '1.0');
+  assert.equal(transported.receipt.rejectionDigest, transported.runtimeEvidence.resultRejection.receiptDigest);
+  assert.equal((await host.journal.read(spawned.receipt.effectId)).state, 'settled');
+});
+
+test('Codex visible adapter transports declared typed outputs without applying the CLI provider schema', async t => {
+  const fixture = await setup(t);
+  const host = fixture.create('typed-output');
+  const spawned = await host.adapter.spawn(spawnInput);
+  const runtimeReceipt = { visibility: spawned.visibility, hostSpawnReceipt: spawned.receipt };
+  await host.adapter.confirm({ ...spawnInput, agentId: spawned.agentId, runtimeReceipt });
+  const typed = { status: 'completed', summary: 'Question parsed.', changedFiles: [], outputs: { question: { schemaId: 'question-v1', value: { question: 'What changed?' }, evidenceRefs: [] } } };
+  fixture.tasks.set(spawned.agentId, { completed: JSON.stringify(typed) });
+  const transported = await host.adapter.result({ agentId: spawned.agentId, dispatchId: spawnInput.dispatchId, runtimeReceipt });
+  assert.deepEqual(transported.result, typed);
+});
+
+test('malformed completed native output becomes a terminal contract failure with its raw digest', async t => {
+  const fixture = await setup(t);
+  const host = fixture.create('malformed-output');
+  const spawned = await host.adapter.spawn(spawnInput);
+  const runtimeReceipt = { visibility: spawned.visibility, hostSpawnReceipt: spawned.receipt };
+  await host.adapter.confirm({ ...spawnInput, agentId: spawned.agentId, runtimeReceipt });
+  fixture.tasks.set(spawned.agentId, { completed: 'not JSON' });
+  const transported = await host.adapter.result({ agentId: spawned.agentId, dispatchId: spawnInput.dispatchId, runtimeReceipt });
+  assert.equal(transported.result.status, 'failed');
+  assert.equal(transported.runtimeEvidence.resultRejection.code, 'CODEX_COLLABORATION_RESULT_JSON_INVALID');
+  assert.equal((await host.journal.read(spawned.receipt.effectId)).state, 'settled');
 });
 
 test('legacy provider identity spawn envelope fails closed and the spawned Agent is interrupted before return', async t => {

@@ -27,9 +27,10 @@ test('workflow compiler validates identity, dependencies, fan-out, and template 
 test('declarative output checks reject failed review and empty answers', () => {
   const state = { metadata: { memorySnapshot: [] }, profile: { config: { branches: [] } } };
   const review = { metadata: { workflow: { nodeId: 'review' }, outputPorts: { review: 'document-review-v1' }, outputChecks: [{ portId: 'review', path: 'passed', operator: 'equals', value: true }] } };
-  assert.equal(composableWorkflowProfile.validateResult({ state, feature: review, result: { outputs: { review: { schemaId: 'document-review-v1', value: { passed: false } } } } }).ok, false);
+  assert.equal(composableWorkflowProfile.validateResult({ state, feature: review, result: { status: 'completed', outputs: { review: { schemaId: 'document-review-v1', value: { passed: false } } } } }).ok, false);
   const answer = { metadata: { workflow: { nodeId: 'answer' }, outputPorts: { answer: 'qa-answer-v1' }, outputChecks: [{ portId: 'answer', path: 'evidence', operator: 'non-empty' }] } };
-  assert.equal(composableWorkflowProfile.validateResult({ state, feature: answer, result: { outputs: { answer: { schemaId: 'qa-answer-v1', value: { claim: 'unsupported', evidence: null } } } } }).ok, false);
+  assert.equal(composableWorkflowProfile.validateResult({ state, feature: answer, result: { status: 'completed', outputs: { answer: { schemaId: 'qa-answer-v1', value: { claim: 'unsupported', evidence: null } } } } }).ok, false);
+  assert.deepEqual(composableWorkflowProfile.validateResult({ state, feature: answer, result: { status: 'failed', summary: 'Provider failed.', changedFiles: [] } }), { ok: true });
 });
 
 test('multi-source reads enforce receiver and pinned content', async t => {

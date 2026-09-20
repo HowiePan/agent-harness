@@ -68,6 +68,14 @@ test('Codex CLI Runtime rejects an invalid output Schema before spawning a proce
   await assert.rejects(() => access(resolve(fixture.dataRoot, 'runtime')), error => error.code === 'ENOENT');
 });
 
+test('fixed-schema Codex CLI Runtime rejects typed output ports before process launch', async t => {
+  const fixture = await makeFixture({ policy: { runtimePlugins: ['codex-cli-runtime'], defaultRuntimePlugin: 'codex-cli-runtime' } });
+  t.after(() => fixture.cleanup());
+  const runtime = createCodexCliRuntime({ resolveProject: id => fixture.harness.projectRegistry.get(id), runtimeRoot: fixture.dataRoot, spawnProcess: () => { throw new Error('must not spawn'); } });
+  const packet = runtimePacket(fixture, 'typed-output', { feature: { id: 'typed', metadata: { outputPorts: { question: 'question-v1' } }, allowedPaths: [], forbiddenPaths: [] } });
+  await assert.rejects(() => spawnRuntime(runtime, packet), error => error.code === 'RUNTIME_TYPED_OUTPUT_CONTRACT_UNSUPPORTED');
+});
+
 test('Codex CLI Runtime uses non-interactive structured output and records transport evidence', async t => {
   const fixture = await makeFixture({ policy: { runtimePlugins: ['codex-cli-runtime'], defaultRuntimePlugin: 'codex-cli-runtime', runtimeConfigs: { 'codex-cli-runtime': { sandbox: 'workspace-write', approveForMe: true } } } });
   t.after(() => fixture.cleanup());

@@ -21,7 +21,7 @@ export const CODEX_CLI_RUNTIME_MANIFEST = Object.freeze({
   id: 'codex-cli-runtime',
   kind: 'agent-runtime',
   version: '1.0.0',
-  capabilities: ['spawn', 'wait', 'heartbeat', 'interrupt', 'structured-result', 'workspace-shared', 'managed-outputs', 'headless'],
+  capabilities: ['spawn', 'wait', 'heartbeat', 'interrupt', 'structured-result', 'fixed-result-schema', 'workspace-shared', 'managed-outputs', 'headless'],
   permissions: ['agent.conversation', 'process.spawn', 'workspace.read', 'workspace.write'],
   execution: { outputs: CODEX_OUTPUTS, sandbox: { mode: 'required' } },
 });
@@ -30,7 +30,7 @@ export const CODEX_ISOLATED_RUNTIME_MANIFEST = Object.freeze({
   id: 'codex-isolated-runtime',
   kind: 'agent-runtime',
   version: '1.0.0',
-  capabilities: ['spawn', 'wait', 'heartbeat', 'interrupt', 'structured-result', 'workspace-isolated', 'managed-outputs', 'headless'],
+  capabilities: ['spawn', 'wait', 'heartbeat', 'interrupt', 'structured-result', 'fixed-result-schema', 'workspace-isolated', 'managed-outputs', 'headless'],
   permissions: ['agent.conversation', 'process.spawn', 'workspace.read', 'workspace.write'],
   execution: { outputs: CODEX_OUTPUTS, sandbox: { mode: 'required' } },
 });
@@ -165,6 +165,7 @@ export const createCodexCliRuntime = ({
   };
   return {
     async spawn(packet, { prompt, launchCapability, executionGrantDigest, packetDigest } = {}) {
+      assert(!Object.keys(packet?.feature?.metadata?.outputPorts ?? {}).length, 'RUNTIME_TYPED_OUTPUT_CONTRACT_UNSUPPORTED', 'This Runtime uses a fixed result Schema and cannot transport typed workflow output ports.');
       const project = await resolveProject(packet.projectId);
       const config = project.policy?.runtimeConfigs?.[manifest.id] ?? {};
       assert((project.policy?.runtimePlugins ?? [manifest.id]).includes(manifest.id), 'PROJECT_RUNTIME_DENIED', `Project ${project.id} does not allow ${manifest.id}.`);

@@ -36,7 +36,7 @@ import { ProjectGateRunner, inspectProjectGateCapabilities } from '../platform/w
 import { assertAgentRuntimeCompatible, assertRuntimeTransportReceipt, resolveLifecycleExecutionPolicy } from '../platform/plugins/runtime/execution-policy.mjs';
 import { assertFreshVisibleObservation, isVisibleHostAdapter } from '../platform/plugins/runtime/visible-host-adapter.mjs';
 import { assertVisibleHostReceiptOwner, createVisibleHostBindings } from '../platform/plugins/runtime/visible-host-bindings.mjs';
-import { validateBusinessResult, validateProfileResult } from '../platform/execution/result-contract.mjs';
+import { assertDispatchResultContract, createDispatchResultContract, validateBusinessResult, validateProfileResult } from '../platform/execution/result-contract.mjs';
 import { sealExecutionReadinessReport, verifyExecutionReadinessReport } from './execution-readiness.mjs';
 import { readActiveRelease, resolveActiveRuntimeRoot } from '../platform/registry/active-generation.mjs';
 import { RunLineageStore, resolveRunLineage, verifyRunLineageResolution } from './lineage.mjs';
@@ -135,6 +135,7 @@ export const createHarness = async ({ controlRoot: controlRootInput, dataRoot: d
     assert(digestJson(packet) === dispatch.packetDigest, 'PACKET_DIGEST_MISMATCH', 'Persisted Dispatch no longer matches its packet.');
     const binding = dispatch.execution?.prompt;
     assert(binding?.pluginId && binding?.pluginVersion && binding?.contractVersion, 'AGENT_PROMPT_BINDING_REQUIRED', 'Dispatch requires an exact Prompt Codec and contract binding.');
+    if (binding.contractVersion === AGENT_PROMPT_CONTRACT_VERSION) assertDispatchResultContract(dispatch.execution?.result, feature, { conversationVisible: dispatch.execution?.runtime?.mode === 'conversation-visible' });
     const codec = pluginHost.get(binding.pluginId, 'codec');
     assert(codec.manifest.capabilities.includes('agent-prompt'), 'AGENT_PROMPT_CODEC_REQUIRED', `Codec ${binding.pluginId} does not provide agent-prompt capability.`);
     assert(codec.manifest.version === binding.pluginVersion, 'AGENT_PROMPT_CODEC_VERSION_MISMATCH', 'Installed Prompt Codec version does not match the immutable Dispatch binding.');
@@ -283,6 +284,21 @@ export const createHarness = async ({ controlRoot: controlRootInput, dataRoot: d
           runtimePolicy = assertAgentRuntimeCompatible({ project, manifest: runtimeManifest, action: plan.intent.action, workflowId: plan.workflow?.id, runtimePluginId: plan.run.runtimePluginId, agentExecutionMode: plan.run.agentExecutionMode });
           add('runtime', true, { id: runtimeManifest.id, version: runtimeManifest.version, mode: runtimePolicy.mode });
         } catch (error) { add('runtime', false, {}, issues(error)); }
+        if (runtimeManifest) {
+          const typedFeatures = plan.run.features.filter(feature => Object.keys(feature.metadata?.outputPorts ?? {}).length > 0).map(feature => feature.id);
+          const compatible = !typedFeatures.length || !runtimeManifest.capabilities.includes('fixed-result-schema');
+          add('result-transport', compatible, { typedFeatures, runtimePluginId: runtimeManifest.id }, compatible ? [] : [{ code: 'RUNTIME_TYPED_OUTPUT_CONTRACT_UNSUPPORTED', message: 'The selected Runtime uses a fixed result Schema that cannot transport the workflow typed output ports.' }]);
+        }
+        const resultContracts = {};
+        const resultContractIssues = [];
+        for (const feature of plan.run.features) {
+          try {
+            resultContracts[feature.id] = createDispatchResultContract(feature, { conversationVisible: runtimePolicy?.mode === 'conversation-visible' }).contractDigest;
+          } catch (error) {
+            resultContractIssues.push({ featureId: feature.id, ...issues(error)[0] });
+          }
+        }
+        add('result-contract', resultContractIssues.length === 0, { contractDigests: resultContracts }, resultContractIssues);
         try {
           const prompt = pluginHost.get(project.policy.promptCodecPlugin, 'codec').manifest;
           assert(prompt.capabilities.includes('agent-prompt'), 'AGENT_PROMPT_CODEC_REQUIRED', 'Project Prompt Codec does not provide agent-prompt capability.');
@@ -523,7 +539,14 @@ export const createHarness = async ({ controlRoot: controlRootInput, dataRoot: d
 
     async executeLifecyclePlan(planInput, { commandId, preflightReport, maxConcurrency, maxRounds = 100, forceFreshGates = true, onGateProgress = null } = {}) {
       assert(commandId, 'COMMAND_ID_REQUIRED', 'Lifecycle execution requires a command ID.');
-      const started = await api.startLifecyclePlan(planInput, { commandId, preflightReport });
+      let started;
+      try { started = await api.startLifecyclePlan(planInput, { commandId, preflightReport }); }
+      catch (error) {
+        if (error.code !== 'EXECUTION_READINESS_EXPIRED') throw error;
+        const refreshed = await api.createExecutionReadinessReport(planInput, { onGateProgress });
+        if (!refreshed.executionReady) return { status: 'attention-required', reason: 'refreshed-execution-readiness-not-ready', preflightReport: refreshed };
+        started = await api.startLifecyclePlan(planInput, { commandId, preflightReport: refreshed });
+      }
       if (started.status === 'attention-required') return started;
       const { plan, runtimePolicy } = started;
       let { state } = started;
@@ -549,7 +572,14 @@ export const createHarness = async ({ controlRoot: controlRootInput, dataRoot: d
 
     async executeVisibleLifecyclePlan(planInput, { commandId, preflightReport, maxConcurrency, maxRounds = 100, forceFreshGates = true, onGateProgress = null } = {}) {
       assert(commandId, 'COMMAND_ID_REQUIRED', 'Visible lifecycle execution requires a command ID.');
-      const started = await api.startLifecyclePlan(planInput, { commandId, preflightReport });
+      let started;
+      try { started = await api.startLifecyclePlan(planInput, { commandId, preflightReport }); }
+      catch (error) {
+        if (error.code !== 'EXECUTION_READINESS_EXPIRED') throw error;
+        const refreshed = await api.createExecutionReadinessReport(planInput, { onGateProgress });
+        if (!refreshed.executionReady) return { status: 'attention-required', reason: 'refreshed-execution-readiness-not-ready', preflightReport: refreshed };
+        started = await api.startLifecyclePlan(planInput, { commandId, preflightReport: refreshed });
+      }
       if (started.status === 'attention-required' || started.status === 'closed') return started;
       const { plan, runtimePolicy } = started;
       assert(runtimePolicy.hostOrchestrated, 'VISIBLE_LIFECYCLE_RUNTIME_REQUIRED', 'Visible lifecycle execution requires a host-orchestrated Runtime.');
@@ -595,6 +625,7 @@ export const createHarness = async ({ controlRoot: controlRootInput, dataRoot: d
                 agentId: spawned.agentId,
                 dispatchId: dispatch.dispatchId,
                 packetDigest: dispatch.packetDigest,
+                resultContractDigest: dispatch.execution?.result?.contractDigest ?? null,
                 prompt: { contractVersion: compiled.prompt.contractVersion, codecPluginId: compiled.prompt.codecPluginId, codecPluginVersion: compiled.prompt.codecPluginVersion, packetDigest: compiled.prompt.packetDigest, promptDigest: compiled.prompt.promptDigest },
                 visibility: structuredClone(spawned.visibility),
                 hostSpawnReceipt: structuredClone(spawned.receipt ?? null),
@@ -767,7 +798,11 @@ export const createHarness = async ({ controlRoot: controlRootInput, dataRoot: d
       if (runtimePolicy.mode === 'conversation-visible') assert(Number.isFinite(visibleHeartbeatTimeoutMs) && visibleHeartbeatTimeoutMs > 0, 'VISIBLE_AGENT_HEARTBEAT_TIMEOUT_INVALID', 'Visible Agent heartbeat timeout must be a positive number of milliseconds.');
       const scheduledInput = { ...input, maxConcurrency: schedulingLimit, runtimePluginId, runtimeRequirements: { mode: runtimePolicy.mode, userVisible: runtimePolicy.userVisible, hostOrchestrated: runtimePolicy.hostOrchestrated, ...(runtimePolicy.mode === 'conversation-visible' ? { heartbeatTimeoutMs: visibleHeartbeatTimeoutMs } : {}) }, sourceSnapshotRef: snapshotEvidence.ref };
       if (input.candidateFeatureIds) {
-        const executionByFeatureId = Object.fromEntries(input.candidateFeatureIds.map(featureId => [featureId, { prompt: structuredClone(promptBinding) }]));
+        const executionByFeatureId = Object.fromEntries(input.candidateFeatureIds.map(featureId => {
+          const feature = state.features.find(item => item.id === featureId);
+          assert(feature, 'FEATURE_NOT_FOUND', `Unknown candidate Feature: ${featureId}`);
+          return [featureId, { prompt: structuredClone(promptBinding), result: createDispatchResultContract(feature, { conversationVisible: runtimePolicy.mode === 'conversation-visible' }), runtime: { mode: runtimePolicy.mode, userVisible: runtimePolicy.userVisible, hostOrchestrated: runtimePolicy.hostOrchestrated } }];
+        }));
         return kernel.schedule(projectId, runId, { ...scheduledInput, executionByFeatureId }, command);
       }
       const activeFeatureIds = [...new Set([...state.leases.filter(lease => ['requested', 'active'].includes(lease.status)).map(lease => lease.featureId), ...state.dispatches.filter(dispatch => ['requested', 'assigned'].includes(dispatch.status)).map(dispatch => dispatch.featureId)])];
@@ -778,7 +813,7 @@ export const createHarness = async ({ controlRoot: controlRootInput, dataRoot: d
       if (toolBrokerPluginId) pluginHost.get(toolBrokerPluginId, 'tool-broker');
       for (const featureId of strategy.payload.featureIds) {
         const feature = state.features.find(item => item.id === featureId);
-        const execution = { prompt: structuredClone(promptBinding), ...(runtimePolicy ? { runtime: { mode: runtimePolicy.mode, userVisible: runtimePolicy.userVisible, hostOrchestrated: runtimePolicy.hostOrchestrated } } : {}) };
+        const execution = { prompt: structuredClone(promptBinding), result: createDispatchResultContract(feature, { conversationVisible: runtimePolicy.mode === 'conversation-visible' }), ...(runtimePolicy ? { runtime: { mode: runtimePolicy.mode, userVisible: runtimePolicy.userVisible, hostOrchestrated: runtimePolicy.hostOrchestrated } } : {}) };
         if (modelRouterPluginId) {
           const request = { featureId, role: feature.ownerRole, capabilities: feature.metadata.requiredCapabilities ?? [], risk: Number(feature.metadata.risk ?? 0) };
           const route = await pluginHost.invoke(modelRouterPluginId, 'route', { ...request, requestDigest: digestJson(request) });
@@ -834,6 +869,7 @@ export const createHarness = async ({ controlRoot: controlRootInput, dataRoot: d
         assert(runtimeReceipt.agentId === input.agentId, 'RUNTIME_RECEIPT_AGENT_MISMATCH', 'Runtime Receipt Agent identity does not match the requested Lease binding.');
         assert(runtimeReceipt.dispatchId === dispatch.dispatchId, 'RUNTIME_RECEIPT_DISPATCH_MISMATCH', 'Runtime Receipt Dispatch identity does not match the managed Dispatch.');
         assert(runtimeReceipt.packetDigest === dispatch.packetDigest, 'PACKET_DIGEST_MISMATCH', 'Runtime Receipt does not match the immutable Dispatch packet.');
+        if (dispatch.execution?.prompt?.contractVersion === AGENT_PROMPT_CONTRACT_VERSION) assert(runtimeReceipt.resultContractDigest === dispatch.execution?.result?.contractDigest, 'RESULT_CONTRACT_RECEIPT_MISMATCH', 'Visible Runtime Receipt does not match the immutable Dispatch result contract.');
         assert(runtimeReceipt.prompt?.codecPluginId === prompt.codecPluginId && runtimeReceipt.prompt?.codecPluginVersion === prompt.codecPluginVersion && runtimeReceipt.prompt?.contractVersion === prompt.contractVersion, 'AGENT_PROMPT_RECEIPT_IDENTITY_MISMATCH', 'Visible Runtime Receipt does not match the generated Prompt Contract identity.');
         assert(runtimeReceipt.prompt?.packetDigest === prompt.packetDigest && runtimeReceipt.prompt?.promptDigest === prompt.promptDigest, 'AGENT_PROMPT_RECEIPT_DIGEST_MISMATCH', 'Visible Runtime Receipt is not bound to the exact generated Prompt and Dispatch packet.');
         assert(typeof trustedAgentAdapter?.verifyVisibleLease === 'function', 'VISIBLE_AGENT_HOST_ATTESTOR_REQUIRED', 'Conversation-visible Lease binding requires a trusted host adapter that can verify the visible child Agent.');
@@ -894,7 +930,8 @@ export const createHarness = async ({ controlRoot: controlRootInput, dataRoot: d
       assert(dispatch && lease, 'ACTIVE_LEASE_REQUIRED', `Dispatch does not have an active Lease: ${dispatchId}`);
       const conversationVisible = dispatch.execution?.runtime?.mode === 'conversation-visible';
       const feature = state.features.find(item => item.id === dispatch.featureId);
-      const validatedResult = validateBusinessResult(result, { conversationVisible, repair: Boolean(feature?.metadata?.repairFindingId) });
+      if (dispatch.execution?.result) assertDispatchResultContract(dispatch.execution.result, feature, { conversationVisible });
+      const validatedResult = validateBusinessResult(result, { conversationVisible, repair: Boolean(feature?.metadata?.repairFindingId), feature });
       validateProfileResult({ profile: profileRegistry.get(state.profile.id), state, feature, result: validatedResult });
       if (feature?.metadata?.repairFindingId && validatedResult.status === 'completed') {
         assert(Array.isArray(runtimeEvidence?.verificationReceipts) && runtimeEvidence.verificationReceipts.length > 0, 'REPAIR_VERIFICATION_RECEIPT_REQUIRED', 'A completed repair requires at least one host-preserved verification Receipt.');
@@ -913,7 +950,14 @@ export const createHarness = async ({ controlRoot: controlRootInput, dataRoot: d
       const interveningFiles = new Set(state.submissions.filter(submission => submission.inputSourceDigest === dispatch.sourceDigest && !submission.supersededAt).flatMap(submission => submission.changedFiles ?? []));
       const actualChangedFiles = cumulativeChangedFiles.filter(path => !interveningFiles.has(path));
       const claimedChangedFiles = [...new Set(validatedResult.changedFiles)].map(path => String(path).replaceAll('\\', '/')).sort();
-      assert(digestJson(claimedChangedFiles) === digestJson(actualChangedFiles), 'RESULT_CHANGED_FILES_MISMATCH', 'Runtime changed-files claim does not match the workspace snapshot diff.', { claimedChangedFiles, actualChangedFiles });
+      const rejection = runtimeEvidence?.resultRejection;
+      if (rejection) {
+        const { receiptDigest, ...rejectionBody } = rejection;
+        assert(validatedResult.status === 'failed' && validatedResult.failureClass === 'runtime-contract' && rejection.kind === 'result-rejected-receipt' && rejection.version === '1.0' && receiptDigest === digestJson(rejectionBody), 'RESULT_REJECTION_RECEIPT_INVALID', 'Host result rejection is not a valid failed-result receipt.');
+        assert(rejection.agentId === lease.agentId && rejection.dispatchId === dispatchId && rejection.packetDigest === dispatch.packetDigest && rejection.resultContractDigest === dispatch.execution?.result?.contractDigest && rejection.promptDigest === lease.runtimeReceipt?.prompt?.promptDigest && runtimeEvidence.hostResultReceipt?.rejectionDigest === receiptDigest, 'RESULT_REJECTION_RECEIPT_BINDING_MISMATCH', 'Host result rejection is not bound to this Lease, Dispatch, result contract, and Host observation.');
+      } else {
+        assert(digestJson(claimedChangedFiles) === digestJson(actualChangedFiles), 'RESULT_CHANGED_FILES_MISMATCH', 'Runtime changed-files claim does not match the workspace snapshot diff.', { claimedChangedFiles, actualChangedFiles });
+      }
       const verifiedResult = { ...validatedResult, changedFiles: actualChangedFiles };
       await atomicWriteJson(dispatch.outputRef, verifiedResult, { root: authorityStore.root });
       const preservedRuntimeEvidence = runtimeEvidence ? JSON.parse(JSON.stringify(runtimeEvidence)) : null;

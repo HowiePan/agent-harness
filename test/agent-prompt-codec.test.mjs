@@ -3,6 +3,7 @@ import test from 'node:test';
 import { digestJson, sha256 } from '../src/common/canonical.mjs';
 import { AGENT_PROMPT_CONTRACT_VERSION, compileAgentPrompt, createAgentPromptCodec, REFERENCE_AGENT_PROMPT_CODEC_MANIFEST } from '../src/platform/plugins/codec/agent-prompt-codec.mjs';
 import { validatePluginInstance, validatePluginManifest } from '../src/platform/plugins/contracts.mjs';
+import { createDispatchResultContract } from '../src/platform/execution/result-contract.mjs';
 
 const packet = () => ({
   protocolVersion: '1.0',
@@ -20,7 +21,7 @@ const packet = () => ({
   pluginSetDigest: 'c'.repeat(64),
   artifactDigest: null,
   gates: [],
-  execution: { prompt: { pluginId: REFERENCE_AGENT_PROMPT_CODEC_MANIFEST.id, pluginVersion: REFERENCE_AGENT_PROMPT_CODEC_MANIFEST.version, contractVersion: AGENT_PROMPT_CONTRACT_VERSION } },
+  execution: { prompt: { pluginId: REFERENCE_AGENT_PROMPT_CODEC_MANIFEST.id, pluginVersion: REFERENCE_AGENT_PROMPT_CODEC_MANIFEST.version, contractVersion: AGENT_PROMPT_CONTRACT_VERSION }, result: createDispatchResultContract({ metadata: {} }) },
 });
 
 test('Prompt Codec deterministically compiles immutable Dispatch data into the full quality contract', () => {
@@ -32,8 +33,21 @@ test('Prompt Codec deterministically compiles immutable Dispatch data into the f
   assert.match(first.text, /Authority and safety boundaries/);
   assert.match(first.text, /Required execution discipline/);
   assert.match(first.text, /Report every current P0-P3 finding/);
-  assert.match(first.text, /Return exactly one structured JSON object/);
+  assert.match(first.text, /Return exactly one JSON object/);
+  assert.match(first.text, /"outputs"/);
+  assert.match(first.text, /"affectedPaths"/);
+  assert.match(first.text, /successful output ports are not required/);
+  assert.match(first.text, new RegExp(packet().execution.result.contractDigest));
   assert.doesNotMatch(first.text, /generatedAt|new Date/);
+});
+
+test('Prompt Codec preserves the original 1.0 prompt for an active historical Dispatch', () => {
+  const old = packet();
+  old.execution.prompt.contractVersion = '1.0';
+  const compiled = compileAgentPrompt(old);
+  assert.equal(compiled.contractVersion, '1.0');
+  assert.match(compiled.text, /It must conform to the Runtime result schema supplied by the host/);
+  assert.doesNotMatch(compiled.text, /complete business transport shape/);
 });
 
 test('Prompt digest changes with authoritative task data and codec binding cannot be bypassed', () => {
@@ -44,6 +58,12 @@ test('Prompt digest changes with authoritative task data and codec binding canno
   const unbound = packet();
   delete unbound.execution.prompt;
   assert.throws(() => compileAgentPrompt(unbound), error => error.code === 'AGENT_PROMPT_CODEC_BINDING_MISMATCH');
+  const missingResult = packet();
+  delete missingResult.execution.result;
+  assert.throws(() => compileAgentPrompt(missingResult), error => error.code === 'RESULT_CONTRACT_BINDING_MISMATCH');
+  const changedResult = packet();
+  changedResult.execution.result = { ...changedResult.execution.result, outputPorts: { unexpected: 'wrong-v1' } };
+  assert.throws(() => compileAgentPrompt(changedResult), error => error.code === 'RESULT_CONTRACT_BINDING_MISMATCH');
 });
 
 test('agent-prompt capability requires compilePrompt implementation', () => {

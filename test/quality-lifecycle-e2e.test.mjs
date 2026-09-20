@@ -7,6 +7,7 @@ import { createCardWorldProjectDescriptor } from '../src/flows/delivery-lifecycl
 import { loadExtensionPack } from '../src/platform/extensions/contract.mjs';
 import { createVisibleHostAdapter } from '../src/platform/plugins/runtime/visible-host-adapter.mjs';
 import { harnessTemporaryRoot } from '../src/common/write-boundary.mjs';
+import { digestJson, sha256 } from '../src/common/canonical.mjs';
 
 const releaseIdentity = { version: '1.0.0', artifactDigest: 'a'.repeat(64), verified: true };
 
@@ -36,7 +37,7 @@ const finding = {
   conflictKeys: ['fixture-readme'],
 };
 
-const createHost = ({ workspace, failFirstWait = false, failFirstInspect = false, failFirstConfirm = false, failFirstResult = false, repeatFindingOnce = false }) => {
+const createHost = ({ workspace, failFirstWait = false, failFirstInspect = false, failFirstConfirm = false, failFirstResult = false, repeatFindingOnce = false, rejectRepairResultWithEdit = false }) => {
   const agents = new Map();
   const stats = { spawnCount: 0, containCount: 0, terminalCount: 0, maxActive: 0 };
   let sequence = 0;
@@ -138,6 +139,21 @@ const createHost = ({ workspace, failFirstWait = false, failFirstInspect = false
           await writeFile(resolve(workspace, 'README.md'), `${current.trimEnd()}\nverified repair\n`, 'utf8');
           task.repaired = true;
         }
+        if (rejectRepairResultWithEdit) {
+          const rejectionBody = {
+            kind: 'result-rejected-receipt', version: '1.0', agentId: input.agentId, dispatchId: input.dispatchId,
+            packetDigest: task.packetDigest, promptDigest: input.runtimeReceipt.prompt.promptDigest,
+            resultContractDigest: input.runtimeReceipt.resultContractDigest,
+            code: 'CODEX_COLLABORATION_RESULT_JSON_INVALID', nativeOutputDigest: sha256('invalid native output'),
+            errors: [], observationRequestDigest: 'a'.repeat(64),
+          };
+          const receiptDigest = digestJson(rejectionBody);
+          return finish({
+            result: { status: 'failed', summary: 'Invalid native result after repair edit.', changedFiles: [], failureClass: 'runtime-contract', blocker: { kind: 'runtime-contract', summary: 'Invalid native result.', code: rejectionBody.code } },
+            runtimeEvidence: { resultRejection: { ...rejectionBody, receiptDigest }, verificationReceipts: [] },
+            receipt: { operation: 'result', stage, rejectionDigest: receiptDigest },
+          });
+        }
         return finish({
           result: result({ summary: 'Finding repaired and verified.', changedFiles: ['README.md'], checkpoint: 'repair-verification' }),
           runtimeEvidence: { verificationReceipts: [{ id: 'focused-check', status: 'passed', evidence: ['README.md'] }] },
@@ -155,7 +171,7 @@ const createHost = ({ workspace, failFirstWait = false, failFirstInspect = false
   return { adapter, agents, stats };
 };
 
-const setup = async ({ failFirstWait = false, failFirstInspect = false, failFirstConfirm = false, failFirstResult = false, repeatFindingOnce = false, preset = 'full' } = {}) => {
+const setup = async ({ failFirstWait = false, failFirstInspect = false, failFirstConfirm = false, failFirstResult = false, repeatFindingOnce = false, rejectRepairResultWithEdit = false, preset = 'full' } = {}) => {
   const controlRoot = resolve(process.cwd());
   const parent = resolve(harnessTemporaryRoot(), 'quality-lifecycle-e2e');
   await mkdir(parent, { recursive: true });
@@ -166,7 +182,7 @@ const setup = async ({ failFirstWait = false, failFirstInspect = false, failFirs
   await writeFile(resolve(workspace, 'README.md'), '# Quality fixture\n', 'utf8');
   const engine = await loadExtensionPack('./src/flows/delivery-lifecycle/index.mjs', { cwd: controlRoot, controlRoot });
   const runtime = await loadExtensionPack('./integrations/codex/extensions/codex-runtime.mjs', { cwd: controlRoot, controlRoot });
-  const host = createHost({ workspace, failFirstWait, failFirstInspect, failFirstConfirm, failFirstResult, repeatFindingOnce });
+  const host = createHost({ workspace, failFirstWait, failFirstInspect, failFirstConfirm, failFirstResult, repeatFindingOnce, rejectRepairResultWithEdit });
   const create = () => createHarness({ controlRoot, dataRoot, releaseIdentity, strictProjectIdentity: false, extensions: [engine, runtime], agentAdapter: host.adapter });
   const harness = await create();
   const descriptor = createCardWorldProjectDescriptor({ workspaceRoot: workspace, harness: releaseIdentity });
@@ -201,6 +217,15 @@ test('visible quality lifecycle completes review, verified repair, fresh re-revi
   const completed = await fixture.harness.executeVisibleLifecyclePlan(fixture.plan, { commandId: 'quality-e2e', preflightReport: preflight, maxConcurrency: 10 });
   assert.equal(completed.rounds.every(round => round.physicalLimit === 1), true);
   assertClosedQualityLoop(completed.state);
+});
+
+test('visible lifecycle refreshes expired readiness for the same Plan before opening its Run', async t => {
+  const fixture = await setup();
+  t.after(() => rm(fixture.root, { recursive: true, force: true }));
+  const expired = await fixture.harness.createExecutionReadinessReport(fixture.plan, { ttlMs: -1 });
+  const completed = await fixture.harness.executeVisibleLifecyclePlan(fixture.plan, { commandId: 'quality-expired-readiness', preflightReport: expired });
+  assertClosedQualityLoop(completed.state);
+  assert.equal(fixture.host.stats.spawnCount, 3);
 });
 
 test('review-only quality records findings without scheduling repairs or changing source', async t => {
@@ -269,6 +294,18 @@ test('terminal Agent failure is committed and blocks the lifecycle before any ne
   assert.equal(stopped.state.submissions.length, 1);
   assert.equal(stopped.state.submissions[0].result.status, 'failed');
   assert.equal(stopped.state.leases.filter(lease => lease.status === 'active').length, 0);
+});
+
+test('rejected native repair result records observed edits and closes its Lease', async t => {
+  const fixture = await setup({ rejectRepairResultWithEdit: true });
+  t.after(() => rm(fixture.root, { recursive: true, force: true }));
+  const preflight = await fixture.harness.createExecutionReadinessReport(fixture.plan);
+  const stopped = await fixture.harness.executeVisibleLifecyclePlan(fixture.plan, { commandId: 'quality-rejected-repair', preflightReport: preflight, maxConcurrency: 1 });
+  assert.equal(stopped.status, 'attention-required');
+  assert.equal(stopped.state.submissions.at(-1).result.status, 'failed');
+  assert.deepEqual(stopped.state.submissions.at(-1).result.changedFiles, ['README.md']);
+  assert.equal(stopped.state.leases.filter(lease => lease.status === 'active').length, 0);
+  assert.equal(fixture.host.stats.spawnCount, 2);
 });
 
 test('post-bind confirmation failure preserves the active Lease for reattachment without interrupting its Agent', async t => {

@@ -1,8 +1,12 @@
+import { readFileSync } from 'node:fs';
 import { digestJson, sha256 } from '../../../common/canonical.mjs';
 import { assert } from '../../../common/errors.mjs';
+import { assertDispatchResultContract } from '../../execution/result-contract.mjs';
 import { envelope } from '../contracts.mjs';
 
-export const AGENT_PROMPT_CONTRACT_VERSION = '1.0';
+export const AGENT_PROMPT_CONTRACT_VERSION = '1.1';
+const visibleResultSchema = JSON.parse(readFileSync(new URL('../../../../schemas/visible-agent-result.schema.json', import.meta.url), 'utf8'));
+const businessResultSchema = JSON.parse(readFileSync(new URL('../../../../schemas/result.schema.json', import.meta.url), 'utf8'));
 
 export const REFERENCE_AGENT_PROMPT_CODEC_MANIFEST = Object.freeze({
   id: 'reference-agent-prompt-codec',
@@ -19,7 +23,9 @@ const assertPromptBinding = (packet, manifest) => {
   assert(packet.protocolVersion === '1.0', 'AGENT_PROMPT_PACKET_VERSION_INVALID', `Unsupported Dispatch packet protocol: ${packet.protocolVersion}`);
   const binding = packet.execution?.prompt;
   assert(binding?.pluginId === manifest.id && binding?.pluginVersion === manifest.version, 'AGENT_PROMPT_CODEC_BINDING_MISMATCH', 'Dispatch packet is not bound to the selected Prompt Codec identity.');
-  assert(binding.contractVersion === AGENT_PROMPT_CONTRACT_VERSION, 'AGENT_PROMPT_CONTRACT_VERSION_MISMATCH', `Dispatch packet requires unsupported Prompt Contract ${binding?.contractVersion ?? '<missing>'}.`);
+  // Old active Leases must retain their original prompt bytes during reattach.
+  assert(['1.0', AGENT_PROMPT_CONTRACT_VERSION].includes(binding.contractVersion), 'AGENT_PROMPT_CONTRACT_VERSION_MISMATCH', `Dispatch packet requires unsupported Prompt Contract ${binding?.contractVersion ?? '<missing>'}.`);
+  return binding.contractVersion;
 };
 
 /**
@@ -28,14 +34,18 @@ const assertPromptBinding = (packet, manifest) => {
  */
 export const compileAgentPrompt = (packetInput, manifest = REFERENCE_AGENT_PROMPT_CODEC_MANIFEST) => {
   const packet = structuredClone(packetInput);
-  assertPromptBinding(packet, manifest);
+  const contractVersion = assertPromptBinding(packet, manifest);
   const packetDigest = digestJson(packet);
   const feature = packet.feature ?? {};
+  const visible = packet.execution?.runtime?.mode === 'conversation-visible';
+  if (contractVersion === AGENT_PROMPT_CONTRACT_VERSION) assertDispatchResultContract(packet.execution?.result, feature, { conversationVisible: visible });
+  const modernResultInstructions = `Return exactly one JSON object as the final answer, with no prose or Markdown. For this Dispatch, the result is validated against the following complete ${visible ? 'conversation-visible' : 'business'} transport shape:\n\n${json(visible ? visibleResultSchema : businessResultSchema)}\n\n- Always return status, a non-empty summary, and the exact changedFiles array.\n- If status is completed, return every declared output port in outputs.<portId> with its schemaId, JSON value, and evidenceRefs. Required ports: ${json(packet.execution?.result?.outputPorts ?? {})}. Value Schemas: ${json(packet.execution?.result?.outputValueSchemas ?? {})}.\n- If status is blocked or failed, provide a stable failureClass and blocker; successful output ports are not required.\n- A read-only Feature must report changedFiles: []. Quality findings require non-empty evidence and affectedPaths.\n- A completed repair must report passing verification checkpoints with non-empty evidence; report only checks actually observed.\n- Optional descriptive arrays need only be present when they contain observed information. Do not invent empty fields or evidence.\n\nThe selected Runtime may impose an additional provider output dialect. Follow its supplied schema exactly when present; Harness still validates the business result and workspace changes.\n`;
+  const legacyResultInstructions = `Return exactly one structured JSON object as the final answer, with no prose before or after it. It must conform to the Runtime result schema supplied by the host and must include:\n\n- status: completed, blocked, or failed;\n- summary: concise factual outcome;\n- changedFiles: exact workspace-relative forward-slash paths, with no unchanged or out-of-scope files;\n- checks/evidence fields required by the supplied schema, populated only from observed results;\n- stable failureClass and blocker details when status is blocked or failed;\n- findings or followUpFeatures only when justified by concrete evidence and fully scoped.\n`;
   const text = `# Agent Harness Dispatch Prompt
 
-Prompt-Contract-Version: ${AGENT_PROMPT_CONTRACT_VERSION}
+Prompt-Contract-Version: ${contractVersion}
 Prompt-Codec: ${manifest.id}@${manifest.version}
-Dispatch-Packet-Digest: ${packetDigest}
+Dispatch-Packet-Digest: ${packetDigest}${contractVersion === AGENT_PROMPT_CONTRACT_VERSION ? `\nResult-Contract: ${packet.execution.result.id}@${packet.execution.result.version} ${packet.execution.result.contractDigest}` : ''}
 
 ## Role and objective
 
@@ -81,14 +91,7 @@ ${json(feature.steps ?? [])}
 
 ## Result contract
 
-Return exactly one structured JSON object as the final answer, with no prose before or after it. It must conform to the Runtime result schema supplied by the host and must include:
-
-- status: completed, blocked, or failed;
-- summary: concise factual outcome;
-- changedFiles: exact workspace-relative forward-slash paths, with no unchanged or out-of-scope files;
-- checks/evidence fields required by the supplied schema, populated only from observed results;
-- stable failureClass and blocker details when status is blocked or failed;
-- findings or followUpFeatures only when justified by concrete evidence and fully scoped.
+${contractVersion === '1.0' ? legacyResultInstructions.trimEnd() : modernResultInstructions.trimEnd()}
 
 Completion is invalid unless all acceptance criteria were checked and the reported changedFiles are accurate.
 
@@ -101,7 +104,7 @@ ${json(packet)}
 END_AGENT_HARNESS_DISPATCH_PACKET_JSON
 `;
   return Object.freeze({
-    contractVersion: AGENT_PROMPT_CONTRACT_VERSION,
+    contractVersion,
     codecPluginId: manifest.id,
     codecPluginVersion: manifest.version,
     packetDigest,

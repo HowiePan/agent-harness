@@ -73,7 +73,7 @@ test('visible host adapter binds inspection and heartbeat to the exact Lease ide
   const bound = await fixture.harness.bindDispatch(fixture.projectId, 'run', {
     dispatchId: dispatch.dispatchId,
     agentId: 'visible-agent',
-    runtimeReceipt: { runtimePluginId: 'codex-conversation-runtime', agentId: 'visible-agent', dispatchId: dispatch.dispatchId, packetDigest: dispatch.packetDigest, prompt: { contractVersion: packet.prompt.contractVersion, codecPluginId: packet.prompt.codecPluginId, codecPluginVersion: packet.prompt.codecPluginVersion, packetDigest: packet.prompt.packetDigest, promptDigest: packet.prompt.promptDigest }, visibility: { mode: 'user-visible', surface: 'codex-task', inspectRef: 'task-visible-heartbeat' } },
+    runtimeReceipt: { runtimePluginId: 'codex-conversation-runtime', agentId: 'visible-agent', dispatchId: dispatch.dispatchId, packetDigest: dispatch.packetDigest, resultContractDigest: dispatch.execution.result.contractDigest, prompt: { contractVersion: packet.prompt.contractVersion, codecPluginId: packet.prompt.codecPluginId, codecPluginVersion: packet.prompt.codecPluginVersion, packetDigest: packet.prompt.packetDigest, promptDigest: packet.prompt.promptDigest }, visibility: { mode: 'user-visible', surface: 'codex-task', inspectRef: 'task-visible-heartbeat' } },
   }, command(scheduled.state));
   const heartbeat = await fixture.harness.recordHeartbeat(fixture.projectId, 'run', { leaseId: bound.result.lease.leaseId, dispatchId: dispatch.dispatchId, agentId: 'visible-agent', progress: 'reviewing' }, command(bound.state));
   assert.equal(heartbeat.result.leaseId, bound.result.lease.leaseId);
@@ -118,14 +118,15 @@ test('host-orchestrated visible Runtime schedules work but never falls back to a
   assert.equal(read.packet.dispatchId, dispatch.dispatchId);
   assert.equal(read.prompt.packetDigest, dispatch.packetDigest);
   assert.match(read.prompt.text, /^# Agent Harness Dispatch Prompt/);
-  assert.match(read.prompt.text, /Return exactly one structured JSON object/);
+  assert.match(read.prompt.text, /Return exactly one JSON object/);
   state = scheduled.state;
   await assert.rejects(() => fixture.harness.kernel.bindLease(fixture.projectId, 'run', { dispatchId: dispatch.dispatchId, agentId: 'bypass-agent', packetDigest: dispatch.packetDigest, runtimeReceipt: { runtimePluginId: runtime } }, command(state)), error => error.code === 'DIRECT_LEASE_BIND_DENIED');
   await assert.rejects(() => fixture.harness.pluginHost.invoke(runtime, 'spawn', read.packet), error => error.code === 'DIRECT_EXECUTION_PLUGIN_INVOKE_DENIED');
   await assert.rejects(() => fixture.harness.bindDispatch(fixture.projectId, 'run', { dispatchId: dispatch.dispatchId, agentId: 'visible-agent', runtimeReceipt: { runtimePluginId: runtime } }, command(state)), error => error.code === 'USER_VISIBLE_RUNTIME_RECEIPT_REQUIRED');
   const promptReceipt = { contractVersion: read.prompt.contractVersion, codecPluginId: read.prompt.codecPluginId, codecPluginVersion: read.prompt.codecPluginVersion, packetDigest: read.prompt.packetDigest, promptDigest: read.prompt.promptDigest };
-  await assert.rejects(() => fixture.harness.bindDispatch(fixture.projectId, 'run', { dispatchId: dispatch.dispatchId, agentId: 'visible-agent', runtimeReceipt: { runtimePluginId: runtime, agentId: 'visible-agent', dispatchId: dispatch.dispatchId, packetDigest: dispatch.packetDigest, prompt: { ...promptReceipt, promptDigest: 'f'.repeat(64) }, visibility: { mode: 'user-visible', surface: 'codex-task', inspectRef: 'task-123' } } }, command(state)), error => error.code === 'AGENT_PROMPT_RECEIPT_DIGEST_MISMATCH');
-  const bound = await fixture.harness.bindDispatch(fixture.projectId, 'run', { dispatchId: dispatch.dispatchId, agentId: 'visible-agent', runtimeReceipt: { runtimePluginId: runtime, agentId: 'visible-agent', dispatchId: dispatch.dispatchId, packetDigest: dispatch.packetDigest, prompt: promptReceipt, visibility: { mode: 'user-visible', surface: 'codex-task', inspectRef: 'task-123' } } }, command(state));
+  await assert.rejects(() => fixture.harness.bindDispatch(fixture.projectId, 'run', { dispatchId: dispatch.dispatchId, agentId: 'visible-agent', runtimeReceipt: { runtimePluginId: runtime, agentId: 'visible-agent', dispatchId: dispatch.dispatchId, packetDigest: dispatch.packetDigest, resultContractDigest: dispatch.execution.result.contractDigest, prompt: { ...promptReceipt, promptDigest: 'f'.repeat(64) }, visibility: { mode: 'user-visible', surface: 'codex-task', inspectRef: 'task-123' } } }, command(state)), error => error.code === 'AGENT_PROMPT_RECEIPT_DIGEST_MISMATCH');
+  await assert.rejects(() => fixture.harness.bindDispatch(fixture.projectId, 'run', { dispatchId: dispatch.dispatchId, agentId: 'visible-agent', runtimeReceipt: { runtimePluginId: runtime, agentId: 'visible-agent', dispatchId: dispatch.dispatchId, packetDigest: dispatch.packetDigest, resultContractDigest: 'f'.repeat(64), prompt: promptReceipt, visibility: { mode: 'user-visible', surface: 'codex-task', inspectRef: 'task-123' } } }, command(state)), error => error.code === 'RESULT_CONTRACT_RECEIPT_MISMATCH');
+  const bound = await fixture.harness.bindDispatch(fixture.projectId, 'run', { dispatchId: dispatch.dispatchId, agentId: 'visible-agent', runtimeReceipt: { runtimePluginId: runtime, agentId: 'visible-agent', dispatchId: dispatch.dispatchId, packetDigest: dispatch.packetDigest, resultContractDigest: dispatch.execution.result.contractDigest, prompt: promptReceipt, visibility: { mode: 'user-visible', surface: 'codex-task', inspectRef: 'task-123' } } }, command(state));
   assert.equal(bound.result.lease.agentId, 'visible-agent');
   assert.equal(bound.result.lease.runtimeReceipt.hostAttestation.verified, true);
   const visibleResult = {
@@ -142,6 +143,19 @@ test('host-orchestrated visible Runtime schedules work but never falls back to a
     blocker: null,
   };
   await assert.rejects(() => fixture.harness.recordResult(fixture.projectId, 'run', dispatch.dispatchId, visibleResult, { commandId: command().commandId }), error => error.code === 'VISIBLE_AGENT_HEARTBEAT_REQUIRED');
+});
+
+test('explicit visible Feature dispatch binds the visible result schema', async t => {
+  const runtime = 'codex-conversation-runtime';
+  const fixture = await makeFixture({ extensions: [codexRuntimeExtension], policy: { agentExecutionMode: 'conversation-visible', runtimePlugins: [runtime], defaultRuntimePlugin: runtime, maxConcurrency: 'auto' } });
+  t.after(() => fixture.cleanup());
+  await startRun(fixture, { features: [feature('visible-candidate')] });
+  const state = await fixture.harness.authorityStore.read(fixture.projectId, 'run');
+  const scheduled = await fixture.harness.dispatch(fixture.projectId, 'run', { candidateFeatureIds: ['visible-candidate'], runtimePluginId: runtime }, command(state));
+  const read = await fixture.harness.readDispatchPacket(fixture.projectId, 'run', scheduled.result.dispatches[0].dispatchId);
+  assert.equal(read.packet.execution.runtime.mode, 'conversation-visible');
+  assert.match(read.packet.execution.result.schemaId, /visible-agent-result/);
+  assert.equal(read.prompt.contractVersion, '1.1');
 });
 
 test('Harness rejects unwrapped visible host callbacks instead of trusting a custom attestor', async () => {
@@ -173,7 +187,7 @@ test('visible Lease binding rejects stale host observations', async t => {
   const packet = await fixture.harness.readDispatchPacket(fixture.projectId, 'run', dispatch.dispatchId);
   const prompt = { contractVersion: packet.prompt.contractVersion, codecPluginId: packet.prompt.codecPluginId, codecPluginVersion: packet.prompt.codecPluginVersion, packetDigest: packet.prompt.packetDigest, promptDigest: packet.prompt.promptDigest };
   await assert.rejects(
-    () => fixture.harness.bindDispatch(fixture.projectId, 'run', { dispatchId: dispatch.dispatchId, agentId: 'stale-agent', runtimeReceipt: { runtimePluginId: 'codex-conversation-runtime', agentId: 'stale-agent', dispatchId: dispatch.dispatchId, packetDigest: dispatch.packetDigest, prompt, visibility: { mode: 'user-visible', surface: 'codex-task', inspectRef: 'stale-task' } } }, command(scheduled.state)),
+    () => fixture.harness.bindDispatch(fixture.projectId, 'run', { dispatchId: dispatch.dispatchId, agentId: 'stale-agent', runtimeReceipt: { runtimePluginId: 'codex-conversation-runtime', agentId: 'stale-agent', dispatchId: dispatch.dispatchId, packetDigest: dispatch.packetDigest, resultContractDigest: dispatch.execution.result.contractDigest, prompt, visibility: { mode: 'user-visible', surface: 'codex-task', inspectRef: 'stale-task' } } }, command(scheduled.state)),
     error => error.code === 'VISIBLE_AGENT_HOST_OBSERVATION_STALE',
   );
 });

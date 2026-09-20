@@ -17,6 +17,9 @@ export const composableWorkflowProfile = Object.freeze({
   validateRun(state) { return state; },
   canDispatch() { return { ok: true }; },
   validateResult({ state, feature, result }) {
+    // A terminal failure has no successful node outputs to validate. Core still
+    // validates its result shape and records the failed attempt in Authority.
+    if (result.status !== 'completed') return { ok: true };
     for (const [portId, schemaId] of Object.entries(feature.metadata?.outputPorts ?? {})) if (result.outputs?.[portId]?.schemaId !== schemaId) return { ok: false, reason: `missing-typed-output:${portId}` };
     const checks = feature.metadata?.outputChecks ?? [];
     assert(Array.isArray(checks) && checks.length <= 16, 'WORKFLOW_OUTPUT_CHECK_INVALID', 'Node accepts at most 16 output checks.');

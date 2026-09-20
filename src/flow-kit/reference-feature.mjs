@@ -20,7 +20,7 @@ export const createReferenceFeature = ({ context, node, item, dependsOn }) => {
     allowedPaths: outputPath ? [outputPath] : [], forbiddenPaths: ['.git', '.agent-harness-data'],
     conflictKeys: outputPath ? [`output:${outputPath}`] : [], gatePlan: [],
     metadata: { stage: node.id, target: context.intent.target, sourcePolicy: outputPath ? 'write' : 'read-only',
-      sourceIds, outputPath, outputPorts: structuredClone(node.outputPorts ?? {}), outputChecks: structuredClone(node.outputChecks ?? []),
+      sourceIds, outputPath, outputPorts: structuredClone(node.outputPorts ?? {}), outputValueSchemas: structuredClone(node.outputValueSchemas ?? {}), outputChecks: structuredClone(node.outputChecks ?? []),
       questionRevision: input.questionRevision ?? null,
       sourceManifestDigest: input.sourceManifest?.manifestDigest ?? null,
       memorySnapshotDigest: digestJson(input.memorySnapshot ?? []),

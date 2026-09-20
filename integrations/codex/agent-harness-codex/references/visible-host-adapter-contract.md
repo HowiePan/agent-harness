@@ -16,3 +16,11 @@ Codex 插件通过 active Release manifest 中逐文件验证的 `visible-lifecy
 每次 native spawn 之前，Coordinator 必须在 Control Root 数据区原子提交 `Host Effect Journal`。状态机为 `spawn-requested -> spawn-responded -> agent-observed -> lease-bound -> settled`，失败分支只能进入 `contained`。Journal 写入支持 expected revision、幂等 command ID、原子替换和崩溃恢复。preflight 先调用 `reconcileVisibleHostEffects`：Authority 中仍有 active Lease 的 Effect 保留并重附着；其他未完成 Effect 必须调用 `interrupt_agent`，再用 `list_agents` 证明目标已消失、idle 或 terminal。无法证明收容时 `visible-host-contract` 失败，禁止创建 Run 或开启下一 Agent。spawn 已成功但 attestation/Lease 绑定失败时同样先收容；Authority Lease 已经提交但确认回执中断时不得误杀 Agent，而应保留 Lease 等待重附着。
 
 `executeVisibleLifecyclePlan()` 是宿主嵌入入口。重启后它从 Authority 查找 active Lease，用持久的 Agent/Dispatch/Packet/Prompt/inspectRef 再次观察，只有 fresh attestation 通过才继续 wait/result；找不到原任务时 preflight 返回 `ACTIVE_LEASE_RESUME_UNAVAILABLE` 或具体宿主观察错误。只有 inspect、spawn、wait、result、reconcile、confirm、contain 七项 capability 全部存在，并且 native contract reconciliation 通过时，`visible-host` 与 `visible-host-contract` 检查才通过。该规则位于共享 lifecycle executor，因此 Engine 与 Collection 的全部 `conversation-visible` state-changing action 使用同一条约束，不允许 action-specific 绕过。当前 Codex 产品宿主若没有这些原生回调，必须明确保持 unsupported/attention-required，不能回退到 `codex exec`、隐藏进程或独立任务。
+
+## Dispatch 结果契约
+
+新 Dispatch 的 Prompt Contract 为 `1.1`，携带 `agent-harness-dispatch-result@1.0` 的摘要。Prompt 明确给出可见结果 JSON 形状、当前 Feature 的端口 Schema ID 与值 Schema。旧 `1.0` Dispatch 重附着时仍使用原 Prompt。可见 Host Adapter 接受 `visible-agent-result.schema.json`，其中成功结果可携带 `outputs`；不再把仅供 CLI provider 使用的 `codex-runtime-result.schema.json` 套到原生可见结果上。Harness 随后按绑定的端口名、Schema ID、值 Schema 和业务 Profile 复验，不能凭 Host 传输通过就提交完成。
+
+原生 Agent 已经完成，但最后的文本不是单一 JSON 对象或不符合可见传输 Schema 时，适配器保存原始文本摘要、原生观察请求摘要、字段错误和拒绝摘要，以 `runtime-contract` 失败结果收束已终态 Lease。它不会补造成功端口，也不会将原始文本提升为业务完成结论。失败或阻断终态不要求成功端口。仍无法确认 Agent 终态时保留 Lease，等待重新观察和收容。
+
+Preflight 逐 Feature 编译结果契约；缺少端口值 Schema 时报告 `RESULT_OUTPUT_VALUE_SCHEMA_REQUIRED`。固定结果 Schema 的 CLI Runtime 无法承载类型化端口时，在 spawn 前报告 `RUNTIME_TYPED_OUTPUT_CONTRACT_UNSUPPORTED`。过期 Readiness 会对同一 Plan 重新预检，任何新的 Source、Release、Lineage 或 Host blocker 仍阻止发车。

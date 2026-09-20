@@ -10,7 +10,7 @@ import { qualityCanClose, validateFinding } from './quality.mjs';
 import { assertArtifactRebaseDecision } from '../platform/maintenance/upgrade-authorization.mjs';
 import { buildRunReceipt, writeRunReceipt } from './receipts.mjs';
 import { scheduleFeatures, validateWorkGraph } from './work-graph.mjs';
-import { validateBusinessResult, validateProfileResult } from '../platform/execution/result-contract.mjs';
+import { assertDispatchResultContract, validateBusinessResult, validateProfileResult } from '../platform/execution/result-contract.mjs';
 
 const activeLease = lease => ['requested', 'active'].includes(lease.status);
 const activeDispatch = dispatch => ['requested', 'assigned'].includes(dispatch.status);
@@ -194,7 +194,8 @@ export class HarnessKernel {
       }
       assert(input.epoch === state.epoch && input.generation === state.generation, 'STALE_SUBMISSION', 'Submission belongs to an older epoch or generation.');
       const feature = state.features.find(item => item.id === lease.featureId);
-      const result = validateBusinessResult(input.result, { conversationVisible: dispatch.execution?.runtime?.mode === 'conversation-visible', repair: Boolean(feature?.metadata?.repairFindingId) });
+      if (dispatch.execution?.result) assertDispatchResultContract(dispatch.execution.result, feature, { conversationVisible: dispatch.execution?.runtime?.mode === 'conversation-visible' });
+      const result = validateBusinessResult(input.result, { conversationVisible: dispatch.execution?.runtime?.mode === 'conversation-visible', repair: Boolean(feature?.metadata?.repairFindingId), feature });
       validateProfileResult({ profile, state, feature, result });
       for (const evidence of evidenceRecords) {
         const metadata = evidence.metadata;
