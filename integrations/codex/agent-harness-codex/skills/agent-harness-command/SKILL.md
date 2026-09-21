@@ -5,6 +5,14 @@ description: "Resolve explicit-project Agent Harness pseudo-commands such as h:e
 
 # Agent Harness Command
 
+## Project-local write boundary
+
+Treat the exact user-selected project checkout as the only source-edit destination. Before any filesystem mutation, resolve the physical current workspace/worktree, Git top-level and common directory, registered project root, and every intended source, control, data, temporary, build, cache, package, install, and generated-artifact destination. Source changes are allowed only when the write target is inside the exact checkout the user reviews and `git status` from that checkout will show them. Sharing a Git common directory is not sufficient. Do not create or use a sibling worktree, clone, mirror, staging repository, or project-external directory to bypass a workspace, sandbox, or permission boundary unless the user explicitly requested that exact location. If the active task is attached to another checkout, stop before writing and require the task to be opened or rebound to the registered project checkout.
+
+Creating or registering any Git worktree is a protected mutation. Immediately before running the creation command, obtain the user's explicit authorization for the exact repository, base ref or branch, and target path. Never create a worktree silently. A general request to implement, continue, isolate work, use another drive, or avoid the current checkout is not worktree authorization. If authorization is absent, keep the current checkout unchanged and ask before creating anything.
+
+On Windows, treat `C:\` as read-only for every Harness-related action. If any mutation target is on `C:\`, stop before writing and report the exact blocked path. A Codex-managed workspace/worktree, sandbox writable root, tool approval, or successful relative workspace-boundary check does not waive this rule. Read-only inspection on `C:\` is allowed. Use only the exact registered non-`C:\` project checkout and its declared non-`C:\` control roots. Never copy, move, delete, or transplant existing changes between checkouts without separate user approval. Before handoff, verify from the registered project root that `git status --short` exposes every source change; state explicitly that uncommitted changes are not portable to another computer and never commit or push without the user's authorization.
+
 所有面向用户的控制对话必须使用中文，包括启动说明、进度更新、权限说明、阻断原因与最终报告。协议 JSON、命令、路径、错误码和原生工具结果保持原样；不得为了中文输出而翻译、改写或补充 Harness 生成的子 Agent Prompt，也不得改写 Host 请求或响应。
 
 Treat a prompt matching `h:<workspace-or-legacy-project-alias> <action> <target> [preset]` as a deterministic Command Intent. The alias is an exact external binding, never a guess derived from a version, batch, path name, model, or action. Workspace commands may end with `--project <member-id>` or `--projects <member-id,...>`; the Coordinator checks this scope against the approved Workspace Descriptor before creating a Run.

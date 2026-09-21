@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { assertKnownFindingInventory, sealKnownFindingInventory } from '../src/platform/execution/known-finding-inventory.mjs';
+import { assertKnownFindingInventory, sealKnownFindingInventory, sealLegacyFindingInventory } from '../src/platform/execution/known-finding-inventory.mjs';
 import { digestJson } from '../src/common/canonical.mjs';
 import { hasCurrentCleanQualityReview } from '../src/flow-kit/profiles/quality-loop.mjs';
 import { validateBusinessResult } from '../src/platform/execution/result-contract.mjs';
@@ -35,6 +35,13 @@ test('completed quality review accounts for every canonical known Finding before
 
 test('known Finding inventory rejects a changed source before planning', () => {
   assert.throws(() => sealKnownFindingInventory({ projectId: 'fixture', target: 'v1', declaration, snapshot: { ...snapshot, files: [{ path: 'docs/version.md', sha256: digest('c') }] } }), error => error.code === 'QUALITY_FINDING_INVENTORY_SOURCE_DRIFT');
+});
+
+test('legacy Project inventory migration preserves its registered source identity without blocking a newer workspace snapshot', () => {
+  const migrated = sealLegacyFindingInventory({ projectId: 'fixture', target: 'v1', declaration });
+  assert.equal(migrated.sources[0].sha256, digest('b'));
+  assert.notEqual(migrated.sourceDigest, snapshot.digest);
+  assert.equal(assertKnownFindingInventory(migrated).inventoryDigest, migrated.inventoryDigest);
 });
 
 test('inventory verification rejects a redigested forged item', () => {

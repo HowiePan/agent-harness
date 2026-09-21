@@ -17,8 +17,8 @@
     },
     {
       "path": "docs/architecture/system-design.md",
-      "sha256": "c00e8602b1ed9a85ccd99468f1c0c5e705131b32f1c4a62998b255256609a0f8",
-      "size": 6813
+      "sha256": "44decfa11fe14c90ca3fa1205a882354f6baf19e5a28a21beb27a97217bc6ba9",
+      "size": 7518
     },
     {
       "path": "docs/flows/batch-production/design.md",
@@ -27,8 +27,8 @@
     },
     {
       "path": "docs/flows/delivery-lifecycle/design.md",
-      "sha256": "f64a1ddd9b5f0c0a70bdd6b54da4884baacd46919bf6cce2d8060dd27d7c7385",
-      "size": 1807
+      "sha256": "0a4e00b197d5cd50e3ec84fccc0c71b8f1fe9386688239e562f554ab71114b05",
+      "size": 3589
     },
     {
       "path": "docs/flows/knowledge-qa/design.md",
@@ -672,8 +672,8 @@
     },
     {
       "path": "src/application/harness.mjs",
-      "sha256": "3b6d3524892fad884f37da21e35b9bd3d851f85e415428ffa59f585e91c62046",
-      "size": 97485
+      "sha256": "357238b75f181ce032ffc4b2c55eeff2c4ac2b35b6b797163bed12b83f28c2fb",
+      "size": 98158
     },
     {
       "path": "src/application/installation.mjs",
@@ -682,8 +682,8 @@
     },
     {
       "path": "src/application/lifecycle-command-plan.mjs",
-      "sha256": "6512e4a0d7bb02bc8a1522851f82ad54f1b55acfa3cd7187e8c253f28ee48aa0",
-      "size": 10829
+      "sha256": "9fe00ba55b434416a5a8a412de5e62969e5ae315e9bd813a08a0d88a55099c84",
+      "size": 12008
     },
     {
       "path": "src/application/lineage.mjs",
@@ -852,8 +852,8 @@
     },
     {
       "path": "src/flows/delivery-lifecycle/planner.mjs",
-      "sha256": "b873d45de2b28b9c2206d39fdebd045b0dc7bc8a7ca85bdc5438837fba4adfa0",
-      "size": 2537
+      "sha256": "2c65239a6f9fd00deafa877bd1e852d0f02adc5e523587f6beff31e276ea0070",
+      "size": 2759
     },
     {
       "path": "src/flows/delivery-lifecycle/policy/engine-delivery.mjs",
@@ -867,8 +867,8 @@
     },
     {
       "path": "src/flows/delivery-lifecycle/variants/cardworld/descriptor.mjs",
-      "sha256": "da7e5c787bf85194ecbdc774c2c055b80f2cd8380031a5d18737199124dfec5a",
-      "size": 7168
+      "sha256": "2f445c848ea752380926bf36008ef25b6f584d0fa453adfb729b33395b1bbb31",
+      "size": 7250
     },
     {
       "path": "src/flows/delivery-lifecycle/variants/cardworld/feature.mjs",
@@ -1007,8 +1007,8 @@
     },
     {
       "path": "src/index.mjs",
-      "sha256": "260793b5c96ac5cc261f0308823ca5faf5b087ba73f67d9c169ebd275067172b",
-      "size": 3476
+      "sha256": "42e003e22529e7e805baa379c4cf13f8dc1440d3a60c16f7dd75ecdf88f249a6",
+      "size": 3852
     },
     {
       "path": "src/interfaces/cli/commands/memory.mjs",
@@ -1087,8 +1087,13 @@
     },
     {
       "path": "src/platform/execution/known-finding-inventory.mjs",
-      "sha256": "417d39a6ff384f265bab8d785a5ccf97d7eb6b2b87a5b7e03e38cc66453cc802",
-      "size": 5794
+      "sha256": "2ec5b71c464bc07f08f2924567af5d64802e1b90e29106e51839f350930ed973",
+      "size": 6609
+    },
+    {
+      "path": "src/platform/execution/quality-target.mjs",
+      "sha256": "8fb24e36ce7f7244f2dca3d5bfda8585e1e185ae79f3bc20aaac79265ffc246f",
+      "size": 9647
     },
     {
       "path": "src/platform/execution/result-contract.mjs",
@@ -1406,7 +1411,7 @@
       "size": 19772
     }
   ],
-  "packageDigest": "568f3975b1e85ac19bab584358585d23bde3d5f089ff945c4cb99df16812f43f",
+  "packageDigest": "0071e8bd426f1a40b6efffc6e4ac142597d7fdccb761475f85b93300d9f01ece",
   "metadataFiles": [
     "release-manifest.json",
     "sbom.spdx.json"

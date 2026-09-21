@@ -1,5 +1,6 @@
 import { digestJson } from '../../common/canonical.mjs';
 import { assert } from '../../common/errors.mjs';
+import { assertQualityInventorySnapshot } from './quality-target.mjs';
 
 const digestPattern = /^[a-f0-9]{64}$/;
 const safePath = path => typeof path === 'string' && path.length > 0 && !path.startsWith('/') && !path.includes('\\') && !path.split('/').some(part => part === '..' || part === '.');
@@ -31,7 +32,21 @@ export const sealKnownFindingInventory = ({ projectId, target, declaration, snap
   return Object.freeze({ ...body, inventoryDigest: digestJson(body) });
 };
 
+export const sealLegacyFindingInventory = ({ projectId, target, declaration }) => {
+  assert(declaration?.version === '1.0' && Array.isArray(declaration.sources) && declaration.sources.length > 0, 'QUALITY_FINDING_INVENTORY_REQUIRED', 'Legacy quality migration requires a versioned inventory declaration with pinned sources.');
+  return sealKnownFindingInventory({
+    projectId,
+    target,
+    declaration,
+    snapshot: {
+      digest: digestJson({ kind: 'legacy-project-inventory-source', projectId, target, sources: declaration.sources }),
+      files: declaration.sources.map(source => ({ path: source.path, sha256: source.sha256 })),
+    },
+  });
+};
+
 export const assertKnownFindingInventory = inventory => {
+  if (inventory?.version === '2.0') return assertQualityInventorySnapshot(inventory);
   assert(inventory?.version === '1.0' && digestPattern.test(inventory?.sourceDigest ?? '') && Array.isArray(inventory?.sources) && Array.isArray(inventory?.findings), 'QUALITY_FINDING_INVENTORY_INVALID', 'Known Finding inventory is invalid.');
   const { inventoryDigest, ...body } = inventory;
   assert(inventoryDigest === digestJson(body), 'QUALITY_FINDING_INVENTORY_DIGEST_MISMATCH', 'Known Finding inventory digest does not match its contents.');

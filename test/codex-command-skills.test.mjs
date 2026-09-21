@@ -65,6 +65,20 @@ test('Codex plugin exposes one explicit-project pseudo-command router', async ()
   assert.deepEqual(actual, ['agent-harness-command', 'agent-harness-extension-author', 'agent-harness-flow-author', 'agent-harness-operator', 'agent-harness-workspace-author']);
   assert(!actual.some(name => name.startsWith('collection-') || name.startsWith('harness-')));
 
+  const skillTexts = await Promise.all(actual.map(name => readFile(resolve(skillsRoot, name, 'SKILL.md'), 'utf8')));
+  for (const skillText of skillTexts) {
+    assert.match(skillText, /exact user-selected project checkout as the only source-edit destination/);
+    assert.match(skillText, /Sharing a Git common directory is not sufficient/);
+    assert.match(skillText, /Do not create or use a sibling worktree, clone, mirror, staging repository, or project-external directory/);
+    assert.match(skillText, /Creating or registering any Git worktree is a protected mutation/);
+    assert.match(skillText, /obtain the user's explicit authorization for the exact repository, base ref or branch, and target path/);
+    assert.match(skillText, /Never create a worktree silently/);
+    assert.match(skillText, /A general request to implement, continue, isolate work, use another drive, or avoid the current checkout is not worktree authorization/);
+    assert.match(skillText, /treat `C:\\` as read-only for every Harness-related action/);
+    assert.match(skillText, /`git status --short` exposes every source change/);
+    assert.match(skillText, /uncommitted changes are not portable to another computer/);
+  }
+
   const skillPath = resolve(skillsRoot, 'agent-harness-command', 'SKILL.md');
   const [skill, operatorSkill, metadata, hooks] = await Promise.all([
     readFile(skillPath, 'utf8'),

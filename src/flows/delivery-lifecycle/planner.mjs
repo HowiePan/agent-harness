@@ -8,7 +8,8 @@ import { engineTemplates } from './variants/cardworld/feature.mjs';
  * This function only returns data; it never touches Authority or the workspace.
  */
 export const createCardWorldLifecyclePlan = ({ intent, project, runId, sourceDigest }) => {
-  if (['quality', 'full', 'deliver'].includes(intent.action)) assert(intent.knownFindingInventory, 'QUALITY_FINDING_INVENTORY_REQUIRED', 'Engine quality planning requires a pinned known Finding inventory.');
+  assert(intent.qualityTarget, 'QUALITY_TARGET_SNAPSHOT_REQUIRED', 'Engine lifecycle planning requires an Authority-derived Quality Target snapshot.');
+  if (['quality', 'full', 'deliver'].includes(intent.action)) assert(intent.knownFindingInventory, 'QUALITY_INVENTORY_SNAPSHOT_REQUIRED', 'Engine quality planning requires an Authority-derived quality inventory snapshot.');
   const finalGateIds = (project.gateRecipes ?? []).filter(recipe => recipe.scope === 'final' && recipe.required !== false).map(recipe => recipe.id);
   const gateIds = ['full', 'quality', 'deliver'].includes(intent.action) ? finalGateIds : [];
   const quality = intent.action === 'quality';
@@ -27,7 +28,7 @@ export const createCardWorldLifecyclePlan = ({ intent, project, runId, sourceDig
     feature.metadata.scope = intent.scope;
   }
   return {
-    run: { runId, profileId: 'engine-delivery', profileConfig, features, metadata: { workflow: { id: engineWorkflowDefinition.id, version: engineWorkflowDefinition.version, artifactDigest: engineWorkflowDefinition.artifactDigest } } },
+    run: { runId, profileId: 'engine-delivery', profileConfig, features, metadata: { workflow: { id: engineWorkflowDefinition.id, version: engineWorkflowDefinition.version, artifactDigest: engineWorkflowDefinition.artifactDigest }, qualityTarget: structuredClone(intent.qualityTarget) } },
     stopCondition: { type: quality ? 'quality-run-complete' : full ? 'engine-full-complete' : 'engine-action-complete', action: intent.action, requiresFeatureCompletion: true, requiresAllFindingsResolved: full || quality || intent.action === 'deliver', requiredFinalGates: gateIds },
     protectedOperations: ['publication', 'commit', 'push', 'legacy-destruction', 'privilege-expansion', 'external-cutover', 'irreversible-migration'],
   };

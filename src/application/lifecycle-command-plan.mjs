@@ -7,6 +7,7 @@ import { resolveLifecycleExecutionPolicy } from '../platform/plugins/runtime/exe
 import { validateLifecycleExecutionGrant } from '../platform/execution/authorization.mjs';
 import { validateWorkGraph } from '../kernel/work-graph.mjs';
 import { assertKnownFindingInventory } from '../platform/execution/known-finding-inventory.mjs';
+import { assertQualityTargetSnapshot } from '../platform/execution/quality-target.mjs';
 
 const schema = JSON.parse(readFileSync(new URL('../../schemas/lifecycle-command-plan.schema.json', import.meta.url), 'utf8'));
 const featureSchema = JSON.parse(readFileSync(new URL('../../schemas/feature.schema.json', import.meta.url), 'utf8'));
@@ -32,9 +33,15 @@ export const deriveLogicalTaskKey = ({ projectId, intent, executionWorkspaceRoot
 export const validateLifecycleCommandPlan = input => {
   assertJsonSchema(input, schema, { schemas, code: 'LIFECYCLE_PLAN_INVALID', label: 'Lifecycle Command Plan' });
   assert(input.planDigest === lifecyclePlanDigest(input), 'LIFECYCLE_PLAN_DIGEST_MISMATCH', 'Lifecycle Command Plan digest does not match its contents.');
+  if (input.intent.qualityTarget) {
+    assertQualityTargetSnapshot(input.intent.qualityTarget);
+    assert(input.intent.qualityTarget.projectId === input.project.id && input.intent.qualityTarget.workflowId === input.intent.workflowId && input.intent.qualityTarget.target === input.intent.target && input.intent.qualityTarget.sourceDigest === input.run.sourceDigest, 'QUALITY_TARGET_BINDING_MISMATCH', 'Quality Target snapshot does not bind the planned Project, Workflow, target, and source.');
+    assert(input.run.metadata?.qualityTarget?.targetDigest === input.intent.qualityTarget.targetDigest, 'QUALITY_TARGET_BINDING_MISMATCH', 'Run metadata does not bind the planned Quality Target snapshot.');
+  }
   if (input.intent.knownFindingInventory) {
     assertKnownFindingInventory(input.intent.knownFindingInventory);
     assert(input.intent.knownFindingInventory.projectId === input.project.id && input.intent.knownFindingInventory.target === input.intent.target && input.intent.knownFindingInventory.sourceDigest === input.run.sourceDigest, 'QUALITY_FINDING_INVENTORY_BINDING_MISMATCH', 'Known Finding inventory does not bind the planned Project, target, and source.');
+    if (input.intent.knownFindingInventory.version === '2.0') assert(input.intent.qualityTarget?.targetDigest === input.intent.knownFindingInventory.targetDigest && input.intent.qualityTarget?.revision === input.intent.knownFindingInventory.targetRevision, 'QUALITY_FINDING_INVENTORY_BINDING_MISMATCH', 'Quality inventory snapshot does not bind the planned Quality Target revision.');
   }
   if (input.workflow) assert(input.intent.workflowId === input.workflow.id && input.run.metadata?.workflow?.artifactDigest === input.workflow.artifactDigest, 'LIFECYCLE_PLAN_WORKFLOW_MISMATCH', 'Lifecycle Plan workflow identity is inconsistent.');
   if (input.workspaceRef) {

@@ -19,6 +19,8 @@ Run 是一次带 Workflow ID、版本、制品摘要、Workspace 修订、成员
 
 所有写命令使用 `expectedRevision`、幂等 `commandId` 和原子提交。Agent 对话、模型输出、插件状态不是权威状态。Evidence 和 Receipt 固定版本、来源与内容摘要。普通继续废止旧 Transport；硬恢复验证 Capsule 后建立新 Epoch，旧结论只作为审计输入。Extension 或 Workspace 修订变化不静默改写已启动 Run。
 
+同一 Project、Workflow 和目标版本的跨 Run 质量状态由 `QualityTargetSnapshot` 表示。它不是第二套可写真相，而是从终态 Run Authority、Submission、Finding、Evidence 和 Receipt 确定性重建的内容寻址投影。第一次进入版本生命周期时 revision 为 0、Finding Ledger 合法为空；开发、测试和审查产生的 Finding 随 Run Authority 持久化，后续 Plan 自动继承。`QualityInventorySnapshot` 固定目标 revision、目标摘要与当前 Source digest；源码变化使旧 clean review 失效，但不删除旧 Finding、Evidence 或历史结论。Project Descriptor 只声明长期质量策略，不保存版本专用 Finding 清单。
+
 交互式执行要求可信宿主提供用户可见子 Agent、心跳、结果与检查引用。显式无人值守执行须同时满足 Descriptor 允许策略、可信用户约束和命令级 Execution Grant；启动进程还须持有 Core 的 launch capability。缺少能力时预检拒绝。确定性 Gate 使用声明的执行类别和受管输出预算。
 
 ## 3. Workspace 与资源

@@ -37,7 +37,7 @@ export const createCardWorldProjectDescriptor = ({
   contextBudgetCommand = defaultContextBudgetCommand(),
   maxConcurrency = AUTO_CONCURRENCY,
   actionExecution = {},
-  knownFindingInventories = {},
+  knownFindingInventories,
 } = {}) => {
   assert(workspaceRoot && isAbsolute(workspaceRoot), 'CARDWORLD_WORKSPACE_REQUIRED', 'CardWorld descriptor requires an absolute workspaceRoot.');
   assert(actionExecution && typeof actionExecution === 'object' && !Array.isArray(actionExecution), 'CARDWORLD_ACTION_EXECUTION_INVALID', 'CardWorld actionExecution must be an object.');
@@ -75,7 +75,7 @@ export const createCardWorldProjectDescriptor = ({
       promptCodecPlugin: 'reference-agent-prompt-codec',
       runtimeConfigs,
       ...(Object.keys(actionExecution).length ? { actionExecution: structuredClone(actionExecution) } : {}),
-      knownFindingInventories: structuredClone(knownFindingInventories),
+      ...(knownFindingInventories && Object.keys(knownFindingInventories).length ? { knownFindingInventories: structuredClone(knownFindingInventories) } : {}),
       recovery: { automaticLineageResolution: true, automaticOrdinaryResume: true, automaticVerifiedHardRecovery: true, preserveSupersededRuns: true },
       maxConcurrency,
     },

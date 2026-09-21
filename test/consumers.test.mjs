@@ -13,8 +13,10 @@ import {
 } from '../src/flows/index.mjs';
 import { resolveLifecycleExecutionPolicy } from '../src/platform/plugins/runtime/execution-policy.mjs';
 import { sealKnownFindingInventory } from '../src/platform/execution/known-finding-inventory.mjs';
+import { deriveQualityTargetSnapshot } from '../src/platform/execution/quality-target.mjs';
 
 const knownFindingInventory = sealKnownFindingInventory({ projectId: 'cardworld-engine', target: 'V-next', declaration: { version: '1.0', sources: [{ path: 'docs/version.md', sha256: 'b'.repeat(64) }], findings: [] }, snapshot: { digest: 'a'.repeat(64), files: [{ path: 'docs/version.md', sha256: 'b'.repeat(64) }] } });
+const qualityTarget = deriveQualityTargetSnapshot({ projectId: 'cardworld-engine', workflowId: 'engine-delivery', target: 'V-next', sourceDigest: 'a'.repeat(64) });
 
 test('CardWorld consumer compiles one canonical requirement and project-owned delivery Features', () => {
   const descriptor = createCardWorldProjectDescriptor({ workspaceRoot: process.cwd(), remote: 'https://github.com/HowiePan/CardWorld.git' });
@@ -55,7 +57,7 @@ test('CardWorld full lifecycle keeps every mutable stage before the final qualit
   const project = createCardWorldProjectDescriptor({ workspaceRoot: process.cwd() });
   project.gateRecipes = [];
   const plan = createCardWorldLifecyclePlan({
-    intent: { action: 'full', target: 'V-next', scope: 'requirement-intake..delivery-receipt', knownFindingInventory },
+    intent: { action: 'full', target: 'V-next', scope: 'requirement-intake..delivery-receipt', qualityTarget, knownFindingInventory },
     project,
     runId: 'full-v-next',
     sourceDigest: 'a'.repeat(64),
@@ -82,19 +84,19 @@ test('CardWorld action plans use action-specific stages, paths, stop conditions,
     ['deliver', ['quality', 'delivery-receipt']],
   ]);
   for (const [action, stages] of expected) {
-    const plan = createCardWorldLifecyclePlan({ intent: { action, target: 'V-next', scope: action, sourcePolicy: action === 'quality' ? 'review-and-repair' : null, ...(['quality', 'full', 'deliver'].includes(action) ? { knownFindingInventory } : {}) }, project, runId: `${action}-v-next`, sourceDigest: 'a'.repeat(64) });
+    const plan = createCardWorldLifecyclePlan({ intent: { action, target: 'V-next', scope: action, sourcePolicy: action === 'quality' ? 'review-and-repair' : null, qualityTarget, ...(['quality', 'full', 'deliver'].includes(action) ? { knownFindingInventory } : {}) }, project, runId: `${action}-v-next`, sourceDigest: 'a'.repeat(64) });
     assert.deepEqual(plan.run.features.map(feature => feature.metadata.stage), stages, action);
     assert.equal(plan.stopCondition.action, action);
   }
-  const quality = createCardWorldLifecyclePlan({ intent: { action: 'quality', target: 'V-next', scope: 'quality', sourcePolicy: 'review-and-repair', knownFindingInventory }, project, runId: 'quality-v-next', sourceDigest: 'a'.repeat(64) });
+  const quality = createCardWorldLifecyclePlan({ intent: { action: 'quality', target: 'V-next', scope: 'quality', sourcePolicy: 'review-and-repair', qualityTarget, knownFindingInventory }, project, runId: 'quality-v-next', sourceDigest: 'a'.repeat(64) });
   assert.deepEqual(quality.run.features[0].allowedPaths, []);
   assert.equal(quality.run.features[0].metadata.sourcePolicy, 'read-only');
   assert.equal(quality.run.features[0].metadata.qualityFindingPolicy, 'repair-and-rereview');
   assert.equal(quality.stopCondition.type, 'quality-run-complete');
-  const reviewOnly = createCardWorldLifecyclePlan({ intent: { action: 'quality', target: 'V-next', scope: 'quality', sourcePolicy: 'read-only', knownFindingInventory }, project, runId: 'quality-review-only-v-next', sourceDigest: 'a'.repeat(64) });
+  const reviewOnly = createCardWorldLifecyclePlan({ intent: { action: 'quality', target: 'V-next', scope: 'quality', sourcePolicy: 'read-only', qualityTarget, knownFindingInventory }, project, runId: 'quality-review-only-v-next', sourceDigest: 'a'.repeat(64) });
   assert.equal(reviewOnly.run.features[0].metadata.sourcePolicy, 'read-only');
   assert.equal(reviewOnly.run.features[0].metadata.qualityFindingPolicy, 'record-only');
-  const deliver = createCardWorldLifecyclePlan({ intent: { action: 'deliver', target: 'V-next', scope: 'delivery-receipt', knownFindingInventory }, project, runId: 'deliver-v-next', sourceDigest: 'a'.repeat(64) });
+  const deliver = createCardWorldLifecyclePlan({ intent: { action: 'deliver', target: 'V-next', scope: 'delivery-receipt', qualityTarget, knownFindingInventory }, project, runId: 'deliver-v-next', sourceDigest: 'a'.repeat(64) });
   assert.equal(deliver.run.profileConfig.requireFinalQualityReview, true);
   assert.equal(deliver.run.profileConfig.requireUserCodeReview, true);
 });

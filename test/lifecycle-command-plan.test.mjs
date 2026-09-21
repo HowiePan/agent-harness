@@ -20,10 +20,10 @@ import { createCardWorldLifecyclePlan } from '../src/flows/delivery-lifecycle/pl
 const releaseIdentity = { version: '1.0.0', artifactDigest: 'a'.repeat(64), verified: true };
 const knownFindingInventories = { 'V3.8.4': { version: '1.0', sources: [{ path: 'README.md', sha256: sha256('fixture\n') }], findings: [] } };
 
-test('quality planning fails closed before Run creation without a pinned inventory', () => {
+test('delivery compiler requires an Authority-derived Quality Target instead of Project configuration', () => {
   assert.throws(
     () => createCardWorldLifecyclePlan({ intent: { action: 'quality', target: 'V3.8.4' }, project: { gateRecipes: [] }, runId: 'missing-inventory', sourceDigest: 'a'.repeat(64) }),
-    error => error.code === 'QUALITY_FINDING_INVENTORY_REQUIRED',
+    error => error.code === 'QUALITY_TARGET_SNAPSHOT_REQUIRED',
   );
 });
 
@@ -40,12 +40,17 @@ test('lifecycle planning deterministically composes quality/full without convers
   const extension = await loadExtensionPack('./src/flows/delivery-lifecycle/index.mjs', { cwd: controlRoot, controlRoot });
   const runtimeExtension = await loadExtensionPack('./integrations/codex/extensions/codex-runtime.mjs', { cwd: controlRoot, controlRoot });
   const harness = await createHarness({ controlRoot, dataRoot, releaseIdentity, strictProjectIdentity: false, extensions: [extension, runtimeExtension] });
-  const descriptor = createCardWorldProjectDescriptor({ workspaceRoot, harness: releaseIdentity, knownFindingInventories });
+  const descriptor = createCardWorldProjectDescriptor({ workspaceRoot, harness: releaseIdentity });
+  assert.equal(Object.hasOwn(descriptor.policy, 'knownFindingInventories'), false);
   descriptor.extensions = descriptor.extensions.map(item => ({ ...item, digest: item.id === extension.id ? extension.digest : runtimeExtension.digest }));
   await harness.projectRegistry.register(descriptor, { expectedRevision: 0, commandId: 'plan-project-register' });
   const first = await harness.createLifecyclePlan({ projectId: descriptor.id, action: 'quality', target: 'V3.8.4', arguments: ['full'], extensionId: extension.id, executionWorkspaceRoot: workspaceRoot });
   const second = await harness.createLifecyclePlan({ projectId: descriptor.id, action: 'quality', target: 'V3.8.4', arguments: ['full'], extensionId: extension.id, executionWorkspaceRoot: workspaceRoot });
   assert.equal(first.planDigest, second.planDigest);
+  assert.equal(first.intent.qualityTarget.kind, 'quality-target-snapshot');
+  assert.equal(first.intent.knownFindingInventory.version, '2.0');
+  assert.equal(first.intent.knownFindingInventory.targetDigest, first.intent.qualityTarget.targetDigest);
+  assert.deepEqual(first.intent.knownFindingInventory.findings, []);
   assert.equal(first.run.profileConfig.requireCanonicalDecision, false);
   assert.equal(first.run.profileConfig.requireUserCodeReview, false);
   assert.equal(first.run.features.length, 1);
