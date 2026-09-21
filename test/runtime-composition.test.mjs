@@ -7,7 +7,7 @@ import { harnessTemporaryRoot } from '../src/common/write-boundary.mjs';
 import { loadReleaseIdentity } from '../src/application/release-identity.mjs';
 import { activeReleaseFile } from '../src/platform/registry/active-generation.mjs';
 import { applyReleaseActivationPlan, createReleaseActivationPlan } from '../src/platform/maintenance/release-activation.mjs';
-import { createRuntimeCompositionManifest, verifyRuntimeComposition } from '../src/platform/maintenance/runtime-composition.mjs';
+import { createRuntimeCompositionManifest, isMissingRuntimeCompositionError, verifyRuntimeComposition } from '../src/platform/maintenance/runtime-composition.mjs';
 
 const createCompositionFixture = async ({ controlRoot, dataRoot }) => {
   const release = await loadReleaseIdentity({ root: controlRoot });
@@ -71,6 +71,12 @@ test('runtime composition identity is deterministic across channel input order',
     () => createRuntimeCompositionManifest({ core, channels: [alpha, alpha] }),
     error => error.code === 'RUNTIME_COMPOSITION_CHANNEL_DUPLICATE',
   );
+});
+
+test('first runtime composition deployment recognizes an absent managed root', () => {
+  assert.equal(isMissingRuntimeCompositionError({ code: 'ENOENT' }), true);
+  assert.equal(isMissingRuntimeCompositionError({ code: 'MANAGED_ROOT_NOT_FOUND' }), true);
+  assert.equal(isMissingRuntimeCompositionError({ code: 'RUNTIME_COMPOSITION_DIGEST_MISMATCH' }), false);
 });
 
 test('runtime composition activation preserves exact Core and Codex identities', async t => {

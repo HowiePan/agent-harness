@@ -1152,8 +1152,8 @@
     },
     {
       "path": "src/platform/maintenance/runtime-composition.mjs",
-      "sha256": "e3aabeed96b1124ac57cd06a0c7ff33e02a83b3a38fea061af36518f0e140ccb",
-      "size": 6965
+      "sha256": "8e84f6b96dc2eea6cfcd7f278089a5ac93af4be71fdcacca45b955eeb07baeb0",
+      "size": 7083
     },
     {
       "path": "src/platform/maintenance/upgrade-authorization.mjs",
@@ -1406,7 +1406,7 @@
       "size": 19772
     }
   ],
-  "packageDigest": "355fd513eaa11275e99241c645b7bd69ed4e3ede1c05317abe584546d15047e6",
+  "packageDigest": "568f3975b1e85ac19bab584358585d23bde3d5f089ff945c4cb99df16812f43f",
   "metadataFiles": [
     "release-manifest.json",
     "sbom.spdx.json"

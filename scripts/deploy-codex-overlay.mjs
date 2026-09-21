@@ -8,7 +8,7 @@ import { assertNoLinkPath } from '../src/common/paths.mjs';
 import { assertHarnessWritePath, temporaryEnvironment } from '../src/common/write-boundary.mjs';
 import { verifyReleaseManifest } from '../src/application/release-identity.mjs';
 import { readActiveRelease, resolveActiveRuntimeRoot } from '../src/platform/registry/active-generation.mjs';
-import { createRuntimeCompositionManifest, verifyRuntimeComposition } from '../src/platform/maintenance/runtime-composition.mjs';
+import { createRuntimeCompositionManifest, isMissingRuntimeCompositionError, verifyRuntimeComposition } from '../src/platform/maintenance/runtime-composition.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const dataRoot = assertHarnessWritePath(resolve(root, '.agent-harness-data'), 'Harness data root', root);
@@ -73,7 +73,7 @@ try {
     await verifyRuntimeComposition({ controlRoot: root, runtimeRoot, expectedDigest: composition.compositionDigest, expectedCore: composition.core, expectedChannels: composition.channels });
     existingComposition = true;
   } catch (error) {
-    if (error.code !== 'ENOENT') throw error;
+    if (!isMissingRuntimeCompositionError(error)) throw error;
   }
   if (!existingComposition) {
     const stagingRoot = assertHarnessWritePath(`${runtimeRoot}.staging-${process.pid}`, 'Runtime composition staging root', root);

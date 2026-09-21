@@ -6,6 +6,8 @@ import { assertNoLinkPath } from '../../common/paths.mjs';
 import { harnessControlRoot } from '../../common/write-boundary.mjs';
 import { verifyReleaseManifest } from '../../application/release-identity.mjs';
 
+export const isMissingRuntimeCompositionError = error => ['ENOENT', 'MANAGED_ROOT_NOT_FOUND'].includes(error?.code);
+
 const safeRelative = (value, code, message) => {
   assert(typeof value === 'string' && value.length > 0 && !isAbsolute(value) && !value.includes('\\') && !value.split('/').includes('..'), code, message);
   return value;
