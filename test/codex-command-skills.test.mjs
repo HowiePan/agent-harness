@@ -74,7 +74,12 @@ test('Codex plugin exposes one explicit-project pseudo-command router', async ()
     assert.match(skillText, /obtain the user's explicit authorization for the exact repository, base ref or branch, and target path/);
     assert.match(skillText, /Never create a worktree silently/);
     assert.match(skillText, /A general request to implement, continue, isolate work, use another drive, or avoid the current checkout is not worktree authorization/);
-    assert.match(skillText, /treat `C:\\` as read-only for every Harness-related action/);
+    assert.match(skillText, /treat `C:\\` as read-only by default/);
+    assert.match(skillText, /sole write exception is a user-requested Codex plugin lifecycle operation/);
+    assert.match(skillText, /install, reinstall, update, or remove an exact named Codex plugin/);
+    assert.match(skillText, /plugin-manager-owned cache, registration, marketplace, and configuration writes/);
+    assert.match(skillText, /execute the official command rather than editing files directly/);
+    assert.match(skillText, /does not authorize source, worktree, temporary, build, Harness control\/data, arbitrary configuration/);
     assert.match(skillText, /`git status --short` exposes every source change/);
     assert.match(skillText, /uncommitted changes are not portable to another computer/);
   }
