@@ -65,7 +65,7 @@ export const configureBindings = async input => {
   if (!inside(controlRoot, entrypoint) || !inside(controlRoot, dataRoot) || (memoryRoot && !inside(controlRoot, memoryRoot))) throw new Error('entrypoint, dataRoot, and memoryRoot must stay inside controlRoot.');
   await Promise.all([access(controlRoot), access(entrypoint)]);
   const activeRelease = await validateActiveReleaseBinding({ controlRoot, dataRoot, entrypoint, verifyAllFiles: true });
-  const release = { version: activeRelease.version, artifactDigest: activeRelease.artifactDigest, generationId: activeRelease.generationId, pointerDigest: activeRelease.pointerDigest };
+  const release = { version: activeRelease.version, artifactDigest: activeRelease.artifactDigest, channelArtifactDigest: activeRelease.channelArtifactDigest, ...(activeRelease.compositionDigest ? { compositionDigest: activeRelease.compositionDigest } : {}), generationId: activeRelease.generationId, pointerDigest: activeRelease.pointerDigest };
 
   const projects = {};
   const workspaces = {};

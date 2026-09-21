@@ -13,6 +13,10 @@ export const readActiveRelease = async (dataRootInput, controlRootInput) => {
   const pointer = await readJson(activeReleaseFile(dataRoot), null);
   if (!pointer) return null;
   assert(pointer.protocolVersion === '1.0' && pointer.kind === 'active-release' && /^[A-Za-z0-9._-]{1,128}$/.test(pointer.generationId ?? ''), 'ACTIVE_RELEASE_POINTER_INVALID', 'Active release pointer is invalid.');
+  if (pointer.compositionDigest !== undefined) {
+    assert(/^[a-f0-9]{64}$/.test(pointer.compositionDigest) && Array.isArray(pointer.channels) && pointer.channels.length > 0, 'ACTIVE_RELEASE_COMPOSITION_INVALID', 'Active release runtime composition identity is invalid.');
+    for (const channel of pointer.channels) assert(/^[a-z][a-z0-9-]{0,31}$/.test(channel?.id ?? '') && /^\d+\.\d+\.\d+$/.test(channel?.version ?? '') && /^[a-f0-9]{64}$/.test(channel?.artifactDigest ?? ''), 'ACTIVE_RELEASE_COMPOSITION_INVALID', 'Active release channel identity is invalid.');
+  }
   assert(pointer.pointerDigest === digestJson(withoutKeys(pointer, ['pointerDigest'])), 'ACTIVE_RELEASE_POINTER_DIGEST_MISMATCH', 'Active release pointer digest does not match its contents.');
   return pointer;
 };
@@ -38,5 +42,6 @@ export const resolveActiveRuntimeRoot = async (dataRootInput, controlRootInput) 
   const rel = relative(controlRoot, runtimeRoot);
   assert(rel && !rel.startsWith('..') && !isAbsolute(rel), 'ACTIVE_RELEASE_RUNTIME_ROOT_INVALID', 'Active release runtimeRoot escapes the standalone control root.');
   assert(existsSync(resolve(runtimeRoot, 'release-manifest.json')) && existsSync(resolve(runtimeRoot, 'bin', 'agent-harness.mjs')), 'ACTIVE_RELEASE_RUNTIME_MISSING', 'Active release runtimeRoot is incomplete.');
+  if (pointer.compositionDigest) assert(existsSync(resolve(runtimeRoot, 'runtime-composition.json')), 'ACTIVE_RELEASE_COMPOSITION_MISSING', 'Active release runtime composition manifest is missing.');
   return runtimeRoot;
 };

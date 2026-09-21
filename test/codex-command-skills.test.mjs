@@ -28,27 +28,36 @@ const createActiveReleaseFixture = async controlRoot => {
   const coordinatorRelative = 'integrations/codex/agent-harness-codex/scripts/visible-lifecycle-coordinator.mjs';
   const coordinatorEntrypoint = resolve(runtimeRoot, coordinatorRelative);
   const coordinatorBytes = Buffer.from('// fixture visible coordinator\n');
+  const hostBridgeRelative = 'integrations/codex/agent-harness-codex/lib/hook-host-exchange.mjs';
+  const hostBridgeModule = resolve(runtimeRoot, hostBridgeRelative);
+  const hostBridgeBytes = Buffer.from('export const captureHookToolResult = async () => ({ captured: false });\n');
   const files = [{ path: entryRelative, sha256: sha256(entryBytes), size: entryBytes.length }];
   const packageDigest = digestJson(files);
-  const channelFiles = [{ path: coordinatorRelative, sha256: sha256(coordinatorBytes), size: coordinatorBytes.length }];
+  const channelFiles = [
+    { path: coordinatorRelative, sha256: sha256(coordinatorBytes), size: coordinatorBytes.length },
+    { path: hostBridgeRelative, sha256: sha256(hostBridgeBytes), size: hostBridgeBytes.length },
+  ];
   const channelBody = { protocolVersion: '1.0', channel: 'codex', plugin: { name: 'agent-harness-codex', version: '1.0.0' }, requiresCore: { name: 'agent-harness', version: '1.0.0', packageDigest }, layout: { pluginPath: 'integrations/codex/agent-harness-codex', marketplacePath: '.agents/plugins/marketplace.json' }, files: channelFiles, contentDigest: digestJson(channelFiles) };
+  const channelArtifactDigest = digestJson(channelBody);
   const generationId = 'g-fixture';
   await Promise.all([
     mkdir(resolve(runtimeRoot, 'bin'), { recursive: true }),
     mkdir(dirname(coordinatorEntrypoint), { recursive: true }),
+    mkdir(dirname(hostBridgeModule), { recursive: true }),
     mkdir(resolve(dataRoot, 'registry', 'generations', generationId, 'projects'), { recursive: true }),
   ]);
   await Promise.all([
     writeFile(entrypoint, entryBytes),
     writeFile(coordinatorEntrypoint, coordinatorBytes),
+    writeFile(hostBridgeModule, hostBridgeBytes),
     writeFile(resolve(runtimeRoot, 'release-manifest.json'), `${JSON.stringify({ protocolVersion: '1.0', version: '1.0.0', files, packageDigest })}\n`, 'utf8'),
-    writeFile(resolve(runtimeRoot, 'codex-channel-manifest.json'), `${JSON.stringify({ ...channelBody, artifactDigest: digestJson(channelBody) })}\n`, 'utf8'),
+    writeFile(resolve(runtimeRoot, 'codex-channel-manifest.json'), `${JSON.stringify({ ...channelBody, artifactDigest: channelArtifactDigest })}\n`, 'utf8'),
     writeFile(resolve(dataRoot, 'registry', 'generations', generationId, 'extensions.json'), '{}\n', 'utf8'),
   ]);
   const pointer = { protocolVersion: '1.0', kind: 'active-release', generationId, release: { version: '1.0.0', artifactDigest: packageDigest, verified: true }, runtimeRoot: runtimeRelative, runtimeEntrypoint: `${runtimeRelative}/${entryRelative}` };
   pointer.pointerDigest = digestJson(pointer);
   await writeFile(resolve(dataRoot, 'registry', 'active-release.json'), `${JSON.stringify(pointer)}\n`, 'utf8');
-  return { dataRoot, entrypoint, coordinatorEntrypoint, release: { version: '1.0.0', artifactDigest: packageDigest, generationId, pointerDigest: pointer.pointerDigest } };
+  return { dataRoot, entrypoint, coordinatorEntrypoint, hostBridgeModule, release: { version: '1.0.0', artifactDigest: packageDigest, channelArtifactDigest, generationId, pointerDigest: pointer.pointerDigest } };
 };
 
 test('Codex plugin exposes one explicit-project pseudo-command router', async () => {

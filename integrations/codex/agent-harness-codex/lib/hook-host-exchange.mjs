@@ -58,12 +58,12 @@ export const createHookHostExchange = ({ controlRoot, dataRoot, codexSessionId, 
 };
 
 export const captureHookToolResult = async (event, { controlRoot, dataRoot, now = () => new Date().toISOString() }) => {
-  if (event?.hook_event_name !== 'PostToolUse' || typeof event.tool_name !== 'string' || !toolUseId(event.tool_use_id) || !event.tool_input || !event.tool_response) return { captured: false };
+  if (event?.hook_event_name !== 'PostToolUse' || typeof event.tool_name !== 'string' || !toolUseId(event.tool_use_id) || !event.tool_input || !event.tool_response) return { captured: false, reasonCode: 'CODEX_HOST_HOOK_EVENT_INVALID' };
   const root = assertHarnessWritePath(resolve(dataRoot, 'host-bridge'), 'Codex Hook Host bridge', controlRoot);
   const pendingRoot = assertHarnessWritePath(resolve(root, 'pending'), 'Codex Hook Host pending requests', controlRoot);
   let names;
   try { names = await readdir(pendingRoot); }
-  catch (error) { if (error.code === 'ENOENT') return { captured: false }; throw error; }
+  catch (error) { if (error.code === 'ENOENT') return { captured: false, reasonCode: 'CODEX_HOST_HOOK_PENDING_ROOT_MISSING' }; throw error; }
   const matches = [];
   for (const name of names.filter(item => item.endsWith('.json') && !item.endsWith('.response.json'))) {
     const file = assertHarnessWritePath(resolve(pendingRoot, name), 'Codex Hook Host pending request', controlRoot);
@@ -74,7 +74,7 @@ export const captureHookToolResult = async (event, { controlRoot, dataRoot, now 
     matches.push({ request, pending });
   }
   if (matches.length > 1) fail('CODEX_HOST_HOOK_REQUEST_AMBIGUOUS', 'A native tool result matches more than one pending Host request.');
-  if (!matches.length) return { captured: false };
+  if (!matches.length) return { captured: false, reasonCode: 'CODEX_HOST_HOOK_PENDING_NOT_MATCHED' };
   if (typeof event.tool_response !== 'object' || Array.isArray(event.tool_response)) fail('CODEX_HOST_HOOK_RESULT_INVALID', 'Native Hook tool_response must be an object.');
   const { request, pending } = matches[0];
   const responseFile = assertHarnessWritePath(resolve(pendingRoot, `${request.requestId}.response.json`), 'Codex Hook Host response', controlRoot);

@@ -1,16 +1,21 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { readFileSync } from 'node:fs';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
 import {
   createPluginMutationPlan,
   inspectMarketplaceConfiguration,
   inspectCodexHostFeatures,
   inspectPluginInstallation,
+  probeInstalledPostToolHook,
   runLocalPluginRelease,
   validateLocalReleaseConfiguration,
   validatePluginBindings,
+  verifyLocalPluginPreparationReceipt,
 } from '../scripts/plugin-release-workflow.mjs';
+import { digestJson } from '../src/common/canonical.mjs';
 
 const root = resolve('.');
 const pluginRoot = resolve(root, 'integrations/codex/agent-harness-codex');
@@ -22,6 +27,7 @@ const marketplace = {
   plugins: [{ name: 'agent-harness-codex', source: { source: 'local', path: './integrations/codex/agent-harness-codex' }, policy: { installation: 'AVAILABLE', authentication: 'ON_INSTALL' } }],
 };
 const sourcePackageDigest = JSON.parse(readFileSync(resolve(root, 'release-manifest.json'), 'utf8')).packageDigest;
+const codexArtifactDigest = 'f'.repeat(64);
 const codexFeatures = 'multi_agent                              stable             true\nmulti_agent_v2                           stable             true\n';
 
 const config = () => validateLocalReleaseConfiguration({ root, packageJson, packageLock, pluginManifest, marketplace });
@@ -42,7 +48,7 @@ const bindingState = current => ({
   controlRoot: root,
   entrypoint: resolve(root, 'bin/agent-harness.mjs'),
   dataRoot: resolve(root, '.agent-harness-data'),
-  release: { version: '1.0.0', packageDigest: sourcePackageDigest, generationId: 'g-current', pointerDigest: 'd'.repeat(64), entrypoint: resolve(root, 'bin/agent-harness.mjs'), runtimeRoot: root, registryRoot: resolve(root, '.agent-harness-data', 'registry', 'generations', 'g-current') },
+  release: { version: '1.0.0', packageDigest: sourcePackageDigest, channelArtifactDigest: codexArtifactDigest, generationId: 'g-current', pointerDigest: 'd'.repeat(64), entrypoint: resolve(root, 'bin/agent-harness.mjs'), runtimeRoot: root, registryRoot: resolve(root, '.agent-harness-data', 'registry', 'generations', 'g-current') },
   projectAliases: ['engine'],
 });
 
@@ -118,14 +124,58 @@ test('mutation plan always adds and verifies, and clears cache before same-versi
   assert.doesNotMatch(JSON.stringify(createPluginMutationPlan({ marketplaceConfigured: true, pluginInstalled: true, config: current })), /codex[\\\s\",]+exec/i);
 });
 
+test('preparation receipt seals the exact Core, Codex, and candidate artifact identities', () => {
+  const body = {
+    protocolVersion: '1.0',
+    kind: 'local-plugin-release-preparation-receipt',
+    workflowVersion: '1.0',
+    status: 'prepared',
+    source: { commit: 'a'.repeat(40), clean: true },
+    release: { version: '1.0.0', packageDigest: 'b'.repeat(64) },
+    channelPackages: {
+      core: { channel: 'core', identity: 'b'.repeat(64), packageDigest: 'b'.repeat(64), archiveDigest: 'c'.repeat(64), archive: 'core.tgz', receipt: 'core.json' },
+      codex: { channel: 'codex', identity: 'd'.repeat(64), artifactDigest: 'd'.repeat(64), requiredCorePackageDigest: 'b'.repeat(64), archiveDigest: 'e'.repeat(64), archive: 'codex.tgz', receipt: 'codex.json' },
+    },
+    candidate: { ok: true, packageDigest: 'b'.repeat(64), archiveDigest: 'f'.repeat(64), archive: 'candidate.tgz', receipt: 'candidate.json' },
+    steps: ['check:codex-host-fast', 'check', 'test', 'workspace:canary', 'check:clean-room', 'pack:core', 'pack:codex', 'check:residue', 'check:channel-composition', 'build:release-candidate'].map(id => ({ id, status: 'passed' })),
+    startedAt: '2026-09-21T00:00:00.000Z',
+    completedAt: '2026-09-21T00:01:00.000Z',
+  };
+  const receipt = { ...body, receiptDigest: digestJson(body) };
+  assert.equal(verifyLocalPluginPreparationReceipt(receipt).receiptDigest, receipt.receiptDigest);
+  assert.throws(
+    () => verifyLocalPluginPreparationReceipt({ ...receipt, status: 'failed' }),
+    error => error?.code === 'LOCAL_RELEASE_PREPARATION_INVALID',
+  );
+  assert.throws(
+    () => verifyLocalPluginPreparationReceipt({ ...receipt, release: { ...receipt.release, packageDigest: '0'.repeat(64) } }),
+    error => error?.code === 'LOCAL_RELEASE_PREPARATION_DIGEST_MISMATCH',
+  );
+});
+
+test('installed Hook probe is bounded and invokes the exact cached PostToolUse entrypoint', async t => {
+  const fixture = await mkdtemp(resolve(tmpdir(), 'agent-harness-installed-hook-probe-'));
+  t.after(() => rm(fixture, { recursive: true, force: true }));
+  const pluginRoot = resolve(fixture, 'plugin');
+  const pluginData = resolve(pluginRoot, '.plugin-data');
+  await mkdir(resolve(pluginRoot, 'hooks'), { recursive: true });
+  await mkdir(pluginData, { recursive: true });
+  const bindingFile = resolve(pluginData, 'bindings.json');
+  await writeFile(bindingFile, '{}\n');
+  await writeFile(resolve(pluginRoot, 'hooks', 'post-tool-host-bridge.mjs'), "let raw = ''; for await (const chunk of process.stdin) raw += chunk; const event = JSON.parse(raw); if (event.tool_name !== 'collaboration.list_agents') process.exitCode = 2; else process.stdout.write('{}');\n");
+  const result = await probeInstalledPostToolHook({ root, installedBindings: { bindingFile }, timeoutMs: 1000 });
+  assert.match(result.probeDigest, /^[a-f0-9]{64}$/);
+  assert.equal(result.hook, resolve(pluginRoot, 'hooks', 'post-tool-host-bridge.mjs'));
+});
+
 test('plugin bindings pin this control root, an existing entrypoint and absolute project workspaces', async () => {
   const current = config();
   const bindings = {
     protocolVersion: '1.0',
-    harness: { controlRoot: root, entrypoint: resolve(root, 'bin/agent-harness.mjs'), dataRoot: resolve(root, '.agent-harness-data'), release: { version: '1.0.0', artifactDigest: sourcePackageDigest, generationId: 'g-current', pointerDigest: 'd'.repeat(64) } },
+    harness: { controlRoot: root, entrypoint: resolve(root, 'bin/agent-harness.mjs'), dataRoot: resolve(root, '.agent-harness-data'), release: { version: '1.0.0', artifactDigest: sourcePackageDigest, channelArtifactDigest: codexArtifactDigest, generationId: 'g-current', pointerDigest: 'd'.repeat(64) } },
     projects: { engine: { projectId: 'engine', profileId: 'engine-delivery', extensionId: 'engine-extension', workspaceRoot: resolve(root, 'fixture-workspace') } },
   };
-  const activeReleaseLoader = async () => ({ version: '1.0.0', packageDigest: sourcePackageDigest, generationId: 'g-current', pointerDigest: 'd'.repeat(64), entrypoint: resolve(root, 'bin/agent-harness.mjs'), runtimeRoot: root, registryRoot: resolve(root, '.agent-harness-data', 'registry', 'generations', 'g-current') });
+  const activeReleaseLoader = async () => ({ version: '1.0.0', packageDigest: sourcePackageDigest, channelArtifactDigest: codexArtifactDigest, generationId: 'g-current', pointerDigest: 'd'.repeat(64), entrypoint: resolve(root, 'bin/agent-harness.mjs'), runtimeRoot: root, registryRoot: resolve(root, '.agent-harness-data', 'registry', 'generations', 'g-current') });
   const validated = await validatePluginBindings({ root, config: current, bindings, activeReleaseLoader });
   assert.equal(validated.entrypoint, resolve(root, 'bin/agent-harness.mjs'));
   assert.deepEqual(validated.projectAliases, ['engine']);
@@ -151,6 +201,20 @@ test('release workflow rejects a plugin binding whose active runtime digest is s
   await assert.rejects(
     () => runLocalPluginRelease({ root, mode: 'check', npmCli: 'npm-cli.js', runner, bindingsLoader: async () => ({ ...bindingState(current), release: { ...bindingState(current).release, packageDigest: '0'.repeat(64) } }) }),
     error => error?.code === 'LOCAL_RELEASE_ACTIVE_RUNTIME_STALE',
+  );
+});
+
+test('apply mode refuses to rebuild or install without a sealed preparation receipt', async () => {
+  const commit = '9'.repeat(40);
+  const runner = async (executable, args) => {
+    if (executable === 'git' && args.join(' ') === 'rev-parse --show-toplevel') return { stdout: `${root}\n` };
+    if (executable === 'git' && args.join(' ') === 'rev-parse HEAD') return { stdout: `${commit}\n` };
+    if (executable === 'git' && args[0] === 'status') return { stdout: '' };
+    throw new Error(`Unexpected command: ${executable} ${args.join(' ')}`);
+  };
+  await assert.rejects(
+    () => runLocalPluginRelease({ root, mode: 'apply', npmCli: 'npm-cli.js', runner }),
+    error => error?.code === 'LOCAL_RELEASE_PREPARATION_REQUIRED',
   );
 });
 

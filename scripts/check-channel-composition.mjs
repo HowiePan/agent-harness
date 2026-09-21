@@ -1,6 +1,8 @@
 import { spawn } from 'node:child_process';
-import { copyFile, lstat, mkdir, mkdtemp, readFile, rm, rmdir, writeFile } from 'node:fs/promises';
+import { once } from 'node:events';
+import { copyFile, lstat, mkdir, mkdtemp, readFile, readdir, rm, rmdir, writeFile } from 'node:fs/promises';
 import { dirname, isAbsolute, relative, resolve } from 'node:path';
+import { PassThrough } from 'node:stream';
 import { pathToFileURL } from 'node:url';
 import { fileURLToPath } from 'node:url';
 import { digestJson, sha256 } from '../src/common/canonical.mjs';
@@ -45,6 +47,10 @@ try {
   });
   const coreRoot = resolve(scratch, 'node_modules', 'agent-harness');
   const codexRoot = resolve(scratch, 'node_modules', 'agent-harness-codex-channel');
+  const installedPluginRoot = resolve(codexRoot, 'integrations', 'codex', 'agent-harness-codex');
+  const installedPostToolHook = resolve(installedPluginRoot, 'hooks', 'post-tool-host-bridge.mjs');
+  const isolatedHook = await import(pathToFileURL(installedPostToolHook).href);
+  assert(typeof isolatedHook.capturePostToolUse === 'function', 'CHANNEL_PROBE_ISOLATED_HOOK_INVALID', 'Codex PostToolUse Hook does not load from the isolated plugin cache layout.');
   const coreIdentity = await verifyReleaseManifest({ root: coreRoot });
   const channelManifest = JSON.parse(await readFile(resolve(codexRoot, 'codex-channel-manifest.json'), 'utf8'));
   const { artifactDigest, ...body } = channelManifest;
@@ -76,11 +82,53 @@ try {
   const binding = await import(pathToFileURL(resolve(coreRoot, 'integrations/codex/agent-harness-codex/lib/active-release-binding.mjs')).href);
   const validated = await binding.validateActiveReleaseBinding({ controlRoot: coreRoot, dataRoot, entrypoint: resolve(coreRoot, 'bin/agent-harness.mjs'), verifyAllFiles: true });
   assert(validated.channelArtifactDigest === artifactDigest, 'CHANNEL_PROBE_BINDING_INVALID', 'Composed Codex channel did not validate against the active Core.');
+  const pluginData = resolve(installedPluginRoot, '.plugin-data');
+  await mkdir(pluginData, { recursive: true });
+  await writeFile(resolve(pluginData, 'bindings.json'), `${JSON.stringify({
+    protocolVersion: '1.0',
+    harness: {
+      controlRoot: coreRoot,
+      entrypoint: resolve(coreRoot, 'bin', 'agent-harness.mjs'),
+      dataRoot,
+      release: { version: coreIdentity.version, artifactDigest: coreIdentity.artifactDigest, channelArtifactDigest: artifactDigest, generationId, pointerDigest: pointer.pointerDigest },
+    },
+    projects: { probe: { projectId: 'probe', profileId: 'probe', extensionId: 'probe', workspaceRoot: coreRoot } },
+    workspaces: {},
+  }, null, 2)}\n`, 'utf8');
+  const exchangeModule = await import(pathToFileURL(validated.hostBridgeModule).href);
+  const requestBody = { protocolVersion: '1.0', kind: 'codex-visible-host-request', tool: 'collaboration.list_agents', arguments: {}, sessionId: 'channel-probe-session', requestId: 'host_request_channel_probe', operation: 'inspect', binding: null, createdAt: '2026-09-21T00:00:00.000Z' };
+  const request = { ...requestBody, requestDigest: digestJson(requestBody) };
+  const requestOutput = new PassThrough();
+  const exchange = exchangeModule.createHookHostExchange({ controlRoot: coreRoot, dataRoot, codexSessionId: request.sessionId, output: requestOutput, responseTimeoutMs: 5000, pollMs: 10 });
+  const pending = exchange.exchange(request);
+  await once(requestOutput, 'data');
+  const hookResult = await new Promise((resolveRun, reject) => {
+    const child = spawn(process.execPath, [installedPostToolHook], {
+      cwd: installedPluginRoot,
+      windowsHide: true,
+      stdio: ['pipe', 'pipe', 'pipe'],
+      env: { ...process.env, PLUGIN_ROOT: installedPluginRoot, PLUGIN_DATA: pluginData, ...temporaryEnvironment(temporary, root) },
+    });
+    let stdout = '';
+    let stderr = '';
+    child.stdout.on('data', chunk => { stdout += chunk; });
+    child.stderr.on('data', chunk => { stderr += chunk; });
+    child.on('error', reject);
+    child.on('close', (code, signal) => code === 0 && !signal ? resolveRun({ stdout, stderr }) : reject(Object.assign(new Error(`Isolated Codex PostToolUse Hook failed: ${stderr.trim() || signal || code}`), { code: 'CHANNEL_PROBE_POST_TOOL_HOOK_FAILED' })));
+    child.stdin.end(JSON.stringify({ hook_event_name: 'PostToolUse', tool_name: 'collaboration.list_agents', tool_use_id: 'tool-channel-probe', tool_input: {}, tool_response: { agents: [] }, session_id: request.sessionId, turn_id: 'turn-channel-probe' }));
+  });
+  assert(hookResult.stdout === '{}', 'CHANNEL_PROBE_POST_TOOL_HOOK_OUTPUT_INVALID', 'Codex PostToolUse Hook returned an unexpected stdout envelope.');
+  assert(hookResult.stderr === '', 'CHANNEL_PROBE_POST_TOOL_HOOK_STDERR_INVALID', 'Codex PostToolUse Hook wrote unexpected stderr output.');
+  assert(JSON.stringify(await pending) === JSON.stringify({ agents: [] }), 'CHANNEL_PROBE_POST_TOOL_ROUND_TRIP_INVALID', 'Codex PostToolUse Hook did not preserve the native result.');
+  exchange.close();
+  const diagnosticRoot = resolve(dataRoot, 'diagnostics', 'codex-host-hook');
+  const invocationDirectories = await readdir(diagnosticRoot, { withFileTypes: true });
+  assert(invocationDirectories.some(entry => entry.isDirectory()), 'CHANNEL_PROBE_HOOK_DIAGNOSTIC_MISSING', 'Codex PostToolUse Hook did not preserve staged diagnostics.');
   const hook = await import(pathToFileURL(resolve(coreRoot, 'integrations/codex/agent-harness-codex/hooks/pseudo-command-router.mjs')).href);
   assert(typeof hook.parsePseudoCommand === 'function', 'CHANNEL_PROBE_HOOK_INVALID', 'Composed Codex Hook did not load against the packaged Core.');
   const parsed = hook.parsePseudoCommand('h:engine quality V3.8.4 review-only');
   assert(parsed.kind === 'command' && parsed.action === 'quality', 'CHANNEL_PROBE_COMMAND_INVALID', 'Composed Codex Hook did not parse a known command.');
-  process.stdout.write(`${JSON.stringify({ ok: true, corePackageDigest: coreIdentity.artifactDigest, codexArtifactDigest: artifactDigest, pluginFiles: channelManifest.files.length, hookLoaded: true, bindingValidated: true }, null, 2)}\n`);
+  process.stdout.write(`${JSON.stringify({ ok: true, corePackageDigest: coreIdentity.artifactDigest, codexArtifactDigest: artifactDigest, pluginFiles: channelManifest.files.length, isolatedHookLoaded: true, hookRoundTrip: true, hookDiagnosticRecorded: true, hookLoaded: true, bindingValidated: true }, null, 2)}\n`);
 } finally {
   await rm(scratch, { recursive: true, force: true });
   await rmdir(scratchRoot).catch(error => { if (!['ENOENT', 'ENOTEMPTY'].includes(error.code)) throw error; });

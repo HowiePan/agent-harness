@@ -103,7 +103,7 @@ const validateBindings = async (input, source) => {
   if ((!input.projects || typeof input.projects !== 'object' || Array.isArray(input.projects)) && (!input.workspaces || typeof input.workspaces !== 'object' || Array.isArray(input.workspaces))) throw new Error(`绑定文件至少需要一个项目或工作区别名：${source}`);
   if (!Object.keys(input.projects ?? {}).length && !Object.keys(input.workspaces ?? {}).length) throw new Error(`绑定文件至少需要一个项目或工作区别名：${source}`);
   const activeRelease = await validateActiveReleaseBinding({ controlRoot: harness.controlRoot, dataRoot: harness.dataRoot, entrypoint: harness.entrypoint, declaredRelease: harness.release });
-  const release = { version: activeRelease.version, artifactDigest: activeRelease.artifactDigest, generationId: activeRelease.generationId, pointerDigest: activeRelease.pointerDigest };
+  const release = { version: activeRelease.version, artifactDigest: activeRelease.artifactDigest, channelArtifactDigest: activeRelease.channelArtifactDigest, ...(activeRelease.compositionDigest ? { compositionDigest: activeRelease.compositionDigest } : {}), generationId: activeRelease.generationId, pointerDigest: activeRelease.pointerDigest };
   const projects = {};
   for (const [alias, project] of Object.entries(input.projects ?? {})) {
     if (!tokenPattern.test(alias) || !project?.projectId || !project.profileId || !project.extensionId) throw new Error(`项目绑定无效：${alias}`);
@@ -139,7 +139,7 @@ const validateBindings = async (input, source) => {
   return Object.freeze({
     protocolVersion: '1.0',
     source,
-    harness: Object.freeze({ controlRoot: resolve(harness.controlRoot), entrypoint: resolve(harness.entrypoint), coordinatorEntrypoint: activeRelease.coordinatorEntrypoint, dataRoot: resolve(harness.dataRoot), ...(harness.memoryRoot ? { memoryRoot: resolve(harness.memoryRoot) } : {}), release }),
+    harness: Object.freeze({ controlRoot: resolve(harness.controlRoot), entrypoint: resolve(harness.entrypoint), coordinatorEntrypoint: activeRelease.coordinatorEntrypoint, hostBridgeModule: activeRelease.hostBridgeModule, dataRoot: resolve(harness.dataRoot), ...(harness.memoryRoot ? { memoryRoot: resolve(harness.memoryRoot) } : {}), release }),
     projects: Object.freeze(projects),
     workspaces: Object.freeze(workspaces),
   });
@@ -213,8 +213,9 @@ export const hookResponse = async (input, options = {}) => {
   if (!workspace) return contextResponse(`Agent Harness 命令拒绝：当前 cwd ${cwd} 既不在项目 ${parsed.projectAlias} 的 workspaceRoot ${project.workspaceRoot} 内，也不是该仓库经验证的 linked worktree。不得搜索其他项目或启动 Harness。`);
 
   if (parsed.kind === 'report') {
-    const reportHarness = { controlRoot: bindings.harness.controlRoot, entrypoint: bindings.harness.entrypoint, dataRoot: bindings.harness.dataRoot, ...(bindings.harness.memoryRoot ? { memoryRoot: bindings.harness.memoryRoot } : {}), release: bindings.harness.release };
-    const report = { ...parsed, project: selectedProject, ...(selectedWorkflow ? { workflow: { id: selectedWorkflow.id, version: selectedWorkflow.version, artifactDigest: selectedWorkflow.artifactDigest } } : {}), harness: reportHarness, workspaceRoot: project.workspaceRoot, workspaceIdentity: project.workspaceIdentity, executionWorkspaceRoot: workspace.executionWorkspaceRoot, workspaceMatch: workspace.kind, cwd, commandId: `report_${randomUUID()}` };
+    const { version, artifactDigest, channelArtifactDigest, compositionDigest } = bindings.harness.release;
+    const reportHarness = { controlRoot: bindings.harness.controlRoot, entrypoint: bindings.harness.entrypoint, dataRoot: bindings.harness.dataRoot, ...(bindings.harness.memoryRoot ? { memoryRoot: bindings.harness.memoryRoot } : {}), release: { version, artifactDigest, channelArtifactDigest, ...(compositionDigest ? { compositionDigest } : {}) } };
+    const report = { ...parsed, project: selectedProject, ...(selectedWorkflow ? { workflow: { id: selectedWorkflow.id, version: selectedWorkflow.version, artifactDigest: selectedWorkflow.artifactDigest } } : {}), harness: reportHarness, executionWorkspaceRoot: workspace.executionWorkspaceRoot, commandId: `report_${randomUUID()}` };
     return contextResponse(`检测到 h:report。使用 $agent-harness-command 在当前任务采集并脱敏相关对话；缺失证据列入 missingEvidence，不得伪造。通过绑定 entrypoint 以 stdin 调用 issue record；只写 controlRoot/issues。不得新建任务、运行 Harness、接受其他输出目录或提交 Git。返回 issue ID、路径和未提交状态。解析结果：${JSON.stringify(report)}`);
   }
 

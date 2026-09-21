@@ -12,6 +12,8 @@ test('Core package excludes the Codex host plugin and marketplace while retainin
   assert.equal(packageJson.scripts['pack:core'], 'node scripts/pack-core.mjs');
   assert.equal(packageJson.scripts['pack:codex'], 'node scripts/pack-codex.mjs');
   assert.equal(packageJson.scripts['deploy:codex'], 'node scripts/deploy-codex-overlay.mjs');
+  assert.equal(packageJson.scripts['check:codex-host-fast'].includes('post-tool-host-bootstrap.test.mjs'), true);
+  assert.equal(packageJson.scripts['release:codex:prepare'].includes('--prepare'), true);
   assert.equal(packageJson.scripts['release:codex:local'].includes('release-codex.mjs'), true);
   assert.equal(Object.hasOwn(packageJson.scripts, 'release:plugin'), false);
   assert.equal(Object.hasOwn(packageJson.scripts, 'release:plugin:check'), false);

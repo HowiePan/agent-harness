@@ -59,9 +59,25 @@ export const validateActiveReleaseBinding = async ({ controlRoot: controlRootInp
   const channel = await readJson(channelManifestFile);
   const { artifactDigest: channelArtifactDigest, ...channelBody } = channel;
   if (channel.protocolVersion !== '1.0' || channel.channel !== 'codex' || !Array.isArray(channel.files) || channelArtifactDigest !== digestJson(channelBody) || channel.contentDigest !== digestJson(channel.files) || channel.requiresCore?.packageDigest !== manifest.packageDigest || channel.requiresCore?.version !== manifest.version || channel.layout?.pluginPath !== 'integrations/codex/agent-harness-codex') throw new Error('Codex 渠道清单与 active Core runtime 不匹配。');
+  if (declaredRelease && declaredRelease.channelArtifactDigest !== channelArtifactDigest) throw new Error('绑定 Codex 渠道 identity 已过期；必须按当前 active release 重新配置插件。');
+  let compositionDigest = null;
+  if (pointer.compositionDigest !== undefined) {
+    if (!/^[a-f0-9]{64}$/.test(pointer.compositionDigest) || !Array.isArray(pointer.channels) || pointer.channels.length === 0) throw new Error('active release composition identity 无效。');
+    const declaredChannel = pointer.channels.find(item => item.id === 'codex');
+    if (!declaredChannel || declaredChannel.version !== channel.plugin?.version || declaredChannel.artifactDigest !== channelArtifactDigest || declaredChannel.manifest !== 'codex-channel-manifest.json') throw new Error('active release Codex channel identity 与 Runtime 不匹配。');
+    const composition = await readJson(resolve(runtimeRoot, 'runtime-composition.json'));
+    const unsignedComposition = structuredClone(composition);
+    delete unsignedComposition.compositionDigest;
+    if (composition?.protocolVersion !== '1.0' || composition.kind !== 'runtime-composition' || composition.compositionDigest !== digestJson(unsignedComposition) || composition.compositionDigest !== pointer.compositionDigest || composition.core?.version !== manifest.version || composition.core?.artifactDigest !== manifest.packageDigest || digestJson(composition.channels) !== digestJson(pointer.channels) || composition.runtimeEntrypoint !== entryRelative) throw new Error('active release Runtime composition manifest 无效。');
+    compositionDigest = composition.compositionDigest;
+    if (declaredRelease && declaredRelease.compositionDigest !== compositionDigest) throw new Error('绑定 Runtime composition identity 已过期；必须按当前 active release 重新配置插件。');
+  } else if (declaredRelease?.compositionDigest !== undefined) throw new Error('绑定声明了不存在的 Runtime composition identity。');
   const coordinatorRelative = 'integrations/codex/agent-harness-codex/scripts/visible-lifecycle-coordinator.mjs';
   const coordinatorEntrypoint = resolve(runtimeRoot, coordinatorRelative);
+  const hostBridgeRelative = 'integrations/codex/agent-harness-codex/lib/hook-host-exchange.mjs';
+  const hostBridgeModule = resolve(runtimeRoot, hostBridgeRelative);
   if (!channel.files.some(item => item.path === coordinatorRelative)) throw new Error('Codex 渠道清单未包含 visible lifecycle Coordinator。');
+  if (!channel.files.some(item => item.path === hostBridgeRelative)) throw new Error('Codex 渠道清单未包含 PostToolUse Host bridge。');
   const channelPaths = new Set();
   for (const item of channel.files) {
     const file = resolve(runtimeRoot, item?.path ?? '');
@@ -79,5 +95,5 @@ export const validateActiveReleaseBinding = async ({ controlRoot: controlRootInp
   }
   const registryRoot = resolve(dataRoot, 'registry', 'generations', pointer.generationId);
   if (!(await optionalLstat(resolve(registryRoot, 'extensions.json')))?.isFile() || !(await optionalLstat(resolve(registryRoot, 'projects')))?.isDirectory()) throw new Error(`active Registry generation 不完整：${registryRoot}`);
-  return Object.freeze({ version: manifest.version, artifactDigest: manifest.packageDigest, generationId: pointer.generationId, pointerDigest: pointer.pointerDigest, runtimeRoot, registryRoot, entrypoint: activeEntrypoint, coordinatorEntrypoint, channelArtifactDigest });
+  return Object.freeze({ version: manifest.version, artifactDigest: manifest.packageDigest, channelArtifactDigest, compositionDigest, generationId: pointer.generationId, pointerDigest: pointer.pointerDigest, runtimeRoot, registryRoot, entrypoint: activeEntrypoint, coordinatorEntrypoint, hostBridgeModule });
 };

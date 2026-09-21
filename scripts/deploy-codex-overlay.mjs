@@ -8,6 +8,7 @@ import { assertNoLinkPath } from '../src/common/paths.mjs';
 import { assertHarnessWritePath, temporaryEnvironment } from '../src/common/write-boundary.mjs';
 import { verifyReleaseManifest } from '../src/application/release-identity.mjs';
 import { readActiveRelease, resolveActiveRuntimeRoot } from '../src/platform/registry/active-generation.mjs';
+import { createRuntimeCompositionManifest, verifyRuntimeComposition } from '../src/platform/maintenance/runtime-composition.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const dataRoot = assertHarnessWritePath(resolve(root, '.agent-harness-data'), 'Harness data root', root);
@@ -21,8 +22,8 @@ const npmCli = process.env.npm_execpath;
 assert(npmCli, 'NPM_EXECUTABLE_REQUIRED', 'deploy:codex must be started through npm.');
 const pointer = await readActiveRelease(dataRoot, root);
 assert(pointer, 'CODEX_OVERLAY_ACTIVE_RELEASE_REQUIRED', 'An exact Core runtime must be active before deploying Codex.');
-const runtimeRoot = await resolveActiveRuntimeRoot(dataRoot, root);
-const core = await verifyReleaseManifest({ root: runtimeRoot, artifactDigest: pointer.release?.artifactDigest });
+const sourceRuntimeRoot = await resolveActiveRuntimeRoot(dataRoot, root);
+const core = await verifyReleaseManifest({ root: sourceRuntimeRoot, artifactDigest: pointer.release?.artifactDigest });
 const scratchRoot = assertHarnessWritePath(resolve(root, '.tmp', 'codex-overlay'), 'Codex overlay scratch', root);
 await mkdir(scratchRoot, { recursive: true });
 const scratch = await mkdtemp(resolve(scratchRoot, 'run-'));
@@ -62,37 +63,53 @@ try {
     assert(bytes.length === item.size && sha256(bytes) === item.sha256, 'CODEX_OVERLAY_FILE_MISMATCH', `Codex channel file changed: ${item.path}`);
   }
   assert(files.has(`${manifest.layout.pluginPath}/scripts/visible-lifecycle-coordinator.mjs`), 'CODEX_OVERLAY_COORDINATOR_MISSING', 'Codex channel is missing the visible lifecycle Coordinator.');
-  const activeManifest = resolve(runtimeRoot, 'codex-channel-manifest.json');
-  let current;
-  try { current = JSON.parse(await readFile(activeManifest, 'utf8')); }
-  catch (error) { if (error.code !== 'ENOENT') throw error; }
-  assert(!current || current.artifactDigest === artifactDigest, 'CODEX_OVERLAY_ALREADY_BOUND', 'The active Core runtime already has a different Codex channel overlay.');
-  for (const item of manifest.files) {
-    const target = assertNoLinkPath(runtimeRoot, resolve(runtimeRoot, item.path), 'Codex overlay target');
-    let existing;
-    try { existing = await readFile(target); }
-    catch (error) { if (error.code !== 'ENOENT') throw error; }
-    if (existing) {
-      assert(existing.length === item.size && sha256(existing) === item.sha256, 'CODEX_OVERLAY_TARGET_CONFLICT', `Active runtime already contains a different file: ${item.path}`);
-      continue;
-    }
-    await mkdir(dirname(target), { recursive: true });
-    const temporary = `${target}.stage-${process.pid}`;
-    await copyFile(resolve(packageRoot, item.path), temporary);
-    await rename(temporary, target);
-  }
-  const manifestTemp = `${activeManifest}.stage-${process.pid}`;
-  await writeFile(manifestTemp, `${JSON.stringify(manifest, null, 2)}\n`);
-  await rename(manifestTemp, activeManifest).catch(async error => {
-    await rm(manifestTemp, { force: true });
-    if (error.code !== 'EEXIST' && error.code !== 'EPERM') throw error;
-    const onDisk = JSON.parse(await readFile(activeManifest, 'utf8'));
-    assert(onDisk.artifactDigest === artifactDigest, 'CODEX_OVERLAY_ALREADY_BOUND', 'Active Codex channel manifest changed concurrently.');
+  const composition = createRuntimeCompositionManifest({
+    core: { version: core.version, artifactDigest: core.artifactDigest, verified: true },
+    channels: [{ id: 'codex', version: manifest.plugin.version, artifactDigest, manifest: 'codex-channel-manifest.json' }],
   });
-  await verifyReleaseManifest({ root: runtimeRoot, artifactDigest: core.artifactDigest });
-  const receiptRoot = assertHarnessWritePath(resolve(dataRoot, 'channel-deployments', 'codex', artifactDigest), 'Codex overlay receipt root', root);
+  const runtimeRoot = assertHarnessWritePath(resolve(dataRoot, 'compositions', core.version, composition.compositionDigest), 'Immutable runtime composition', root);
+  let existingComposition = false;
+  try {
+    await verifyRuntimeComposition({ controlRoot: root, runtimeRoot, expectedDigest: composition.compositionDigest, expectedCore: composition.core, expectedChannels: composition.channels });
+    existingComposition = true;
+  } catch (error) {
+    if (error.code !== 'ENOENT') throw error;
+  }
+  if (!existingComposition) {
+    const stagingRoot = assertHarnessWritePath(`${runtimeRoot}.staging-${process.pid}`, 'Runtime composition staging root', root);
+    await rm(stagingRoot, { recursive: true, force: true });
+    await mkdir(stagingRoot, { recursive: true });
+    try {
+      const coreManifest = JSON.parse(await readFile(resolve(sourceRuntimeRoot, 'release-manifest.json'), 'utf8'));
+      for (const item of coreManifest.files) {
+        const target = resolve(stagingRoot, item.path);
+        await mkdir(dirname(target), { recursive: true });
+        await copyFile(assertNoLinkPath(sourceRuntimeRoot, resolve(sourceRuntimeRoot, item.path), 'Core composition source'), target);
+      }
+      for (const metadataFile of coreManifest.metadataFiles ?? ['release-manifest.json', 'sbom.spdx.json']) {
+        const target = resolve(stagingRoot, metadataFile);
+        await mkdir(dirname(target), { recursive: true });
+        await copyFile(assertNoLinkPath(sourceRuntimeRoot, resolve(sourceRuntimeRoot, metadataFile), 'Core composition metadata'), target);
+      }
+      for (const item of manifest.files) {
+        const target = assertNoLinkPath(stagingRoot, resolve(stagingRoot, item.path), 'Codex composition target');
+        await mkdir(dirname(target), { recursive: true });
+        await copyFile(resolve(packageRoot, item.path), target);
+      }
+      await writeFile(resolve(stagingRoot, 'codex-channel-manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`);
+      await writeFile(resolve(stagingRoot, 'runtime-composition.json'), `${JSON.stringify(composition, null, 2)}\n`);
+      await verifyRuntimeComposition({ controlRoot: root, runtimeRoot: stagingRoot, expectedDigest: composition.compositionDigest, expectedCore: composition.core, expectedChannels: composition.channels });
+      await mkdir(dirname(runtimeRoot), { recursive: true });
+      await rename(stagingRoot, runtimeRoot);
+    } catch (error) {
+      await rm(stagingRoot, { recursive: true, force: true });
+      throw error;
+    }
+  }
+  await verifyRuntimeComposition({ controlRoot: root, runtimeRoot, expectedDigest: composition.compositionDigest, expectedCore: composition.core, expectedChannels: composition.channels });
+  const receiptRoot = assertHarnessWritePath(resolve(dataRoot, 'channel-deployments', 'codex', composition.compositionDigest), 'Codex overlay receipt root', root);
   await mkdir(receiptRoot, { recursive: true });
-  const receipt = { protocolVersion: '1.0', kind: 'codex-channel-deployment-receipt', corePackageDigest: core.artifactDigest, codexArtifactDigest: artifactDigest, runtimeRoot, fileCount: manifest.files.length, archive, deployedAt: new Date().toISOString() };
+  const receipt = { protocolVersion: '1.0', kind: 'runtime-composition-deployment-receipt', core: composition.core, channels: composition.channels, compositionDigest: composition.compositionDigest, sourceRuntimeRoot, runtimeRoot, fileCount: manifest.files.length, archive, deployedAt: new Date().toISOString() };
   const receiptFile = resolve(receiptRoot, 'receipt.json');
   await writeFile(receiptFile, `${JSON.stringify({ ...receipt, receiptDigest: digestJson(receipt) }, null, 2)}\n`);
   process.stdout.write(`${JSON.stringify({ ok: true, ...receipt, receipt: receiptFile }, null, 2)}\n`);

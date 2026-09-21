@@ -12,6 +12,7 @@ import { assertHarnessWritePath, harnessControlRoot } from '../../common/write-b
 import { assertNoLinkPath, safeSegment } from '../../common/paths.mjs';
 import { verifyReleaseManifest } from '../../application/release-identity.mjs';
 import { activateHarnessInstallationRuntime } from '../../application/installation.mjs';
+import { verifyRuntimeComposition } from './runtime-composition.mjs';
 
 const activationRoot = dataRoot => resolve(dataRoot, 'registry', 'activations');
 const activationLock = dataRoot => resolve(dataRoot, 'registry', 'release-activation.lock');
@@ -19,12 +20,23 @@ const seal = (value, key) => ({ ...value, [key]: digestJson(value) });
 
 export const releaseActivationPlanDigest = plan => digestJson(withoutKeys(plan, ['planDigest']));
 
+const verifyPlannedRuntime = async ({ plan, controlRoot, runtimeRoot }) => {
+  if (plan.runtime.compositionDigest) {
+    return verifyRuntimeComposition({ controlRoot, runtimeRoot, expectedDigest: plan.runtime.compositionDigest, expectedCore: plan.release, expectedChannels: plan.runtime.channels });
+  }
+  return verifyReleaseManifest({ root: runtimeRoot, artifactDigest: plan.release.artifactDigest });
+};
+
 export const verifyReleaseActivationPlan = input => {
   assert(input?.protocolVersion === '1.0' && input.kind === 'release-activation-plan', 'RELEASE_ACTIVATION_PLAN_INVALID', 'Release activation plan is invalid.');
   assert(/^[a-f0-9]{64}$/.test(input.planDigest ?? '') && input.planDigest === releaseActivationPlanDigest(input), 'RELEASE_ACTIVATION_PLAN_DIGEST_MISMATCH', 'Release activation plan digest does not match its contents.');
   assert(input.release?.verified === true && /^[a-f0-9]{64}$/.test(input.release.artifactDigest ?? ''), 'RELEASE_ACTIVATION_RELEASE_INVALID', 'Release activation requires a verified candidate release.');
   assert(Array.isArray(input.extensions) && Array.isArray(input.projects), 'RELEASE_ACTIVATION_PLAN_INVALID', 'Release activation plan must include Extension and Project sets.');
   assert(input.runtime?.relativeRoot && input.runtime?.entrypoint === 'bin/agent-harness.mjs', 'RELEASE_ACTIVATION_RUNTIME_INVALID', 'Release activation plan requires an immutable runtime target.');
+  if (input.runtime.compositionDigest !== undefined) {
+    assert(/^[a-f0-9]{64}$/.test(input.runtime.compositionDigest) && Array.isArray(input.runtime.channels) && input.runtime.channels.length > 0, 'RELEASE_ACTIVATION_COMPOSITION_INVALID', 'Release activation runtime composition identity is invalid.');
+    for (const channel of input.runtime.channels) assert(/^[a-z][a-z0-9-]{0,31}$/.test(channel?.id ?? '') && /^\d+\.\d+\.\d+$/.test(channel?.version ?? '') && /^[a-f0-9]{64}$/.test(channel?.artifactDigest ?? '') && typeof channel.manifest === 'string', 'RELEASE_ACTIVATION_COMPOSITION_INVALID', 'Release activation runtime channel identity is invalid.');
+  }
   const extensionIds = new Set();
   for (const extension of input.extensions) {
     assert(extension?.id && !extensionIds.has(extension.id), 'RELEASE_ACTIVATION_EXTENSION_DUPLICATE', 'Release activation plan contains a duplicate Extension.');
@@ -45,7 +57,7 @@ export const verifyReleaseActivationPlan = input => {
   return structuredClone(input);
 };
 
-export const createReleaseActivationPlan = async ({ controlRoot: controlRootInput, dataRoot: dataRootInput, releaseIdentity, projectIds = [], projectDescriptors = [], extensionReplacements = [], now = () => new Date().toISOString() } = {}) => {
+export const createReleaseActivationPlan = async ({ controlRoot: controlRootInput, dataRoot: dataRootInput, releaseIdentity, runtimeCompositionReceipt = null, projectIds = [], projectDescriptors = [], extensionReplacements = [], now = () => new Date().toISOString() } = {}) => {
   const controlRoot = harnessControlRoot(controlRootInput);
   const dataRoot = assertHarnessWritePath(dataRootInput, 'Release activation data root', controlRoot);
   assert(releaseIdentity?.verified && releaseIdentity.version && releaseIdentity.artifactDigest, 'RELEASE_ACTIVATION_RELEASE_REQUIRED', 'Release activation requires a verified candidate release identity.');
@@ -104,8 +116,16 @@ export const createReleaseActivationPlan = async ({ controlRoot: controlRootInpu
       nextDescriptor,
     };
   });
+  let runtime = { relativeRoot: relative(controlRoot, resolve(dataRoot, 'runtimes', releaseIdentity.version, releaseIdentity.artifactDigest)).replaceAll('\\', '/'), entrypoint: 'bin/agent-harness.mjs' };
+  if (runtimeCompositionReceipt) {
+    const receiptDigest = digestJson(withoutKeys(runtimeCompositionReceipt, ['receiptDigest']));
+    assert(runtimeCompositionReceipt.protocolVersion === '1.0' && runtimeCompositionReceipt.kind === 'runtime-composition-deployment-receipt' && runtimeCompositionReceipt.core?.version === releaseIdentity.version && runtimeCompositionReceipt.core?.artifactDigest === releaseIdentity.artifactDigest && Array.isArray(runtimeCompositionReceipt.channels) && runtimeCompositionReceipt.channels.length > 0 && /^[a-f0-9]{64}$/.test(runtimeCompositionReceipt.compositionDigest ?? '') && runtimeCompositionReceipt.receiptDigest === receiptDigest, 'RELEASE_ACTIVATION_COMPOSITION_RECEIPT_INVALID', 'Release activation runtime composition receipt is invalid.');
+    const verifiedComposition = await verifyRuntimeComposition({ controlRoot, runtimeRoot: runtimeCompositionReceipt.runtimeRoot, expectedDigest: runtimeCompositionReceipt.compositionDigest, expectedCore: { version: releaseIdentity.version, artifactDigest: releaseIdentity.artifactDigest } });
+    assert(digestJson(verifiedComposition.channels) === digestJson(runtimeCompositionReceipt.channels), 'RELEASE_ACTIVATION_COMPOSITION_RECEIPT_MISMATCH', 'Release activation runtime composition receipt does not bind the verified channel set.');
+    runtime = { relativeRoot: relative(controlRoot, verifiedComposition.runtimeRoot).replaceAll('\\', '/'), entrypoint: verifiedComposition.runtimeEntrypoint, compositionDigest: verifiedComposition.compositionDigest, channels: verifiedComposition.channels };
+  }
   const pointer = await readJson(activeReleaseFile(dataRoot), null);
-  const generationDigest = digestJson({ release: releaseIdentity, extensions: extensions.map(extension => ({ id: extension.id, version: extension.version, entry: extension.entry, digest: extension.artifactDigest })), projects: projects.map(project => ({ id: project.id, descriptor: project.nextDescriptor })) });
+  const generationDigest = digestJson({ release: releaseIdentity, runtime, extensions: extensions.map(extension => ({ id: extension.id, version: extension.version, entry: extension.entry, digest: extension.artifactDigest })), projects: projects.map(project => ({ id: project.id, descriptor: project.nextDescriptor })) });
   const body = {
     protocolVersion: '1.0',
     kind: 'release-activation-plan',
@@ -115,7 +135,7 @@ export const createReleaseActivationPlan = async ({ controlRoot: controlRootInpu
     currentGenerationId: pointer?.generationId ?? null,
     generationId: `g-${generationDigest.slice(0, 24)}`,
     release: { version: releaseIdentity.version, artifactDigest: releaseIdentity.artifactDigest, verified: true },
-    runtime: { relativeRoot: relative(controlRoot, resolve(dataRoot, 'runtimes', releaseIdentity.version, releaseIdentity.artifactDigest)).replaceAll('\\', '/'), entrypoint: 'bin/agent-harness.mjs' },
+    runtime,
     expectedExtensionRevision: currentExtensions.revision,
     extensions,
     projects,
@@ -144,9 +164,9 @@ export const applyReleaseActivationPlan = async (planInput, { controlRoot: contr
     const activePointer = await readActiveRelease(dataRoot, controlRoot);
     if (activePointer?.generationId === plan.generationId && activePointer.planDigest === plan.planDigest) {
       const runtimeRoot = assertHarnessWritePath(resolve(controlRoot, plan.runtime.relativeRoot), 'Immutable release runtime', controlRoot);
-      await verifyReleaseManifest({ root: runtimeRoot, artifactDigest: plan.release.artifactDigest });
+      await verifyPlannedRuntime({ plan, controlRoot, runtimeRoot });
       if (activateInstallation) await activateHarnessInstallationRuntime({ controlRoot, runtimeRoot, now: () => activePointer.activatedAt ?? now() });
-      const recoveredBody = { protocolVersion: '1.0', kind: 'release-activation-receipt', commandId: safeCommandId, planDigest: plan.planDigest, generationId: plan.generationId, release: plan.release, projectIds: plan.projects.map(project => project.id), committedAt: activePointer.activatedAt ?? now(), authorityDecision: structuredClone(authorityDecision), recovered: true };
+      const recoveredBody = { protocolVersion: '1.0', kind: 'release-activation-receipt', commandId: safeCommandId, planDigest: plan.planDigest, generationId: plan.generationId, release: plan.release, ...(plan.runtime.compositionDigest ? { compositionDigest: plan.runtime.compositionDigest, channels: plan.runtime.channels } : {}), projectIds: plan.projects.map(project => project.id), committedAt: activePointer.activatedAt ?? now(), authorityDecision: structuredClone(authorityDecision), recovered: true };
       const recovered = { ...recoveredBody, receiptDigest: digestJson(recoveredBody) };
       await atomicWriteJson(receiptFile, recovered, { root: dataRoot });
       return { receipt: recovered, runtimeRoot, runtimeEntrypoint: resolve(runtimeRoot, plan.runtime.entrypoint), reused: true };
@@ -176,8 +196,9 @@ export const applyReleaseActivationPlan = async (planInput, { controlRoot: contr
     const runtimeManifestFile = resolve(runtimeRoot, 'release-manifest.json');
     const existingRuntimeManifest = await readJson(runtimeManifestFile, null);
     if (existingRuntimeManifest) {
-      await verifyReleaseManifest({ root: runtimeRoot, artifactDigest: plan.release.artifactDigest });
+      await verifyPlannedRuntime({ plan, controlRoot, runtimeRoot });
     } else {
+      assert(!plan.runtime.compositionDigest, 'RELEASE_ACTIVATION_COMPOSITION_MISSING', 'Release activation requires the prebuilt immutable runtime composition selected by the plan.');
       const stagingRoot = assertHarnessWritePath(`${runtimeRoot}.staging-${safeCommandId}`, 'Immutable release runtime staging root', controlRoot);
       await rm(stagingRoot, { recursive: true, force: true });
       await mkdir(stagingRoot, { recursive: true });
@@ -223,11 +244,11 @@ export const applyReleaseActivationPlan = async (planInput, { controlRoot: contr
     for (const current of currentProjects.filter(project => !selectedIds.has(project.id))) {
       await atomicWriteJson(resolve(generationRoot, 'projects', `${safeSegment(current.id, 'projectId')}.json`), current, { root: dataRoot });
     }
-    const pointerBody = { protocolVersion: '1.0', kind: 'active-release', generationId: plan.generationId, runtimeRoot: plan.runtime.relativeRoot, runtimeEntrypoint: `${plan.runtime.relativeRoot}/${plan.runtime.entrypoint}`, release: plan.release, planDigest: plan.planDigest, activatedAt: at };
+    const pointerBody = { protocolVersion: '1.0', kind: 'active-release', generationId: plan.generationId, runtimeRoot: plan.runtime.relativeRoot, runtimeEntrypoint: `${plan.runtime.relativeRoot}/${plan.runtime.entrypoint}`, release: plan.release, ...(plan.runtime.compositionDigest ? { compositionDigest: plan.runtime.compositionDigest, channels: plan.runtime.channels } : {}), planDigest: plan.planDigest, activatedAt: at };
     const pointer = { ...pointerBody, pointerDigest: digestJson(pointerBody) };
     await atomicWriteJson(activeReleaseFile(dataRoot), pointer, { root: dataRoot });
     if (activateInstallation) await activateHarnessInstallationRuntime({ controlRoot, runtimeRoot, now: () => at });
-    const receiptBody = { protocolVersion: '1.0', kind: 'release-activation-receipt', commandId: safeCommandId, planDigest: plan.planDigest, generationId: plan.generationId, release: plan.release, projectIds: plan.projects.map(project => project.id), committedAt: at, authorityDecision: structuredClone(authorityDecision) };
+    const receiptBody = { protocolVersion: '1.0', kind: 'release-activation-receipt', commandId: safeCommandId, planDigest: plan.planDigest, generationId: plan.generationId, release: plan.release, ...(plan.runtime.compositionDigest ? { compositionDigest: plan.runtime.compositionDigest, channels: plan.runtime.channels } : {}), projectIds: plan.projects.map(project => project.id), committedAt: at, authorityDecision: structuredClone(authorityDecision) };
     const receipt = { ...receiptBody, receiptDigest: digestJson(receiptBody) };
     await atomicWriteJson(receiptFile, receipt, { root: dataRoot });
     return { receipt, runtimeRoot, runtimeEntrypoint: resolve(runtimeRoot, plan.runtime.entrypoint), reused: false };

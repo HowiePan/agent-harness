@@ -34,6 +34,7 @@ export {
 export { validateBusinessResult, validateProfileResult, VISIBLE_AGENT_RESULT_CONTRACT_VERSION } from './platform/execution/result-contract.mjs';
 export { readActiveRelease, resolveActiveRuntimeRoot } from './platform/registry/active-generation.mjs';
 export { applyReleaseActivationPlan, createReleaseActivationPlan, releaseActivationPlanDigest, verifyReleaseActivationPlan } from './platform/maintenance/release-activation.mjs';
+export { createRuntimeCompositionManifest, runtimeCompositionDigest, verifyRuntimeComposition } from './platform/maintenance/runtime-composition.mjs';
 export * from './platform/workflow/index.mjs';
 export * from './platform/resources/memory/index.mjs';
 export * from './platform/workspace/index.mjs';

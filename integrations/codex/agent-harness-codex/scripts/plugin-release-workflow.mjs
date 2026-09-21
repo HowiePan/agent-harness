@@ -2,7 +2,7 @@ import { spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { mkdir, open, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { delimiter, dirname, isAbsolute, relative, resolve } from 'node:path';
-import { digestJson, sha256 } from '../../../../src/common/canonical.mjs';
+import { digestJson, sha256, withoutKeys } from '../../../../src/common/canonical.mjs';
 import { assert } from '../../../../src/common/errors.mjs';
 import { verifyReleaseCandidateReceipt } from '../../../../src/platform/maintenance/release-receipt.mjs';
 import { assertNoLinkPath } from '../../../../src/common/paths.mjs';
@@ -200,6 +200,7 @@ const loadActiveReleaseBinding = async ({ root, dataRoot }) => {
     registryRoot,
     entrypoint,
     channelArtifactDigest: channel.channelArtifactDigest,
+    compositionDigest: channel.compositionDigest,
   });
 };
 
@@ -215,7 +216,7 @@ export const validatePluginBindings = async ({ root, config, bindings, activeRel
   const activeRelease = await activeReleaseLoader({ root, dataRoot });
   assert(comparablePath(entrypoint) === comparablePath(activeRelease.entrypoint), 'LOCAL_RELEASE_BINDING_ENTRYPOINT_STALE', 'Codex plugin binding entrypoint is not the active verified runtime entrypoint.', { bindingEntrypoint: entrypoint, activeEntrypoint: activeRelease.entrypoint });
   const declaredRelease = bindings.harness.release;
-  assert(declaredRelease?.version === activeRelease.version && declaredRelease?.artifactDigest === activeRelease.packageDigest && declaredRelease?.generationId === activeRelease.generationId && declaredRelease?.pointerDigest === activeRelease.pointerDigest, 'LOCAL_RELEASE_BINDING_RELEASE_STALE', 'Codex plugin binding release identity does not match the active release pointer.', { declaredRelease, activeRelease });
+  assert(declaredRelease?.version === activeRelease.version && declaredRelease?.artifactDigest === activeRelease.packageDigest && declaredRelease?.channelArtifactDigest === activeRelease.channelArtifactDigest && declaredRelease?.compositionDigest === (activeRelease.compositionDigest ?? undefined) && declaredRelease?.generationId === activeRelease.generationId && declaredRelease?.pointerDigest === activeRelease.pointerDigest, 'LOCAL_RELEASE_BINDING_RELEASE_STALE', 'Codex plugin binding release identity does not match the active release pointer, Runtime composition, and Codex channel.', { declaredRelease, activeRelease });
   const projectEntries = Object.entries(bindings.projects);
   assert(projectEntries.length > 0, 'LOCAL_RELEASE_BINDINGS_INVALID', 'Codex plugin bindings require at least one project alias.');
   for (const [alias, project] of projectEntries) {
@@ -247,6 +248,44 @@ export const loadInstalledPluginBindings = async ({ root, config, codexHome = pr
   assert(existsSync(bindingFile), 'LOCAL_RELEASE_INSTALLED_BINDINGS_MISSING', `Installed Codex plugin bindings are missing: ${bindingFile}`);
   const validated = await validatePluginBindings({ root, config, bindings: await readJson(bindingFile) });
   return Object.freeze({ ...validated, bindingFile });
+};
+
+export const probeInstalledPostToolHook = async ({ root, installedBindings, timeoutMs = 5000 }) => {
+  assert(Number.isInteger(timeoutMs) && timeoutMs > 0 && timeoutMs <= 10000, 'LOCAL_RELEASE_HOOK_PROBE_TIMEOUT_INVALID', 'Installed Hook probe timeout must be between 1 and 10000 milliseconds.');
+  const bindingFile = resolve(installedBindings?.bindingFile ?? '');
+  const pluginData = dirname(bindingFile);
+  const pluginRoot = dirname(pluginData);
+  assert(bindingFile && dirname(pluginData) === pluginRoot && (await stat(bindingFile)).isFile(), 'LOCAL_RELEASE_INSTALLED_BINDINGS_MISSING', 'Installed Hook probe requires the verified installed binding file.');
+  const hook = resolve(pluginRoot, 'hooks', 'post-tool-host-bridge.mjs');
+  assert((await stat(hook)).isFile(), 'LOCAL_RELEASE_INSTALLED_HOOK_MISSING', 'Installed PostToolUse Hook is missing.');
+  const event = { hook_event_name: 'PostToolUse', tool_name: 'collaboration.list_agents', tool_use_id: 'local-release-installed-probe', tool_input: {}, tool_response: { agents: [] }, session_id: 'local-release-installed-probe', turn_id: 'local-release-installed-probe' };
+  const result = await new Promise((resolveProbe, reject) => {
+    const child = spawn(process.execPath, [hook], { cwd: root, env: { ...process.env, PLUGIN_ROOT: pluginRoot, PLUGIN_DATA: pluginData }, windowsHide: true, shell: false, stdio: ['pipe', 'pipe', 'pipe'] });
+    let stdout = '';
+    let stderr = '';
+    let settled = false;
+    const finish = callback => value => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      callback(value);
+    };
+    const fail = finish(reject);
+    const pass = finish(resolveProbe);
+    const timer = setTimeout(() => {
+      child.kill();
+      const error = new Error(`Installed PostToolUse Hook probe exceeded ${timeoutMs}ms.`);
+      error.code = 'LOCAL_RELEASE_INSTALLED_HOOK_PROBE_TIMEOUT';
+      fail(error);
+    }, timeoutMs);
+    child.stdout.on('data', chunk => { stdout += chunk; });
+    child.stderr.on('data', chunk => { stderr += chunk; });
+    child.on('error', fail);
+    child.on('close', (exitCode, signal) => pass({ exitCode, signal, stdout, stderr }));
+    child.stdin.end(`${JSON.stringify(event)}\n`);
+  });
+  assert(result.exitCode === 0 && !result.signal && result.stdout.trim() === '{}' && result.stderr.trim() === '', 'LOCAL_RELEASE_INSTALLED_HOOK_PROBE_FAILED', 'Installed PostToolUse Hook did not complete the bounded cache-to-runtime bootstrap probe.', result);
+  return Object.freeze({ hook, bindingFile, timeoutMs, probeDigest: digestJson({ hook, bindingFile, event, stdout: result.stdout.trim() }) });
 };
 
 const sourceSnapshot = async ({ runner, root }) => {
@@ -287,6 +326,49 @@ const writeWorkflowReceipt = async ({ root, runId, value }) => {
   return file;
 };
 
+export const verifyLocalPluginPreparationReceipt = input => {
+  assert(input?.protocolVersion === '1.0' && input.kind === 'local-plugin-release-preparation-receipt' && input.workflowVersion === LOCAL_RELEASE_WORKFLOW_VERSION && input.status === 'prepared', 'LOCAL_RELEASE_PREPARATION_INVALID', 'Local plugin release preparation receipt is invalid.');
+  assert(input.receiptDigest === digestJson(withoutKeys(input, ['receiptDigest'])), 'LOCAL_RELEASE_PREPARATION_DIGEST_MISMATCH', 'Local plugin release preparation receipt digest does not match its contents.');
+  assert(input.source?.clean === true && /^[a-f0-9]{40,64}$/.test(input.source.commit ?? ''), 'LOCAL_RELEASE_PREPARATION_SOURCE_INVALID', 'Local plugin release preparation must bind a clean Git commit.');
+  assert(/^\d+\.\d+\.\d+$/.test(input.release?.version ?? '') && /^[a-f0-9]{64}$/.test(input.release?.packageDigest ?? ''), 'LOCAL_RELEASE_PREPARATION_RELEASE_INVALID', 'Local plugin release preparation Core identity is invalid.');
+  assert(input.channelPackages?.core?.packageDigest === input.release.packageDigest && input.channelPackages?.core?.identity === input.release.packageDigest && /^[a-f0-9]{64}$/.test(input.channelPackages?.core?.archiveDigest ?? ''), 'LOCAL_RELEASE_PREPARATION_CORE_INVALID', 'Prepared Core package identity is invalid.');
+  assert(input.channelPackages?.codex?.requiredCorePackageDigest === input.release.packageDigest && /^[a-f0-9]{64}$/.test(input.channelPackages?.codex?.artifactDigest ?? '') && input.channelPackages.codex.identity === input.channelPackages.codex.artifactDigest && /^[a-f0-9]{64}$/.test(input.channelPackages.codex.archiveDigest ?? ''), 'LOCAL_RELEASE_PREPARATION_CODEX_INVALID', 'Prepared Codex package identity is invalid.');
+  assert(input.candidate?.ok === true && input.candidate.packageDigest === input.release.packageDigest && /^[a-f0-9]{64}$/.test(input.candidate.archiveDigest ?? ''), 'LOCAL_RELEASE_PREPARATION_CANDIDATE_INVALID', 'Prepared Release Candidate identity is invalid.');
+  const requiredSteps = ['check:codex-host-fast', 'check', 'test', 'workspace:canary', 'check:clean-room', 'pack:core', 'pack:codex', 'check:residue', 'check:channel-composition', 'build:release-candidate'];
+  assert(Array.isArray(input.steps) && input.steps.length === requiredSteps.length && new Set(input.steps.map(step => step?.id)).size === input.steps.length && requiredSteps.every(id => input.steps.some(step => step.id === id && step.status === 'passed')), 'LOCAL_RELEASE_PREPARATION_STEPS_INVALID', 'Local plugin release preparation does not prove every required pre-install stage passed.');
+  return structuredClone(input);
+};
+
+const verifyPreparedChannel = async ({ root, channel, prepared }) => {
+  const archive = assertNoLinkPath(root, resolve(prepared.archive), `prepared ${channel} archive`);
+  const receiptFile = assertNoLinkPath(root, resolve(prepared.receipt), `prepared ${channel} package receipt`);
+  const [archiveBytes, packageReceipt] = await Promise.all([readFile(archive), readJson(receiptFile)]);
+  assert(packageReceipt.protocolVersion === '1.0' && packageReceipt.channel === channel && packageReceipt.identity === prepared.identity && comparablePath(packageReceipt.archive) === comparablePath(archive) && packageReceipt.archiveDigest === prepared.archiveDigest && sha256(archiveBytes) === prepared.archiveDigest, 'LOCAL_RELEASE_PREPARED_ARTIFACT_MISMATCH', `Prepared ${channel} package bytes or receipt changed after validation.`);
+};
+
+const verifyPreparedArtifacts = async ({ root, preparation }) => {
+  await Promise.all([
+    verifyPreparedChannel({ root, channel: 'core', prepared: preparation.channelPackages.core }),
+    verifyPreparedChannel({ root, channel: 'codex', prepared: preparation.channelPackages.codex }),
+  ]);
+  const candidateReceiptFile = assertNoLinkPath(root, resolve(preparation.candidate.receipt), 'prepared Release Candidate receipt');
+  const candidateArchiveFile = assertNoLinkPath(root, resolve(preparation.candidate.archive), 'prepared Release Candidate archive');
+  const [candidateReceipt, candidateArchiveBytes] = await Promise.all([readJson(candidateReceiptFile), readFile(candidateArchiveFile)]);
+  const verifiedCandidate = verifyReleaseCandidateReceipt(candidateReceipt);
+  assert(verifiedCandidate.source.commit === preparation.source.commit && verifiedCandidate.source.clean === true && verifiedCandidate.releaseManifest.packageDigest === preparation.release.packageDigest && verifiedCandidate.archive.sha256 === preparation.candidate.archiveDigest && sha256(candidateArchiveBytes) === preparation.candidate.archiveDigest, 'LOCAL_RELEASE_PREPARED_ARTIFACT_MISMATCH', 'Prepared Release Candidate changed after validation.');
+  return Object.freeze({ candidateReceiptFile, candidateArchiveFile });
+};
+
+const writePreparationReceipt = async ({ root, value }) => {
+  const preparationId = `${value.source.commit.slice(0, 12)}-${value.channelPackages.codex.artifactDigest.slice(0, 16)}`;
+  const directory = assertHarnessWritePath(resolve(root, '.agent-harness-data', 'release-preparations', preparationId), 'local release preparation directory', root);
+  await mkdir(directory, { recursive: true });
+  const file = resolve(directory, 'receipt.json');
+  const receipt = receiptPayload(value);
+  await writeFile(file, `${JSON.stringify(receipt, null, 2)}\n`, 'utf8');
+  return Object.freeze({ receipt, file });
+};
+
 const acquireReleaseLock = async ({ root, source, startedAt }) => {
   const directory = assertHarnessWritePath(resolve(root, '.agent-harness-data', 'release-workflows'), 'local release workflow root', root);
   await mkdir(directory, { recursive: true });
@@ -309,9 +391,62 @@ const acquireReleaseLock = async ({ root, source, startedAt }) => {
   return Object.freeze({ file, release: () => rm(file, { force: true }) });
 };
 
-export const runLocalPluginRelease = async ({ root: rootInput, mode, npmCli, runner: runnerInput = undefined, bindingsLoader = loadPluginBindings, installedBindingsLoader = loadInstalledPluginBindings, clock = () => new Date() }) => {
+const prepareLocalPluginRelease = async ({ root, source, releaseIdentity, config, runner, npmCli, clock }) => {
+  const startedAt = clock().toISOString();
+  const releaseLock = await acquireReleaseLock({ root, source, startedAt });
+  const steps = [];
+  const channelPackages = {};
+  try {
+    for (const script of ['check:codex-host-fast', 'check', 'test', 'workspace:canary', 'check:clean-room', 'pack:core', 'pack:codex', 'check:residue']) {
+      const stageStartedAt = clock().toISOString();
+      const stageResult = await npmRun(runner, npmCli, script);
+      if (script === 'pack:core') assert(stageResult.json?.ok === true && stageResult.json?.channel === 'core' && stageResult.json?.packageDigest === releaseIdentity.artifactDigest, 'LOCAL_RELEASE_CORE_PACKAGE_INVALID', 'Core channel package does not match the verified release manifest.');
+      if (script === 'pack:codex') assert(stageResult.json?.ok === true && stageResult.json?.channel === 'codex' && stageResult.json?.requiredCorePackageDigest === releaseIdentity.artifactDigest, 'LOCAL_RELEASE_CODEX_PACKAGE_INVALID', 'Codex channel package does not bind the verified Core package.');
+      if (script === 'pack:core') channelPackages.core = stageResult.json;
+      if (script === 'pack:codex') channelPackages.codex = stageResult.json;
+      steps.push({ id: script, status: 'passed', startedAt: stageStartedAt, completedAt: clock().toISOString(), ...(stageResult.json?.archiveDigest ? { archiveDigest: stageResult.json.archiveDigest, packageReceipt: stageResult.json.receipt } : {}) });
+    }
+    const compositionStartedAt = clock().toISOString();
+    await runner(process.execPath, [resolve(root, 'scripts/check-channel-composition.mjs'), '--core', channelPackages.core.archive, '--codex', channelPackages.codex.archive]);
+    steps.push({ id: 'check:channel-composition', status: 'passed', startedAt: compositionStartedAt, completedAt: clock().toISOString() });
+    await assertSourceUnchanged({ runner, root, expectedCommit: source.commit });
+    const candidateStartedAt = clock().toISOString();
+    const candidateResult = await npmRun(runner, npmCli, 'build:release-candidate');
+    const candidate = candidateResult.json;
+    assert(candidate?.ok === true && typeof candidate.receipt === 'string' && typeof candidate.archive === 'string' && typeof candidate.archiveDigest === 'string' && typeof candidate.packageDigest === 'string', 'LOCAL_RELEASE_CANDIDATE_INVALID', 'Release candidate builder returned an invalid receipt.');
+    const candidateReceiptFile = assertNoLinkPath(root, resolve(candidate.receipt), 'local Release Candidate receipt');
+    const candidateArchiveFile = assertNoLinkPath(root, resolve(candidate.archive), 'local Release Candidate archive');
+    const verifiedCandidate = verifyReleaseCandidateReceipt(await readJson(candidateReceiptFile));
+    const archiveBytes = await readFile(candidateArchiveFile);
+    assert(verifiedCandidate.source.commit === source.commit && verifiedCandidate.source.clean === true, 'LOCAL_RELEASE_CANDIDATE_SOURCE_MISMATCH', 'Release Candidate receipt is not bound to the frozen clean commit.');
+    assert(verifiedCandidate.version === config.version, 'LOCAL_RELEASE_CANDIDATE_VERSION_MISMATCH', 'Release Candidate version does not match the frozen plugin version.');
+    assert(verifiedCandidate.releaseManifest.packageDigest === releaseIdentity.artifactDigest && candidate.packageDigest === releaseIdentity.artifactDigest, 'LOCAL_RELEASE_CANDIDATE_PACKAGE_MISMATCH', 'Release Candidate package digest does not match the verified release manifest.');
+    assert(verifiedCandidate.archive.sha256 === candidate.archiveDigest && sha256(archiveBytes) === candidate.archiveDigest, 'LOCAL_RELEASE_CANDIDATE_ARCHIVE_MISMATCH', 'Release Candidate archive bytes do not match the candidate receipt.');
+    steps.push({ id: 'build:release-candidate', status: 'passed', startedAt: candidateStartedAt, completedAt: clock().toISOString(), candidateReceipt: candidate.receipt, archiveDigest: candidate.archiveDigest });
+    await assertSourceUnchanged({ runner, root, expectedCommit: source.commit });
+    const value = {
+      protocolVersion: '1.0',
+      kind: 'local-plugin-release-preparation-receipt',
+      workflowVersion: LOCAL_RELEASE_WORKFLOW_VERSION,
+      status: 'prepared',
+      source,
+      release: { version: config.version, packageDigest: releaseIdentity.artifactDigest },
+      channelPackages,
+      candidate,
+      steps,
+      startedAt,
+      completedAt: clock().toISOString(),
+    };
+    const written = await writePreparationReceipt({ root, value });
+    return Object.freeze({ ok: true, ...written.receipt, receipt: written.file });
+  } finally {
+    await releaseLock.release();
+  }
+};
+
+export const runLocalPluginRelease = async ({ root: rootInput, mode, npmCli, preparedReceiptFile = undefined, runner: runnerInput = undefined, bindingsLoader = loadPluginBindings, installedBindingsLoader = loadInstalledPluginBindings, installedHookProbe = probeInstalledPostToolHook, clock = () => new Date() }) => {
   const root = resolve(rootInput);
-  assert(['check', 'apply'].includes(mode), 'LOCAL_RELEASE_MODE_INVALID', 'Local release workflow mode must be check or apply.');
+  assert(['check', 'prepare', 'apply'].includes(mode), 'LOCAL_RELEASE_MODE_INVALID', 'Local release workflow mode must be check, prepare, or apply.');
   assert(Number(process.versions.node.split('.')[0]) >= 22, 'LOCAL_RELEASE_NODE_UNSUPPORTED', 'Local release workflow requires Node.js 22 or newer.');
   assert(typeof npmCli === 'string' && npmCli.length > 0, 'NPM_EXECUTABLE_REQUIRED', 'Local release workflow must be started through npm.');
   const runner = runnerInput ?? createCommandRunner({ root, npmCli });
@@ -319,6 +454,14 @@ export const runLocalPluginRelease = async ({ root: rootInput, mode, npmCli, run
   const source = await sourceSnapshot({ runner, root });
   const releaseIdentity = await verifyReleaseManifest({ root });
   assert(releaseIdentity.version === config.version, 'LOCAL_RELEASE_MANIFEST_VERSION_MISMATCH', 'Release manifest version does not match package.json.');
+  if (mode === 'prepare') return prepareLocalPluginRelease({ root, source, releaseIdentity, config, runner, npmCli, clock });
+  let preparation = null;
+  if (mode === 'apply') {
+    assert(typeof preparedReceiptFile === 'string' && preparedReceiptFile.length > 0, 'LOCAL_RELEASE_PREPARATION_REQUIRED', 'Local plugin installation requires an exact preparation receipt. Run release:codex:prepare first, then pass its receipt with --prepared.');
+    preparation = verifyLocalPluginPreparationReceipt(await readJson(assertNoLinkPath(root, resolve(preparedReceiptFile), 'local release preparation receipt')));
+    assert(preparation.source.commit === source.commit && preparation.release.version === config.version && preparation.release.packageDigest === releaseIdentity.artifactDigest, 'LOCAL_RELEASE_PREPARATION_STALE', 'Local plugin release preparation does not match the current clean source and Core identity.');
+    await verifyPreparedArtifacts({ root, preparation });
+  }
   const bindings = await bindingsLoader({ root, config });
   assert(bindings.release?.packageDigest === releaseIdentity.artifactDigest, 'LOCAL_RELEASE_ACTIVE_RUNTIME_STALE', 'The active bound runtime does not match the source release artifact. Build and explicitly activate the exact candidate before reinstalling the plugin.', { sourcePackageDigest: releaseIdentity.artifactDigest, activePackageDigest: bindings.release?.packageDigest ?? null });
 
@@ -357,37 +500,13 @@ export const runLocalPluginRelease = async ({ root: rootInput, mode, npmCli, run
   const runId = `${startedAt.replaceAll(':', '').replaceAll('.', '-')}-${source.commit.slice(0, 12)}`;
   const releaseLock = await acquireReleaseLock({ root, source, startedAt });
   const steps = [];
-  let candidate;
+  let candidate = preparation.candidate;
   let removed = false;
-  const channelPackages = {};
+  const channelPackages = preparation.channelPackages;
   try {
-    for (const script of ['check', 'test', 'workspace:canary', 'check:clean-room', 'pack:core', 'pack:codex', 'check:residue']) {
-      const stageStartedAt = clock().toISOString();
-      const stageResult = await npmRun(runner, npmCli, script);
-      if (script === 'pack:core') assert(stageResult.json?.ok === true && stageResult.json?.channel === 'core' && stageResult.json?.packageDigest === releaseIdentity.artifactDigest, 'LOCAL_RELEASE_CORE_PACKAGE_INVALID', 'Core channel package does not match the verified release manifest.');
-      if (script === 'pack:codex') assert(stageResult.json?.ok === true && stageResult.json?.channel === 'codex' && stageResult.json?.requiredCorePackageDigest === releaseIdentity.artifactDigest, 'LOCAL_RELEASE_CODEX_PACKAGE_INVALID', 'Codex channel package does not bind the verified Core package.');
-      if (script === 'pack:core') channelPackages.core = stageResult.json;
-      if (script === 'pack:codex') channelPackages.codex = stageResult.json;
-      steps.push({ id: script, status: 'passed', startedAt: stageStartedAt, completedAt: clock().toISOString(), ...(stageResult.json?.archiveDigest ? { archiveDigest: stageResult.json.archiveDigest, packageReceipt: stageResult.json.receipt } : {}) });
-    }
-    const compositionStartedAt = clock().toISOString();
-    await runner(process.execPath, [resolve(root, 'scripts/check-channel-composition.mjs'), '--core', channelPackages.core.archive, '--codex', channelPackages.codex.archive]);
-    steps.push({ id: 'check:channel-composition', status: 'passed', startedAt: compositionStartedAt, completedAt: clock().toISOString() });
+    steps.push({ id: 'prepared-artifacts-verified', status: 'passed', startedAt, completedAt: clock().toISOString(), preparationReceipt: resolve(preparedReceiptFile), coreArchiveDigest: channelPackages.core.archiveDigest, codexArchiveDigest: channelPackages.codex.archiveDigest, candidateArchiveDigest: candidate.archiveDigest });
     assert(bindings.release.channelArtifactDigest === channelPackages.codex.artifactDigest, 'LOCAL_RELEASE_CODEX_CHANNEL_STALE', 'The deployed Codex overlay does not match the source channel package.');
-    await assertSourceUnchanged({ runner, root, expectedCommit: source.commit });
-    const candidateStartedAt = clock().toISOString();
-    const candidateResult = await npmRun(runner, npmCli, 'build:release-candidate');
-    candidate = candidateResult.json;
-    assert(candidate?.ok === true && typeof candidate.receipt === 'string' && typeof candidate.archive === 'string' && typeof candidate.archiveDigest === 'string' && typeof candidate.packageDigest === 'string', 'LOCAL_RELEASE_CANDIDATE_INVALID', 'Release candidate builder returned an invalid receipt.');
-    const candidateReceiptFile = assertNoLinkPath(root, resolve(candidate.receipt), 'local Release Candidate receipt');
-    const candidateArchiveFile = assertNoLinkPath(root, resolve(candidate.archive), 'local Release Candidate archive');
-    const verifiedCandidate = verifyReleaseCandidateReceipt(await readJson(candidateReceiptFile));
-    const archiveBytes = await readFile(candidateArchiveFile);
-    assert(verifiedCandidate.source.commit === source.commit && verifiedCandidate.source.clean === true, 'LOCAL_RELEASE_CANDIDATE_SOURCE_MISMATCH', 'Release Candidate receipt is not bound to the frozen clean commit.');
-    assert(verifiedCandidate.version === config.version, 'LOCAL_RELEASE_CANDIDATE_VERSION_MISMATCH', 'Release Candidate version does not match the frozen plugin version.');
-    assert(verifiedCandidate.releaseManifest.packageDigest === releaseIdentity.artifactDigest && candidate.packageDigest === releaseIdentity.artifactDigest, 'LOCAL_RELEASE_CANDIDATE_PACKAGE_MISMATCH', 'Release Candidate package digest does not match the verified release manifest.');
-    assert(verifiedCandidate.archive.sha256 === candidate.archiveDigest && sha256(archiveBytes) === candidate.archiveDigest, 'LOCAL_RELEASE_CANDIDATE_ARCHIVE_MISMATCH', 'Release Candidate archive bytes do not match the candidate receipt.');
-    steps.push({ id: 'build:release-candidate', status: 'passed', startedAt: candidateStartedAt, completedAt: clock().toISOString(), candidateReceipt: candidate.receipt, archiveDigest: candidate.archiveDigest });
+    assert(/^[a-f0-9]{64}$/.test(bindings.release.compositionDigest ?? ''), 'LOCAL_RELEASE_RUNTIME_COMPOSITION_REQUIRED', 'The active plugin binding must select an immutable Core + Codex runtime composition before installation.');
     await assertSourceUnchanged({ runner, root, expectedCommit: source.commit });
     const currentBindings = await bindingsLoader({ root, config });
     assert(currentBindings.digest === bindings.digest, 'LOCAL_RELEASE_BINDINGS_CHANGED', 'Codex plugin bindings changed while the release workflow was running. Restart from preflight.');
@@ -424,11 +543,12 @@ export const runLocalPluginRelease = async ({ root: rootInput, mode, npmCli, run
     const installed = inspectPluginInstallation({ payload: finalList.json, config, requireInstalled: true });
     installedBindings = await installedBindingsLoader({ root, config });
     assert(installedBindings.digest === currentBindings.digest, 'LOCAL_RELEASE_INSTALLED_BINDINGS_STALE', 'Reinstalled Codex plugin bindings do not match the verified source binding.', { sourceBindingDigest: currentBindings.digest, installedBindingDigest: installedBindings.digest, installedBindingFile: installedBindings.bindingFile });
-    steps.push({ id: 'plugin-verify', status: 'passed', startedAt: verifyStartedAt, completedAt: clock().toISOString(), installedVersion: installed.version, enabled: installed.enabled, source: installed.source, bindingDigest: installedBindings.digest, bindingFile: installedBindings.bindingFile });
+    const hookProbe = await installedHookProbe({ root, installedBindings });
+    steps.push({ id: 'plugin-verify', status: 'passed', startedAt: verifyStartedAt, completedAt: clock().toISOString(), installedVersion: installed.version, enabled: installed.enabled, source: installed.source, bindingDigest: installedBindings.digest, bindingFile: installedBindings.bindingFile, hookProbe });
     await assertSourceUnchanged({ runner, root, expectedCommit: source.commit });
 
     const completedAt = clock().toISOString();
-    const value = { ...common, installedBindings, runId, status: 'completed', startedAt, completedAt, candidate, removedExistingInstallation: removed, steps };
+    const value = { ...common, installedBindings, runId, status: 'completed', startedAt, completedAt, preparationReceipt: resolve(preparedReceiptFile), preparationReceiptDigest: preparation.receiptDigest, candidate, removedExistingInstallation: removed, steps };
     const receipt = await writeWorkflowReceipt({ root, runId, value });
     return Object.freeze({ ok: true, ...value, receipt });
   } catch (error) {

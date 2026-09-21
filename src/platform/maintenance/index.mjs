@@ -4,3 +4,4 @@ export { listIssueRecords, readIssueTriage, recordIssueTriage, validateIssueTria
 export { sealReleaseCandidateReceipt, verifyReleaseCandidateReceipt } from './release-receipt.mjs';
 export { assertArtifactRebaseDecision } from './upgrade-authorization.mjs';
 export { applyReleaseActivationPlan, createReleaseActivationPlan, releaseActivationPlanDigest, verifyReleaseActivationPlan } from './release-activation.mjs';
+export { createRuntimeCompositionManifest, runtimeCompositionDigest, verifyRuntimeComposition } from './runtime-composition.mjs';
