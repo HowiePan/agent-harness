@@ -72,7 +72,7 @@
     "pack:codex": "node scripts/pack-codex.mjs",
     "deploy:codex": "node scripts/deploy-codex-overlay.mjs",
     "check:channels": "node scripts/check-channel-composition.mjs",
-    "check:codex-host-fast": "node --test --test-isolation=none --test-concurrency=1 test/post-tool-host-bootstrap.test.mjs test/codex-command-skills.test.mjs test/plugin-release-workflow.test.mjs test/runtime-composition.test.mjs",
+    "check:codex-host-fast": "node --test --test-isolation=none --test-concurrency=1 test/post-tool-host-bootstrap.test.mjs test/codex-command-skills.test.mjs test/plugin-release-workflow.test.mjs test/runtime-composition.test.mjs test/hook-host-exchange.test.mjs test/visible-lifecycle-events.test.mjs",
     "pack:dry-run": "node scripts/pack-dry-run.mjs",
     "release:codex:check": "node integrations/codex/agent-harness-codex/scripts/release-codex.mjs --check",
     "release:codex:prepare": "node integrations/codex/agent-harness-codex/scripts/release-codex.mjs --prepare",

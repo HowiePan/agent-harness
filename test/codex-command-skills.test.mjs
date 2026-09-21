@@ -99,6 +99,10 @@ test('Codex plugin exposes one explicit-project pseudo-command router', async ()
   assert.match(skill, /所有面向用户的控制对话必须使用中文/);
   assert.match(skill, /不得为了中文输出而翻译、改写或补充 Harness 生成的子 Agent Prompt/);
   assert.match(skill, /qualityFindingPolicy=repair-and-rereview/);
+  assert.match(skill, /`yield_time_ms` no greater than 1000/);
+  assert.match(skill, /stop with `CODEX_VISIBLE_COORDINATOR_SESSION_REQUIRED`/);
+  assert.match(skill, /deduplicate by the exact `requestId` plus `requestDigest`/);
+  assert.match(skill, /Never inspect the pending directory as a substitute/);
   assert.match(operatorSkill, /所有面向用户的控制对话必须使用中文/);
   assert.match(metadata, /allow_implicit_invocation: true/);
   assert.match(metadata, /h:report/);

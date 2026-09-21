@@ -12,8 +12,8 @@ const hookToolName = (name, requested) => name === requested || name === 'Agent'
 const safeId = value => typeof value === 'string' && /^[a-zA-Z0-9_-]{1,128}$/.test(value);
 const toolUseId = value => typeof value === 'string' && value.length > 0 && value.length <= 256;
 
-export const createHookHostExchange = ({ controlRoot, dataRoot, codexSessionId, output = process.stdout, onRejected = null, responseTimeoutMs = 120000, pollMs = 50, now = () => new Date().toISOString() }) => {
-  if (!Number.isSafeInteger(responseTimeoutMs) || responseTimeoutMs < 1 || !Number.isSafeInteger(pollMs) || pollMs < 1) fail('CODEX_HOST_TIMEOUT_INVALID', 'Hook Host exchange requires positive timeouts.');
+export const createHookHostExchange = ({ controlRoot, dataRoot, codexSessionId, output = process.stdout, onRejected = null, responseTimeoutMs = 120000, pollMs = 50, requestReminderMs = 5000, now = () => new Date().toISOString() }) => {
+  if (!Number.isSafeInteger(responseTimeoutMs) || responseTimeoutMs < 1 || !Number.isSafeInteger(pollMs) || pollMs < 1 || !Number.isSafeInteger(requestReminderMs) || requestReminderMs < 1) fail('CODEX_HOST_TIMEOUT_INVALID', 'Hook Host exchange requires positive timeout, poll, and request-reminder intervals.');
   if (typeof codexSessionId !== 'string' || !codexSessionId.length) fail('CODEX_HOST_SESSION_BINDING_REQUIRED', 'Hook Host exchange requires the parent Codex session ID.');
   const root = assertHarnessWritePath(resolve(dataRoot, 'host-bridge'), 'Codex Hook Host bridge', controlRoot);
   const pendingRoot = assertHarnessWritePath(resolve(root, 'pending'), 'Codex Hook Host pending requests', controlRoot);
@@ -40,14 +40,20 @@ export const createHookHostExchange = ({ controlRoot, dataRoot, codexSessionId, 
       const responseFile = assertHarnessWritePath(resolve(pendingRoot, `${request.requestId}.response.json`), 'Codex Hook Host response', controlRoot);
       await mkdir(pendingRoot, { recursive: true });
       await atomicWriteJson(file, { request, requestDigest, argumentsDigest: digestJson(request.arguments), codexSessionId, expiresAt: new Date(Date.parse(now()) + responseTimeoutMs).toISOString() }, { root });
-      output.write(`${JSON.stringify(request)}\n`);
+      const requestLine = `${JSON.stringify(request)}\n`;
+      output.write(requestLine);
       const deadline = Date.now() + responseTimeoutMs;
+      let nextReminder = Date.now() + requestReminderMs;
       while (Date.now() < deadline) {
         const reply = await readJson(responseFile, null);
         if (reply) {
           if (reply.requestDigest !== requestDigest || reply.tool !== request.tool || reply.argumentsDigest !== digestJson(request.arguments) || reply.hookSessionId !== codexSessionId || !toolUseId(reply.toolUseId) || seenToolUseIds.has(reply.toolUseId) || !reply.result || typeof reply.result !== 'object' || Array.isArray(reply.result)) await reject('CODEX_HOST_HOOK_RESPONSE_INVALID', 'Hook Host response is not bound to the pending native tool call.', request, reply);
           seenToolUseIds.add(reply.toolUseId);
           return structuredClone(createHostResponseEnvelope(request, reply.result).result);
+        }
+        if (Date.now() >= nextReminder) {
+          output.write(requestLine);
+          nextReminder = Date.now() + requestReminderMs;
         }
         await delay(pollMs);
       }

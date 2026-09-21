@@ -10,6 +10,7 @@ import { assertMachineBoundQualityTransport } from '../lib/stdio-host-exchange.m
 import { createHookHostExchange } from '../lib/hook-host-exchange.mjs';
 import { createHostExchangeDiagnosticWriter } from '../lib/host-exchange-diagnostics.mjs';
 import { decodeVisibleLifecycleIntent } from '../lib/visible-lifecycle-intent.mjs';
+import { createPlannedLifecycleEvent, createPreflightLifecycleEvent } from '../lib/visible-lifecycle-events.mjs';
 import { captureSourceManifest } from '../../../../src/platform/workflow/source-manifest.mjs';
 
 const samePath = (left, right) => process.platform === 'win32'
@@ -80,11 +81,11 @@ const main = async () => {
       arguments: intent.command.arguments,
       executionWorkspaceRoot: intent.executionWorkspaceRoot,
     });
-    emit({ kind: 'codex-visible-lifecycle-event', phase: 'planned', commandId: intent.commandId, intentDigest: intent.intentDigest, planDigest: plan.planDigest, plan });
+    emit(createPlannedLifecycleEvent({ commandId: intent.commandId, intentDigest: intent.intentDigest, plan }));
     assertMachineBoundQualityTransport(hostExchange, intent.command.action);
     const onGateProgress = event => emit({ kind: 'codex-visible-lifecycle-event', phase: 'gate-progress', commandId: intent.commandId, planDigest: plan.planDigest, event });
     const preflight = await harness.createExecutionReadinessReport(plan, { onGateProgress });
-    emit({ kind: 'codex-visible-lifecycle-event', phase: 'preflight', commandId: intent.commandId, intentDigest: intent.intentDigest, planDigest: plan.planDigest, executionReady: preflight.executionReady, report: preflight });
+    emit(createPreflightLifecycleEvent({ commandId: intent.commandId, intentDigest: intent.intentDigest, planDigest: plan.planDigest, report: preflight }));
     if (!preflight.executionReady) {
       process.exitCode = 2;
       return;

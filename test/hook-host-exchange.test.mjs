@@ -36,6 +36,34 @@ test('PostToolUse captures the exact native result for one pending request', asy
   bridge.close();
 });
 
+test('an unresolved native Host request is re-emitted without changing its identity', async t => {
+  const controlRoot = resolve(process.cwd());
+  const parent = resolve(harnessTemporaryRoot(), 'hook-host-exchange');
+  await mkdir(parent, { recursive: true });
+  const dataRoot = await mkdtemp(resolve(parent, 'reminder-'));
+  t.after(() => rm(dataRoot, { recursive: true, force: true }));
+  const output = new PassThrough();
+  let rendered = '';
+  let releaseRepeated;
+  const repeated = new Promise(resolveRepeated => { releaseRepeated = resolveRepeated; });
+  output.on('data', chunk => {
+    rendered += chunk.toString();
+    if (rendered.trim().split(/\r?\n/u).length >= 2) releaseRepeated();
+  });
+  const bridge = createHookHostExchange({ controlRoot, dataRoot, codexSessionId: 'parent-session', output, responseTimeoutMs: 1000, pollMs: 2, requestReminderMs: 10 });
+  const pendingRequest = request();
+  const pending = bridge.exchange(pendingRequest);
+  await repeated;
+  const lines = rendered.trim().split(/\r?\n/u).map(line => JSON.parse(line));
+  assert(lines.length >= 2);
+  assert.deepEqual(lines[0], pendingRequest);
+  assert.deepEqual(lines[1], pendingRequest);
+  const captured = await captureHookToolResult({ hook_event_name: 'PostToolUse', tool_name: 'collaboration.list_agents', tool_use_id: 'tool-reminder', tool_input: {}, tool_response: { agents: [] }, session_id: 'parent-session', turn_id: 'turn-reminder' }, { controlRoot, dataRoot });
+  assert.equal(captured.captured, true);
+  assert.deepEqual(await pending, { agents: [] });
+  bridge.close();
+});
+
 test('missing Hook result times out with a bound diagnostic and closes the channel', async t => {
   const controlRoot = resolve(process.cwd());
   const parent = resolve(harnessTemporaryRoot(), 'hook-host-exchange');
