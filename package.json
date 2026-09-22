@@ -27,6 +27,8 @@
     "./extensions/legacy-compat": "./integrations/legacy-consumers/legacy-compat.mjs",
     "./extensions/composable-workflow": "./src/platform/extensions/composable-workflow.mjs",
     "./consumers": "./src/flows/index.mjs",
+    "./consumers/delivery-lifecycle": "./src/flows/delivery-lifecycle/index.mjs",
+    "./consumers/batch-production": "./src/flows/batch-production/index.mjs",
     "./consumers/cardworld-engine": "./src/flows/delivery-lifecycle/index.mjs",
     "./consumers/tabletop-collection": "./src/flows/batch-production/index.mjs",
     "./consumers/requirements-design": "./src/flows/requirements-design/index.mjs",

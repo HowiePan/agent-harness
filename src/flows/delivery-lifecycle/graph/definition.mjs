@@ -1,27 +1,38 @@
 import { defineWorkflowDefinition } from '../../../platform/workflow/definition.mjs';
+import { intakeNode, canonicalNode } from '../nodes/intake/index.mjs';
+import { planNode } from '../nodes/plan/index.mjs';
+import { implementNode } from '../nodes/implement/index.mjs';
+import { scopeNode } from '../nodes/scope/index.mjs';
+import { docsNode } from '../nodes/docs/index.mjs';
+import { qualityNode } from '../nodes/quality/index.mjs';
+import { reviewNode } from '../nodes/review/index.mjs';
+import { deliverNode } from '../nodes/deliver/index.mjs';
 
-const engineNode = (id, action, stage, dependsOn = [], options = {}) => ({ id, template: 'engine-stage', action, stage, dependsOn, ...options });
+const withDeps = (node, dependsOn) => ({ ...node, dependsOn });
+
 export const engineWorkflowDefinition = defineWorkflowDefinition({
-  id: 'engine-delivery', version: '1.0.0', profileId: 'engine-delivery',
+  id: 'engine-delivery',
+  version: '1.0.0',
+  profileId: 'engine-delivery',
   routes: {
     full: [
-      engineNode('intake', 'requirements-intake', 'requirement-intake'),
-      engineNode('canonical', 'canonical-requirement', 'canonical-requirement', ['intake']),
-      engineNode('plan', 'plan', 'version-planning', ['canonical']),
-      engineNode('implement', 'implement', 'implementation', ['plan']),
-      engineNode('scope', 'scope', 'scope-resolution', ['implement']),
-      engineNode('docs', 'docs', 'docs-closeout', ['scope']),
-      engineNode('quality', 'quality', 'quality', ['docs'], { qualityReview: true }),
-      engineNode('review', 'review', 'user-code-review', ['quality'], { readOnly: true }),
-      engineNode('deliver', 'deliver', 'delivery-receipt', ['review'], { readOnly: true }),
+      intakeNode,
+      canonicalNode,
+      planNode,
+      implementNode,
+      scopeNode,
+      docsNode,
+      qualityNode,
+      reviewNode,
+      deliverNode,
     ],
-    requirements: [engineNode('intake', 'requirements-intake', 'requirement-intake'), engineNode('canonical', 'canonical-requirement', 'canonical-requirement', ['intake']), engineNode('plan', 'plan', 'version-planning', ['canonical'])],
-    deliver: [engineNode('quality', 'quality', 'quality', [], { qualityReview: true }), engineNode('deliver', 'deliver', 'delivery-receipt', ['quality'], { readOnly: true })],
-    quality: [engineNode('quality', 'quality', 'quality', [], { qualityReview: true })],
-    plan: [engineNode('plan', 'plan', 'version-planning')],
-    implement: [engineNode('implement', 'implement', 'implementation')],
-    scope: [engineNode('scope', 'scope', 'scope-resolution')],
-    docs: [engineNode('docs', 'docs', 'docs-closeout')],
-    review: [engineNode('review', 'review', 'user-code-review', [], { readOnly: true })],
+    requirements: [intakeNode, canonicalNode, planNode],
+    deliver: [withDeps(qualityNode, []), withDeps(deliverNode, ['quality'])],
+    quality: [withDeps(qualityNode, [])],
+    plan: [withDeps(planNode, [])],
+    implement: [withDeps(implementNode, [])],
+    scope: [withDeps(scopeNode, [])],
+    docs: [withDeps(docsNode, [])],
+    review: [withDeps(reviewNode, [])],
   },
 });

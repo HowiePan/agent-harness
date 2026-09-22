@@ -1,1 +1,1 @@
-export { collectionBatchProfile } from './collection-batch.mjs';
+export { collectionBatchProfile, batchProductionProfile } from './collection-batch.mjs';

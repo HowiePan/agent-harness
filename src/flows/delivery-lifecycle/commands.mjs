@@ -37,3 +37,6 @@ export const cardWorldCommandManifest = defineCommandManifest({
     },
   },
 });
+
+export const deliveryLifecycleCommandManifest = cardWorldCommandManifest;
+export const engineDeliveryCommandManifest = cardWorldCommandManifest;

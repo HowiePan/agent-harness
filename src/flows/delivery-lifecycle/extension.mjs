@@ -2,11 +2,12 @@ import { defineExtensionPack } from '../../platform/extensions/contract.mjs';
 import { engineDeliveryProfile } from './policy/index.mjs';
 import { engineWorkflowDefinition } from './graph/definition.mjs';
 import { cardWorldCommandManifest } from './commands.mjs';
-import { createCardWorldProjectDescriptor, compileCardWorldFeatureGraph } from './variants/cardworld/descriptor.mjs';
-import { createCardWorldLifecyclePlan } from './planner.mjs';
+import { createDeliveryProjectDescriptor, compileDeliveryFeatureGraph } from './descriptor.mjs';
+import { createDeliveryLifecyclePlan } from './planner.mjs';
 
 export const extensionPack = defineExtensionPack({
   id: 'cardworld-engine-profile',
+  aliases: ['engine-delivery-profile', 'delivery-lifecycle-profile'],
   version: '1.0.0',
   profiles: [engineDeliveryProfile],
   workflows: [engineWorkflowDefinition],
@@ -17,9 +18,9 @@ export const extensionPack = defineExtensionPack({
     createLifecyclePlan: { executionClass: 'pure-planner' },
   },
   operations: {
-    createProjectDescriptor: createCardWorldProjectDescriptor,
-    compileFeatureGraph: compileCardWorldFeatureGraph,
-    createLifecyclePlan: createCardWorldLifecyclePlan,
+    createProjectDescriptor: createDeliveryProjectDescriptor,
+    compileFeatureGraph: compileDeliveryFeatureGraph,
+    createLifecyclePlan: createDeliveryLifecyclePlan,
   },
 });
 

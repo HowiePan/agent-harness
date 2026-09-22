@@ -2,20 +2,24 @@ import { assert } from '../../../common/errors.mjs';
 import { approvalSatisfied, orderedBarrier } from '../../../flow-kit/primitives.mjs';
 import { createQualityFollowUpFeatures, hasCurrentCleanQualityReview, validateQualityReviewPolicies } from '../../../flow-kit/profiles/quality-loop.mjs';
 
+const resolveItemId = feature => feature.metadata.itemId ?? feature.metadata.gameId;
+
 export const collectionBatchProfile = Object.freeze({
   id: 'collection-batch',
   version: '1.0.0',
 
   validateConfig(config, features) {
-    assert(config.activeBatch, 'ACTIVE_BATCH_REQUIRED', 'Collection Profile requires an active batch.');
+    assert(config.activeBatch, 'ACTIVE_BATCH_REQUIRED', 'Batch Profile requires an active batch.');
     const batches = Array.isArray(config.batches) ? config.batches.map(batch => ({ id: String(batch.id), order: Number(batch.order), status: batch.status ?? 'planned' })) : [{ id: String(config.activeBatch), order: 1, status: 'active' }];
     assert(batches.some(batch => batch.id === config.activeBatch), 'ACTIVE_BATCH_UNKNOWN', 'The active batch must exist in the batch list.');
-    const logicalGames = new Set(features.filter(feature => !feature.metadata.capabilityOwner).map(feature => feature.metadata.gameId).filter(Boolean));
-    assert(logicalGames.size <= Number(config.maxLogicalGames ?? 10), 'LOGICAL_GAME_LIMIT_EXCEEDED', 'Collection batch exceeds its configured logical game limit.', { games: [...logicalGames] });
+    const maxItems = Number(config.maxLogicalItems ?? config.maxLogicalGames ?? 10);
+    const logicalItems = new Set(features.filter(feature => !feature.metadata.capabilityOwner).map(resolveItemId).filter(Boolean));
+    assert(logicalItems.size <= maxItems, 'LOGICAL_GAME_LIMIT_EXCEEDED', 'Batch exceeds its configured logical item limit.', { items: [...logicalItems], games: [...logicalItems] });
     return {
       activeBatch: String(config.activeBatch),
       batches,
-      maxLogicalGames: Number(config.maxLogicalGames ?? 10),
+      maxLogicalItems: maxItems,
+      maxLogicalGames: maxItems,
       requiredFinalGates: [...new Set(config.requiredFinalGates ?? [])],
       requireRuleReady: config.requireRuleReady !== false,
       requireHarnessAcceptance: config.requireHarnessAcceptance !== false,
@@ -35,8 +39,9 @@ export const collectionBatchProfile = Object.freeze({
     validateQualityReviewPolicies(state.features);
     const owners = new Map();
     for (const feature of state.features) {
-      assert(feature.metadata.batchId, 'FEATURE_BATCH_REQUIRED', `Collection Feature ${feature.id} requires metadata.batchId.`);
-      assert(feature.metadata.gameId || feature.metadata.capabilityOwner, 'FEATURE_GAME_REQUIRED', `Collection Feature ${feature.id} requires metadata.gameId unless it is a declared shared-capability owner.`);
+      assert(feature.metadata.batchId, 'FEATURE_BATCH_REQUIRED', `Batch Feature ${feature.id} requires metadata.batchId.`);
+      const itemId = resolveItemId(feature);
+      assert(itemId || feature.metadata.capabilityOwner, 'FEATURE_GAME_REQUIRED', `Batch Feature ${feature.id} requires metadata itemId/gameId unless it is a declared shared-capability owner.`);
       if (feature.metadata.capabilityKey && feature.metadata.capabilityOwner) {
         assert(!owners.has(feature.metadata.capabilityKey), 'CAPABILITY_OWNER_DUPLICATE', `Capability ${feature.metadata.capabilityKey} has multiple owners.`);
         owners.set(feature.metadata.capabilityKey, feature.id);
@@ -55,7 +60,6 @@ export const collectionBatchProfile = Object.freeze({
   canDispatch(feature, state) {
     const activeBatch = state.profile.config.activeBatch;
     if (feature.metadata.batchId !== activeBatch) return { ok: false, reason: 'batch-barrier' };
-    const active = state.profile.config.batches.find(batch => batch.id === activeBatch);
     if (!orderedBarrier({ currentId: activeBatch, entries: state.profile.config.batches }).ok) return { ok: false, reason: 'previous-batch-not-closed' };
     if (state.profile.config.requireBatchLaunchDecision && !approvalSatisfied(state, `batch:${activeBatch}:launched`)) return { ok: false, reason: 'batch-launch-decision-required' };
     if (state.profile.config.requireRuleReady && feature.metadata.ruleStatus !== 'rule-ready') return { ok: false, reason: 'rule-readiness-required' };
@@ -70,18 +74,18 @@ export const collectionBatchProfile = Object.freeze({
       const missingQualityRoot = qualityRoots.find(root => !hasCurrentCleanQualityReview(state, root));
       if (!qualityRoots.length || missingQualityRoot) return { ok: false, reason: `current-source-clean-quality-review-required${missingQualityRoot ? `:${missingQualityRoot}` : ''}` };
     }
-    const games = [...new Set(state.features.filter(feature => !feature.metadata.capabilityOwner).map(feature => feature.metadata.gameId).filter(Boolean))];
+    const items = [...new Set(state.features.filter(feature => !feature.metadata.capabilityOwner).map(resolveItemId).filter(Boolean))];
     if (config.requireHarnessAcceptance) {
-      const pendingGame = games.find(gameId => !approvalSatisfied(state, `game:${gameId}:harness-accepted`));
-      if (pendingGame) return { ok: false, reason: `game-harness-acceptance-required:${pendingGame}` };
+      const pendingItem = items.find(itemId => !approvalSatisfied(state, `item:${itemId}:harness-accepted`) && !approvalSatisfied(state, `game:${itemId}:harness-accepted`));
+      if (pendingItem) return { ok: false, reason: `game-harness-acceptance-required:${pendingItem}` };
     }
     if (config.requireIndependentReview) {
-      const pendingGame = games.find(gameId => !approvalSatisfied(state, `game:${gameId}:release-review-approved`));
-      if (pendingGame) return { ok: false, reason: `game-release-review-required:${pendingGame}` };
+      const pendingItem = items.find(itemId => !approvalSatisfied(state, `item:${itemId}:release-review-approved`) && !approvalSatisfied(state, `game:${itemId}:release-review-approved`));
+      if (pendingItem) return { ok: false, reason: `game-release-review-required:${pendingItem}` };
     }
     if (config.requireUserGameAcceptance) {
-      const pendingGame = games.find(gameId => !approvalSatisfied(state, `game:${gameId}:accepted`));
-      if (pendingGame) return { ok: false, reason: `game-user-acceptance-required:${pendingGame}` };
+      const pendingItem = items.find(itemId => !approvalSatisfied(state, `item:${itemId}:accepted`) && !approvalSatisfied(state, `game:${itemId}:accepted`));
+      if (pendingItem) return { ok: false, reason: `game-user-acceptance-required:${pendingItem}` };
     }
     const missingGate = state.profile.config.requiredFinalGates.find(id => !state.gates.some(gate => gate.id === id && gate.status === 'passed' && gate.forcedFresh));
     if (missingGate) return { ok: false, reason: `required-final-gate-missing:${missingGate}` };
@@ -90,12 +94,26 @@ export const collectionBatchProfile = Object.freeze({
   },
 
   project(state) {
-    const games = {};
+    const items = {};
     for (const feature of state.features) {
-      const gameId = feature.metadata.gameId ?? '_shared';
-      games[gameId] ??= [];
-      games[gameId].push({ id: feature.id, state: feature.state, blocker: feature.blocker ?? null });
+      const itemId = resolveItemId(feature) ?? '_shared';
+      items[itemId] ??= [];
+      items[itemId].push({ id: feature.id, state: feature.state, blocker: feature.blocker ?? null });
     }
-    return { profile: this.id, status: state.status, activeBatch: state.profile.config.activeBatch, epoch: state.epoch, generation: state.generation, games, openFindings: state.findings.filter(finding => finding.status !== 'resolved') };
+    return {
+      profile: this.id,
+      status: state.status,
+      activeBatch: state.profile.config.activeBatch,
+      epoch: state.epoch,
+      generation: state.generation,
+      items,
+      games: items,
+      openFindings: state.findings.filter(finding => finding.status !== 'resolved'),
+    };
   },
+});
+
+export const batchProductionProfile = Object.freeze({
+  ...collectionBatchProfile,
+  id: 'batch-production',
 });

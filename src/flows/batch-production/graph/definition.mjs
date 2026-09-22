@@ -1,13 +1,25 @@
 import { defineWorkflowDefinition } from '../../../platform/workflow/definition.mjs';
+import { rulesNode } from '../nodes/rules/index.mjs';
+import { produceNode } from '../nodes/produce/index.mjs';
+import { qualityNode } from '../nodes/quality/index.mjs';
+import { reviewNode } from '../nodes/review/index.mjs';
+import { acceptNode } from '../nodes/accept/index.mjs';
+import { launchNode, closeNode } from '../nodes/lifecycle/index.mjs';
 
-const collectionNode = (id, action, dependsOn = [], options = {}) => ({ id, template: 'collection-stage', action, forEach: 'item', dependsOn, ...options });
+const withDeps = (node, dependsOn) => ({ ...node, dependsOn });
+
 export const collectionWorkflowDefinition = defineWorkflowDefinition({
-  id: 'collection-batch-production', version: '1.0.0', profileId: 'collection-batch',
+  id: 'collection-batch-production',
+  version: '1.0.0',
+  profileId: 'collection-batch',
   routes: {
-    full: [collectionNode('rules', 'rules'), collectionNode('produce', 'produce', ['rules']), collectionNode('quality', 'quality', ['produce'], { qualityReview: true }), collectionNode('review', 'review', ['quality'], { readOnly: true }), collectionNode('accept', 'accept', ['review'], { readOnly: true })],
-    rules: [collectionNode('rules', 'rules')], launch: [collectionNode('launch', 'launch', [], { readOnly: true })],
-    produce: [collectionNode('produce', 'produce')], quality: [collectionNode('quality', 'quality', [], { qualityReview: true })],
-    review: [collectionNode('review', 'review', [], { readOnly: true })], accept: [collectionNode('accept', 'accept', [], { readOnly: true })],
-    close: [collectionNode('close', 'close', [], { readOnly: true })],
+    full: [rulesNode, produceNode, qualityNode, reviewNode, acceptNode],
+    rules: [rulesNode],
+    launch: [launchNode],
+    produce: [withDeps(produceNode, [])],
+    quality: [withDeps(qualityNode, [])],
+    review: [withDeps(reviewNode, [])],
+    accept: [withDeps(acceptNode, [])],
+    close: [closeNode],
   },
 });

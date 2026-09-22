@@ -19,8 +19,8 @@ export const EXPECTED_MARKETPLACE_NAME = 'agent-harness-local';
 export const EXPECTED_PLUGIN_RELATIVE_PATH = 'integrations/codex/agent-harness-codex';
 export const REQUIRED_CODEX_MULTI_AGENT_CONTRACT = 'multi-agent-v2';
 
-const stripWindowsDevicePrefix = value => value.replace(/^\\\\\?\\/, '');
-const comparablePath = value => stripWindowsDevicePrefix(resolve(value)).replaceAll('\\', '/').toLowerCase();
+const stripWindowsDevicePrefix = value => String(value ?? '').replace(/^\\\\\?\\/, '');
+const comparablePath = value => stripWindowsDevicePrefix(resolve(stripWindowsDevicePrefix(value))).replaceAll('\\', '/').toLowerCase();
 const readJson = async file => JSON.parse(await readFile(file, 'utf8'));
 
 const resolveExecutable = executable => {

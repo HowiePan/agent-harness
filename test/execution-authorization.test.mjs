@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { resolve } from 'node:path';
 import { execFile as execFileCallback } from 'node:child_process';
 import { promisify } from 'node:util';
 import { compileAgentPrompt } from '../src/platform/plugins/codec/agent-prompt-codec.mjs';
@@ -106,7 +107,7 @@ test('trusted deny constraints override a well-formed Descriptor-compatible gran
 
 test('Harness refuses untrusted authorization callbacks', async () => {
   await assert.rejects(
-    () => createHarness({ dataRoot: `${process.cwd()}\\.agent-harness-data-untrusted-test`, releaseIdentity: { version: '1.0.0', artifactDigest: null }, strictProjectIdentity: false, initializeStorage: false, executionAuthorizationAdapter: { verifyExecutionGrant: () => ({ verified: true }) } }),
+    () => createHarness({ dataRoot: resolve(process.cwd(), '.agent-harness-data-untrusted-test'), releaseIdentity: { version: '1.0.0', artifactDigest: null }, strictProjectIdentity: false, initializeStorage: false, executionAuthorizationAdapter: { verifyExecutionGrant: () => ({ verified: true }) } }),
     error => error.code === 'EXECUTION_AUTHORIZATION_ADAPTER_REQUIRED',
   );
 });

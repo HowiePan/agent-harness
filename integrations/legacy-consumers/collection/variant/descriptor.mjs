@@ -1,6 +1,6 @@
 import { isAbsolute } from 'node:path';
-import { assert } from '../../../../common/errors.mjs';
-import { validateWorkGraph } from '../../../../kernel/work-graph.mjs';
+import { assert } from '../../../../src/common/errors.mjs';
+import { validateWorkGraph } from '../../../../src/kernel/work-graph.mjs';
 
 export const COLLECTION_FINAL_GATE_IDS = Object.freeze([
   'collection-typecheck',

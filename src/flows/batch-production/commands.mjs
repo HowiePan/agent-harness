@@ -39,3 +39,6 @@ export const tabletopCollectionCommandManifest = defineCommandManifest({
     },
   },
 });
+
+export const batchProductionCommandManifest = tabletopCollectionCommandManifest;
+export const collectionBatchCommandManifest = tabletopCollectionCommandManifest;

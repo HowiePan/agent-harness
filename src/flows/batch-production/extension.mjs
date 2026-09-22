@@ -1,14 +1,15 @@
 import { defineExtensionPack } from '../../platform/extensions/contract.mjs';
-import { collectionBatchProfile } from './policy/index.mjs';
+import { collectionBatchProfile, batchProductionProfile } from './policy/index.mjs';
 import { collectionWorkflowDefinition } from './graph/definition.mjs';
 import { tabletopCollectionCommandManifest } from './commands.mjs';
-import { createTabletopCollectionProjectDescriptor, compileTabletopCollectionFeatureGraph } from './variants/collection/descriptor.mjs';
-import { createTabletopCollectionLifecyclePlan } from './planner.mjs';
+import { createBatchProductionProjectDescriptor, compileBatchProductionFeatureGraph } from './descriptor.mjs';
+import { createBatchProductionLifecyclePlan } from './planner.mjs';
 
 export const extensionPack = defineExtensionPack({
   id: 'tabletop-collection-profile',
+  aliases: ['batch-production-profile'],
   version: '1.0.0',
-  profiles: [collectionBatchProfile],
+  profiles: [collectionBatchProfile, batchProductionProfile],
   workflows: [collectionWorkflowDefinition],
   commandManifest: tabletopCollectionCommandManifest,
   operationManifest: {
@@ -17,9 +18,9 @@ export const extensionPack = defineExtensionPack({
     createLifecyclePlan: { executionClass: 'pure-planner' },
   },
   operations: {
-    createProjectDescriptor: createTabletopCollectionProjectDescriptor,
-    compileFeatureGraph: compileTabletopCollectionFeatureGraph,
-    createLifecyclePlan: createTabletopCollectionLifecyclePlan,
+    createProjectDescriptor: createBatchProductionProjectDescriptor,
+    compileFeatureGraph: compileBatchProductionFeatureGraph,
+    createLifecyclePlan: createBatchProductionLifecyclePlan,
   },
 });
 

@@ -1,4 +1,4 @@
-import { createDeliveryTemplates } from '../../nodes/delivery/feature.mjs';
+import { createDeliveryTemplates } from '../../../../src/flows/delivery-lifecycle/nodes/delivery/feature.mjs';
 
 const qualityAllowedPaths = Object.freeze([
   'card_world_engine/src', 'card_world_engine/tests', 'card_world_engine/Cargo.toml', 'card_world_engine/Cargo.lock',
@@ -14,6 +14,7 @@ const actionPaths = Object.freeze({
 });
 
 export const engineTemplates = createDeliveryTemplates({
-  actionPaths, qualityRootPrefix: 'engine',
-  forbiddenPaths: ['.git', '.agent-harness-data', '.cardworld-local', 'F:/agent-harness'],
+  actionPaths,
+  qualityRootPrefix: 'engine',
+  forbiddenPaths: ['.git', '.agent-harness-data', '.cardworld-local'],
 });
