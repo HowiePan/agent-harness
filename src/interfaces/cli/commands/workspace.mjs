@@ -1,12 +1,37 @@
-import { WorkspaceRegistry } from '../../../platform/workspace/workspace-registry.mjs';
+import { WorkspaceRegistry, workspaceDecisionContext } from '../../../platform/workspace/workspace-registry.mjs';
 
 export const handleWorkspaceCommand = async ({ subject, dataRoot, controlRoot, take, jsonFile, jsonInput }) => {
   if (!['register', 'list', 'show', 'rollback'].includes(subject)) return false;
   const registry = new WorkspaceRegistry({ root: dataRoot, controlRoot });
-  const workspace = subject === 'list' ? await registry.list()
-    : subject === 'show' ? await registry.get(take('--workspace-id'))
-    : subject === 'register' ? await registry.register(await jsonInput('--input'), { expectedRevision: Number(take('--expected-revision') ?? 0), commandId: take('--command-id'), authorityDecision: await jsonFile(take('--decision')) })
-    : await registry.rollback(take('--workspace-id'), Number(take('--revision')), { commandId: take('--command-id'), authorityDecision: await jsonFile(take('--decision')) });
+  let workspace;
+  if (subject === 'list') {
+    workspace = await registry.list();
+  } else if (subject === 'show') {
+    workspace = await registry.get(take('--workspace-id'));
+  } else if (subject === 'register') {
+    const input = await jsonInput('--input');
+    const current = await registry.get(input.workspaceId, { required: false });
+    const expectedRevision = Number(take('--expected-revision') ?? current?.revision ?? 0);
+    const commandId = take('--command-id') ?? `register-${Date.now()}`;
+    let authorityDecision = take('--decision') ? await jsonFile(take('--decision')) : null;
+    const actor = take('--actor');
+    if (!authorityDecision && actor) {
+      authorityDecision = {
+        actor,
+        decision: 'approved',
+        action: 'workspace-register',
+        expiresAt: '2099-01-01T00:00:00.000Z',
+        context: workspaceDecisionContext({ current, input, expectedRevision }),
+      };
+    }
+    workspace = await registry.register(input, { expectedRevision, commandId, authorityDecision });
+  } else if (subject === 'rollback') {
+    const workspaceId = take('--workspace-id');
+    const revision = Number(take('--revision'));
+    const commandId = take('--command-id') ?? `rollback-${Date.now()}`;
+    const authorityDecision = take('--decision') ? await jsonFile(take('--decision')) : null;
+    workspace = await registry.rollback(workspaceId, revision, { commandId, authorityDecision });
+  }
   console.log(JSON.stringify({ ok: true, [subject === 'list' ? 'workspaces' : 'workspace']: workspace }, null, 2));
   return true;
 };

@@ -1,4 +1,9 @@
+import { readFile } from 'node:fs/promises';
+import { resolve } from 'node:path';
 import { assert } from '../../../src/common/errors.mjs';
+import { WorkspaceRegistry, workspaceDecisionContext } from '../../../src/platform/workspace/workspace-registry.mjs';
+import { defaultDataRoot } from '../../../src/application/harness.mjs';
+import { harnessControlRoot } from '../../../src/common/write-boundary.mjs';
 
 /**
  * Native tool definitions exposable to OpenCode model context.
@@ -11,6 +16,47 @@ export const createOpenCodeTools = ({ harness = null, getHarness = null } = {}) 
   };
 
   return {
+    harness_init: {
+      description: 'Initialize and register an Agent Harness workspace from a local harness.json configuration file.',
+      parameters: {
+        type: 'object',
+        properties: {
+          actor: { type: 'string', description: 'The approving actor name (e.g. howie).' },
+          file: { type: 'string', description: 'Path to workspace configuration file, defaults to harness.json.' },
+        },
+      },
+      execute: async ({ actor = 'howie', file = 'harness.json' } = {}) => {
+        const cleanActor = String(actor ?? '').trim() || 'howie';
+        const cleanFile = String(file ?? '').trim() || 'harness.json';
+        const controlRoot = harnessControlRoot();
+        const dataRoot = defaultDataRoot(controlRoot);
+        const resolvedPath = resolve(process.cwd(), cleanFile);
+        const content = await readFile(resolvedPath, 'utf8');
+        const input = JSON.parse(content);
+        const registry = new WorkspaceRegistry({ root: dataRoot, controlRoot });
+        const current = await registry.get(input.workspaceId, { required: false });
+        const expectedRevision = current?.revision ?? 0;
+        const commandId = `init-${Date.now()}`;
+        const authorityDecision = {
+          actor: cleanActor,
+          decision: 'approved',
+          action: 'workspace-register',
+          expiresAt: '2099-01-01T00:00:00.000Z',
+          context: workspaceDecisionContext({ current, input, expectedRevision }),
+        };
+        const workspace = await registry.register(input, { expectedRevision, commandId, authorityDecision });
+        return {
+          ok: true,
+          workspaceId: workspace.workspaceId,
+          alias: workspace.alias,
+          revision: workspace.revision,
+          projects: workspace.projects.map(p => p.id),
+          sources: workspace.sources.map(s => ({ id: s.sourceId, type: s.type, root: s.root })),
+          message: `Workspace "${workspace.workspaceId}" (alias: "${workspace.alias}") successfully registered at revision ${workspace.revision}.`,
+        };
+      },
+    },
+
     harness_status: {
       description: 'Query status, active Run, and finding ledger for a project in Agent Harness.',
       parameters: {

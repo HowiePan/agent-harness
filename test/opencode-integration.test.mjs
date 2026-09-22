@@ -4,7 +4,8 @@ import { resolve } from 'node:path';
 import {
   createOpenCodeVisibleHostAdapter,
   OPENCODE_HOST_PROVIDER,
-} from '../integrations/opencode/src/adapter.mjs';
+  createOpenCodePlugin,
+} from '../integrations/opencode/src/index.mjs';
 import { createWriteGuard } from '../integrations/opencode/src/guard.mjs';
 import { createOpenCodeTools } from '../integrations/opencode/src/tools.mjs';
 import { isVisibleHostAdapter } from '../src/platform/plugins/runtime/visible-host-adapter.mjs';
@@ -83,7 +84,7 @@ test('OpenCode write guard blocks unauthorized file edits', async () => {
   );
 });
 
-test('OpenCode tools expose status and gate interfaces', () => {
+test('OpenCode tools expose init, status and gate interfaces', () => {
   const tools = createOpenCodeTools({
     harness: {
       projectRegistry: {
@@ -95,6 +96,26 @@ test('OpenCode tools expose status and gate interfaces', () => {
     },
   });
 
+  assert.equal(typeof tools.harness_init.execute, 'function');
   assert.equal(typeof tools.harness_status.execute, 'function');
   assert.equal(typeof tools.harness_gate.execute, 'function');
+});
+
+test('OpenCode plugin registers /h and /h:init command and subagent in config hook', async () => {
+  const plugin = await createOpenCodePlugin()({});
+  assert.equal(typeof plugin.config, 'function');
+
+  const cfg = {};
+  plugin.config(cfg);
+
+  assert.equal(typeof cfg.command?.h, 'object');
+  assert.match(cfg.command.h.description, /initialize workspace/);
+  assert.match(cfg.command.h.template, /harness_init/);
+
+  assert.equal(typeof cfg.command?.['h:init'], 'object');
+  assert.match(cfg.command['h:init'].description, /harness\.json/);
+  assert.match(cfg.command['h:init'].template, /harness_init/);
+
+  assert.equal(typeof cfg.agent?.['harness-worker'], 'object');
+  assert.equal(cfg.agent['harness-worker'].mode, 'subagent');
 });
