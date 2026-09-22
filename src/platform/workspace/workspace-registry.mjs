@@ -126,22 +126,22 @@ export class WorkspaceRegistry {
   stateFile(id) { return resolve(this.workspaceDirectory(id), 'active.json'); }
   revisionFile(id, revision) { return resolve(this.workspaceDirectory(id), 'revisions', `${revision}.json`); }
 
-  async get(id, { required = true } = {}) {
+  async get(id, { required = true, validate = true } = {}) {
     const state = await readJson(this.stateFile(id), null);
     if (!state) { if (required) fail('WORKSPACE_NOT_FOUND', `Workspace not found: ${id}`); return null; }
     assert(state.stateDigest === digestJson(withoutKeys(state, ['stateDigest'])), 'WORKSPACE_STATE_DIGEST_MISMATCH', 'Workspace active state digest is invalid.');
     assert(state.schemaVersion === '1.0' && state.workspaceId === id && state.descriptorDigest === digestJson(state.descriptor), 'WORKSPACE_DIGEST_MISMATCH', 'Workspace active record digest is invalid.');
     const revision = await readJson(this.revisionFile(id, state.revision), null);
     assert(revision?.descriptorDigest === state.descriptorDigest && digestJson(revision.descriptor) === state.descriptorDigest, 'WORKSPACE_REVISION_MISSING', 'Workspace active revision is missing or changed.');
-    validateWorkspaceDescriptor(state.descriptor);
+    if (validate) validateWorkspaceDescriptor(state.descriptor);
     return { ...structuredClone(state.descriptor), revision: state.revision, descriptorDigest: state.descriptorDigest, registeredAt: state.registeredAt };
   }
 
-  async list() {
+  async list({ validate = true } = {}) {
     let entries;
     try { entries = await readdir(this.directory, { withFileTypes: true }); }
     catch (error) { if (error.code === 'ENOENT') return []; throw error; }
-    return Promise.all(entries.filter(item => item.isDirectory() && idPattern.test(item.name)).map(item => this.get(item.name)));
+    return Promise.all(entries.filter(item => item.isDirectory() && idPattern.test(item.name)).map(item => this.get(item.name, { validate })));
   }
 
   async resolveAlias(alias) {
@@ -157,7 +157,7 @@ export class WorkspaceRegistry {
     const payloadDigest = digestJson(descriptor);
     await mkdir(this.directory, { recursive: true });
     return withDirectoryLock(resolve(this.directory, '.registry.lock'), async () => {
-      const current = await this.get(descriptor.workspaceId, { required: false });
+      const current = await this.get(descriptor.workspaceId, { required: false, validate: false });
       const state = await readJson(this.stateFile(descriptor.workspaceId), null);
       const prior = state?.commands?.[commandId];
       if (prior) {
@@ -165,7 +165,7 @@ export class WorkspaceRegistry {
         return current;
       }
       assert((current?.revision ?? 0) === expectedRevision, 'WORKSPACE_REVISION_CONFLICT', 'Workspace Descriptor revision changed.');
-      const all = await this.list();
+      const all = await this.list({ validate: false });
       assert(!all.some(item => item.alias === descriptor.alias && item.workspaceId !== descriptor.workspaceId), 'WORKSPACE_ALIAS_DUPLICATE', 'Another Workspace already uses this alias.');
       for (const project of descriptor.projects) assert(!all.some(item => item.workspaceId !== descriptor.workspaceId && item.projects.some(other => other.id === project.id)), 'WORKSPACE_PROJECT_OWNER_CONFLICT', `Member Project ${project.id} already belongs to another Workspace.`);
       for (const target of descriptor.executionTargets) {

@@ -13,11 +13,13 @@ export const createRequirementsDesignPlan = ({ intent, project, runId }) => {
   assert(manifest.projectId === project.id, 'SOURCE_PROJECT_MISMATCH', 'Source Manifest Project differs from the workflow Project.');
   const documents = manifest.sources.filter(source => source.type === 'document');
   const repositories = manifest.sources.filter(source => source.type === 'repository');
-  assert(documents.length && repositories.length, 'WORKFLOW_SOURCE_KIND_REQUIRED', 'Requirements workflow requires at least one document and one repository.');
+  assert(repositories.length, 'WORKFLOW_SOURCE_KIND_REQUIRED', 'Requirements workflow requires at least one repository.');
   const receiver = resolveLifecycleExecutionPolicy({ project, action: intent.action, workflowId: intent.workflowId }).runtimePluginId;
   for (const source of manifest.sources) assert(source.accessScope.includes(receiver), 'SOURCE_RECEIVER_DENIED', `Runtime cannot receive source ${source.sourceId}.`);
   assert(input.outputPaths.requirements !== input.outputPaths.design, 'WORKFLOW_OUTPUT_CONFLICT', 'Requirements and design outputs must differ.');
-  const features = compileWorkflowFeatures({ definition: requirementsDesignWorkflow, routeId: 'analyze', templates: { 'reference-feature': createReferenceFeature }, context: { intent }, items: { documents, repositories } });
+  const routeId = documents.length > 0 ? 'analyze' : 'analyze-code';
+  const items = documents.length > 0 ? { documents, repositories } : { repositories };
+  const features = compileWorkflowFeatures({ definition: requirementsDesignWorkflow, routeId, templates: { 'reference-feature': createReferenceFeature }, context: { intent }, items });
   const workflow = { id: requirementsDesignWorkflow.id, version: requirementsDesignWorkflow.version, artifactDigest: requirementsDesignWorkflow.artifactDigest };
   const requiredFinalGatesForRun = requiredFinalGates(project);
   return {

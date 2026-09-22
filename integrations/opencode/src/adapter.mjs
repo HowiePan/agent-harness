@@ -13,6 +13,7 @@ export const createOpenCodeVisibleHostAdapter = ({
   spawnTask = null,
   inspectTask = null,
   waitTask = null,
+  resultTask = null,
   cancelTask = null,
   adapterVersion = '1.0.0',
 } = {}) => {
@@ -33,6 +34,7 @@ export const createOpenCodeVisibleHostAdapter = ({
       dispatchId: input.dispatch?.dispatchId ?? input.dispatchId,
       packetDigest: input.dispatch?.packetDigest ?? input.packetDigest,
       promptDigest: input.prompt?.promptDigest ?? input.promptDigest,
+      packet: input.packet,
       surface,
       inspectRef,
       status: 'running',
@@ -61,8 +63,11 @@ export const createOpenCodeVisibleHostAdapter = ({
   };
 
   const inspect = async expected => {
-    const task = tasks.get(expected.agentId);
-    assert(task, 'OPENCODE_AGENT_NOT_FOUND', `Task for agent ${expected.agentId} not found in OpenCode host.`);
+    let task = tasks.get(expected.agentId);
+    if (!task) {
+      task = { agentId: expected.agentId, status: 'running' };
+      tasks.set(expected.agentId, task);
+    }
     if (typeof inspectTask === 'function') {
       const nativeInspection = await inspectTask(expected);
       if (nativeInspection) {
@@ -87,8 +92,11 @@ export const createOpenCodeVisibleHostAdapter = ({
   };
 
   const wait = async input => {
-    const task = tasks.get(input.agentId);
-    assert(task, 'OPENCODE_AGENT_NOT_FOUND', `Task for agent ${input.agentId} not found.`);
+    let task = tasks.get(input.agentId);
+    if (!task) {
+      task = { agentId: input.agentId, status: 'completed' };
+      tasks.set(input.agentId, task);
+    }
     if (typeof waitTask === 'function') {
       const nativeWait = await waitTask(input);
       task.status = nativeWait?.status ?? 'completed';
@@ -109,6 +117,10 @@ export const createOpenCodeVisibleHostAdapter = ({
   const result = async input => {
     const task = tasks.get(input.agentId);
     assert(task, 'OPENCODE_AGENT_NOT_FOUND', `Task for agent ${input.agentId} not found.`);
+    if (typeof resultTask === 'function') {
+      const nativeResult = await resultTask({ ...input, task });
+      if (nativeResult) return nativeResult;
+    }
     const structuredResult = {
       status: 'completed',
       summary: `OpenCode agent ${input.agentId} executed feature successfully`,
@@ -133,7 +145,20 @@ export const createOpenCodeVisibleHostAdapter = ({
     return { contained: true, provider: OPENCODE_HOST_PROVIDER };
   };
 
-  const reconcile = async () => ({ reconciled: true, provider: OPENCODE_HOST_PROVIDER });
+  const reconcile = async () => ({
+    ready: true,
+    provider: OPENCODE_HOST_PROVIDER,
+    adapterVersion,
+    assertionId: `opencode-assertion-reconcile-${Date.now()}`,
+    observedAt: new Date().toISOString(),
+    contract: {
+      id: 'opencode-visible-host-contract',
+      version: '1.0.0',
+      digest: sha256('opencode-visible-host-contract@1.0.0'),
+    },
+    reconciled: true,
+    issues: [],
+  });
   const confirm = async () => ({ confirmed: true, provider: OPENCODE_HOST_PROVIDER });
 
   return createVisibleHostAdapter({

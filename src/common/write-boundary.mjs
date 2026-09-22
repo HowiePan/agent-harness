@@ -23,7 +23,7 @@ export const harnessControlRoot = input => {
   if (process.platform === 'win32') assert(!/^c:[\\/]/i.test(root), 'HARNESS_SYSTEM_DRIVE_FORBIDDEN', 'The Agent Harness control root may not be located on the Windows C drive.', { root });
   assert(existsSync(root) && !lstatSync(root).isSymbolicLink(), 'HARNESS_CONTROL_ROOT_LINK_FORBIDDEN', 'The Agent Harness control root must be an existing physical directory, not a symbolic link or junction.', { root });
   const realRoot = realpathSync.native(root);
-  assert(realRoot === root || (process.platform === 'win32' && realRoot.toLowerCase() === root.toLowerCase()), 'HARNESS_CONTROL_ROOT_LINK_FORBIDDEN', 'The Agent Harness control root path may not traverse symbolic links or junctions.', { root, realRoot });
+  assert(realRoot === root || (['win32', 'darwin'].includes(process.platform) && realRoot.toLowerCase() === root.toLowerCase()), 'HARNESS_CONTROL_ROOT_LINK_FORBIDDEN', 'The Agent Harness control root path may not traverse symbolic links or junctions.', { root, realRoot });
   if (process.platform === 'win32') assert(!/^c:[\\/]/i.test(realRoot), 'HARNESS_SYSTEM_DRIVE_FORBIDDEN', 'The Agent Harness control root may not be located on the Windows C drive.', { root: realRoot });
   assert(insideOrEqual(root, packageRoot), 'HARNESS_RUNTIME_OUTSIDE_CONTROL_ROOT', 'The Agent Harness runtime must be contained by its standalone control root.', { root, packageRoot });
   if (root !== packageRoot) {

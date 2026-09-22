@@ -752,8 +752,8 @@
     },
     {
       "path": "src/common/paths.mjs",
-      "sha256": "d6bdcd9f0b47a25a8e3e781b6be1b8f69c823134af338136482bbff7dccdbe68",
-      "size": 2430
+      "sha256": "451a80f362734d6ee3ca0f9f88c50556a4c4999d580c346db9594a663d0c489f",
+      "size": 2448
     },
     {
       "path": "src/common/workspace-identity.mjs",
@@ -767,8 +767,8 @@
     },
     {
       "path": "src/common/write-boundary.mjs",
-      "sha256": "468d08eabcc782b212a2477a973cc6780abeaa468bac7a8a51a335ef376d9c11",
-      "size": 3741
+      "sha256": "30fa83155aec17a4a009c7be83d70466f52e472def1bd0308e87fcc6fc72bb3b",
+      "size": 3759
     },
     {
       "path": "src/flow-kit/primitives.mjs",
@@ -1057,8 +1057,8 @@
     },
     {
       "path": "src/flows/requirements-design/graph/definition.mjs",
-      "sha256": "4b04100da2239f065390a83bec7a5df4b7cc3cd4a3dcc4f9dd587077bd948c49",
-      "size": 574
+      "sha256": "46bc07b042a11bd5a97787436e85074ab9f93f868c915bca4c2548b76846ba06",
+      "size": 680
     },
     {
       "path": "src/flows/requirements-design/index.mjs",
@@ -1067,13 +1067,13 @@
     },
     {
       "path": "src/flows/requirements-design/nodes/discovery/index.mjs",
-      "sha256": "1d1d28cfeee5ca7e7b692304082d1860e24bce227badb93395ebc458e66407ae",
-      "size": 554
+      "sha256": "4a90be90f3faea860fe538c188d4fb7b2ca98657166baeef8d24acde058da752",
+      "size": 1238
     },
     {
       "path": "src/flows/requirements-design/nodes/documents/index.mjs",
-      "sha256": "886a35aa1f0f6f339e8ab0e9c633b8a57c2225ecff4314e11203564880e5e609",
-      "size": 726
+      "sha256": "e884602a99aff3432ddb389dceae578a25781d4a881f04a5ce8554e9421e465a",
+      "size": 879
     },
     {
       "path": "src/flows/requirements-design/nodes/intake/index.mjs",
@@ -1087,13 +1087,13 @@
     },
     {
       "path": "src/flows/requirements-design/nodes/review/index.mjs",
-      "sha256": "5fb48a6fcc35d3ab87a8fb545835ab98b4e7ac396552560b63390d6acbd548c1",
-      "size": 622
+      "sha256": "dc2b2e82b3dc259951aff17903e7b696a39374b4b840f6955858366e7a73cfc4",
+      "size": 672
     },
     {
       "path": "src/flows/requirements-design/planner.mjs",
-      "sha256": "8c041a507747d79de25fe81bce515735e6211279e34e31163452e6dde99c2331",
-      "size": 2698
+      "sha256": "bbbe8441af534988af82ab482f78cfe749144129c999fc8c455fb9d6bc4ed137",
+      "size": 2777
     },
     {
       "path": "src/flows/requirements-design/policy/index.mjs",
@@ -1502,11 +1502,11 @@
     },
     {
       "path": "src/platform/workspace/workspace-registry.mjs",
-      "sha256": "da3e3261b5267180cecb120fbd11d6e909f13da821e70a2af07ac98c07bbd8bd",
-      "size": 19772
+      "sha256": "575cfee88a33d910e701ccd9f0250b6033e10e1b86c06028ef27220e47e2d815",
+      "size": 19877
     }
   ],
-  "packageDigest": "4c829f522e4859a2a89cc86bf6a2a2696495aec64265b23c178127acfdeea70c",
+  "packageDigest": "472decdd9760af4957eb0e201f4f11238b989742a8d3c1e8f43cfd9b0ec6cc51",
   "metadataFiles": [
     "release-manifest.json",
     "sbom.spdx.json"

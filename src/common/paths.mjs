@@ -23,7 +23,7 @@ export const assertNoLinkPath = (root, target, label = 'path') => {
   const base = resolve(root);
   assert(existsSync(base), 'MANAGED_ROOT_NOT_FOUND', `${label} root does not exist.`, { root: base });
   const baseReal = realpathSync.native(base);
-  assert(baseReal === base || (process.platform === 'win32' && baseReal.toLowerCase() === base.toLowerCase()), 'MANAGED_ROOT_LINK_FORBIDDEN', `${label} root may not contain symbolic links or junctions.`, { root: base, realRoot: baseReal });
+  assert(baseReal === base || (['win32', 'darwin'].includes(process.platform) && baseReal.toLowerCase() === base.toLowerCase()), 'MANAGED_ROOT_LINK_FORBIDDEN', `${label} root may not contain symbolic links or junctions.`, { root: base, realRoot: baseReal });
   let existing = candidate;
   while (!existsSync(existing)) {
     const parent = dirname(existing);
