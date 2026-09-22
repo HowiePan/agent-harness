@@ -72,10 +72,10 @@ try {
     source: stage,
     npmCli: process.env.npm_execpath,
     expectedFiles: [...files.map(f => f.path), 'opencode-channel-manifest.json', 'package.json'],
-    forbiddenPrefixes: ['src/', 'integrations/codex/', 'integrations/vscode/'],
-    identity: core.artifactDigest,
+    forbiddenPrefixes: ['src/', 'schemas/', 'integrations/codex/', 'integrations/vscode/'],
+    identity: channelManifest.artifactDigest,
   });
-  console.log(JSON.stringify({ ok: true, channel: 'opencode', ...result }, null, 2));
+  process.stdout.write(`${JSON.stringify({ ok: true, ...result, plugin: channelManifest.plugin, requiredCorePackageDigest: core.artifactDigest, contentDigest: channelManifest.contentDigest, artifactDigest: channelManifest.artifactDigest }, null, 2)}\n`);
 } finally {
   await rm(stage, { recursive: true, force: true });
 }
