@@ -17,8 +17,8 @@ test('Core package excludes the Codex host plugin and marketplace while retainin
   assert.equal(packageJson.scripts['release:codex:local'].includes('release-codex.mjs'), true);
   assert.equal(Object.hasOwn(packageJson.scripts, 'release:plugin'), false);
   assert.equal(Object.hasOwn(packageJson.scripts, 'release:plugin:check'), false);
-  assert.equal(packageJson.files.some(path => path.startsWith('integrations/codex/agent-harness-codex/') || path === '.agents/'), false);
-  assert.equal(manifest.files.some(file => file.path.startsWith('integrations/codex/agent-harness-codex/') || file.path.startsWith('.agents/')), false);
+  assert.equal(packageJson.files.some(path => path.startsWith('integrations/codex/agent-harness-codex/') || path === '.agents/' || path.startsWith('integrations/opencode/') || path.startsWith('integrations/vscode/')), false);
+  assert.equal(manifest.files.some(file => file.path.startsWith('integrations/codex/agent-harness-codex/') || file.path.startsWith('.agents/') || file.path.startsWith('integrations/opencode/') || file.path.startsWith('integrations/vscode/')), false);
   assert.equal(manifest.files.some(file => file.path === 'integrations/codex/runtime/codex-runtime.mjs'), true);
 });
 

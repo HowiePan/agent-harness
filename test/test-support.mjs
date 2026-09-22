@@ -1,6 +1,6 @@
 import { mkdtemp, mkdir, rm, rmdir, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
-import { createExecutionAuthorizationAdapter, createHarness, createInMemoryRuntime, harnessTemporaryRoot, projectExecutionPolicyDecisionContext, sealLifecycleExecutionGrant } from '../src/index.mjs';
+import { createExecutionAuthorizationAdapter, createHarness, createInMemoryRuntime, createVisibleHostAdapter, harnessTemporaryRoot, projectExecutionPolicyDecisionContext, sealLifecycleExecutionGrant } from '../src/index.mjs';
 import { extensionPack as engineDeliveryExtension } from '../src/flows/delivery-lifecycle/index.mjs';
 import { extensionPack as collectionBatchExtension } from '../src/flows/batch-production/index.mjs';
 
@@ -90,3 +90,47 @@ export const dispatchAndBind = async (fixture, runId, { maxConcurrency = 1, inde
 };
 
 export const recordResult = async (fixture, runId, dispatch, result = { status: 'completed', summary: 'done', changedFiles: [] }) => fixture.harness.recordResult(fixture.projectId, runId, dispatch.dispatchId, { changedFiles: [], ...result }, { commandId: command().commandId });
+
+export const createMockVisibleHostAdapter = ({
+  provider = 'test-host',
+  adapterVersion = '1.0.0',
+  onSpawn = null,
+  onResult = null,
+} = {}) => createVisibleHostAdapter({
+  provider,
+  adapterVersion,
+  inspectVisibleAgent: async input => ({
+    verified: true,
+    status: 'running',
+    assertionId: `${provider}-assertion-${input.agentId}`,
+    observedAt: new Date().toISOString(),
+    agentId: input.agentId,
+    dispatchId: input.dispatchId,
+    packetDigest: input.packetDigest,
+    promptDigest: input.promptDigest,
+    visibility: { mode: 'user-visible', surface: input.surface, inspectRef: input.inspectRef },
+  }),
+  spawnVisibleAgent: async input => {
+    onSpawn?.(input);
+    return {
+      agentId: input.agentId ?? `agent-${Date.now()}`,
+      visibility: { mode: 'user-visible', surface: `${provider}-surface`, inspectRef: `ref-${Date.now()}` },
+      hostSpawnReceipt: { host: provider, spawnedAt: new Date().toISOString() },
+    };
+  },
+  waitVisibleAgent: async () => ({
+    status: 'completed',
+    progress: '100%',
+    receipt: { host: provider, waitedAt: new Date().toISOString() },
+  }),
+  readVisibleResult: async input => ({
+    result: onResult ? await onResult(input) : { status: 'completed', summary: `${provider} task completed`, changedFiles: [] },
+    receipt: { host: provider, resultAt: new Date().toISOString() },
+    runtimeEvidence: { hostWaitReceipt: { host: provider }, hostResultReceipt: { host: provider } },
+  }),
+  reconcileVisibleHostEffects: async () => ({ reconciled: true }),
+  confirmVisibleLease: async () => ({ confirmed: true }),
+  containVisibleAgent: async () => ({ contained: true }),
+  sendVisibleAgent: async () => ({ sent: true }),
+  interruptVisibleAgent: async () => ({ interrupted: true }),
+});

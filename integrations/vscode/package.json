@@ -1,0 +1,74 @@
+{
+  "name": "agent-harness-vscode",
+  "displayName": "Agent Harness",
+  "description": "VS Code extension for Agent Harness workflow orchestration, chat participation, and quality gate review",
+  "version": "1.0.0",
+  "publisher": "agent-harness",
+  "license": "UNLICENSED",
+  "engines": {
+    "vscode": "^1.85.0",
+    "node": ">=22"
+  },
+  "type": "module",
+  "main": "./src/extension.mjs",
+  "contributes": {
+    "chatParticipants": [
+      {
+        "id": "agent-harness.chat",
+        "name": "harness",
+        "description": "Agent Harness workflow orchestration assistant",
+        "isDefault": false,
+        "commands": [
+          {
+            "name": "full",
+            "description": "Run a full lifecycle delivery run for a version or batch"
+          },
+          {
+            "name": "quality",
+            "description": "Execute quality review, repair, and re-review loop"
+          },
+          {
+            "name": "status",
+            "description": "Inspect the active Run status, DAG nodes, and finding ledger"
+          }
+        ]
+      }
+    ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "agent-harness",
+          "title": "Agent Harness",
+          "icon": "$(circuit-board)"
+        }
+      ]
+    },
+    "views": {
+      "agent-harness": [
+        {
+          "id": "agent-harness.runs",
+          "name": "Active Runs & Work Graph"
+        },
+        {
+          "id": "agent-harness.findings",
+          "name": "Quality Finding Ledger"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "agent-harness.showDiff",
+        "title": "Agent Harness: Show Submission Diff"
+      },
+      {
+        "command": "agent-harness.runGate",
+        "title": "Agent Harness: Run Deterministic Gates"
+      }
+    ]
+  },
+  "files": [
+    "src/",
+    "scripts/",
+    "README.md"
+  ]
+}

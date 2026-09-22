@@ -1,0 +1,23 @@
+{
+  "name": "agent-harness-opencode",
+  "version": "1.0.0",
+  "description": "OpenCode native plugin for Agent Harness workflow orchestration and host coordination",
+  "type": "module",
+  "license": "UNLICENSED",
+  "engines": {
+    "node": ">=22"
+  },
+  "exports": {
+    ".": "./src/index.mjs",
+    "./adapter": "./src/adapter.mjs",
+    "./tools": "./src/tools.mjs",
+    "./guard": "./src/guard.mjs"
+  },
+  "files": [
+    "src/",
+    "commands/",
+    "skills/",
+    "scripts/",
+    "README.md"
+  ]
+}
