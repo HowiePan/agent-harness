@@ -234,6 +234,7 @@ Node 依赖必须指向同一路由中更早出现的 Node；不能前向引用�
 |---|---:|---|
 | `id` | 是 | 路由内唯一 Node ID。 |
 | `template` | 是 | Extension 中注册的纯 Node template ID。 |
+| `task` | 是 | 第 5.3 节的完整 Node Task Contract；缺失时 Workflow 不能注册。 |
 | `dependsOn` | 否 | 前置 Node ID 数组。fan-out 对同一集合按索引依赖，否则依赖前置 Node 的全部实例。 |
 | `forEach` | 否 | 命名集合；每个 item 生成一个 Feature。 |
 | `action` | 模板相关 | 业务动作，交付/批处理模板会写入 Feature `kind`。 |
@@ -247,9 +248,32 @@ Node 依赖必须指向同一路由中更早出现的 Node；不能前向引用�
 | `expectedHit` | 否 | 知识检索节点对 `match.value.hit` 的预期。 |
 | `outputPath` | 否 | `output-path` 检查运算符使用的权威路径。 |
 
-`outputChecks.operator` 支持：`equals`（值严格等于 `value`）、`non-empty`（非空）、`output-path`（值等于 Node/Feature 的 `outputPath`）。Node 的其他字段只能由对应 template 明确解释；Core 不把未知 Node 字段自动变成权限。
+`outputChecks.operator` 支持：`equals`（值严格等于 `value`）、`non-empty`（非空）、`output-path`（值等于 Node/Feature 的 `outputPath`）。Node 的其他字段只能由对应 template 明确解释；Core 不把未知 Node 字段自动变成权限。Workflow 编译器会把 `task`、`acceptance`、`steps`、`ownerRole` 和输出合同统一投影到 Feature，模板不能静默丢弃它们。
 
-### 5.3 Feature 全字段
+### 5.3 Node Task Contract
+
+每个 Agent Node 必须完整声明任务语义；不允许依靠“完成当前 action”之类的生产默认 Prompt。
+
+| 字段 | 必填 | 含义 |
+|---|---:|---|
+| `schemaVersion` | 生成 | 当前固定 `1.0`。 |
+| `taskDigest` | 生成 | 对规范化 Task 正文的 SHA-256 摘要。 |
+| `role` | 是 | `{id,description}`；稳定责任角色及其职责。 |
+| `objective` | 是 | 节点必须解决的唯一目标。 |
+| `instructions` | 是 | 非空、唯一的工作方法数组。 |
+| `inputs` | 是 | 输入绑定数组；可以为空。 |
+| `steps` | 是 | 有序步骤数组；每项包含 `id` 和非空 `instruction`，至少一项。 |
+| `constraints` | 是 | 非空、唯一的禁止项和边界数组。 |
+| `acceptance` | 是 | 非空、唯一、可核验的完成条件数组。 |
+| `evidenceRequirements` | 是 | 非空、唯一的证据要求数组。 |
+
+每个 `inputs[]` 包含 `id`、`source`、`required`、`description`。非上游输入还必须有 `path`；`source` 支持 `intent`、`feature`、`workspace`、`source-manifest`、`memory`、`quality-target`。`path` 是点号字段路径，`$` 表示整个根对象。`upstream` 输入包含 `nodeId`、`portId`、`schemaId`，由编译器根据实际直接依赖和端口合同生成；分支/repeat 根据触发端口生成。必填输入在 Dispatch 前无法解析、或者上游 `schemaId` 不匹配时，运行失败关闭而不是把缺失上下文交给 Agent 猜测。
+
+Prompt Contract 1.3 按四层组合：不可覆盖的 Core Contract、Node Task Contract、已解析的 Dispatch Context、Runtime 输出方言。项目 `harness.json` 不能注入自由文本 Prompt；改变节点任务语义必须发布新的 Flow/Extension 制品摘要。Prompt 固定并报告 `taskDigest`、Dispatch `packetDigest` 与最终 `promptDigest`。历史 1.0/1.2 Dispatch 仍按原合同重放，不升级为 1.3。
+
+固定结果 Schema 的 Runtime 若要执行含 typed outputs 的 Feature，必须在 Manifest 声明兼容方言。参考 Codex CLI Runtime 使用 `typed-output-envelope-v1`：Provider 最终 JSON 中的 `typedOutputs[]` 每项含 `portId`、`schemaId`、`valueJson`、`evidenceRefs`；`valueJson` 是输出值对象的 JSON 字符串。Runtime 在提交前将其无损解码为标准 `outputs.<portId>`，随后 Core 逐端口检查端口全集、Schema ID、值 Schema、证据和 256 KiB 总预算。重复端口、非法 JSON、非对象值或未声明端口都会失败；该方言不是逃逸 Schema 校验的通道。
+
+### 5.4 Feature 全字段
 
 | 字段 | 默认/约束 | 含义 |
 |---|---|---|
@@ -259,6 +283,7 @@ Node 依赖必须指向同一路由中更早出现的 Node；不能前向引用�
 | `ownerRole` | `worker` | 责任角色，不是用户身份。 |
 | `logicalRoot` | 默认 `id`，必须非空 | 跨重试稳定逻辑根。 |
 | `laneId` | 默认 owner role | round-robin 调度 lane。 |
+| `task` | Flow Node 编译时必填 | 已规范化、摘要绑定的 Node Task Contract。低层 Legacy Feature 可读取，但不能使用 Prompt Contract 1.3 派发。 |
 | `acceptance` | 必填非空数组 | 验收条件。 |
 | `steps` | `[]` | 每步包含 `id` 与可选 `title`；Step 默认不拆成独立 Agent。 |
 | `dependsOn` | `[]` | Feature DAG 依赖。 |
@@ -278,7 +303,7 @@ Node 依赖必须指向同一路由中更早出现的 Node；不能前向引用�
 
 调度同时检查 `dependsOn`、`conflictsWith`、`conflictKeys`、`symbols`、`contracts`、Artifact 读写冲突，以及 `allowedPaths`/`generatedOutputs` 的父子路径重叠。`maxConcurrency` 只是上述约束之后的上限。
 
-### 5.4 条件分支 `branches`
+### 5.5 条件分支 `branches`
 
 Composable Profile 的每条分支包含：
 
@@ -293,7 +318,7 @@ Composable Profile 的每条分支包含：
 
 最多 32 条分支。同一 Node 的规则必须恰好命中一条：零命中返回 `WORKFLOW_BRANCH_UNMATCHED`，多命中返回 `WORKFLOW_BRANCH_AMBIGUOUS`。追加 Feature 自动依赖触发 Feature，总 Feature 数不得超过 100。
 
-### 5.5 循环 `repeats`
+### 5.6 循环 `repeats`
 
 循环不是回边，而是有界地追加新 Feature 实例：
 
@@ -309,7 +334,7 @@ Composable Profile 的每条分支包含：
 
 最多 16 条 repeat 规则。新实例 ID 为 `<原ID>--repeat-<ruleId>-<iteration>`；内部依赖同步改写，没有内部前置的 Feature 自动依赖触发 Feature。超过次数不会假装完成，而是返回 `WORKFLOW_REPEAT_EXHAUSTED`。
 
-### 5.6 Profile 关闭参数
+### 5.7 Profile 关闭参数
 
 通用 Composable Profile 支持 `requiredFinalGates`、`requiredDecisions`、`branches`、`repeats`。
 
@@ -441,4 +466,4 @@ agent-harness run status --project <projectId> --run <runId>
 - 修改配置、源码 rebind 或 Gate 通过都不能改写既有 Run 历史，也不构成删除 Legacy 资产的授权。
 - source-link 不能冒充不可变 `1.0.0` 发布制品。
 
-对应的中立机器契约随包位于 `schemas/project-harness-config.schema.json`、内置通用 Flow 的 `*-project-input.schema.json`、`schemas/project-descriptor-input.schema.json`、`schemas/workflow-definition.schema.json`、`schemas/feature.schema.json` 与 `schemas/composable-workflow-profile.schema.json`。业务 Extension 的 Project Input 契约由其 `projectConfiguration.schema` 随 Extension 制品发布，不属于本通用 API 的字段目录。
+对应的中立机器契约随包位于 `schemas/project-harness-config.schema.json`、内置通用 Flow 的 `*-project-input.schema.json`、`schemas/project-descriptor-input.schema.json`、`schemas/node-task-contract.schema.json`、`schemas/workflow-definition.schema.json`、`schemas/feature.schema.json` 与 `schemas/composable-workflow-profile.schema.json`。业务 Extension 的 Project Input 契约由其 `projectConfiguration.schema` 随 Extension 制品发布，不属于本通用 API 的字段目录。

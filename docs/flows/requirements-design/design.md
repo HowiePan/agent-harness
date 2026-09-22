@@ -12,6 +12,12 @@ analyze-code:                          每个仓库 search → map(code-architec
 
 `ingest` 返回带来源位置的 `source-facts-v1`；`normalize` 返回 `requirements-v1`；`search` 返回 `code-evidence-v1`。普通 `analyze` 的 `map` 返回同时绑定代码和需求的 `impact-map-v1`；不含需求输入的 `analyze-code` 改为返回 `code-architecture-v1`，其中必须包含 `modules`、`capabilities` 和 capability-to-path `mappings`，不得伪造 requirement。两份文档节点分别写入 Workspace 允许的输出路径并返回 `document-ref-v1`。`review` 检查两份文档和固定来源，返回通过的 `document-review-v1` 与 `memory-candidates-v1`；它不能绕过文档路径、证据或 P0–P3 质量规则。合同在 `contracts/`，节点按 `intake/`、`discovery/`、`documents/`、`review/` 阶段分组。
 
+## Node Task Contract 与 Prompt
+
+所有节点都有独立 Task Contract：文档 `ingest` 只抽取来源事实，`normalize` 保留冲突，代码 `search` 分别处理需求映射或纯代码架构，`map` 明确区分 `impact-map-v1` 与 `code-architecture-v1`，两个文档节点固定输出路径与写作目标，`review` 独立覆盖全部来源并产生 Finding/知识候选。Task 的来源 ID、输出路径和直接依赖端口在 Dispatch 前解析，缺失即阻止执行。
+
+Prompt Contract 1.3 将 Task、Source Manifest、typed upstream outputs、输出值 Schema 与证据要求一起渲染。纯代码路线的 Task 明确禁止把观察到的能力伪造成需求；文档路线要求每个结论可追溯。项目只能选择来源、输出路径和 Runtime，不能改写节点 Task。
+
 Plan 固定文档、仓库的 Source Manifest 和输出路径；实际读取受 Workspace 项目范围、Source Binding 与 Runtime 权限约束。记忆候选按资源权限处理，不能因节点输出自行升为已核验知识。没有来源、输出路径冲突、来源漂移或资源撤权时拒绝相关操作。失败可重试受影响 Feature；恢复保留原 Run 的来源/制品快照。
 
 Workspace 可配置成员项目、来源集合、输出路径、Runtime 和记忆绑定，不得变更已发布图。单实例分析一个功能，实例集可并行分析多个功能；每个实例独立 Plan、输出与 Run。

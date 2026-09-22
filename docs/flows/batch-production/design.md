@@ -8,6 +8,12 @@
 
 输入包含批次、item、依赖、共享能力归属和已批准 Descriptor；输出端口为 `batch-rules-v1`、`batch-produce-v1`、`batch-quality-v1`、`batch-review-v1`、`batch-accept-v1`、`batch-launch-v1` 与 `batch-close-v1`，形成逐项验收、批次状态及关闭 Receipt。Result/证据必须与当前 Feature 和批次身份相符。当前周期 P0–P3 问题必须关闭；人工验收 Decision、确定性 Gate 和批次关闭条件缺一不可。失败与恢复遵守通用 Attempt/Epoch 语义，不以旧状态字符串提升权威。
 
+## Node Task Contract 与 Prompt
+
+`rules`、`produce`、`quality`、`review`、`accept`、`launch`、`close` 各自发布完整 Task Contract。合同明确区分规则就绪、受限生产、只读质量审查、领域复核、Authority 验收、批次发车检查和批次关闭检查；每个 Feature 的 Task 输入固定 batch target 和 item，直接依赖的 typed outputs 由 Workflow 编译器自动绑定。这样后序节点消费真实规则/生产/质量/评审结果，而不是只看到 item ID。
+
+Prompt Contract 1.3 渲染节点角色、目标、方法、步骤、约束、验收、证据、已解析输入和结果 Schema。项目变体可以通过版本化 Extension 增加领域规则和 Gate，但不能用项目 JSON 覆盖 Task 或向中立 Flow 注入自由文本 Prompt。质量修复和复审使用独立、摘要绑定的 Task Contract。
+
 Workspace 只配置成员、目标、流程绑定、`batches`、`maxLogicalItems`、`itemKey`、item 路径和 Runtime，不改变 Barrier 或验收图。Collection shim 把旧 `gameId`、`collectionBatches`、游戏 Decision key 与旧命令映射到中立工厂；中立 Flow 不读取这些旧字段。新业务项目要提供自己的验收变体与制品，而不是复用 Collection 的游戏规则。
 
 ## 命令级验收

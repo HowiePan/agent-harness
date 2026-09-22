@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { dirname, resolve } from 'node:path';
 import { access, mkdir, readFile, writeFile } from 'node:fs/promises';
-import { adaptCodexStructuredOutputSchema, createCodexCliRuntime, resolveCodexExecutionPolicy, validateCodexStructuredOutputSchema } from '../integrations/codex/runtime/codex-cli-runtime.mjs';
+import { adaptCodexStructuredOutputSchema, createCodexCliRuntime, decodeCodexTypedOutputs, resolveCodexExecutionPolicy, validateCodexStructuredOutputSchema } from '../integrations/codex/runtime/codex-cli-runtime.mjs';
 import { businessResultFromRuntime } from '../src/platform/workflow/coordinator/run-coordinator.mjs';
 import { compileAgentPrompt } from '../src/platform/plugins/codec/agent-prompt-codec.mjs';
 import { createAgentRuntimeLaunchCapability } from '../src/platform/execution/authorization.mjs';
@@ -68,12 +68,16 @@ test('Codex CLI Runtime rejects an invalid output Schema before spawning a proce
   await assert.rejects(() => access(resolve(fixture.dataRoot, 'runtime')), error => error.code === 'ENOENT');
 });
 
-test('fixed-schema Codex CLI Runtime rejects typed output ports before process launch', async t => {
+test('fixed-schema Codex CLI Runtime transports arbitrary typed output values through its strict envelope', async t => {
   const fixture = await makeFixture({ policy: { runtimePlugins: ['codex-cli-runtime'], defaultRuntimePlugin: 'codex-cli-runtime' } });
   t.after(() => fixture.cleanup());
   const runtime = createCodexCliRuntime({ resolveProject: id => fixture.harness.projectRegistry.get(id), runtimeRoot: fixture.dataRoot, spawnProcess: () => { throw new Error('must not spawn'); } });
   const packet = runtimePacket(fixture, 'typed-output', { feature: { id: 'typed', metadata: { outputPorts: { question: 'question-v1' } }, allowedPaths: [], forbiddenPaths: [] } });
-  await assert.rejects(() => spawnRuntime(runtime, packet), error => error.code === 'RUNTIME_TYPED_OUTPUT_CONTRACT_UNSUPPORTED');
+  await assert.rejects(() => spawnRuntime(runtime, packet), /must not spawn/);
+  assert.deepEqual(decodeCodexTypedOutputs({ status: 'completed', summary: 'done', changedFiles: [], typedOutputs: [{ portId: 'question', schemaId: 'question-v1', valueJson: '{"question":"Why?","revision":1}', evidenceRefs: ['source/a'] }] }), {
+    status: 'completed', summary: 'done', changedFiles: [], outputs: { question: { schemaId: 'question-v1', value: { question: 'Why?', revision: 1 }, evidenceRefs: ['source/a'] } },
+  });
+  assert.throws(() => decodeCodexTypedOutputs({ typedOutputs: [{ portId: 'question', schemaId: 'question-v1', valueJson: '{bad', evidenceRefs: [] }] }), error => error.code === 'CODEX_TYPED_OUTPUT_VALUE_INVALID');
 });
 
 test('Codex CLI Runtime uses non-interactive structured output and records transport evidence', async t => {

@@ -1,5 +1,6 @@
 import { access, readFile, readdir } from 'node:fs/promises';
 import { dirname, relative, resolve, sep } from 'node:path';
+import { pathToFileURL } from 'node:url';
 
 const required = ['index.mjs', 'extension.mjs', 'planner.mjs', 'graph/definition.mjs', 'contracts/index.mjs', 'policy/index.mjs'];
 const imports = /(?:\bfrom\s*|\bimport\s*\(|\bimport\s*)[('\s]*['"]([^'"]+)['"]/g;
@@ -43,6 +44,14 @@ export const checkFlowStructure = async root => {
     catch { errors.push(`missing stage nodes: src/flows/${entry.name}/nodes`); }
     try { await access(resolve(root, 'docs', 'flows', entry.name, 'design.md')); }
     catch { errors.push(`missing Flow design: docs/flows/${entry.name}/design.md`); }
+    try {
+      const module = await import(pathToFileURL(resolve(flowsRoot, entry.name, 'extension.mjs')).href);
+      for (const workflow of module.extensionPack?.workflows ?? []) for (const [routeId, nodes] of Object.entries(workflow.routes ?? {})) for (const node of nodes) {
+        if (!node.task?.taskDigest) errors.push(`Flow Node lacks a versioned Task Contract: ${entry.name}/${routeId}/${node.id}`);
+        if (!Object.keys(node.outputPorts ?? {}).length) errors.push(`Flow Node lacks a typed output port: ${entry.name}/${routeId}/${node.id}`);
+        for (const [portId] of Object.entries(node.outputPorts ?? {})) if (!node.outputValueSchemas?.[portId]) errors.push(`Flow Node lacks an output value Schema: ${entry.name}/${routeId}/${node.id}/${portId}`);
+      }
+    } catch (error) { errors.push(`cannot inspect Flow contracts: ${entry.name}: ${error.code ?? error.message}`); }
     await walk(resolve(flowsRoot, entry.name), entry.name);
   }
   for (const area of ['kernel', 'platform']) {

@@ -1,6 +1,7 @@
 import { assert } from '../common/errors.mjs';
 import { EXECUTION_CLASSES, assertExecutionClass } from '../platform/execution/boundary.mjs';
 import { slash } from '../common/paths.mjs';
+import { defineNodeTaskContract } from '../common/task-contract.mjs';
 
 const unique = values => [...new Set(values ?? [])];
 const list = value => unique(Array.isArray(value) ? value.map(String) : []);
@@ -12,6 +13,7 @@ export const normalizeFeature = feature => ({
   ownerRole: String(feature.ownerRole ?? 'worker'),
   logicalRoot: String(feature.logicalRoot ?? feature.id ?? ''),
   laneId: String(feature.laneId ?? feature.gameId ?? feature.ownerRole ?? 'default'),
+  ...(feature.task ? { task: structuredClone(defineNodeTaskContract(feature.task)) } : {}),
   acceptance: list(feature.acceptance),
   steps: Array.isArray(feature.steps) ? feature.steps.map((step, index) => ({ id: String(step.id ?? `step-${index + 1}`), title: String(step.title ?? step.id ?? `Step ${index + 1}`) })) : [],
   dependsOn: list(feature.dependsOn),

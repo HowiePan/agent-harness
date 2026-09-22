@@ -27,7 +27,14 @@ test('a failed final Gate returns attention and a fresh retry closes the same qu
   const releaseIdentity = { version: '1.0.0', artifactDigest: 'a'.repeat(64), verified: true };
   const harness = await createHarness({ controlRoot, dataRoot, releaseIdentity, strictProjectIdentity: false, extensions: [engine], executionAuthorizationAdapter: createTestExecutionAuthorizationAdapter() });
   const runtimeManifest = { id: 'gate-test-runtime', kind: 'agent-runtime', version: '1.0.0', capabilities: ['spawn', 'wait', 'headless'], permissions: [] };
-  harness.registerPlugin(runtimeManifest, createInMemoryRuntime({ manifest: runtimeManifest, handler: async () => ({ status: 'completed', summary: 'quality review clean', changedFiles: [], findings: [], knownFindingDispositions: [] }) }));
+  harness.registerPlugin(runtimeManifest, createInMemoryRuntime({ manifest: runtimeManifest, handler: async () => ({
+    status: 'completed',
+    summary: 'quality review clean',
+    changedFiles: [],
+    findings: [],
+    knownFindingDispositions: [],
+    outputs: { quality: { schemaId: 'delivery-quality-v1', value: { findings: [] }, evidenceRefs: ['gate-recovery/quality'] } },
+  }) }));
   const descriptor = createCardWorldProjectDescriptor({ workspaceRoot: workspace, harness: releaseIdentity, runtimePluginId: runtimeManifest.id, runtimeExtension: null, agentExecutionMode: 'headless', knownFindingInventories: { 'V3.8.4': { version: '1.0', sources: [{ path: 'README.md', sha256: sha256('# Gate recovery fixture\n') }], findings: [] } } });
   descriptor.extensions = descriptor.extensions.map(item => ({ ...item, digest: engine.digest }));
   descriptor.gateRecipes = [{

@@ -21,7 +21,7 @@ export const CODEX_CLI_RUNTIME_MANIFEST = Object.freeze({
   id: 'codex-cli-runtime',
   kind: 'agent-runtime',
   version: '1.0.0',
-  capabilities: ['spawn', 'wait', 'heartbeat', 'interrupt', 'structured-result', 'fixed-result-schema', 'workspace-shared', 'managed-outputs', 'headless'],
+  capabilities: ['spawn', 'wait', 'heartbeat', 'interrupt', 'structured-result', 'fixed-result-schema', 'typed-output-envelope-v1', 'workspace-shared', 'managed-outputs', 'headless'],
   permissions: ['agent.conversation', 'process.spawn', 'workspace.read', 'workspace.write'],
   execution: { outputs: CODEX_OUTPUTS, sandbox: { mode: 'required' } },
 });
@@ -30,7 +30,7 @@ export const CODEX_ISOLATED_RUNTIME_MANIFEST = Object.freeze({
   id: 'codex-isolated-runtime',
   kind: 'agent-runtime',
   version: '1.0.0',
-  capabilities: ['spawn', 'wait', 'heartbeat', 'interrupt', 'structured-result', 'fixed-result-schema', 'workspace-isolated', 'managed-outputs', 'headless'],
+  capabilities: ['spawn', 'wait', 'heartbeat', 'interrupt', 'structured-result', 'fixed-result-schema', 'typed-output-envelope-v1', 'workspace-isolated', 'managed-outputs', 'headless'],
   permissions: ['agent.conversation', 'process.spawn', 'workspace.read', 'workspace.write'],
   execution: { outputs: CODEX_OUTPUTS, sandbox: { mode: 'required' } },
 });
@@ -119,6 +119,29 @@ const parseEmbeddedJson = value => {
   try { return JSON.parse(value); } catch { return value; }
 };
 
+export const decodeCodexTypedOutputs = input => {
+  if (!input || typeof input !== 'object' || Array.isArray(input) || input.typedOutputs === undefined) return input;
+  assert(Array.isArray(input.typedOutputs), 'CODEX_TYPED_OUTPUT_ENVELOPE_INVALID', 'Codex typedOutputs must be an array.');
+  assert(!Object.hasOwn(input, 'outputs'), 'CODEX_TYPED_OUTPUT_ENVELOPE_INVALID', 'Codex result cannot contain both typedOutputs and outputs.');
+  const outputs = {};
+  for (const entry of input.typedOutputs) {
+    assert(entry && typeof entry === 'object' && !Array.isArray(entry), 'CODEX_TYPED_OUTPUT_ENVELOPE_INVALID', 'Every Codex typed output must be an object.');
+    assert(Object.keys(entry).length === 4 && Object.keys(entry).every(key => ['portId', 'schemaId', 'valueJson', 'evidenceRefs'].includes(key)), 'CODEX_TYPED_OUTPUT_ENVELOPE_INVALID', 'Codex typed output contains unknown or missing fields.');
+    assert(/^[a-z][a-z0-9.-]{0,63}$/.test(entry.portId ?? '') && typeof entry.schemaId === 'string' && entry.schemaId.length > 0, 'CODEX_TYPED_OUTPUT_ENVELOPE_INVALID', 'Codex typed output requires a valid portId and schemaId.');
+    assert(!Object.hasOwn(outputs, entry.portId), 'CODEX_TYPED_OUTPUT_ENVELOPE_INVALID', `Codex typed output port is duplicated: ${entry.portId}`);
+    assert(typeof entry.valueJson === 'string', 'CODEX_TYPED_OUTPUT_ENVELOPE_INVALID', `Codex typed output ${entry.portId} requires valueJson.`);
+    let value;
+    try { value = JSON.parse(entry.valueJson); }
+    catch (error) { assert(false, 'CODEX_TYPED_OUTPUT_VALUE_INVALID', `Codex typed output ${entry.portId} contains invalid JSON.`, { cause: error.message }); }
+    assert(value && typeof value === 'object' && !Array.isArray(value), 'CODEX_TYPED_OUTPUT_VALUE_INVALID', `Codex typed output ${entry.portId} value must be a JSON object.`);
+    assert(Array.isArray(entry.evidenceRefs) && entry.evidenceRefs.every(ref => typeof ref === 'string' && ref.length > 0), 'CODEX_TYPED_OUTPUT_ENVELOPE_INVALID', `Codex typed output ${entry.portId} requires evidenceRefs.`);
+    assert(new Set(entry.evidenceRefs).size === entry.evidenceRefs.length, 'CODEX_TYPED_OUTPUT_ENVELOPE_INVALID', `Codex typed output ${entry.portId} contains duplicate evidenceRefs.`);
+    outputs[entry.portId] = { schemaId: entry.schemaId, value, evidenceRefs: [...entry.evidenceRefs] };
+  }
+  const { typedOutputs, ...result } = input;
+  return { ...result, ...(typedOutputs.length > 0 ? { outputs } : {}) };
+};
+
 const providerFailureFromEvents = events => {
   for (const event of events) {
     if (!['error', 'turn.failed', 'item.completed'].includes(event.type)) continue;
@@ -165,7 +188,6 @@ export const createCodexCliRuntime = ({
   };
   return {
     async spawn(packet, { prompt, launchCapability, executionGrantDigest, packetDigest } = {}) {
-      assert(!Object.keys(packet?.feature?.metadata?.outputPorts ?? {}).length, 'RUNTIME_TYPED_OUTPUT_CONTRACT_UNSUPPORTED', 'This Runtime uses a fixed result Schema and cannot transport typed workflow output ports.');
       const project = await resolveProject(packet.projectId);
       const config = project.policy?.runtimeConfigs?.[manifest.id] ?? {};
       assert((project.policy?.runtimePlugins ?? [manifest.id]).includes(manifest.id), 'PROJECT_RUNTIME_DENIED', `Project ${project.id} does not allow ${manifest.id}.`);
@@ -241,7 +263,7 @@ export const createCodexCliRuntime = ({
         : null;
       let result = null;
       let resultError = null;
-      try { result = JSON.parse(await readFile(task.lastMessagePath, 'utf8')); }
+      try { result = decodeCodexTypedOutputs(JSON.parse(await readFile(task.lastMessagePath, 'utf8'))); }
       catch (error) { resultError = { code: error.code ?? 'RESULT_PARSE_FAILED', message: error.message }; }
       if (result && workspaceProvider && !resultError) {
         try { await workspaceProvider.inspect(task.workspaceContext, result); }

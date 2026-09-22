@@ -19,6 +19,28 @@ const harnesses = new Map();
 const outputRoots = new Map();
 const runs = [];
 const out = (schemaId, value, evidenceRefs = []) => ({ schemaId, value, evidenceRefs });
+const legacyWorkflowOutputs = Object.freeze({
+  'engine-delivery': Object.freeze({
+    intake: ['intake', 'delivery-intake-v1', { requirements: ['Synthetic workspace requirement.'] }],
+    canonical: ['canonical', 'canonical-requirement-v1', { id: 'workspace-requirement', acceptance: ['Synthetic acceptance is satisfied.'] }],
+    plan: ['plan', 'delivery-plan-v1', { features: ['synthetic-feature'] }],
+    implement: ['implement', 'delivery-implementation-v1', { changedFiles: [] }],
+    scope: ['scope', 'delivery-scope-v1', { resolved: true }],
+    docs: ['docs', 'delivery-docs-v1', { documents: ['README.md'] }],
+    quality: ['quality', 'delivery-quality-v1', { findings: [] }],
+    review: ['review', 'delivery-review-v1', { approved: true }],
+    deliver: ['deliver', 'delivery-receipt-v1', { receiptId: 'workspace-delivery', status: 'closed' }],
+  }),
+  'collection-batch-production': Object.freeze({
+    rules: ['rules', 'batch-rules-v1', { ready: true }],
+    produce: ['produce', 'batch-produce-v1', { changedFiles: [] }],
+    quality: ['quality', 'batch-quality-v1', { findings: [] }],
+    review: ['review', 'batch-review-v1', { reviewed: true }],
+    accept: ['accept', 'batch-accept-v1', { accepted: true }],
+    launch: ['launch', 'batch-launch-v1', { launched: true }],
+    close: ['close', 'batch-close-v1', { closed: true }],
+  }),
+});
 const adapter = createExecutionAuthorizationAdapter({
   provider: 'workspace-canary-host', constraints: { processBackedAgent: 'allow-explicit', unattended: 'allow-explicit', decisionLineage: 'workspace-canary-command' },
   authorizeExecution: ({ context, evidence }) => evidence?.explicitUnattended === true ? sealLifecycleExecutionGrant({ protocolVersion: '1.0', kind: 'lifecycle-execution-grant', grantId: `workspace-canary-${context.runId}`, actor: 'workspace-canary', decision: 'approved', interactionMode: 'unattended', context, issuedAt: '2026-09-19T00:00:00.000Z', expiresAt: '2099-09-19T00:00:00.000Z', attestation: { provider: 'workspace-canary-host', reference: 'npm-run-workspace-canary' } }) : null,
@@ -32,6 +54,17 @@ const handler = async packet => {
   const context = packet.workflowContext;
   if (!context) return { status: 'completed', summary: `Workspace Canary ${packet.feature.metadata.stage}`, changedFiles: [], ...(packet.feature.metadata.qualityReview ? { findings: [], knownFindingDispositions: [] } : {}) };
   const nodeId = packet.feature.metadata.workflow.nodeId;
+  const legacyDefinition = legacyWorkflowOutputs[context.workflow.id]?.[nodeId];
+  if (legacyDefinition) {
+    const [port, schemaId, value] = legacyDefinition;
+    return {
+      status: 'completed',
+      summary: `Workspace Canary ${nodeId}`,
+      changedFiles: [],
+      outputs: { [port]: out(schemaId, value, [`workspace-canary/${nodeId}`]) },
+      ...(nodeId === 'quality' ? { findings: [], knownFindingDispositions: [] } : {}),
+    };
+  }
   const manifest = context.sourceManifest;
   const upstream = context.upstreamOutputs;
   let outputs = {};

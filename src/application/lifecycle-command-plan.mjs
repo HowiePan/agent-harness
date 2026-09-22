@@ -11,7 +11,8 @@ import { assertQualityTargetSnapshot } from '../platform/execution/quality-targe
 
 const schema = JSON.parse(readFileSync(new URL('../../schemas/lifecycle-command-plan.schema.json', import.meta.url), 'utf8'));
 const featureSchema = JSON.parse(readFileSync(new URL('../../schemas/feature.schema.json', import.meta.url), 'utf8'));
-const schemas = new Map([['feature.schema.json', featureSchema]]);
+const nodeTaskSchema = JSON.parse(readFileSync(new URL('../../schemas/node-task-contract.schema.json', import.meta.url), 'utf8'));
+const schemas = new Map([['feature.schema.json', featureSchema], ['node-task-contract.schema.json', nodeTaskSchema]]);
 
 const slug = value => String(value).toLowerCase().replace(/[^a-z0-9._-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 48) || 'target';
 

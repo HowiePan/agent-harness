@@ -42,9 +42,45 @@ const sourceText = async (packet, type) => {
 };
 const out = (schemaId, value, evidenceRefs = []) => ({ schemaId, value, evidenceRefs });
 
+const lifecycleCanaryOutputs = Object.freeze({
+  intake: ['intake', 'delivery-intake-v1', { requirements: ['Synthetic canary requirement.'] }],
+  canonical: ['canonical', 'canonical-requirement-v1', { id: 'canary-requirement', acceptance: ['Synthetic acceptance is satisfied.'] }],
+  plan: ['plan', 'delivery-plan-v1', { features: ['synthetic-feature'] }],
+  implement: ['implement', 'delivery-implementation-v1', { changedFiles: [] }],
+  scope: ['scope', 'delivery-scope-v1', { resolved: true }],
+  docs: ['docs', 'delivery-docs-v1', { documents: ['README.md'] }],
+  quality: ['quality', 'delivery-quality-v1', { findings: [] }],
+  review: ['review', 'delivery-review-v1', { approved: true }],
+  deliver: ['deliver', 'delivery-receipt-v1', { receiptId: 'canary-delivery', status: 'closed' }],
+});
+
+const batchCanaryOutputs = Object.freeze({
+  rules: ['rules', 'batch-rules-v1', { ready: true }],
+  produce: ['produce', 'batch-produce-v1', { changedFiles: [] }],
+  quality: ['quality', 'batch-quality-v1', { findings: [] }],
+  review: ['review', 'batch-review-v1', { reviewed: true }],
+  accept: ['accept', 'batch-accept-v1', { accepted: true }],
+  launch: ['launch', 'batch-launch-v1', { launched: true }],
+  close: ['close', 'batch-close-v1', { closed: true }],
+});
+
+const lifecycleCanaryResult = (nodeId, definition) => {
+  const [port, schemaId, value] = definition;
+  return {
+    status: 'completed',
+    summary: `Canary completed ${nodeId}`,
+    changedFiles: [],
+    outputs: { [port]: out(schemaId, value, [`canary/${nodeId}`]) },
+    ...(nodeId === 'quality' ? { findings: [], knownFindingDispositions: [] } : {}),
+  };
+};
+
 const handler = async packet => {
   if (!packet.workflowContext) return { status: 'completed', summary: `Canary completed ${packet.feature.metadata.stage}`, changedFiles: [], ...(packet.feature.metadata.qualityReview ? { findings: [], knownFindingDispositions: [] } : {}) };
   const nodeId = packet.feature.metadata.workflow.nodeId;
+  const workflowId = packet.workflowContext.workflow.id;
+  if (workflowId === 'engine-delivery') return lifecycleCanaryResult(nodeId, lifecycleCanaryOutputs[nodeId]);
+  if (workflowId === 'collection-batch-production') return lifecycleCanaryResult(nodeId, batchCanaryOutputs[nodeId]);
   const manifest = packet.workflowContext.sourceManifest;
   const upstream = packet.workflowContext.upstreamOutputs;
   const firstUpstream = Object.values(upstream)[0] ?? {};

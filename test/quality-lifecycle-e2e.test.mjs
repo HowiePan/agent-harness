@@ -11,7 +11,7 @@ import { digestJson, sha256 } from '../src/common/canonical.mjs';
 
 const releaseIdentity = { version: '1.0.0', artifactDigest: 'a'.repeat(64), verified: true };
 
-const result = ({ summary, findings = [], changedFiles = [], checkpoint = 'review', knownFindingDispositions = undefined }) => ({
+const result = ({ summary, findings = [], changedFiles = [], checkpoint = 'review', knownFindingDispositions = undefined, outputs = undefined }) => ({
   status: 'completed',
   summary,
   checkpoints: [{ id: checkpoint, status: 'passed', summary, evidence: [`host:${checkpoint}`] }],
@@ -20,6 +20,7 @@ const result = ({ summary, findings = [], changedFiles = [], checkpoint = 'revie
   changedFiles,
   observations: [],
   findings,
+  ...(outputs ? { outputs } : {}),
   ...(knownFindingDispositions ? { knownFindingDispositions } : {}),
   followUpFeatures: [],
   failureClass: null,
@@ -137,7 +138,7 @@ const createHost = ({ workspace, failFirstWait = false, failFirstInspect = false
             receipt: { operation: 'result', stage },
           });
         }
-        return finish({ result: result({ summary: 'Initial full review found one defect.', findings: [finding], knownFindingDispositions: openDisposition }), receipt: { operation: 'result', stage } });
+        return finish({ result: result({ summary: 'Initial full review found one defect.', findings: [finding], knownFindingDispositions: openDisposition, outputs: { quality: { schemaId: 'delivery-quality-v1', value: { findings: [finding] }, evidenceRefs: ['host:review'] } } }), receipt: { operation: 'result', stage } });
       }
       if (stage === 'quality-repair') {
         if (!task.repaired) {

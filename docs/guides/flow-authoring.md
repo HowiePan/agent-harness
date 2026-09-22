@@ -12,7 +12,9 @@ Planner 只把已批准的 Descriptor、Command Intent、Source Manifest、Targe
 
 ## 节点与结果
 
-每个节点声明稳定 ID、模板、依赖、可选扇出、来源权限、允许/禁止路径、冲突键、步骤、验收条件和 `outputPorts`。每个端口固定 Schema ID；输出值和 Evidence 引用由结果合同校验。读写边界必须从 Feature 产生，不能靠 Prompt 约定。
+每个节点声明稳定 ID、模板、依赖、可选扇出、来源权限、允许/禁止路径、冲突键、Node Task Contract 和 `outputPorts`。Task Contract 必须完整声明 `role`、`objective`、`instructions`、`inputs`、`steps`、`constraints`、`acceptance` 与 `evidenceRequirements`；禁止用泛化默认 Prompt 代替节点语义。每个端口固定 Schema ID和值 Schema；输出值和 Evidence 引用由结果合同校验。读写边界必须从 Feature 产生，不能靠 Prompt 约定。
+
+直接依赖节点的全部 typed outputs 会由 Workflow 编译器自动生成 `upstream` Task 输入；分支与 repeat 会把触发端口绑定到追加 Feature。非上游输入必须明确绑定 `intent`、`feature`、`workspace`、`source-manifest`、`memory` 或 `quality-target` 的字段路径。必填输入在 Dispatch 时解析失败会阻止执行。项目配置不能提供自由文本 Prompt；需要新语义时应发布新的 Task Contract/Flow 制品。
 
 路线、扇出、分支和有界循环的完整规则见 `agent-harness docs show control`。特别注意：静态图只能向前依赖；循环通过带 `maxIterations` 的 repeat continuation 展开为新 Feature，不能建立环形 DAG。
 
@@ -26,4 +28,4 @@ Flow Policy 声明必需的 fresh final Gates、人工 Decisions、Finding 策�
 
 ## 验收
 
-至少验证：非法后向依赖、重复节点、扇出预算、无匹配/多匹配分支、循环耗尽、结果端口错配、越权路径、缺失 Gate/Decision、Source 漂移、恢复和完整 `closed` Receipt。结构测试、合同测试和命令级合成闭环缺一不可；真实业务执行仍需单独授权。
+至少验证：缺失/摘要不符的 Task Contract、未解析必填输入、节点字段丢失、非法后向依赖、重复节点、扇出预算、无匹配/多匹配分支、循环耗尽、结果端口错配、越权路径、缺失 Gate/Decision、Source 漂移、恢复和完整 `closed` Receipt。检查必须查看最终 Prompt 的 Task 摘要、已解析输入和结果合同。结构测试、合同测试和命令级合成闭环缺一不可；真实业务执行仍需单独授权。

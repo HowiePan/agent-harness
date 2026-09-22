@@ -14,7 +14,7 @@ const requiredPages = [
 const currentDirectories = new Set(['architecture', 'flows', 'guides', 'history', 'operations', 'overview', 'reference']);
 const configurationSchemas = [
   'project-harness-config.schema.json', 'delivery-project-input.schema.json', 'batch-production-project-input.schema.json',
-  'project-descriptor-input.schema.json', 'workflow-definition.schema.json', 'feature.schema.json',
+  'project-descriptor-input.schema.json', 'node-task-contract.schema.json', 'workflow-definition.schema.json', 'feature.schema.json',
   'composable-workflow-profile.schema.json',
 ];
 
@@ -66,7 +66,7 @@ export const checkCurrentDocs = async root => {
     const schema = JSON.parse(await readFile(resolve(root, 'schemas', file), 'utf8'));
     for (const field of propertyNames(schema)) if (!documentedFields.has(field)) errors.push(`configuration API omits public field: ${file} -> ${field}`);
   }
-  for (const term of ['H0', 'H1', 'H2', 'H3', 'H4', 'WORKFLOW_REPEAT_EXHAUSTED', 'deterministic-process', 'source-link']) {
+  for (const term of ['H0', 'H1', 'H2', 'H3', 'H4', 'WORKFLOW_REPEAT_EXHAUSTED', 'deterministic-process', 'source-link', 'Node Task Contract', 'taskDigest', 'Prompt Contract 1.3']) {
     if (!configurationApi.includes(term)) errors.push(`configuration API omits required contract term: ${term}`);
   }
   for (const term of ['cardworld', 'tabletop-collection', 'contextBudgetCommand', 'maxLogicalGames', 'gameIds', 'collectionBatches']) {

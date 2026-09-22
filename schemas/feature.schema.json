@@ -12,6 +12,7 @@
     "logicalRoot": { "type": "string", "minLength": 1 },
     "laneId": { "type": "string", "minLength": 1 },
     "acceptance": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "type": "string" } },
+    "task": { "$ref": "node-task-contract.schema.json" },
     "steps": { "type": "array", "items": { "$ref": "#/$defs/step" } },
     "dependsOn": { "type": "array", "uniqueItems": true, "items": { "type": "string" } },
     "allowedPaths": { "type": "array", "uniqueItems": true, "items": { "type": "string" } },

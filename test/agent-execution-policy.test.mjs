@@ -155,7 +155,7 @@ test('explicit visible Feature dispatch binds the visible result schema', async 
   const read = await fixture.harness.readDispatchPacket(fixture.projectId, 'run', scheduled.result.dispatches[0].dispatchId);
   assert.equal(read.packet.execution.runtime.mode, 'conversation-visible');
   assert.match(read.packet.execution.result.schemaId, /visible-agent-result/);
-  assert.equal(read.prompt.contractVersion, '1.2');
+  assert.equal(read.prompt.contractVersion, '1.3');
 });
 
 test('Harness rejects unwrapped visible host callbacks instead of trusting a custom attestor', async () => {

@@ -4,4 +4,6 @@
 
 插件 manifest 声明 kind、API 版本、capabilities、permissions 和入口。Scheduler 返回候选 Intent；Agent Runtime 负责执行载体；Model Router 选择模型；Tool Broker 限制文件/命令；Codec 从不可变 Dispatch 生成完整 Prompt；Gate Executor 返回确定性结果；Artifact/Storage Provider 提供外部内容与存储。Plugin Host 对权限与版本再次校验，Kernel 对结果再校验。进程型插件声明受管输出预算；交互式 Runtime 必须提供可信可见宿主证明。
 
+Flow Author 使用 `defineNodeTaskContract()` 创建版本化节点任务。Workflow Definition 注册时拒绝缺少 Task Contract 的 Agent Node，并根据真实 `dependsOn + outputPorts` 自动生成类型化上游输入。编译出的 Feature 固定 Task、角色、步骤、验收和输出合同；Prompt Contract 1.3 由 Codec 按 Core Contract、Node Task、已解析 Dispatch Context、Runtime 方言四层渲染，并记录 `taskDigest`、`packetDigest` 和 `promptDigest`。自定义 Codec 可以改变渲染方式，但不能绕过 Task、Authority、结果合同或项目固定的 Codec 身份。
+
 可安装 Extension 制品提供 `agent-harness-extension.json`，列出入口和全部运行时文件。Registry 在执行代码前验证内容摘要，安装/升级/移除需要预期修订、命令 ID 与 Authority Decision。Workspace 以精确 ID、版本、摘要绑定 Workflow；新的制品需要新的绑定修订。自定义 Flow 应按整体设计的统一包结构建立，并提供自己的设计页、结果端口合同、Conformance 和命令级 `closed` 验收。

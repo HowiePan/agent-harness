@@ -1,0 +1,66 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-harness.local/schemas/node-task-contract.schema.json",
+  "title": "Agent Harness Node Task Contract",
+  "type": "object",
+  "required": ["schemaVersion", "taskDigest", "role", "objective", "instructions", "inputs", "steps", "constraints", "acceptance", "evidenceRequirements"],
+  "properties": {
+    "schemaVersion": { "const": "1.0" },
+    "taskDigest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "role": {
+      "type": "object",
+      "required": ["id", "description"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "description": { "type": "string", "minLength": 1 }
+      },
+      "additionalProperties": false
+    },
+    "objective": { "type": "string", "minLength": 1 },
+    "instructions": { "$ref": "#/$defs/nonEmptyStrings" },
+    "inputs": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "source", "required", "description"],
+        "properties": {
+          "id": { "$ref": "#/$defs/id" },
+          "source": { "enum": ["intent", "feature", "workspace", "source-manifest", "memory", "quality-target", "upstream"] },
+          "path": { "type": "string", "minLength": 1 },
+          "nodeId": { "$ref": "#/$defs/id" },
+          "portId": { "type": "string", "minLength": 1 },
+          "schemaId": { "type": "string", "minLength": 1 },
+          "required": { "type": "boolean" },
+          "description": { "type": "string", "minLength": 1 }
+        },
+        "additionalProperties": false
+      }
+    },
+    "steps": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["id", "instruction"],
+        "properties": {
+          "id": { "$ref": "#/$defs/id" },
+          "instruction": { "type": "string", "minLength": 1 }
+        },
+        "additionalProperties": false
+      }
+    },
+    "constraints": { "$ref": "#/$defs/nonEmptyStrings" },
+    "acceptance": { "$ref": "#/$defs/nonEmptyStrings" },
+    "evidenceRequirements": { "$ref": "#/$defs/nonEmptyStrings" }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "id": { "type": "string", "pattern": "^[a-z][a-z0-9.-]*$" },
+    "nonEmptyStrings": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": { "type": "string", "minLength": 1 }
+    }
+  }
+}

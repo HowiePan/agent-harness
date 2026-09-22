@@ -1,34 +1,58 @@
 import { digestJson } from '../../common/canonical.mjs';
 import { assert } from '../../common/errors.mjs';
+import { defineNodeTaskContract, taskFeatureProjection } from '../../common/task-contract.mjs';
 import { validateWorkGraph } from '../../kernel/work-graph.mjs';
 
 const idPattern = /^[a-z][a-z0-9.-]*$/;
 const versionPattern = /^\d+\.\d+\.\d+$/;
+
+const normalizeDefinition = input => {
+  assert(idPattern.test(input?.id ?? ''), 'WORKFLOW_ID_INVALID', 'Workflow requires a stable ID.');
+  assert(versionPattern.test(input?.version ?? ''), 'WORKFLOW_VERSION_INVALID', 'Workflow requires a semantic version.');
+  assert(input?.profileId && idPattern.test(input.profileId), 'WORKFLOW_PROFILE_INVALID', 'Workflow requires a Profile ID.');
+  assert(input?.routes && typeof input.routes === 'object' && !Array.isArray(input.routes), 'WORKFLOW_ROUTES_REQUIRED', 'Workflow requires routes.');
+  const routes = {};
+  for (const [routeId, nodes] of Object.entries(input.routes)) {
+    assert(idPattern.test(routeId) && Array.isArray(nodes) && nodes.length, 'WORKFLOW_ROUTE_INVALID', `Invalid workflow route: ${routeId}`);
+    const known = new Map();
+    const normalized = [];
+    for (const node of nodes) {
+      assert(idPattern.test(node?.id ?? '') && idPattern.test(node?.template ?? ''), 'WORKFLOW_NODE_INVALID', `Invalid node in ${routeId}.`);
+      assert(!known.has(node.id), 'WORKFLOW_NODE_DUPLICATE', `Duplicate node ${node.id}.`);
+      assert(node.forEach === undefined || idPattern.test(node.forEach), 'WORKFLOW_FANOUT_INVALID', 'Node fan-out requires a named item collection.');
+      for (const dependency of node.dependsOn ?? []) assert(known.has(dependency), 'WORKFLOW_DEPENDENCY_INVALID', `Node ${node.id} depends on a missing or later node ${dependency}.`);
+      const declaredTask = defineNodeTaskContract(node.task);
+      const explicitInputs = declaredTask.inputs.filter(binding => binding.source !== 'upstream');
+      const upstreamInputs = (node.dependsOn ?? []).flatMap(dependency => Object.entries(known.get(dependency).outputPorts ?? {}).map(([portId, schemaId]) => ({
+        id: `upstream.${dependency}.${portId}`,
+        source: 'upstream',
+        nodeId: dependency,
+        portId,
+        schemaId,
+        required: true,
+        description: `Typed ${portId} output produced by dependency node ${dependency}.`,
+      })));
+      const { taskDigest: _taskDigest, ...taskBody } = declaredTask;
+      const normalizedNode = structuredClone({ ...node, task: defineNodeTaskContract({ ...taskBody, inputs: [...explicitInputs, ...upstreamInputs] }) });
+      normalized.push(normalizedNode);
+      known.set(node.id, normalizedNode);
+    }
+    routes[routeId] = normalized;
+  }
+  return { id: input.id, version: input.version, profileId: input.profileId, routes, schemaVersion: '1.0' };
+};
 
 /** A workflow is immutable data. Template implementations belong to an approved Extension. */
 export const defineWorkflowDefinition = input => {
   if (input?.artifactDigest) {
     const { artifactDigest, ...body } = input;
     assert(artifactDigest === digestJson(body), 'WORKFLOW_DIGEST_MISMATCH', 'Workflow Definition digest changed.');
-    return Object.freeze(structuredClone(input));
+    const normalized = normalizeDefinition(body);
+    assert(artifactDigest === digestJson(normalized), 'WORKFLOW_DIGEST_MISMATCH', 'Workflow Definition normalization changed its digest.');
+    return Object.freeze({ ...normalized, artifactDigest });
   }
-  assert(idPattern.test(input?.id ?? ''), 'WORKFLOW_ID_INVALID', 'Workflow requires a stable ID.');
-  assert(versionPattern.test(input?.version ?? ''), 'WORKFLOW_VERSION_INVALID', 'Workflow requires a semantic version.');
-  assert(input?.profileId && idPattern.test(input.profileId), 'WORKFLOW_PROFILE_INVALID', 'Workflow requires a Profile ID.');
-  assert(input?.routes && typeof input.routes === 'object' && !Array.isArray(input.routes), 'WORKFLOW_ROUTES_REQUIRED', 'Workflow requires routes.');
-  for (const [routeId, nodes] of Object.entries(input.routes)) {
-    assert(idPattern.test(routeId) && Array.isArray(nodes) && nodes.length, 'WORKFLOW_ROUTE_INVALID', `Invalid workflow route: ${routeId}`);
-    const known = new Set();
-    for (const node of nodes) {
-      assert(idPattern.test(node?.id ?? '') && idPattern.test(node?.template ?? ''), 'WORKFLOW_NODE_INVALID', `Invalid node in ${routeId}.`);
-      assert(!known.has(node.id), 'WORKFLOW_NODE_DUPLICATE', `Duplicate node ${node.id}.`);
-      assert(node.forEach === undefined || idPattern.test(node.forEach), 'WORKFLOW_FANOUT_INVALID', 'Node fan-out requires a named item collection.');
-      for (const dependency of node.dependsOn ?? []) assert(known.has(dependency), 'WORKFLOW_DEPENDENCY_INVALID', `Node ${node.id} depends on a missing or later node ${dependency}.`);
-      known.add(node.id);
-    }
-  }
-  const body = structuredClone(input);
-  const definition = { ...body, schemaVersion: '1.0', artifactDigest: digestJson({ ...body, schemaVersion: '1.0' }) };
+  const body = normalizeDefinition(input);
+  const definition = { ...body, artifactDigest: digestJson(body) };
   return Object.freeze(definition);
 };
 
@@ -59,8 +83,19 @@ export const compileWorkflowFeatures = ({ definition, routeId, templates, contex
       });
       const feature = template({ context: structuredClone(context), node: structuredClone(node), item: structuredClone(item), index, dependsOn: [...new Set(dependencies)] });
       assert(feature?.executionClass === 'agent-reasoning', 'WORKFLOW_TEMPLATE_FEATURE_INVALID', `Template ${node.template} must return an Agent Feature.`);
+      const taskProjection = taskFeatureProjection(node.task);
+      feature.task = taskProjection.task;
+      feature.ownerRole = taskProjection.ownerRole;
+      feature.acceptance = taskProjection.acceptance;
+      feature.steps = taskProjection.steps;
       feature.dependsOn = [...new Set(dependencies)];
-      feature.metadata = { ...(feature.metadata ?? {}), workflow: { id: definition.id, version: definition.version, artifactDigest: definition.artifactDigest, nodeId: node.id, templateId: node.template } };
+      feature.metadata = {
+        ...(feature.metadata ?? {}),
+        outputPorts: structuredClone(node.outputPorts ?? {}),
+        outputValueSchemas: structuredClone(node.outputValueSchemas ?? {}),
+        outputChecks: structuredClone(node.outputChecks ?? []),
+        workflow: { id: definition.id, version: definition.version, artifactDigest: definition.artifactDigest, nodeId: node.id, templateId: node.template },
+      };
       entries.push(feature);
       features.push(feature);
     }

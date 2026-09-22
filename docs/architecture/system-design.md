@@ -47,7 +47,9 @@ policy/index.mjs          Profile、Gate、Decision、关闭策略
 commands.mjs              暴露命令时存在
 ```
 
-条件分支放在 `graph/branches.mjs`；个性节点可继续拆文件。小流程不创建空目录。`graph/` 只组合节点，节点声明输入映射、来源权限、输出端口、证据和可验证的结果条件；Agent 推理由 Runtime 执行。静态图只能向前依赖。通用循环由带类型化停止条件、`maxIterations` 和耗尽策略的 repeat continuation 逐轮展开为新 Feature，Authority 中不得出现循环 DAG。流程不能导入其他流程的 `nodes/`、`graph/` 或 `policy/`，也不能导入 `integrations/legacy-consumers/`。至少两个流程共享且合同语义相同的能力才进入 `flow-kit/`。Workspace 参数只能填流程已开放的槽，不能改变已发布节点顺序、分支、Gate 或关闭规则。
+条件分支放在 `graph/branches.mjs`；个性节点可继续拆文件。小流程不创建空目录。`graph/` 只组合节点。每个 Agent Node 必须声明版本化 Node Task Contract，完整给出角色、目标、执行说明、输入、步骤、约束、验收和证据要求；每个结果端口必须有 Schema ID和值 Schema。Workflow 编译器自动把直接依赖节点的类型化输出绑定为 Task 输入，并把 Task Contract 投影到 Feature，模板不得静默丢弃或改写任务语义。Agent 推理由 Runtime 执行。使用固定 Provider Schema 的 Runtime 必须声明可验证的通用 typed-output 方言；Codex CLI 以 `typed-output-envelope-v1` 传输 `portId/schemaId/valueJson/evidenceRefs`，Runtime 解码后仍由 Core 按原端口和值 Schema 校验，不允许以字符串封装绕过业务合同。
+
+Prompt 采用四层确定性组合：不可覆盖的 Core 权限/安全合同、Flow 拥有的 Node Task Contract、Dispatch 中已解析的来源/上游/工作区上下文，以及 Runtime 输出方言。项目配置只能填写 Schema 允许的参数，不能注入任意 Prompt 或覆盖 Authority。Prompt、Task、Dispatch 分别绑定摘要；旧 Run 保留其原 Prompt Contract。静态图只能向前依赖。通用循环由带类型化停止条件、`maxIterations` 和耗尽策略的 repeat continuation 逐轮展开为新 Feature，Authority 中不得出现循环 DAG。流程不能导入其他流程的 `nodes/`、`graph/` 或 `policy/`，也不能导入 `integrations/legacy-consumers/`。至少两个流程共享且合同语义相同的能力才进入 `flow-kit/`。Workspace 参数只能填流程已开放的槽，不能改变已发布节点顺序、Task Contract、分支、Gate 或关闭规则。
 
 每条流程必须有 `docs/flows/<flow-id>/design.md`，记录用途、动作、输入输出、节点与分支、结果合同、来源/资源权限、策略与关闭、恢复、可配置项和命令级闭环。流程代码与文档同版演进。制品变更产生新摘要，经批准安装和 Workspace Binding 切换；旧 Run 保留原身份。
 

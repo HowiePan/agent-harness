@@ -12,6 +12,12 @@ parse → lookup ─命中→ answer
 
 `parse` 返回 `question-v1`；`lookup` 返回 `memory-match-v1`。`search` 返回带证据的候选；`answer` 返回有非空结论和证据的 `qa-answer-v1`；`clarify` 返回具体问题的 `qa-clarification-v1`。分支条件由 `graph/branches.mjs` 的结果端口决定，不能由自然语言状态暗示。错误答案反馈使该会话的候选临时排除，再以新问题修订重新运行；经核验的正确答案才可提议进入持久知识。
 
+## Node Task Contract 与 Prompt
+
+`parse`、`lookup`、`search`、`answer`、`clarify` 分别发布完整 Task Contract：解析节点不得提前回答；记忆节点只能命中当前、已验证且未被否定的候选；检索节点必须给出路径和摘要证据；回答节点必须绑定 claim fingerprint 与非空证据；澄清节点只问一个能解除阻塞的问题。分支追加 `answer`、`search` 或 `clarify` 时，Composable Profile 会把触发端口作为 typed upstream Task 输入重新绑定并生成新 Task 摘要。
+
+Prompt Contract 1.3 同时携带问题修订、授权记忆、Source Manifest、触发分支的 typed output、拒绝记录和结果 Schema。项目不能用自由文本 Prompt 绕过来源隔离、拒答或澄清策略。
+
 Workspace 通用、项目、流程、来源和会话记忆分层，前后端专有知识不跨项目泄漏。记忆命中也要检验来源覆盖摘要；来源增仓或变更可触发复核。来源读取和资源访问每次受当前授权检查。没有答案且证据不足时走澄清分支，不编造结论。失败重试保留会话/问题修订身份；Run 恢复遵守原快照与 Epoch 规则。
 
 Workspace 可选项目范围、来源和资源绑定、会话与问题修订，不能更改分支谓词或端口合同。同一流程可在多个工作区运行，记忆按工作区隔离。

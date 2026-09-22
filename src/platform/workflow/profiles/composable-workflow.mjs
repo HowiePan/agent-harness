@@ -1,13 +1,31 @@
 import { assert } from '../../../common/errors.mjs';
+import { defineNodeTaskContract } from '../../../common/task-contract.mjs';
 import { validateWorkGraph } from '../../../kernel/work-graph.mjs';
 
 const select = (value, path) => String(path ?? '').split('.').filter(Boolean).reduce((current, segment) => current?.[segment], value);
 const repeatFeatureId = (id, ruleId, iteration) => `${id}--repeat-${ruleId}-${iteration}`;
 
+const bindTriggerInput = (candidate, rule) => {
+  const task = defineNodeTaskContract(candidate.task);
+  const { taskDigest: _taskDigest, ...body } = task;
+  const triggerId = `upstream.${rule.nodeId}.${rule.portId}`;
+  const inputs = [...task.inputs.filter(input => input.id !== triggerId), {
+    id: triggerId,
+    source: 'upstream',
+    nodeId: rule.nodeId,
+    portId: rule.portId,
+    schemaId: rule.schemaId,
+    required: true,
+    description: `Typed ${rule.portId} output that selected this continuation from node ${rule.nodeId}.`,
+  }];
+  return { ...structuredClone(candidate), task: defineNodeTaskContract({ ...body, inputs }) };
+};
+
 const expandRepeat = ({ rule, feature, iteration }) => {
   const ids = new Set(rule.features.map(candidate => candidate.id));
   const mapId = id => ids.has(id) ? repeatFeatureId(id, rule.id, iteration) : id;
-  return rule.features.map(candidate => {
+  return rule.features.map(rawCandidate => {
+    const candidate = bindTriggerInput(rawCandidate, rule);
     const internalDependencies = (candidate.dependsOn ?? []).filter(id => ids.has(id));
     const dependencies = (candidate.dependsOn ?? []).map(mapId);
     if (!internalDependencies.length) dependencies.push(feature.id);
@@ -93,7 +111,7 @@ export const composableWorkflowProfile = Object.freeze({
     const matching = rules.filter(rule => select(result.outputs[rule.portId].value, rule.path) === rule.equals);
     if (rules.length) assert(matching.length > 0, 'WORKFLOW_BRANCH_UNMATCHED', `No continuation rule matched ${nodeId}.`);
     assert(matching.length <= 1, 'WORKFLOW_BRANCH_AMBIGUOUS', `Multiple continuation rules matched ${nodeId}.`);
-    const appended = matching.flatMap(rule => rule.features.map(candidate => ({ ...structuredClone(candidate), dependsOn: [...new Set([feature.id, ...(candidate.dependsOn ?? [])])] })));
+    const appended = matching.flatMap(rule => rule.features.map(candidate => ({ ...bindTriggerInput(candidate, rule), dependsOn: [...new Set([feature.id, ...(candidate.dependsOn ?? [])])] })));
     assert(state.features.length + appended.length <= 100, 'WORKFLOW_FEATURE_BUDGET', 'Workflow continuation exceeds 100 Features.');
     if (appended.length) validateWorkGraph([...state.features, ...appended]);
     return appended;

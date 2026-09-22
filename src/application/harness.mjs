@@ -288,7 +288,7 @@ export const createHarness = async ({ controlRoot: controlRootInput, dataRoot: d
         } catch (error) { add('runtime', false, {}, issues(error)); }
         if (runtimeManifest) {
           const typedFeatures = plan.run.features.filter(feature => Object.keys(feature.metadata?.outputPorts ?? {}).length > 0).map(feature => feature.id);
-          const compatible = !typedFeatures.length || !runtimeManifest.capabilities.includes('fixed-result-schema');
+          const compatible = !typedFeatures.length || !runtimeManifest.capabilities.includes('fixed-result-schema') || runtimeManifest.capabilities.includes('typed-output-envelope-v1');
           add('result-transport', compatible, { typedFeatures, runtimePluginId: runtimeManifest.id }, compatible ? [] : [{ code: 'RUNTIME_TYPED_OUTPUT_CONTRACT_UNSUPPORTED', message: 'The selected Runtime uses a fixed result Schema that cannot transport the workflow typed output ports.' }]);
         }
         const resultContracts = {};
@@ -827,7 +827,7 @@ export const createHarness = async ({ controlRoot: controlRootInput, dataRoot: d
         const executionByFeatureId = Object.fromEntries(input.candidateFeatureIds.map(featureId => {
           const feature = state.features.find(item => item.id === featureId);
           assert(feature, 'FEATURE_NOT_FOUND', `Unknown candidate Feature: ${featureId}`);
-          return [featureId, { prompt: structuredClone(promptBinding), result: createDispatchResultContract(feature, { conversationVisible: runtimePolicy.mode === 'conversation-visible' }), runtime: { mode: runtimePolicy.mode, userVisible: runtimePolicy.userVisible, hostOrchestrated: runtimePolicy.hostOrchestrated } }];
+          return [featureId, { prompt: structuredClone(promptBinding), result: createDispatchResultContract(feature, { conversationVisible: runtimePolicy.mode === 'conversation-visible' }), runtime: { mode: runtimePolicy.mode, userVisible: runtimePolicy.userVisible, hostOrchestrated: runtimePolicy.hostOrchestrated, ...(runtimeManifest.capabilities.includes('typed-output-envelope-v1') ? { resultDialect: 'typed-output-envelope-v1' } : {}) } }];
         }));
         return kernel.schedule(projectId, runId, { ...scheduledInput, executionByFeatureId }, command);
       }
@@ -839,7 +839,7 @@ export const createHarness = async ({ controlRoot: controlRootInput, dataRoot: d
       if (toolBrokerPluginId) pluginHost.get(toolBrokerPluginId, 'tool-broker');
       for (const featureId of strategy.payload.featureIds) {
         const feature = state.features.find(item => item.id === featureId);
-        const execution = { prompt: structuredClone(promptBinding), result: createDispatchResultContract(feature, { conversationVisible: runtimePolicy.mode === 'conversation-visible' }), ...(runtimePolicy ? { runtime: { mode: runtimePolicy.mode, userVisible: runtimePolicy.userVisible, hostOrchestrated: runtimePolicy.hostOrchestrated } } : {}) };
+        const execution = { prompt: structuredClone(promptBinding), result: createDispatchResultContract(feature, { conversationVisible: runtimePolicy.mode === 'conversation-visible' }), ...(runtimePolicy ? { runtime: { mode: runtimePolicy.mode, userVisible: runtimePolicy.userVisible, hostOrchestrated: runtimePolicy.hostOrchestrated, ...(runtimeManifest.capabilities.includes('typed-output-envelope-v1') ? { resultDialect: 'typed-output-envelope-v1' } : {}) } } : {}) };
         if (modelRouterPluginId) {
           const request = { featureId, role: feature.ownerRole, capabilities: feature.metadata.requiredCapabilities ?? [], risk: Number(feature.metadata.risk ?? 0) };
           const route = await pluginHost.invoke(modelRouterPluginId, 'route', { ...request, requestDigest: digestJson(request) });

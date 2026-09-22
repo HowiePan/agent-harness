@@ -1,4 +1,5 @@
 import { assert } from '../../../common/errors.mjs';
+import { defineNodeTaskContract, taskFeatureProjection } from '../../../common/task-contract.mjs';
 import { approvalSatisfied } from '../../../flow-kit/primitives.mjs';
 import { createQualityFollowUpFeatures, hasCurrentCleanQualityReview, validateQualityReviewPolicies } from '../../../flow-kit/profiles/quality-loop.mjs';
 
@@ -56,6 +57,16 @@ export const createDeliveryLifecycleProfile = (id = 'delivery-lifecycle') => Obj
       const withinParent = path => parentPaths.some(root => path === root || path.startsWith(`${root.replace(/\/$/, '')}/`));
       assert(childPaths.every(withinParent), 'FOLLOW_UP_PATH_OUTSIDE_PARENT', `Follow-up Feature ${id} exceeds its parent Feature paths.`);
       const dependencies = [...new Set([feature.id, ...(item.dependsOn ?? []).map(dependency => `${feature.id}/${dependency}`)])];
+      const taskProjection = taskFeatureProjection(defineNodeTaskContract({
+        role: { id: 'implementation-engineer', description: 'Executes one explicitly proposed and path-bounded delivery follow-up.' },
+        objective: `Complete approved follow-up ${item.id} for parent Feature ${feature.id}.`,
+        instructions: ['Use the parent Feature result and current source as context.', 'Complete only the declared follow-up acceptance criteria.', 'Run focused verification and report exact changed files.'],
+        inputs: [{ id: 'parent-feature', source: 'feature', path: 'dynamicParentId', required: true, description: 'The exact parent Feature that authorized this decomposition.' }],
+        steps: item.steps?.length ? item.steps.map((step, index) => ({ id: step.id ?? `step-${index + 1}`, instruction: step.title ?? step.id ?? `Complete follow-up step ${index + 1}.` })) : [{ id: 'execute', instruction: `Execute follow-up ${item.id}.` }, { id: 'verify', instruction: `Verify follow-up ${item.id}.` }],
+        constraints: ['Stay inside the parent Feature path authority.', 'Do not expand the follow-up beyond its declared acceptance criteria.'],
+        acceptance: item.acceptance,
+        evidenceRequirements: ['Cite the parent result, exact changed paths, and focused verification evidence.'],
+      }));
       return {
         id,
         executionClass: 'agent-reasoning',
@@ -63,8 +74,7 @@ export const createDeliveryLifecycleProfile = (id = 'delivery-lifecycle') => Obj
         ownerRole: item.ownerRole ?? feature.ownerRole,
         logicalRoot: `${feature.logicalRoot}:${item.id}`,
         laneId: item.laneId ?? feature.laneId,
-        acceptance: item.acceptance,
-        steps: item.steps ?? [],
+        ...taskProjection,
         dependsOn: dependencies,
         allowedPaths: childPaths,
         forbiddenPaths: [...new Set([...feature.forbiddenPaths, ...(item.forbiddenPaths ?? [])])],

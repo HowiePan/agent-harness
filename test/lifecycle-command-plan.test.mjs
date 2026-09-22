@@ -101,7 +101,7 @@ test('headless quality requires one trusted command grant while other Engine act
   assert.equal(planning.run.runtimePluginId, 'codex-conversation-runtime');
   assert.equal(planning.run.agentExecutionMode, 'conversation-visible');
   const preflight = await harness.createExecutionReadinessReport(authorizedQuality);
-  assert.equal(preflight.executionReady, true);
+  assert.equal(preflight.executionReady, true, JSON.stringify(preflight.checks.filter(check => !check.ready)));
   assert.deepEqual(preflight.checks.find(check => check.id === 'visible-host').details, { required: false });
   const started = await harness.startLifecyclePlan(authorizedQuality, { commandId: 'headless-lineage-start', preflightReport: preflight });
   assert.equal(started.status, 'started');
@@ -176,7 +176,7 @@ test('lifecycle planning automatically resolves an inactive incompatible logical
   }, { commandId: 'start-historical-quality' });
   const plan = await harness.createLifecyclePlan({ projectId: descriptor.id, action: 'quality', target: 'V3.8.4', arguments: ['full'], extensionId: extension.id, executionWorkspaceRoot: workspaceRoot, executionAuthorizationEvidence: { explicitUnattended: true } });
   const preflight = await harness.createExecutionReadinessReport(plan);
-  assert.equal(preflight.executionReady, true);
+  assert.equal(preflight.executionReady, true, JSON.stringify(preflight.checks.filter(check => !check.ready)));
   const lineage = preflight.checks.find(check => check.id === 'run-lineage');
   assert.equal(lineage.ready, true);
   assert.equal(lineage.details.resolution.action, 'supersede-and-start');

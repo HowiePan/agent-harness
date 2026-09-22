@@ -14,6 +14,12 @@
 
 权限边界不变：质量审查只读，修复由独立 Feature 执行；Flow 和 Extension 只返回 Intent/Event/Receipt，不直接写 Kernel Authority。Target 投影可从 Run Authority 和 Receipt 重建，不依赖模型上下文或插件内部状态。
 
+## Node Task Contract 与 Prompt
+
+九个节点分别发布完整 Task Contract，而不是共享“完成 action”式默认 Prompt：`intake` 负责来源化需求盘点，`canonical` 固化唯一需求合同，`plan` 生成覆盖/依赖/冲突图，`implement` 完成受限实现，`scope` 对账计划与实际范围，`docs` 同步外部合同，`quality` 执行只读 P0–P3 全量审查，`review` 独立评审，`deliver` 验证 Gate/Decision/Finding 后封存回执。每个合同包含角色、唯一目标、执行说明、输入、步骤、约束、验收和证据要求。
+
+Workflow 编译器根据当前 route 的真实 `dependsOn` 自动把前序 typed output 绑定为 Task 输入，因此独立 `quality`、`plan` 等路线不会伪造不存在的上游，而 `full` 路线会逐阶段传递结果。编译后的 Feature 必须保留 Task、端口和值 Schema；Prompt Contract 1.3 显示 Task 摘要、已解析输入、结果合同和 Dispatch 摘要。质量修复、复审和动态开发 follow-up 也生成独立 Task Contract。
+
 Workspace 可选择已发布的动作、目标、成员项目范围、Runtime、Gate Recipe、动作路径、Finding inventory 迁移种子和并发参数，不能重排节点或改写结果合同。CardWorld 的路径、脚本、旧命令及 `engine-delivery` 身份由 Legacy shim 显式提供；旧 Descriptor 必须绑定该 shim，新业务不得把它当作中立 Flow 的隐式别名。
 
 ## 命令级验收

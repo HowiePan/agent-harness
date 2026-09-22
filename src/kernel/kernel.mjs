@@ -24,7 +24,44 @@ export const leaseHealth = (state, now = Date.now()) => state.leases.filter(acti
   return { leaseId: lease.leaseId, featureId: lease.featureId, elapsedMs, health: hardExpired ? 'expired' : elapsedMs >= 60 * 1000 ? 'warning' : 'healthy', hardExpired };
 });
 
-export const buildDispatchPacket = (state, dispatch, feature) => ({
+const selectPath = (value, path) => path === '$' ? value : String(path).split('.').filter(Boolean).reduce((current, segment) => current?.[segment], value);
+
+const taskInputValues = (state, feature, upstreamOutputs) => (feature.task?.inputs ?? []).map(binding => {
+  if (binding.source === 'upstream') {
+    const values = feature.dependsOn.flatMap(featureId => {
+      const dependency = state.features.find(candidate => candidate.id === featureId);
+      if (dependency?.metadata?.workflow?.nodeId !== binding.nodeId) return [];
+      const output = upstreamOutputs[featureId]?.[binding.portId];
+      if (!output) return [];
+      assert(output.schemaId === binding.schemaId, 'NODE_TASK_INPUT_SCHEMA_MISMATCH', `Task input ${binding.id} expected ${binding.schemaId} from ${binding.nodeId}.${binding.portId}.`);
+      return [{ featureId, schemaId: output.schemaId, value: structuredClone(output.value), evidenceRefs: structuredClone(output.evidenceRefs ?? []) }];
+    });
+    assert(!binding.required || values.length > 0, 'NODE_TASK_INPUT_MISSING', `Required upstream Task input ${binding.id} is unavailable.`);
+    return { ...structuredClone(binding), values };
+  }
+  const roots = {
+    intent: state.metadata?.commandIntent,
+    feature: feature.metadata,
+    workspace: state.metadata?.workspace,
+    'source-manifest': state.metadata?.sourceManifest,
+    memory: state.metadata?.memorySnapshot,
+    'quality-target': state.metadata?.qualityTarget,
+  };
+  const value = selectPath(roots[binding.source], binding.path);
+  assert(!binding.required || (value !== undefined && value !== null), 'NODE_TASK_INPUT_MISSING', `Required Task input ${binding.id} is unavailable at ${binding.source}:${binding.path}.`);
+  return { ...structuredClone(binding), value: structuredClone(value ?? null) };
+});
+
+export const buildDispatchPacket = (state, dispatch, feature) => {
+  const upstreamOutputs = Object.fromEntries(feature.dependsOn.map(id => [id, structuredClone([...state.submissions].reverse().find(submission => submission.featureId === id && !submission.supersededAt)?.result?.outputs ?? {})]));
+  const workflowContext = state.metadata?.workflow || feature.task ? {
+    workflow: structuredClone(state.metadata?.workflow ?? null),
+    sourceManifest: structuredClone(state.metadata?.sourceManifest ?? null),
+    memorySnapshot: structuredClone(state.metadata?.memorySnapshot ?? null),
+    upstreamOutputs,
+    taskInputs: taskInputValues(state, feature, upstreamOutputs),
+  } : null;
+  return {
   protocolVersion: '1.0', projectId: state.projectId, runId: state.runId, profileId: state.profile.id,
   epoch: state.epoch, generation: state.generation, dispatchId: dispatch.dispatchId, feature: structuredClone(feature), outputRef: dispatch.outputRef,
   sourceDigest: dispatch.sourceDigest ?? state.sourceDigest, sourceSnapshotRef: dispatch.sourceSnapshotRef, policyDigest: state.policyDigest, pluginSetDigest: state.pluginSetDigest, artifactDigest: state.artifactDigest,
@@ -33,13 +70,9 @@ export const buildDispatchPacket = (state, dispatch, feature) => ({
   ...(state.metadata?.workspace ? { workspace: structuredClone(state.metadata.workspace) } : {}),
   ...(state.metadata?.workspaceRef ? { workspaceRef: structuredClone(state.metadata.workspaceRef) } : {}),
   ...(state.metadata?.sourceToolBinding ? { sourceToolBinding: structuredClone(state.metadata.sourceToolBinding) } : {}),
-  ...(state.profile.id === 'composable-workflow' ? { workflowContext: {
-    workflow: structuredClone(state.metadata?.workflow ?? null),
-    sourceManifest: structuredClone(state.metadata?.sourceManifest ?? null),
-    memorySnapshot: structuredClone(state.metadata?.memorySnapshot ?? null),
-    upstreamOutputs: Object.fromEntries(feature.dependsOn.map(id => [id, structuredClone([...state.submissions].reverse().find(submission => submission.featureId === id && !submission.supersededAt)?.result?.outputs ?? {})])),
-  } } : {}),
-});
+  ...(workflowContext ? { workflowContext } : {}),
+  };
+};
 
 const event = (state, type, payload, now) => {
   state.events.push({ sequence: state.events.length + 1, type, at: now(), epoch: state.epoch, generation: state.generation, ...structuredClone(payload) });

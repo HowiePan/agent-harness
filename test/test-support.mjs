@@ -1,6 +1,6 @@
 import { mkdtemp, mkdir, rm, rmdir, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
-import { createExecutionAuthorizationAdapter, createHarness, createInMemoryRuntime, createVisibleHostAdapter, harnessTemporaryRoot, projectExecutionPolicyDecisionContext, sealLifecycleExecutionGrant } from '../src/index.mjs';
+import { createExecutionAuthorizationAdapter, createHarness, createInMemoryRuntime, createVisibleHostAdapter, defineNodeTaskContract, harnessTemporaryRoot, projectExecutionPolicyDecisionContext, sealLifecycleExecutionGrant } from '../src/index.mjs';
 import { extensionPack as engineDeliveryExtension } from '../integrations/legacy-consumers/cardworld/index.mjs';
 import { extensionPack as collectionBatchExtension } from '../integrations/legacy-consumers/collection/index.mjs';
 
@@ -72,7 +72,18 @@ export const makeFixture = async ({ projectId = 'project', profiles = ['feature-
   }
 };
 
-export const feature = (id, metadata = {}, extra = {}) => ({ id, executionClass: 'agent-reasoning', acceptance: [`${id} accepted`], dependsOn: [], allowedPaths: [`work/${id}`], metadata, ...extra });
+export const taskContract = (id = 'test-task', acceptance = [`${id} accepted`]) => defineNodeTaskContract({
+  role: { id: 'test-worker', description: 'Executes one bounded test Feature.' },
+  objective: `Complete ${id}.`,
+  instructions: [`Execute ${id} exactly as declared.`],
+  inputs: [],
+  steps: [{ id: 'execute', instruction: `Execute ${id}.` }],
+  constraints: ['Stay inside the test Feature authority.'],
+  acceptance,
+  evidenceRequirements: ['Return observed test evidence.'],
+});
+
+export const feature = (id, metadata = {}, extra = {}) => ({ id, executionClass: 'agent-reasoning', task: taskContract(id), acceptance: [`${id} accepted`], dependsOn: [], allowedPaths: [`work/${id}`], metadata, ...extra });
 
 export const startRun = async (fixture, { runId = 'run', profileId = 'feature-delivery', features = [feature('one')], profileConfig = {}, artifactDigest = null } = {}) => {
   const output = await fixture.harness.startRun({ projectId: fixture.projectId, runId, profileId, features, profileConfig, artifactDigest, executionAuthorizationEvidence: { explicitUnattended: true } }, command());

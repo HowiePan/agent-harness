@@ -3,6 +3,7 @@ import test from 'node:test';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { assertSourceManifestCurrent, captureSourceManifest, compileWorkflowFeatures, defineMemorySpace, defineWorkflowDefinition, digestJson, harnessTemporaryRoot, MemoryStore, readPinnedSource, readSourceForDispatch, runWorkflowInstanceSet, searchSourceForDispatch, WorkflowAdmissionStore } from '../src/index.mjs';
+import { taskContract } from './test-support.mjs';
 import { resolveLifecycleExecutionPolicy } from '../src/platform/plugins/runtime/execution-policy.mjs';
 import { composableWorkflowProfile } from '../src/platform/workflow/profiles/composable-workflow.mjs';
 import { parsePseudoCommand } from '../integrations/codex/agent-harness-codex/hooks/pseudo-command-router.mjs';
@@ -16,11 +17,14 @@ const fixture = async t => {
 };
 
 test('workflow compiler validates identity, dependencies, fan-out, and template output', () => {
-  assert.throws(() => defineWorkflowDefinition({ id: 'example', version: '1.0.0', profileId: 'composable-workflow', routes: { full: [{ id: 'late', template: 'unit', dependsOn: ['missing'] }] } }), error => error.code === 'WORKFLOW_DEPENDENCY_INVALID');
-  const definition = defineWorkflowDefinition({ id: 'example', version: '1.0.0', profileId: 'composable-workflow', routes: { full: [{ id: 'read', template: 'unit', forEach: 'documents' }, { id: 'merge', template: 'unit', dependsOn: ['read'] }] } });
+  assert.throws(() => defineWorkflowDefinition({ id: 'example', version: '1.0.0', profileId: 'composable-workflow', routes: { full: [{ id: 'late', template: 'unit', task: taskContract('late'), dependsOn: ['missing'] }] } }), error => error.code === 'WORKFLOW_DEPENDENCY_INVALID');
+  const outputSchema = { type: 'object', required: ['value'], properties: { value: { type: 'string' } }, additionalProperties: false };
+  const definition = defineWorkflowDefinition({ id: 'example', version: '1.0.0', profileId: 'composable-workflow', routes: { full: [{ id: 'read', template: 'unit', task: taskContract('read'), forEach: 'documents', outputPorts: { result: 'result-v1' }, outputValueSchemas: { result: outputSchema } }, { id: 'merge', template: 'unit', task: taskContract('merge'), dependsOn: ['read'], outputPorts: { result: 'result-v1' }, outputValueSchemas: { result: outputSchema } }] } });
   const templates = { unit: ({ node, item, dependsOn }) => ({ id: `${node.id}/${item ?? 'all'}`, executionClass: 'agent-reasoning', acceptance: ['done'], allowedPaths: [], dependsOn }) };
   const features = compileWorkflowFeatures({ definition, routeId: 'full', templates, context: {}, items: { documents: ['a', 'b'] } });
   assert.deepEqual(features.find(item => item.id === 'merge/all').dependsOn, ['read/a', 'read/b']);
+  assert.deepEqual(features.find(item => item.id === 'merge/all').task.inputs.map(input => input.id), ['upstream.read.result']);
+  assert.deepEqual(features.find(item => item.id === 'merge/all').acceptance, features.find(item => item.id === 'merge/all').task.acceptance);
   assert.throws(() => compileWorkflowFeatures({ definition: { ...definition, version: '1.0.1' }, routeId: 'full', templates, context: {}, items: { documents: ['a'] } }), error => error.code === 'WORKFLOW_DIGEST_MISMATCH');
 });
 

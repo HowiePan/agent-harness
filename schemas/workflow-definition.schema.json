@@ -20,10 +20,11 @@
     "id": { "type": "string", "pattern": "^[a-z][a-z0-9.-]*$" },
     "node": {
       "type": "object",
-      "required": ["id", "template"],
+      "required": ["id", "template", "task"],
       "properties": {
         "id": { "$ref": "#/$defs/id" },
         "template": { "$ref": "#/$defs/id" },
+        "task": { "$ref": "node-task-contract.schema.json" },
         "dependsOn": { "type": "array", "uniqueItems": true, "items": { "$ref": "#/$defs/id" } },
         "forEach": { "$ref": "#/$defs/id" },
         "action": { "type": "string", "minLength": 1 },

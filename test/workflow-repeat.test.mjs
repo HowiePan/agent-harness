@@ -1,9 +1,10 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { composableWorkflowProfile } from '../src/platform/workflow/profiles/composable-workflow.mjs';
+import { taskContract } from './test-support.mjs';
 
 const body = {
-  id: 'review', executionClass: 'agent-reasoning', acceptance: ['Review the current result.'], dependsOn: [], allowedPaths: [],
+  id: 'review', executionClass: 'agent-reasoning', task: taskContract('review', ['Review the current result.']), acceptance: ['Review the current result.'], dependsOn: [], allowedPaths: [],
   metadata: { workflow: { nodeId: 'review' }, outputPorts: { review: 'review-v1' } },
 };
 
