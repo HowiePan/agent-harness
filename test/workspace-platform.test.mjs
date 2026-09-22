@@ -34,6 +34,7 @@ test('Workspace Registry owns identity, revisions, aliases and Project projectio
   try {
     const registry = new WorkspaceRegistry({ root: dataRoot, controlRoot: process.cwd() });
     const approve = (input, current = null) => ({ actor: 'test', decision: 'approved', action: 'workspace-register', expiresAt: '2099-01-01T00:00:00.000Z', context: workspaceDecisionContext({ current, input }) });
+    await assert.rejects(registry.register(descriptor, { commandId: 'register-without-decision' }), { code: 'WORKSPACE_DECISION_REQUIRED' });
     const first = await registry.register(descriptor, { commandId: 'register-1', authorityDecision: approve(descriptor) });
     assert.equal(first.revision, 1);
     assert.equal((await registry.resolveAlias('atlas')).workspaceId, 'atlas');

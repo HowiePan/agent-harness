@@ -55,6 +55,17 @@ export const parsePseudoCommand = prompt => {
   const match = prompt.trim().match(commandPattern);
   if (!match || !tokenPattern.test(match[1])) return { kind: 'invalid', error: '伪命令语法无效。' };
   const tokens = (match[2] ?? '').trim().split(/\s+/).filter(Boolean);
+  if (match[1] === 'init') {
+    const values = {};
+    for (let index = 0; index < tokens.length; index += 2) {
+      const flag = tokens[index];
+      const value = tokens[index + 1];
+      if (!['--decision', '--config', '--source', '--entrypoint'].includes(flag) || !value || values[flag]) return { kind: 'invalid', error: '语法应为 h:init --decision <文件> [--config <harness.json>] (--source <Harness源码根>|--entrypoint <已安装CLI>)。' };
+      values[flag] = value;
+    }
+    if (!values['--decision'] || Boolean(values['--source']) === Boolean(values['--entrypoint'])) return { kind: 'invalid', error: 'h:init 必须提供 --decision，并且 --source 与 --entrypoint 二选一。' };
+    return { protocolVersion: '1.0', kind: 'init', decisionFile: values['--decision'], configFile: values['--config'] ?? 'harness.json', ...(values['--source'] ? { sourceRoot: values['--source'] } : { entrypoint: values['--entrypoint'] }) };
+  }
   let projectIds = null;
   const projectFlag = tokens.findIndex(token => token === '--project' || token === '--projects');
   if (projectFlag >= 0) {
@@ -103,7 +114,7 @@ const validateBindings = async (input, source) => {
   if ((!input.projects || typeof input.projects !== 'object' || Array.isArray(input.projects)) && (!input.workspaces || typeof input.workspaces !== 'object' || Array.isArray(input.workspaces))) throw new Error(`绑定文件至少需要一个项目或工作区别名：${source}`);
   if (!Object.keys(input.projects ?? {}).length && !Object.keys(input.workspaces ?? {}).length) throw new Error(`绑定文件至少需要一个项目或工作区别名：${source}`);
   const activeRelease = await validateActiveReleaseBinding({ controlRoot: harness.controlRoot, dataRoot: harness.dataRoot, entrypoint: harness.entrypoint, declaredRelease: harness.release });
-  const release = { version: activeRelease.version, artifactDigest: activeRelease.artifactDigest, channelArtifactDigest: activeRelease.channelArtifactDigest, ...(activeRelease.compositionDigest ? { compositionDigest: activeRelease.compositionDigest } : {}), generationId: activeRelease.generationId, pointerDigest: activeRelease.pointerDigest };
+  const release = { ...(activeRelease.mode ? { mode: activeRelease.mode } : {}), version: activeRelease.version, artifactDigest: activeRelease.artifactDigest, channelArtifactDigest: activeRelease.channelArtifactDigest, ...(activeRelease.compositionDigest ? { compositionDigest: activeRelease.compositionDigest } : {}), generationId: activeRelease.generationId, pointerDigest: activeRelease.pointerDigest, ...(activeRelease.developmentManifest ? { developmentManifest: activeRelease.developmentManifest } : {}) };
   const projects = {};
   for (const [alias, project] of Object.entries(input.projects ?? {})) {
     if (!tokenPattern.test(alias) || !project?.projectId || !project.profileId || !project.extensionId) throw new Error(`项目绑定无效：${alias}`);
@@ -179,6 +190,7 @@ export const hookResponse = async (input, options = {}) => {
   const parsed = parsePseudoCommand(input?.prompt);
   if (!parsed) return null;
   if (parsed.kind === 'invalid') return contextResponse(`Agent Harness 伪命令解析失败：${parsed.error} 不得启动或修改任何 Harness 状态。`);
+  if (parsed.kind === 'init') return contextResponse(`检测到 h:init。使用 $agent-harness-command 执行项目初始化；只使用用户显式提供的 config、Decision 和 Harness source/entrypoint，不得扫描磁盘或自行批准。先校验当前项目根和 harness.json。source 模式调用 <source>/bin/agent-harness.mjs dev execute；installed 模式调用指定 entrypoint 的 init execute。随后仅使用初始化回执的 hostBinding 配置本 Codex 插件；source 模式必须同时绑定 developmentManifest。初始化不创建 Run。解析结果：${JSON.stringify({ ...parsed, cwd: resolve(input?.cwd ?? '.') })}`);
   let bindings;
   try { bindings = await loadBindings(options); }
   catch (error) { return contextResponse(`Agent Harness 绑定不可用：${error.message} 不得搜索磁盘，不得启动或修改任何 Harness 状态。`); }

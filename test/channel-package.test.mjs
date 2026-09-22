@@ -11,6 +11,8 @@ const manifest = JSON.parse(readFileSync(resolve(root, 'release-manifest.json'),
 test('Core package excludes the Codex host plugin and marketplace while retaining the runtime adapter', () => {
   assert.equal(packageJson.scripts['pack:core'], 'node scripts/pack-core.mjs');
   assert.equal(packageJson.scripts['pack:codex'], 'node scripts/pack-codex.mjs');
+  assert.equal(packageJson.scripts['pack:opencode'], 'node scripts/pack-opencode.mjs');
+  assert.equal(packageJson.scripts['pack:vscode'], 'node scripts/pack-vscode.mjs');
   assert.equal(packageJson.scripts['deploy:codex'], 'node scripts/deploy-codex-overlay.mjs');
   assert.equal(packageJson.scripts['check:codex-host-fast'].includes('post-tool-host-bootstrap.test.mjs'), true);
   assert.equal(packageJson.scripts['release:codex:prepare'].includes('--prepare'), true);

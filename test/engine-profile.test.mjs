@@ -4,7 +4,7 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { buildDispatchPacket } from '../src/kernel/kernel.mjs';
 import { RunCoordinator } from '../src/platform/workflow/coordinator/run-coordinator.mjs';
-import { engineDeliveryProfile } from '../src/flows/delivery-lifecycle/policy/engine-delivery.mjs';
+import { engineDeliveryProfile } from '../integrations/legacy-consumers/cardworld/index.mjs';
 import { command, dispatchAndBind, feature, makeFixture, recordResult, startRun } from './test-support.mjs';
 
 test('quality Finding policy cannot grant workspace writes to the review Feature', () => {

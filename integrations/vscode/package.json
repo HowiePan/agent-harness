@@ -1,7 +1,7 @@
 {
   "name": "agent-harness-vscode",
   "displayName": "Agent Harness",
-  "description": "VS Code extension for Agent Harness workflow orchestration, chat participation, and quality gate review",
+  "description": "Experimental VS Code status and review extension with fail-closed Agent Harness host integration",
   "version": "1.0.0",
   "publisher": "agent-harness",
   "license": "UNLICENSED",
@@ -19,6 +19,10 @@
         "description": "Agent Harness workflow orchestration assistant",
         "isDefault": false,
         "commands": [
+          {
+            "name": "init",
+            "description": "Initialize Agent Harness from project-owned harness.json and an external Decision"
+          },
           {
             "name": "full",
             "description": "Run a full lifecycle delivery run for a version or batch"
@@ -57,12 +61,12 @@
     },
     "commands": [
       {
-        "command": "agent-harness.showDiff",
-        "title": "Agent Harness: Show Submission Diff"
+        "command": "agent-harness.initializeProject",
+        "title": "Agent Harness: Initialize Project"
       },
       {
-        "command": "agent-harness.runGate",
-        "title": "Agent Harness: Run Deterministic Gates"
+        "command": "agent-harness.showDiff",
+        "title": "Agent Harness: Show Submission Diff"
       }
     ]
   },

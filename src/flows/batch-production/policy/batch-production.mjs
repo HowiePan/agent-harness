@@ -2,29 +2,36 @@ import { assert } from '../../../common/errors.mjs';
 import { approvalSatisfied, orderedBarrier } from '../../../flow-kit/primitives.mjs';
 import { createQualityFollowUpFeatures, hasCurrentCleanQualityReview, validateQualityReviewPolicies } from '../../../flow-kit/profiles/quality-loop.mjs';
 
-const resolveItemId = feature => feature.metadata.itemId ?? feature.metadata.gameId;
+const defaultResolveItemId = feature => feature.metadata.itemId;
 
-export const collectionBatchProfile = Object.freeze({
-  id: 'collection-batch',
+export const createBatchProductionProfile = ({
+  id = 'batch-production',
+  resolveItemId = defaultResolveItemId,
+  itemLabel = 'item',
+  normalizeConfig = config => config,
+  decisionKeys = (itemId, suffix) => [`item:${itemId}:${suffix}`],
+  projectAliases = () => ({}),
+} = {}) => Object.freeze({
+  id,
   version: '1.0.0',
 
-  validateConfig(config, features) {
+  validateConfig(inputConfig, features) {
+    const config = normalizeConfig(structuredClone(inputConfig));
     assert(config.activeBatch, 'ACTIVE_BATCH_REQUIRED', 'Batch Profile requires an active batch.');
     const batches = Array.isArray(config.batches) ? config.batches.map(batch => ({ id: String(batch.id), order: Number(batch.order), status: batch.status ?? 'planned' })) : [{ id: String(config.activeBatch), order: 1, status: 'active' }];
     assert(batches.some(batch => batch.id === config.activeBatch), 'ACTIVE_BATCH_UNKNOWN', 'The active batch must exist in the batch list.');
-    const maxItems = Number(config.maxLogicalItems ?? config.maxLogicalGames ?? 10);
+    const maxItems = Number(config.maxLogicalItems ?? 10);
     const logicalItems = new Set(features.filter(feature => !feature.metadata.capabilityOwner).map(resolveItemId).filter(Boolean));
-    assert(logicalItems.size <= maxItems, 'LOGICAL_GAME_LIMIT_EXCEEDED', 'Batch exceeds its configured logical item limit.', { items: [...logicalItems], games: [...logicalItems] });
+    assert(logicalItems.size <= maxItems, 'LOGICAL_ITEM_LIMIT_EXCEEDED', 'Batch exceeds its configured logical item limit.', { items: [...logicalItems] });
     return {
       activeBatch: String(config.activeBatch),
       batches,
       maxLogicalItems: maxItems,
-      maxLogicalGames: maxItems,
       requiredFinalGates: [...new Set(config.requiredFinalGates ?? [])],
       requireRuleReady: config.requireRuleReady !== false,
       requireHarnessAcceptance: config.requireHarnessAcceptance !== false,
       requireIndependentReview: config.requireIndependentReview !== false,
-      requireUserGameAcceptance: config.requireUserGameAcceptance !== false,
+      requireUserItemAcceptance: config.requireUserItemAcceptance !== false,
       requireBatchCloseDecision: config.requireBatchCloseDecision !== false,
       requireBatchLaunchDecision: config.requireBatchLaunchDecision !== false,
       requireFinalQualityReview: config.requireFinalQualityReview === true,
@@ -41,7 +48,7 @@ export const collectionBatchProfile = Object.freeze({
     for (const feature of state.features) {
       assert(feature.metadata.batchId, 'FEATURE_BATCH_REQUIRED', `Batch Feature ${feature.id} requires metadata.batchId.`);
       const itemId = resolveItemId(feature);
-      assert(itemId || feature.metadata.capabilityOwner, 'FEATURE_GAME_REQUIRED', `Batch Feature ${feature.id} requires metadata itemId/gameId unless it is a declared shared-capability owner.`);
+      assert(itemId || feature.metadata.capabilityOwner, 'FEATURE_ITEM_REQUIRED', `Batch Feature ${feature.id} requires metadata itemId unless it is a declared shared-capability owner.`);
       if (feature.metadata.capabilityKey && feature.metadata.capabilityOwner) {
         assert(!owners.has(feature.metadata.capabilityKey), 'CAPABILITY_OWNER_DUPLICATE', `Capability ${feature.metadata.capabilityKey} has multiple owners.`);
         owners.set(feature.metadata.capabilityKey, feature.id);
@@ -75,19 +82,20 @@ export const collectionBatchProfile = Object.freeze({
       if (!qualityRoots.length || missingQualityRoot) return { ok: false, reason: `current-source-clean-quality-review-required${missingQualityRoot ? `:${missingQualityRoot}` : ''}` };
     }
     const items = [...new Set(state.features.filter(feature => !feature.metadata.capabilityOwner).map(resolveItemId).filter(Boolean))];
+    const approved = (state, itemId, suffix) => decisionKeys(itemId, suffix).some(decisionId => approvalSatisfied(state, decisionId));
     if (config.requireHarnessAcceptance) {
-      const pendingItem = items.find(itemId => !approvalSatisfied(state, `item:${itemId}:harness-accepted`) && !approvalSatisfied(state, `game:${itemId}:harness-accepted`));
-      if (pendingItem) return { ok: false, reason: `game-harness-acceptance-required:${pendingItem}` };
+      const pendingItem = items.find(itemId => !approved(state, itemId, 'harness-accepted'));
+      if (pendingItem) return { ok: false, reason: `${itemLabel}-harness-acceptance-required:${pendingItem}` };
     }
     if (config.requireIndependentReview) {
-      const pendingItem = items.find(itemId => !approvalSatisfied(state, `item:${itemId}:release-review-approved`) && !approvalSatisfied(state, `game:${itemId}:release-review-approved`));
-      if (pendingItem) return { ok: false, reason: `game-release-review-required:${pendingItem}` };
+      const pendingItem = items.find(itemId => !approved(state, itemId, 'release-review-approved'));
+      if (pendingItem) return { ok: false, reason: `${itemLabel}-release-review-required:${pendingItem}` };
     }
-    if (config.requireUserGameAcceptance) {
-      const pendingItem = items.find(itemId => !approvalSatisfied(state, `item:${itemId}:accepted`) && !approvalSatisfied(state, `game:${itemId}:accepted`));
-      if (pendingItem) return { ok: false, reason: `game-user-acceptance-required:${pendingItem}` };
+    if (config.requireUserItemAcceptance) {
+      const pendingItem = items.find(itemId => !approved(state, itemId, 'accepted'));
+      if (pendingItem) return { ok: false, reason: `${itemLabel}-user-acceptance-required:${pendingItem}` };
     }
-    const missingGate = state.profile.config.requiredFinalGates.find(id => !state.gates.some(gate => gate.id === id && gate.status === 'passed' && gate.forcedFresh));
+    const missingGate = state.profile.config.requiredFinalGates.find(gateId => !state.gates.some(gate => gate.id === gateId && gate.status === 'passed' && gate.forcedFresh));
     if (missingGate) return { ok: false, reason: `required-final-gate-missing:${missingGate}` };
     if (config.requireBatchCloseDecision && !approvalSatisfied(state, `batch:${batch}:closed`)) return { ok: false, reason: 'batch-close-decision-required' };
     return { ok: true };
@@ -107,13 +115,10 @@ export const collectionBatchProfile = Object.freeze({
       epoch: state.epoch,
       generation: state.generation,
       items,
-      games: items,
+      ...projectAliases(items),
       openFindings: state.findings.filter(finding => finding.status !== 'resolved'),
     };
   },
 });
 
-export const batchProductionProfile = Object.freeze({
-  ...collectionBatchProfile,
-  id: 'batch-production',
-});
+export const batchProductionProfile = createBatchProductionProfile();

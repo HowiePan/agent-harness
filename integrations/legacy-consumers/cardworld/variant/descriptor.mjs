@@ -1,9 +1,10 @@
 import { dirname, isAbsolute, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { assert } from '../../../../src/common/errors.mjs';
-import { ENGINE_STAGES } from '../../../../src/flows/delivery-lifecycle/policy/index.mjs';
+import { DELIVERY_STAGES } from '../../../../src/flows/delivery-lifecycle/policy/index.mjs';
 import { validateWorkGraph } from '../../../../src/kernel/work-graph.mjs';
 import { AUTO_CONCURRENCY } from '../../../../src/common/concurrency.mjs';
+import { CARDWORLD_ACTION_PATHS } from './feature.mjs';
 
 export const CARDWORLD_FINAL_GATE_IDS = Object.freeze([
   'context-budget',
@@ -73,6 +74,7 @@ export const createCardWorldProjectDescriptor = ({
       runtimePlugins,
       promptCodecPlugin: 'reference-agent-prompt-codec',
       runtimeConfigs,
+      actionPaths: structuredClone(CARDWORLD_ACTION_PATHS),
       ...(Object.keys(actionExecution).length ? { actionExecution: structuredClone(actionExecution) } : {}),
       ...(knownFindingInventories && Object.keys(knownFindingInventories).length ? { knownFindingInventories: structuredClone(knownFindingInventories) } : {}),
       recovery: { automaticLineageResolution: true, automaticOrdinaryResume: true, automaticVerifiedHardRecovery: true, preserveSupersededRuns: true },
@@ -107,8 +109,8 @@ export const compileCardWorldFeatureGraph = ({ requirement, features = [] } = {}
     metadata: { ...(requirement.metadata ?? {}), stage: 'canonical-requirement', canonical: true },
   };
   const compiled = features.map(feature => {
-    assert(ENGINE_STAGES.includes(feature.stage), 'ENGINE_STAGE_INVALID', `Unknown CardWorld stage: ${feature.stage}`);
-    assert(ENGINE_STAGES.indexOf(feature.stage) > ENGINE_STAGES.indexOf('canonical-requirement'), 'ENGINE_STAGE_BEFORE_CANONICAL', 'Compiled delivery Features must come after the canonical requirement.');
+    assert(DELIVERY_STAGES.includes(feature.stage), 'ENGINE_STAGE_INVALID', `Unknown CardWorld stage: ${feature.stage}`);
+    assert(DELIVERY_STAGES.indexOf(feature.stage) > DELIVERY_STAGES.indexOf('canonical-requirement'), 'ENGINE_STAGE_BEFORE_CANONICAL', 'Compiled delivery Features must come after the canonical requirement.');
     const dependencies = feature.dependsOn?.length ? feature.dependsOn : [canonicalId];
     return { ...structuredClone(feature), dependsOn: dependencies, metadata: { ...(feature.metadata ?? {}), stage: feature.stage } };
   });

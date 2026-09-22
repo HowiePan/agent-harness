@@ -1,5 +1,8 @@
 export { createHarness, defaultDataRoot } from './application/harness.mjs';
 export { applyBootstrapPlan, createBootstrapPlan, validateBootstrapRequest, verifyBootstrapPlan } from './application/bootstrap.mjs';
+export { applyProjectInitializationPlan, createProjectInitializationPlan, loadProjectHarnessConfig, projectInitializationPlanDigest, validateProjectHarnessConfig, verifyProjectInitializationPlan, writeProjectHarnessTemplate } from './application/project-initialization.mjs';
+export { captureDevelopmentSourceIdentity, developmentSourceManifestDigest, verifyDevelopmentSourceManifest, writeDevelopmentGenerationSnapshot, writeDevelopmentSourceManifest } from './application/development-source.mjs';
+export { applyDevelopmentPatchPlan, createDevelopmentPatchPlan, developmentPatchPlanDigest, developmentPatchReceiptDigest, diffDevelopmentFiles, rollbackDevelopmentPatch, verifyDevelopmentPatchPlan } from './application/development-patch.mjs';
 export { inspectLifecycleReadiness, readRunStatus } from './application/readiness.mjs';
 export { activateHarnessInstallationRuntime, initializeHarnessInstallation } from './application/installation.mjs';
 export { loadReleaseIdentity, verifyReleaseManifest } from './application/release-identity.mjs';

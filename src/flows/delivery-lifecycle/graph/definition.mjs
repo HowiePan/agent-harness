@@ -10,10 +10,10 @@ import { deliverNode } from '../nodes/deliver/index.mjs';
 
 const withDeps = (node, dependsOn) => ({ ...node, dependsOn });
 
-export const engineWorkflowDefinition = defineWorkflowDefinition({
-  id: 'engine-delivery',
+export const createDeliveryWorkflowDefinition = ({ id = 'delivery-lifecycle', profileId = 'delivery-lifecycle' } = {}) => defineWorkflowDefinition({
+  id,
   version: '1.0.0',
-  profileId: 'engine-delivery',
+  profileId,
   routes: {
     full: [
       intakeNode,
@@ -36,3 +36,5 @@ export const engineWorkflowDefinition = defineWorkflowDefinition({
     review: [withDeps(reviewNode, [])],
   },
 });
+
+export const deliveryLifecycleWorkflowDefinition = createDeliveryWorkflowDefinition();

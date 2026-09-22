@@ -1,4 +1,4 @@
-import { WorkspaceRegistry, workspaceDecisionContext } from '../../../platform/workspace/workspace-registry.mjs';
+import { WorkspaceRegistry } from '../../../platform/workspace/workspace-registry.mjs';
 
 export const handleWorkspaceCommand = async ({ subject, dataRoot, controlRoot, take, jsonFile, jsonInput }) => {
   if (!['register', 'list', 'show', 'rollback'].includes(subject)) return false;
@@ -13,17 +13,7 @@ export const handleWorkspaceCommand = async ({ subject, dataRoot, controlRoot, t
     const current = await registry.get(input.workspaceId, { required: false });
     const expectedRevision = Number(take('--expected-revision') ?? current?.revision ?? 0);
     const commandId = take('--command-id') ?? `register-${Date.now()}`;
-    let authorityDecision = take('--decision') ? await jsonFile(take('--decision')) : null;
-    const actor = take('--actor');
-    if (!authorityDecision && actor) {
-      authorityDecision = {
-        actor,
-        decision: 'approved',
-        action: 'workspace-register',
-        expiresAt: '2099-01-01T00:00:00.000Z',
-        context: workspaceDecisionContext({ current, input, expectedRevision }),
-      };
-    }
+    const authorityDecision = take('--decision') ? await jsonFile(take('--decision')) : null;
     workspace = await registry.register(input, { expectedRevision, commandId, authorityDecision });
   } else if (subject === 'rollback') {
     const workspaceId = take('--workspace-id');

@@ -2,7 +2,7 @@ import { canonicalize } from './canonical.mjs';
 import { assert } from './errors.mjs';
 
 const types = new Set(['array', 'boolean', 'integer', 'null', 'number', 'object', 'string']);
-const supportedKeywords = new Set(['$schema', '$id', '$defs', '$ref', 'title', 'description', 'type', 'anyOf', 'const', 'enum', 'required', 'properties', 'additionalProperties', 'items', 'minimum', 'minLength', 'maxLength', 'minItems', 'uniqueItems', 'pattern', 'format']);
+const supportedKeywords = new Set(['$schema', '$id', '$defs', '$ref', 'title', 'description', 'type', 'anyOf', 'oneOf', 'allOf', 'const', 'enum', 'required', 'properties', 'additionalProperties', 'items', 'minimum', 'maximum', 'minLength', 'maxLength', 'minItems', 'maxItems', 'uniqueItems', 'pattern', 'format']);
 const valueType = value => value === null ? 'null' : Array.isArray(value) ? 'array' : Number.isInteger(value) ? 'integer' : typeof value === 'number' ? 'number' : typeof value;
 const pointer = (document, fragment) => fragment.split('/').slice(1).reduce((value, segment) => value?.[segment.replaceAll('~1', '/').replaceAll('~0', '~')], document);
 
@@ -28,6 +28,8 @@ export const validateJsonSchema = (value, schema, { schemas = new Map(), path = 
       return;
     }
     if (rule.anyOf && !rule.anyOf.some(candidate => validateJsonSchema(input, candidate, { schemas, path: location, rootSchema: root }).valid)) errors.push(`${location}: does not match anyOf`);
+    if (rule.oneOf && rule.oneOf.filter(candidate => validateJsonSchema(input, candidate, { schemas, path: location, rootSchema: root }).valid).length !== 1) errors.push(`${location}: does not match exactly one oneOf branch`);
+    for (const candidate of rule.allOf ?? []) visit(input, candidate, location, root);
     if (rule.const !== undefined && canonicalize(input) !== canonicalize(rule.const)) errors.push(`${location}: must equal const`);
     if (rule.enum && !rule.enum.some(candidate => canonicalize(input) === canonicalize(candidate))) errors.push(`${location}: is not an allowed enum value`);
     if (rule.type) {
@@ -43,8 +45,10 @@ export const validateJsonSchema = (value, schema, { schemas = new Map(), path = 
       if (rule.format === 'date-time' && Number.isNaN(Date.parse(input))) errors.push(`${location}: is not a date-time`);
     }
     if (typeof input === 'number' && rule.minimum !== undefined && input < rule.minimum) errors.push(`${location}: below minimum`);
+    if (typeof input === 'number' && rule.maximum !== undefined && input > rule.maximum) errors.push(`${location}: above maximum`);
     if (Array.isArray(input)) {
       if (rule.minItems !== undefined && input.length < rule.minItems) errors.push(`${location}: has fewer than minItems`);
+      if (rule.maxItems !== undefined && input.length > rule.maxItems) errors.push(`${location}: has more than maxItems`);
       if (rule.uniqueItems && new Set(input.map(canonicalize)).size !== input.length) errors.push(`${location}: contains duplicate items`);
       if (rule.items) input.forEach((item, index) => visit(item, rule.items, `${location}[${index}]`, root));
     } else if (input && typeof input === 'object') {
@@ -82,6 +86,8 @@ export const assertSchemaDefinition = (schema, label = 'JSON Schema') => {
     if (rule.items) visit(rule.items);
     if (rule.additionalProperties && typeof rule.additionalProperties === 'object') visit(rule.additionalProperties);
     for (const value of rule.anyOf ?? []) visit(value);
+    for (const value of rule.oneOf ?? []) visit(value);
+    for (const value of rule.allOf ?? []) visit(value);
   };
   visit(schema);
   return schema;

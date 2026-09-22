@@ -5,7 +5,7 @@ import { resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { createHarness } from '../src/application/harness.mjs';
 import { loadExtensionPack } from '../src/platform/extensions/contract.mjs';
-import { createCardWorldProjectDescriptor } from '../src/flows/delivery-lifecycle/index.mjs';
+import { createCardWorldProjectDescriptor, createCardWorldLifecyclePlan } from '../integrations/legacy-consumers/cardworld/index.mjs';
 import { createReleaseActivationPlan, applyReleaseActivationPlan, releaseActivationPlanDigest } from '../src/platform/maintenance/release-activation.mjs';
 import { ExtensionRegistry } from '../src/platform/extensions/registry.mjs';
 import { ProjectRegistry } from '../src/platform/registry/project-registry.mjs';
@@ -15,7 +15,6 @@ import { harnessTemporaryRoot } from '../src/common/write-boundary.mjs';
 import { createTestExecutionAuthorizationAdapter } from './test-support.mjs';
 import { projectExecutionPolicyDecisionContext } from '../src/platform/registry/project-registry.mjs';
 import { digestJson, sha256, withoutKeys } from '../src/common/canonical.mjs';
-import { createCardWorldLifecyclePlan } from '../src/flows/delivery-lifecycle/planner.mjs';
 
 const releaseIdentity = { version: '1.0.0', artifactDigest: 'a'.repeat(64), verified: true };
 const knownFindingInventories = { 'V3.8.4': { version: '1.0', sources: [{ path: 'README.md', sha256: sha256('fixture\n') }], findings: [] } };
@@ -37,7 +36,7 @@ test('lifecycle planning deterministically composes quality/full without convers
   const dataRoot = resolve(root, 'data');
   await mkdir(resolve(workspaceRoot, '.git'), { recursive: true });
   await writeFile(resolve(workspaceRoot, 'README.md'), 'fixture\n', 'utf8');
-  const extension = await loadExtensionPack('./src/flows/delivery-lifecycle/index.mjs', { cwd: controlRoot, controlRoot });
+  const extension = await loadExtensionPack('./integrations/legacy-consumers/cardworld/index.mjs', { cwd: controlRoot, controlRoot });
   const runtimeExtension = await loadExtensionPack('./integrations/codex/extensions/codex-runtime.mjs', { cwd: controlRoot, controlRoot });
   const harness = await createHarness({ controlRoot, dataRoot, releaseIdentity, strictProjectIdentity: false, extensions: [extension, runtimeExtension] });
   const descriptor = createCardWorldProjectDescriptor({ workspaceRoot, harness: releaseIdentity });
@@ -82,7 +81,7 @@ test('headless quality requires one trusted command grant while other Engine act
   const dataRoot = resolve(root, 'data');
   await mkdir(resolve(workspaceRoot, '.git'), { recursive: true });
   await writeFile(resolve(workspaceRoot, 'README.md'), 'fixture\n', 'utf8');
-  const extension = await loadExtensionPack('./src/flows/delivery-lifecycle/index.mjs', { cwd: controlRoot, controlRoot });
+  const extension = await loadExtensionPack('./integrations/legacy-consumers/cardworld/index.mjs', { cwd: controlRoot, controlRoot });
   const runtimeExtension = await loadExtensionPack('./integrations/codex/extensions/codex-runtime.mjs', { cwd: controlRoot, controlRoot });
   const headlessExtension = await loadExtensionPack('./integrations/codex/extensions/codex-headless-runtime.mjs', { cwd: controlRoot, controlRoot });
   const descriptor = createCardWorldProjectDescriptor({ workspaceRoot, harness: releaseIdentity, knownFindingInventories, runtimePluginIds: ['codex-conversation-runtime', 'codex-cli-runtime'], actionExecution: { quality: { agentExecutionMode: 'headless', runtimePluginId: 'codex-cli-runtime' } } });
@@ -158,7 +157,7 @@ test('lifecycle planning automatically resolves an inactive incompatible logical
   await mkdir(resolve(workspaceRoot, '.git'), { recursive: true });
   await writeFile(resolve(workspaceRoot, 'README.md'), 'fixture\n', 'utf8');
   t.after(() => rm(root, { recursive: true, force: true }));
-  const extension = await loadExtensionPack('./src/flows/delivery-lifecycle/index.mjs', { cwd: controlRoot, controlRoot });
+  const extension = await loadExtensionPack('./integrations/legacy-consumers/cardworld/index.mjs', { cwd: controlRoot, controlRoot });
   const runtimeExtension = await loadExtensionPack('./integrations/codex/extensions/codex-runtime.mjs', { cwd: controlRoot, controlRoot });
   const headlessExtension = await loadExtensionPack('./integrations/codex/extensions/codex-headless-runtime.mjs', { cwd: controlRoot, controlRoot });
   const harness = await createHarness({ controlRoot, dataRoot, releaseIdentity, strictProjectIdentity: false, extensions: [extension, runtimeExtension, headlessExtension], executionAuthorizationAdapter: createTestExecutionAuthorizationAdapter(), allowedPluginPermissions: ['state.write', 'agent.conversation', 'process.spawn', 'workspace.read', 'workspace.write', 'gate.execute', 'artifact.read'] });
@@ -201,7 +200,7 @@ test('release activation stages a complete generation and switches the active po
   await writeFile(resolve(workspaceRoot, 'README.md'), 'fixture\n', 'utf8');
   const release = await loadReleaseIdentity({ root: controlRoot });
   const extensionRegistry = new ExtensionRegistry({ controlRoot, dataRoot });
-  const extension = await extensionRegistry.register('./src/flows/delivery-lifecycle/index.mjs', { cwd: controlRoot, expectedRevision: 0, commandId: 'activation-extension', authorityDecision: { actor: 'test', decision: 'approved' } });
+  const extension = await extensionRegistry.register('./integrations/legacy-consumers/cardworld/index.mjs', { cwd: controlRoot, expectedRevision: 0, commandId: 'activation-extension', authorityDecision: { actor: 'test', decision: 'approved' } });
   const runtime = await extensionRegistry.register('./integrations/codex/extensions/codex-runtime.mjs', { cwd: controlRoot, expectedRevision: 1, commandId: 'activation-runtime', authorityDecision: { actor: 'test', decision: 'approved' } });
   const projects = new ProjectRegistry({ root: dataRoot, controlRoot });
   const descriptor = createCardWorldProjectDescriptor({ workspaceRoot, harness: { version: release.version, artifactDigest: release.artifactDigest } });
@@ -252,17 +251,17 @@ test('release activation stages a complete generation and switches the active po
   const repeated = await applyReleaseActivationPlan(plan, { controlRoot, dataRoot, releaseIdentity: release, commandId: 'activation-apply', authorityDecision: decision, now: () => '2026-09-14T13:00:02.000Z' });
   assert.equal(repeated.reused, true);
   await assert.rejects(
-    () => createReleaseActivationPlan({ controlRoot, dataRoot, releaseIdentity: release, extensionReplacements: [{ id: 'missing-extension', entry: 'src/flows/delivery-lifecycle/extension.mjs' }] }),
+    () => createReleaseActivationPlan({ controlRoot, dataRoot, releaseIdentity: release, extensionReplacements: [{ id: 'missing-extension', entry: 'integrations/legacy-consumers/cardworld/extension.mjs' }] }),
     error => error.code === 'RELEASE_ACTIVATION_EXTENSION_NOT_FOUND',
   );
   const migratedPlan = await createReleaseActivationPlan({
     controlRoot,
     dataRoot,
     releaseIdentity: release,
-    extensionReplacements: [{ id: extension.id, entry: 'src/flows/delivery-lifecycle/extension.mjs' }],
+    extensionReplacements: [{ id: extension.id, entry: 'integrations/legacy-consumers/cardworld/extension.mjs' }],
   });
   assert.notEqual(migratedPlan.generationId, plan.generationId);
-  assert.equal(migratedPlan.extensions.find(item => item.id === extension.id).entry, 'src/flows/delivery-lifecycle/extension.mjs');
+  assert.equal(migratedPlan.extensions.find(item => item.id === extension.id).entry, 'integrations/legacy-consumers/cardworld/extension.mjs');
   const forgedPlan = structuredClone(migratedPlan);
   forgedPlan.extensions.find(item => item.id === extension.id).entry = 'integrations/codex/extensions/codex-runtime.mjs';
   forgedPlan.planDigest = releaseActivationPlanDigest(forgedPlan);
@@ -284,5 +283,5 @@ test('release activation stages a complete generation and switches the active po
     authorityDecision: { actor: 'test', decision: 'approved', action: 'release-activation', context: { planDigest: migratedPlan.planDigest } },
   });
   assert.equal(migrated.reused, false);
-  assert.equal((await extensionRegistry.loadOneArtifact(extension.id)).receipt.entry, 'src/flows/delivery-lifecycle/extension.mjs');
+  assert.equal((await extensionRegistry.loadOneArtifact(extension.id)).receipt.entry, 'integrations/legacy-consumers/cardworld/extension.mjs');
 });

@@ -3,7 +3,7 @@ import { mkdir } from 'node:fs/promises';
 import { isAbsolute, relative, resolve } from 'node:path';
 import { digestJson } from '../common/canonical.mjs';
 import { assert } from '../common/errors.mjs';
-import { inspectExtensionArtifact } from '../platform/extensions/contract.mjs';
+import { inspectExtensionArtifact, loadExtensionPack } from '../platform/extensions/contract.mjs';
 import { ExtensionRegistry } from '../platform/extensions/registry.mjs';
 import { assertJsonSchema } from '../common/json-schema.mjs';
 import { atomicWriteJson, readJson, withDirectoryLock } from '../kernel/atomic-io.mjs';
@@ -28,6 +28,15 @@ export const validateBootstrapRequest = input => {
   return structuredClone(input);
 };
 
+const validateGeneratorProjectInput = (generator, input) => {
+  assert(generator?.projectConfiguration?.schema, 'BOOTSTRAP_GENERATOR_CONFIGURATION_SCHEMA_REQUIRED', 'Bootstrap generator Extension must publish its project input Schema.');
+  assertJsonSchema(input, generator.projectConfiguration.schema, {
+    schemas: new Map(Object.entries(generator.projectConfiguration.schemas ?? {})),
+    code: 'BOOTSTRAP_PROJECT_INPUT_INVALID',
+    label: `Project input for ${generator.id}`,
+  });
+};
+
 export const verifyBootstrapPlan = plan => {
   assert(plan?.protocolVersion === '1.0' && plan.kind === 'bootstrap-plan', 'BOOTSTRAP_PLAN_INVALID', 'Bootstrap plan is invalid.');
   assert(/^[a-f0-9]{64}$/.test(plan.planDigest ?? ''), 'BOOTSTRAP_PLAN_INVALID', 'Bootstrap plan requires a SHA-256 digest.');
@@ -36,25 +45,29 @@ export const verifyBootstrapPlan = plan => {
   return structuredClone(plan);
 };
 
-export const createBootstrapPlan = async (input, { controlRoot: controlRootInput, dataRoot: dataRootInput, releaseIdentity } = {}) => {
+export const createBootstrapPlan = async (input, { controlRoot: controlRootInput, dataRoot: dataRootInput, releaseIdentity, developmentMode = false } = {}) => {
   const request = validateBootstrapRequest(input);
   const controlRoot = harnessControlRoot(controlRootInput);
   const dataRoot = assertHarnessWritePath(dataRootInput ?? resolve(controlRoot, '.agent-harness-data'), 'Harness dataRoot', controlRoot);
   assert(!(await readJson(activeReleaseFile(dataRoot), null)), 'BOOTSTRAP_REQUIRES_RELEASE_ACTIVATION', 'An initialized active release must be upgraded through release activation, not Bootstrap.');
   assert(releaseIdentity?.verified && /^\d+\.\d+\.\d+$/.test(releaseIdentity.version ?? '') && /^[a-f0-9]{64}$/.test(releaseIdentity.artifactDigest ?? ''), 'BOOTSTRAP_RELEASE_IDENTITY_REQUIRED', 'Bootstrap requires a verified Harness release identity.');
-  const extensionRegistry = new ExtensionRegistry({ controlRoot, dataRoot });
+  const extensionRegistry = new ExtensionRegistry({ controlRoot, dataRoot, developmentMode });
   const extensionState = await extensionRegistry.list();
   const projectRegistry = new ProjectRegistry({ controlRoot, root: dataRoot });
   const existingProjectRevision = await projectRegistry.getPersistedRevision(request.binding.projectId);
   const extensions = [];
   for (const requested of request.extensions) {
-    const artifact = await inspectExtensionArtifact(requested.module, { controlRoot, requireArtifactManifest: true });
+    const artifact = await inspectExtensionArtifact(requested.module, { controlRoot, requireArtifactManifest: !developmentMode });
     const entry = slash(relative(controlRoot, artifact.resolvedPath));
     assert(entry && !entry.startsWith('../'), 'BOOTSTRAP_EXTENSION_OUTSIDE_CONTROL_ROOT', 'Bootstrap Extension must be inside the control root.', { module: requested.module });
     const existing = extensionState.extensions.find(item => item.id === requested.id) ?? null;
-    const action = existing && existing.version === requested.version && existing.digest === artifact.digest && existing.entry === entry ? 'reuse' : 'register';
-    extensions.push({ id: requested.id, version: requested.version, entry, artifactDigest: artifact.digest, action });
+    const artifactMode = developmentMode ? 'source-link' : 'immutable';
+    const action = existing && existing.version === requested.version && existing.digest === artifact.digest && existing.entry === entry && (existing.artifactMode ?? 'immutable') === artifactMode ? 'reuse' : 'register';
+    extensions.push({ id: requested.id, version: requested.version, entry, artifactDigest: artifact.digest, artifactMode, action });
   }
+  const generatorArtifact = extensions.find(item => item.id === request.project.generatorExtensionId);
+  const generator = await loadExtensionPack(resolve(controlRoot, generatorArtifact.entry), { controlRoot, expectedDigest: generatorArtifact.artifactDigest, requireArtifactManifest: !developmentMode });
+  validateGeneratorProjectInput(generator, request.project.input);
   const body = {
     protocolVersion: '1.0',
     kind: 'bootstrap-plan',
@@ -64,12 +77,13 @@ export const createBootstrapPlan = async (input, { controlRoot: controlRootInput
     dataRoot,
     expectedExtensionRevision: extensionState.revision,
     expectedProjectRevision: existingProjectRevision,
+    developmentMode: developmentMode === true,
     extensions,
   };
   return { ...body, planDigest: digestJson(body) };
 };
 
-export const applyBootstrapPlan = async (planInput, { controlRoot: controlRootInput, dataRoot: dataRootInput, releaseIdentity, commandId, authorityDecision, now = () => new Date().toISOString() } = {}) => {
+export const applyBootstrapPlan = async (planInput, { controlRoot: controlRootInput, dataRoot: dataRootInput, releaseIdentity, commandId, authorityDecision, developmentMode = false, now = () => new Date().toISOString() } = {}) => {
   const plan = verifyBootstrapPlan(planInput);
   assert(commandId, 'COMMAND_ID_REQUIRED', 'Bootstrap apply requires a command ID.');
   assert(authorityDecision?.actor && authorityDecision?.decision === 'approved', 'BOOTSTRAP_AUTHORITY_DECISION_REQUIRED', 'Bootstrap apply requires an approved Authority Decision.');
@@ -78,6 +92,7 @@ export const applyBootstrapPlan = async (planInput, { controlRoot: controlRootIn
   const dataRoot = assertHarnessWritePath(dataRootInput ?? plan.dataRoot, 'Harness dataRoot', controlRoot);
   assert(resolve(plan.controlRoot) === controlRoot && resolve(plan.dataRoot) === dataRoot, 'BOOTSTRAP_PLAN_ROOT_MISMATCH', 'Bootstrap plan roots do not match the apply target.');
   assert(releaseIdentity?.verified && plan.harness.version === releaseIdentity.version && plan.harness.artifactDigest === releaseIdentity.artifactDigest, 'BOOTSTRAP_RELEASE_IDENTITY_MISMATCH', 'Bootstrap plan does not match the active Harness release.');
+  assert(plan.developmentMode === (developmentMode === true), 'BOOTSTRAP_MODE_MISMATCH', 'Bootstrap plan mode does not match the apply mode.');
   const journalFile = assertHarnessWritePath(resolve(dataRoot, 'registry', 'bootstrap', `${safeCommandId}.json`), 'Bootstrap journal', controlRoot);
   await mkdir(dataRoot, { recursive: true });
   return withDirectoryLock(`${journalFile}.lock`, async () => {
@@ -86,12 +101,12 @@ export const applyBootstrapPlan = async (planInput, { controlRoot: controlRootIn
       assert(prior.planDigest === plan.planDigest, 'COMMAND_ID_REUSED', 'Bootstrap command ID was reused with a different plan.');
       if (prior.status === 'committed') return { receipt: prior, reused: true };
     } else {
-      const fresh = await createBootstrapPlan(plan.request, { controlRoot, dataRoot, releaseIdentity });
+      const fresh = await createBootstrapPlan(plan.request, { controlRoot, dataRoot, releaseIdentity, developmentMode });
       assert(fresh.planDigest === plan.planDigest, 'BOOTSTRAP_PLAN_STALE', 'Bootstrap state changed after the plan was created.', { expected: plan.planDigest, actual: fresh.planDigest });
       await atomicWriteJson(journalFile, { protocolVersion: '1.0', kind: 'bootstrap-receipt', commandId: safeCommandId, planDigest: plan.planDigest, status: 'prepared', preparedAt: now(), authorityDecision: structuredClone(authorityDecision) }, { root: dataRoot });
     }
 
-    const extensionRegistry = new ExtensionRegistry({ controlRoot, dataRoot, now });
+    const extensionRegistry = new ExtensionRegistry({ controlRoot, dataRoot, now, developmentMode });
     let revision = plan.expectedExtensionRevision;
     for (const extension of plan.extensions) {
       if (extension.action === 'reuse') continue;
@@ -103,6 +118,7 @@ export const applyBootstrapPlan = async (planInput, { controlRoot: controlRootIn
     await new AuthorityStore({ root: dataRoot, controlRoot, now }).init();
     const generator = await extensionRegistry.loadOne(plan.request.project.generatorExtensionId);
     assert(typeof generator.operations.createProjectDescriptor === 'function', 'BOOTSTRAP_DESCRIPTOR_GENERATOR_MISSING', 'Bootstrap generator Extension does not provide createProjectDescriptor().');
+    validateGeneratorProjectInput(generator, plan.request.project.input);
     const draft = generator.operations.createProjectDescriptor(plan.request.project.input);
     assert(draft.id === plan.request.binding.projectId, 'BOOTSTRAP_PROJECT_ID_MISMATCH', 'Generated Project Descriptor does not match the binding project ID.');
     assert(draft.profiles.includes(plan.request.binding.profileId), 'BOOTSTRAP_PROFILE_MISMATCH', 'Generated Project Descriptor does not include the bound Profile.');
@@ -120,7 +136,7 @@ export const applyBootstrapPlan = async (planInput, { controlRoot: controlRootIn
     assertProjectDescriptorInput(descriptor);
     const projectRegistry = new ProjectRegistry({ root: dataRoot, controlRoot, now });
     const project = await projectRegistry.register(descriptor, { expectedRevision: plan.expectedProjectRevision, commandId: `${safeCommandId}.project.${descriptor.id}`, authorityDecision });
-    const readiness = await inspectLifecycleReadiness({ controlRoot, dataRoot, releaseIdentity, projectId: plan.request.binding.projectId, profileId: plan.request.binding.profileId, extensionId: plan.request.binding.extensionId, executionWorkspaceRoot: plan.request.binding.workspaceRoot });
+    const readiness = await inspectLifecycleReadiness({ controlRoot, dataRoot, releaseIdentity, projectId: plan.request.binding.projectId, profileId: plan.request.binding.profileId, extensionId: plan.request.binding.extensionId, executionWorkspaceRoot: plan.request.binding.workspaceRoot, developmentMode });
     assert(readiness.registryReady, 'BOOTSTRAP_READINESS_FAILED', 'Bootstrap completed writes but project-scoped Registry readiness did not pass.', { projectReadiness: readiness.projectReadiness });
     const receiptBody = { protocolVersion: '1.0', kind: 'bootstrap-receipt', commandId: safeCommandId, planDigest: plan.planDigest, status: 'committed', projectId: project.id, projectRevision: project.revision, descriptorDigest: project.descriptorDigest, extensionRegistryRevision: readiness.extensionRegistryRevision, committedAt: now(), authorityDecision: structuredClone(authorityDecision), readiness };
     const receipt = { ...receiptBody, receiptDigest: digestJson(receiptBody) };

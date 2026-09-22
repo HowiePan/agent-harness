@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-harness.local/schemas/delivery-project-input.schema.json",
+  "title": "Delivery Lifecycle Project Input",
+  "type": "object",
+  "properties": {
+    "id": { "type": "string", "minLength": 1, "maxLength": 128 },
+    "harness": { "$ref": "#/$defs/harness" },
+    "workspaceRoot": { "type": "string", "minLength": 1 },
+    "remote": { "type": "string", "minLength": 1 },
+    "runtimePluginId": { "$ref": "#/$defs/id" },
+    "runtimePluginIds": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "$ref": "#/$defs/id" } },
+    "agentExecutionMode": { "enum": ["conversation-visible", "headless"] },
+    "runtimeExtension": { "$ref": "#/$defs/extension" },
+    "headlessRuntimeExtension": { "$ref": "#/$defs/extension" },
+    "runtimeConfigs": { "type": "object", "additionalProperties": { "type": "object" } },
+    "extensions": { "type": "array", "items": { "$ref": "#/$defs/extension" } },
+    "model": { "type": "string", "minLength": 1 },
+    "gateRecipes": { "type": "array", "items": { "$ref": "project-descriptor-input.schema.json#/$defs/gateRecipe" } },
+    "maxConcurrency": { "anyOf": [{ "const": "auto" }, { "type": "integer", "minimum": 1 }] },
+    "actionExecution": { "type": "object", "additionalProperties": { "$ref": "project-descriptor-input.schema.json#/$defs/actionExecution" } },
+    "knownFindingInventories": { "type": "object", "additionalProperties": { "type": "object" } },
+    "actionPaths": { "type": "object", "additionalProperties": { "type": "array", "items": { "type": "string" } } },
+    "excluded": { "type": "array", "uniqueItems": true, "items": { "type": "string" } }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9.-]+$" },
+    "harness": { "type": "object", "required": ["version", "artifactDigest"], "properties": { "version": { "type": "string", "pattern": "^\\d+\\.\\d+\\.\\d+$" }, "artifactDigest": { "type": "string", "pattern": "^[a-f0-9]{64}$" } }, "additionalProperties": false },
+    "extension": { "type": ["object", "null"], "properties": { "id": { "$ref": "#/$defs/id" }, "version": { "type": "string", "pattern": "^\\d+\\.\\d+\\.\\d+$" }, "digest": { "type": "string", "pattern": "^[a-f0-9]{64}$" } }, "required": ["id", "version"], "additionalProperties": false }
+  }
+}

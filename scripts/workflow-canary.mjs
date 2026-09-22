@@ -3,8 +3,8 @@ import assert from 'node:assert/strict';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { dirname, isAbsolute, relative, resolve } from 'node:path';
 import { captureSourceManifest, createExecutionAuthorizationAdapter, createHarness, createInMemoryRuntime, defineMemorySpace, digestJson, harnessTemporaryRoot, loadExtensionPack, projectExecutionPolicyDecisionContext, RunCoordinator, runWorkflowInstanceSet, sealLifecycleExecutionGrant } from '../src/index.mjs';
-import { createCardWorldProjectDescriptor } from '../src/flows/delivery-lifecycle/index.mjs';
-import { createTabletopCollectionProjectDescriptor } from '../src/flows/batch-production/index.mjs';
+import { createCardWorldProjectDescriptor } from '../integrations/legacy-consumers/cardworld/index.mjs';
+import { createTabletopCollectionProjectDescriptor } from '../integrations/legacy-consumers/collection/index.mjs';
 import { sha256 } from '../src/common/canonical.mjs';
 
 const rootBase = resolve(harnessTemporaryRoot(), 'workflow-canary');
@@ -173,8 +173,8 @@ try {
   const requirements = await loadExtensionPack('./src/flows/requirements-design/index.mjs', { cwd: process.cwd(), controlRoot: process.cwd() });
   const qa = await loadExtensionPack('./src/flows/knowledge-qa/index.mjs', { cwd: process.cwd(), controlRoot: process.cwd() });
   const workflowProfile = await loadExtensionPack('./src/platform/extensions/composable-workflow.mjs', { cwd: process.cwd(), controlRoot: process.cwd() });
-  const engineExtension = await loadExtensionPack('./src/flows/delivery-lifecycle/index.mjs', { cwd: process.cwd(), controlRoot: process.cwd() });
-  const collectionExtension = await loadExtensionPack('./src/flows/batch-production/index.mjs', { cwd: process.cwd(), controlRoot: process.cwd() });
+  const engineExtension = await loadExtensionPack('./integrations/legacy-consumers/cardworld/index.mjs', { cwd: process.cwd(), controlRoot: process.cwd() });
+  const collectionExtension = await loadExtensionPack('./integrations/legacy-consumers/collection/index.mjs', { cwd: process.cwd(), controlRoot: process.cwd() });
   harness = await createHarness({ controlRoot: process.cwd(), dataRoot, releaseIdentity: { version: '1.0.0', artifactDigest: 'a'.repeat(64) }, strictProjectIdentity: false, extensions: [requirements, qa, workflowProfile, engineExtension, collectionExtension], executionAuthorizationAdapter: adapter });
   const runtimeManifest = { id: runtimeId, kind: 'agent-runtime', version: '1.0.0', capabilities: ['spawn', 'wait', 'send', 'heartbeat', 'interrupt', 'headless', 'workspace-shared'], permissions: [] };
   harness.registerPlugin(runtimeManifest, createInMemoryRuntime({ manifest: runtimeManifest, handler }));

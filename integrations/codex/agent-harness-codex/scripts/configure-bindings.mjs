@@ -1,4 +1,4 @@
-import { access, mkdir, rename, rm, writeFile } from 'node:fs/promises';
+import { access, mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { isAbsolute, relative, resolve } from 'node:path';
 import process from 'node:process';
 import { fileURLToPath } from 'node:url';
@@ -42,6 +42,7 @@ const parseArguments = input => {
     projectSpecs: takeAll('--project'),
     workspaceSpecs: takeAll('--workspace'),
     workflowSpecs: takeAll('--workflow'),
+    developmentManifest: takeOptional('--development-manifest'),
   };
   if (args.length) throw new Error(`Unknown arguments: ${args.join(' ')}`);
   return parsed;
@@ -64,8 +65,14 @@ export const configureBindings = async input => {
   const workflowSpecs = input.workflowSpecs ?? [];
   if (!inside(controlRoot, entrypoint) || !inside(controlRoot, dataRoot) || (memoryRoot && !inside(controlRoot, memoryRoot))) throw new Error('entrypoint, dataRoot, and memoryRoot must stay inside controlRoot.');
   await Promise.all([access(controlRoot), access(entrypoint)]);
-  const activeRelease = await validateActiveReleaseBinding({ controlRoot, dataRoot, entrypoint, verifyAllFiles: true });
-  const release = { version: activeRelease.version, artifactDigest: activeRelease.artifactDigest, channelArtifactDigest: activeRelease.channelArtifactDigest, ...(activeRelease.compositionDigest ? { compositionDigest: activeRelease.compositionDigest } : {}), generationId: activeRelease.generationId, pointerDigest: activeRelease.pointerDigest };
+  const declaredDevelopment = input.developmentManifest ? { mode: 'source-link', developmentManifest: resolve(input.developmentManifest) } : null;
+  if (declaredDevelopment) {
+    const manifest = JSON.parse(await readFile(declaredDevelopment.developmentManifest, 'utf8'));
+    declaredDevelopment.version = manifest.release?.version;
+    declaredDevelopment.artifactDigest = manifest.release?.artifactDigest;
+  }
+  const activeRelease = await validateActiveReleaseBinding({ controlRoot, dataRoot, entrypoint, declaredRelease: declaredDevelopment, verifyAllFiles: true });
+  const release = { ...(activeRelease.mode ? { mode: activeRelease.mode } : {}), version: activeRelease.version, artifactDigest: activeRelease.artifactDigest, channelArtifactDigest: activeRelease.channelArtifactDigest, ...(activeRelease.compositionDigest ? { compositionDigest: activeRelease.compositionDigest } : {}), generationId: activeRelease.generationId, pointerDigest: activeRelease.pointerDigest, ...(activeRelease.developmentManifest ? { developmentManifest: activeRelease.developmentManifest } : {}) };
 
   const projects = {};
   const workspaces = {};

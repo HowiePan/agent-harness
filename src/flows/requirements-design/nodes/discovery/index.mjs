@@ -22,7 +22,7 @@ export const codeDiscoveryNodes = [
     acceptance: ['Search the pinned repository, index directory structures, component trees, and functional modules with cited source files.'],
   }),
   node('map', ['search'], {
-    outputPorts: { impact: requirementsPorts.impact },
+    outputPorts: { architecture: requirementsPorts.architecture },
     acceptance: ['Map codebase architecture, module directory structure, functional capabilities, and feature-to-directory mappings.'],
   }),
 ];

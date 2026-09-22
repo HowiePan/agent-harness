@@ -1,10 +1,10 @@
 import { defineCommandManifest } from '../../platform/extensions/command-contract.mjs';
 
-export const cardWorldCommandManifest = defineCommandManifest({
+export const createDeliveryCommandManifest = ({ id = 'delivery-lifecycle-commands', profileId = 'delivery-lifecycle', workflowId = 'delivery-lifecycle' } = {}) => defineCommandManifest({
   protocolVersion: '1.0',
-  id: 'engine-delivery-commands',
-  profileId: 'engine-delivery',
-  workflowId: 'engine-delivery',
+  id,
+  profileId,
+  workflowId,
   actions: {
     full: { targetKind: 'version', presets: { default: { scope: 'requirement-intake..delivery-receipt', stateChanging: true } } },
     requirements: {
@@ -38,5 +38,4 @@ export const cardWorldCommandManifest = defineCommandManifest({
   },
 });
 
-export const deliveryLifecycleCommandManifest = cardWorldCommandManifest;
-export const engineDeliveryCommandManifest = cardWorldCommandManifest;
+export const deliveryLifecycleCommandManifest = createDeliveryCommandManifest();

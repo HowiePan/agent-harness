@@ -4,8 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { validatePluginManifest } from '../src/platform/plugins/contracts.mjs';
 import { digestJson } from '../src/common/canonical.mjs';
 import { assertSchemaDefinition, validateJsonSchema } from '../src/common/json-schema.mjs';
-import { createCardWorldProjectDescriptor } from '../src/flows/delivery-lifecycle/index.mjs';
-import { createTabletopCollectionProjectDescriptor } from '../src/flows/batch-production/index.mjs';
+import { createDeliveryProjectDescriptor } from '../src/flows/delivery-lifecycle/descriptor.mjs';
 import { validateReleaseVersionContract } from './release-version-contract.mjs';
 import { checkFlowStructure } from './check-flow-structure.mjs';
 import { checkCurrentDocs } from './check-current-docs.mjs';
@@ -44,6 +43,17 @@ for (const [name, schema] of schemas) {
   };
   visitReferences(schema);
 }
+try {
+  const projectConfig = JSON.parse(await readFile(resolve(root, 'examples', 'project-harness.json'), 'utf8'));
+  const result = validateJsonSchema(projectConfig, schemas.get('project-harness-config.schema.json'), { schemas });
+  if (!result.valid) errors.push(`project-owned harness.json example violates Schema: ${result.errors.join('; ')}`);
+} catch (error) { errors.push(`invalid project-owned harness.json example: ${error.code ?? error.message}`); }
+for (const legacyProjectConfig of ['engine-project-input.json', 'collection-project-input.json', 'engine-bootstrap-request.json']) {
+  try {
+    await access(resolve(root, 'examples', legacyProjectConfig));
+    errors.push(`project-specific configuration must live in its consumer repository: examples/${legacyProjectConfig}`);
+  } catch (error) { if (error.code !== 'ENOENT') errors.push(`cannot inspect removed project configuration: ${legacyProjectConfig}: ${error.message}`); }
+}
 for (const directory of ['profiles', 'plugins']) {
   for (const name of await readdir(resolve(root, directory))) {
     if (!name.endsWith('.json')) continue;
@@ -62,8 +72,7 @@ for (const directory of ['profiles', 'plugins']) {
 
 const exactDigest = 'a'.repeat(64);
 const descriptorInputs = [
-  ['engine-project-input.json', createCardWorldProjectDescriptor],
-  ['collection-project-input.json', createTabletopCollectionProjectDescriptor],
+  ['delivery-project-input.json', createDeliveryProjectDescriptor],
 ];
 for (const [name, createDescriptor] of descriptorInputs) {
   try {

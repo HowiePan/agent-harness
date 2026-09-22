@@ -3,7 +3,7 @@ import test from 'node:test';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { createHarness } from '../src/application/harness.mjs';
-import { createCardWorldProjectDescriptor } from '../src/flows/delivery-lifecycle/index.mjs';
+import { createCardWorldProjectDescriptor } from '../integrations/legacy-consumers/cardworld/index.mjs';
 import { loadExtensionPack } from '../src/platform/extensions/contract.mjs';
 import { createInMemoryRuntime } from '../src/platform/plugins/runtime/in-memory-runtime.mjs';
 import { harnessTemporaryRoot } from '../src/common/write-boundary.mjs';
@@ -23,7 +23,7 @@ test('a failed final Gate returns attention and a fresh retry closes the same qu
   await writeFile(resolve(workspace, 'README.md'), '# Gate recovery fixture\n', 'utf8');
   t.after(() => rm(root, { recursive: true, force: true }));
 
-  const engine = await loadExtensionPack('./src/flows/delivery-lifecycle/index.mjs', { cwd: controlRoot, controlRoot });
+  const engine = await loadExtensionPack('./integrations/legacy-consumers/cardworld/index.mjs', { cwd: controlRoot, controlRoot });
   const releaseIdentity = { version: '1.0.0', artifactDigest: 'a'.repeat(64), verified: true };
   const harness = await createHarness({ controlRoot, dataRoot, releaseIdentity, strictProjectIdentity: false, extensions: [engine], executionAuthorizationAdapter: createTestExecutionAuthorizationAdapter() });
   const runtimeManifest = { id: 'gate-test-runtime', kind: 'agent-runtime', version: '1.0.0', capabilities: ['spawn', 'wait', 'headless'], permissions: [] };

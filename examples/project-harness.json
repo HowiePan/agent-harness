@@ -1,0 +1,31 @@
+{
+  "$schema": "../schemas/project-harness-config.schema.json",
+  "schemaVersion": "1.0",
+  "kind": "agent-harness-project",
+  "extensions": [
+    {
+      "id": "delivery-lifecycle-profile",
+      "version": "1.0.0",
+      "module": "agent-harness/consumers/delivery-lifecycle"
+    },
+    {
+      "id": "codex-runtime",
+      "version": "1.0.0",
+      "module": "agent-harness/extensions/codex-runtime"
+    }
+  ],
+  "project": {
+    "generatorExtensionId": "delivery-lifecycle-profile",
+    "input": {
+      "maxConcurrency": "auto",
+      "gateRecipes": []
+    }
+  },
+  "binding": {
+    "alias": "example-project",
+    "projectId": "example-project",
+    "profileId": "delivery-lifecycle",
+    "extensionId": "delivery-lifecycle-profile",
+    "workspaceRoot": "."
+  }
+}

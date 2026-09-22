@@ -1,0 +1,6 @@
+{
+  "id": "example-delivery-project",
+  "workspaceRoot": "/workspaces/example-delivery-project",
+  "maxConcurrency": "auto",
+  "gateRecipes": []
+}

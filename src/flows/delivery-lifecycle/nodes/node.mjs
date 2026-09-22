@@ -8,7 +8,7 @@ export const deliveryNode = (id, action, stage, dependsOn = [], options = {}) =>
     : {};
   return {
     id,
-    template: 'engine-stage',
+    template: 'delivery-stage',
     action,
     stage,
     dependsOn,

@@ -17,12 +17,13 @@ const emptyRegistry = () => seal({ protocolVersion: '1.0', revision: 0, extensio
 const registrySchema = JSON.parse(readFileSync(new URL('../../../schemas/extension-installation.schema.json', import.meta.url), 'utf8'));
 
 export class ExtensionRegistry {
-  constructor({ dataRoot, controlRoot, now = () => new Date().toISOString() }) {
+  constructor({ dataRoot, controlRoot, now = () => new Date().toISOString(), developmentMode = false }) {
     this.controlRoot = resolve(controlRoot);
     this.dataRoot = assertHarnessWritePath(dataRoot, 'Extension Registry data root', this.controlRoot);
     this.legacyFile = resolve(this.dataRoot, 'registry', 'extensions.json');
     this.lock = `${this.legacyFile}.lock`;
     this.now = now;
+    this.developmentMode = developmentMode === true;
   }
 
   async filePath() { return resolve(await resolveActiveRegistryRoot(this.dataRoot, this.controlRoot), 'extensions.json'); }
@@ -44,7 +45,9 @@ export class ExtensionRegistry {
     const packs = [];
     for (const receipt of current.extensions) {
       const entry = await this.entryPath(receipt);
-      const pack = await loadExtensionPack(entry, { controlRoot: this.controlRoot, expectedDigest: receipt.digest, requireArtifactManifest: true });
+      const sourceLinked = receipt.artifactMode === 'source-link';
+      assert(!sourceLinked || this.developmentMode, 'SOURCE_LINK_EXTENSION_MODE_REQUIRED', `Registered source-linked Extension ${receipt.id} requires explicit development mode.`);
+      const pack = await loadExtensionPack(entry, { controlRoot: this.controlRoot, expectedDigest: receipt.digest, requireArtifactManifest: !sourceLinked });
       assert(pack.id === receipt.id && pack.version === receipt.version, 'EXTENSION_INSTALLATION_IDENTITY_MISMATCH', `Registered Extension ${receipt.id} no longer matches its installation receipt.`);
       packs.push(pack);
     }
@@ -56,7 +59,9 @@ export class ExtensionRegistry {
     const receipt = current.extensions.find(item => item.id === id);
     assert(receipt, 'EXTENSION_NOT_REGISTERED', `Extension is not registered: ${id}`);
     const entry = await this.entryPath(receipt);
-    const pack = await loadExtensionPack(entry, { controlRoot: this.controlRoot, expectedDigest: receipt.digest, requireArtifactManifest: true });
+    const sourceLinked = receipt.artifactMode === 'source-link';
+    assert(!sourceLinked || this.developmentMode, 'SOURCE_LINK_EXTENSION_MODE_REQUIRED', `Registered source-linked Extension ${receipt.id} requires explicit development mode.`);
+    const pack = await loadExtensionPack(entry, { controlRoot: this.controlRoot, expectedDigest: receipt.digest, requireArtifactManifest: !sourceLinked });
     assert(pack.id === receipt.id && pack.version === receipt.version, 'EXTENSION_INSTALLATION_IDENTITY_MISMATCH', `Registered Extension ${receipt.id} no longer matches its installation receipt.`);
     return pack;
   }
@@ -66,7 +71,9 @@ export class ExtensionRegistry {
     const receipt = current.extensions.find(item => item.id === id);
     assert(receipt, 'EXTENSION_NOT_REGISTERED', `Extension is not registered: ${id}`);
     const entry = await this.entryPath(receipt);
-    const artifact = await inspectExtensionArtifact(entry, { controlRoot: this.controlRoot, expectedDigest: receipt.digest, requireArtifactManifest: true });
+    const sourceLinked = receipt.artifactMode === 'source-link';
+    assert(!sourceLinked || this.developmentMode, 'SOURCE_LINK_EXTENSION_MODE_REQUIRED', `Registered source-linked Extension ${receipt.id} requires explicit development mode.`);
+    const artifact = await inspectExtensionArtifact(entry, { controlRoot: this.controlRoot, expectedDigest: receipt.digest, requireArtifactManifest: !sourceLinked });
     return { receipt: structuredClone(receipt), artifact };
   }
 
@@ -75,7 +82,9 @@ export class ExtensionRegistry {
     const verified = [];
     for (const receipt of current.extensions) {
       const entry = await this.entryPath(receipt);
-      await inspectExtensionArtifact(entry, { controlRoot: this.controlRoot, expectedDigest: receipt.digest, requireArtifactManifest: true });
+      const sourceLinked = receipt.artifactMode === 'source-link';
+      assert(!sourceLinked || this.developmentMode, 'SOURCE_LINK_EXTENSION_MODE_REQUIRED', `Registered source-linked Extension ${receipt.id} requires explicit development mode.`);
+      await inspectExtensionArtifact(entry, { controlRoot: this.controlRoot, expectedDigest: receipt.digest, requireArtifactManifest: !sourceLinked });
       verified.push(structuredClone(receipt));
     }
     return { ...current, extensions: verified };
@@ -84,7 +93,8 @@ export class ExtensionRegistry {
   async register(moduleSpecifier, { cwd = process.cwd(), expectedRevision, commandId, authorityDecision } = {}) {
     assert(commandId, 'COMMAND_ID_REQUIRED', 'Extension Registry writes require a command ID.');
     const resolvedPath = assertNoLinkPath(this.controlRoot, resolveExtensionModule(moduleSpecifier, { cwd }), 'Extension entrypoint');
-    const requestDigest = digestJson({ operation: 'register', entry: relative(this.controlRoot, resolvedPath).replaceAll('\\', '/') });
+    const artifactMode = this.developmentMode ? 'source-link' : 'immutable';
+    const requestDigest = digestJson({ operation: 'register', entry: relative(this.controlRoot, resolvedPath).replaceAll('\\', '/'), artifactMode });
     const preliminary = await this.list();
     const existingCommand = preliminary.commands?.[commandId];
     if (existingCommand) {
@@ -95,8 +105,8 @@ export class ExtensionRegistry {
     assert(Number.isInteger(expectedRevision), 'EXPECTED_REVISION_REQUIRED', 'Extension Registry writes require a numeric expected revision.');
     assert(preliminary.revision === expectedRevision, 'EXTENSION_REGISTRY_REVISION_CONFLICT', 'Extension Registry revision changed.', { expected: expectedRevision, actual: preliminary.revision });
     assert(authorityDecision?.actor && authorityDecision?.decision === 'approved', 'EXTENSION_AUTHORITY_DECISION_REQUIRED', 'Installing or updating trusted Extension code requires an approved Authority Decision.');
-    const pack = await loadExtensionPack(resolvedPath, { controlRoot: this.controlRoot, requireArtifactManifest: true });
-    const payloadDigest = digestJson({ operation: 'register', id: pack.id, version: pack.version, digest: pack.digest, entry: relative(this.controlRoot, resolvedPath).replaceAll('\\', '/') });
+    const pack = await loadExtensionPack(resolvedPath, { controlRoot: this.controlRoot, requireArtifactManifest: !this.developmentMode });
+    const payloadDigest = digestJson({ operation: 'register', id: pack.id, version: pack.version, digest: pack.digest, entry: relative(this.controlRoot, resolvedPath).replaceAll('\\', '/'), artifactMode });
     await mkdir(this.dataRoot, { recursive: true });
     assertHarnessWritePath(this.dataRoot, 'Extension Registry data root', this.controlRoot);
     return withDirectoryLock(this.lock, async () => {
@@ -113,6 +123,7 @@ export class ExtensionRegistry {
       const receipt = {
         ...extensionIdentity(pack),
         entry: relative(this.controlRoot, resolvedPath).replaceAll('\\', '/'),
+        artifactMode,
         registeredAt: prior?.registeredAt ?? this.now(),
       };
       const extensions = [...current.extensions.filter(item => item.id !== pack.id), receipt].sort((a, b) => a.id.localeCompare(b.id));

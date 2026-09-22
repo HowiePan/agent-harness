@@ -2,7 +2,7 @@ import { isAbsolute } from 'node:path';
 import { assert } from '../../common/errors.mjs';
 import { AUTO_CONCURRENCY } from '../../common/concurrency.mjs';
 import { validateWorkGraph } from '../../kernel/work-graph.mjs';
-import { ENGINE_STAGES } from './policy/index.mjs';
+import { DELIVERY_STAGES } from './policy/index.mjs';
 
 export const createDeliveryProjectDescriptor = ({
   id = 'delivery-project',
@@ -47,9 +47,9 @@ export const createDeliveryProjectDescriptor = ({
     id,
     ...(harness ? { harness: structuredClone(harness) } : {}),
     workspace,
-    profiles: ['engine-delivery'],
+    profiles: ['delivery-lifecycle'],
     extensions: [
-      { id: 'cardworld-engine-profile', version: '1.0.0' },
+      { id: 'delivery-lifecycle-profile', version: '1.0.0' },
       ...selectedRuntimeExtensions.filter(Boolean).map(value => structuredClone(value)),
       ...structuredClone(extensions),
     ],
@@ -59,6 +59,7 @@ export const createDeliveryProjectDescriptor = ({
       runtimePlugins,
       promptCodecPlugin: 'reference-agent-prompt-codec',
       runtimeConfigs,
+      profileConfigs: { 'delivery-lifecycle': {} },
       ...(actionPaths ? { actionPaths: structuredClone(actionPaths) } : {}),
       ...(Object.keys(actionExecution).length ? { actionExecution: structuredClone(actionExecution) } : {}),
       ...(knownFindingInventories && Object.keys(knownFindingInventories).length ? { knownFindingInventories: structuredClone(knownFindingInventories) } : {}),
@@ -88,8 +89,8 @@ export const compileDeliveryFeatureGraph = ({ requirement, features = [] } = {})
     metadata: { ...(requirement.metadata ?? {}), stage: 'canonical-requirement', canonical: true },
   };
   const compiled = features.map(feature => {
-    assert(ENGINE_STAGES.includes(feature.stage), 'ENGINE_STAGE_INVALID', `Unknown delivery stage: ${feature.stage}`);
-    assert(ENGINE_STAGES.indexOf(feature.stage) > ENGINE_STAGES.indexOf('canonical-requirement'), 'ENGINE_STAGE_BEFORE_CANONICAL', 'Compiled delivery Features must come after the canonical requirement.');
+    assert(DELIVERY_STAGES.includes(feature.stage), 'DELIVERY_STAGE_INVALID', `Unknown delivery stage: ${feature.stage}`);
+    assert(DELIVERY_STAGES.indexOf(feature.stage) > DELIVERY_STAGES.indexOf('canonical-requirement'), 'DELIVERY_STAGE_BEFORE_CANONICAL', 'Compiled delivery Features must come after the canonical requirement.');
     const dependencies = feature.dependsOn?.length ? feature.dependsOn : [canonicalId];
     return { ...structuredClone(feature), dependsOn: dependencies, metadata: { ...(feature.metadata ?? {}), stage: feature.stage } };
   });

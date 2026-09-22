@@ -1,11 +1,29 @@
-# 开发一条 Flow
+# 编写可独立发布的 Flow
 
-先确认需求确实需要新的节点图；若只是换 Workspace 的来源、项目或执行目标，保留原 Flow。Flow ID、版本和制品摘要是运行身份的一部分，已启动 Run 不能静默改绑。
+Flow 是 Extension Pack 中的版本化 Workflow、Planner、节点模板、结果合同和关闭策略。它不能直接写 Authority，也不能要求消费者阅读其源码才能配置。
 
-1. 在 `src/flows/<flow-id>/` 建立 `index.mjs`、`extension.mjs`、`planner.mjs`、`graph/definition.mjs`、按阶段组织的 `nodes/`、`contracts/index.mjs`、`policy/index.mjs`；有条件分支再建 `graph/branches.mjs`，有命令入口再建 `commands.mjs`。按整体设计的 Flow 包章节确定依赖方向。
-2. 为每个节点定义输入来源、结果端口 Schema、证据和输出检查。Planner 只生成确定性 Plan，不启动进程、不写 Authority。Agent 推理交 Runtime，确定性检查交 Gate，人工确认交 Decision。
-3. 使用版本化 Extension Pack 导出 Workflow、命令清单及 `pure-planner` operation。只能通过公开平台/flow-kit 合同复用能力；不得导入另一 Flow 的私有 `graph/`、`nodes/` 或 `policy/`。
-4. 编写 `docs/flows/<flow-id>/design.md`，说明用途、动作、节点/分支、端口合同、权限、Gate/关闭、失败恢复、Workspace 参数及命令到 `closed` 的场景。
-5. 做正反向验证：正确输入、重复命令、缺来源/结果合同、错误分支、越权路径和不兼容版本。`npm run check` 检查骨架/边界，`npm run test:conformance` 检查扩展合同，最后通过命令从 Plan 跑到 `closed`。更新公开导出、发行文件清单和对外流程介绍。
+## 标准内容
 
-发布新制品后，先批准安装，再更新 Workspace Binding；旧 Run 使用其创建时固定的 Workflow 和来源快照。流程专属业务 Gate 应留在接入变体，不进入中性流程或 Kernel。
+一个 Flow 包应提供公开入口、Extension、纯 Planner、Workflow Definition、按阶段组织的节点、类型化合同、Profile/Policy、命令清单和设计文档。Extension manifest 固定 ID、版本、Workflow 摘要、Profile、操作执行类别和权限；每个 operation 都必须是 `pure-planner`。Agent 工作使用 `agent-reasoning` Feature，确定性进程检查使用 Project Gate Recipe。
+
+## 输入和计划
+
+Planner 只把已批准的 Descriptor、Command Intent、Source Manifest、Target snapshot 和 Flow 参数编译成确定性 Plan，不启动进程、不写状态。计划必须固定 Workflow ID/版本/摘要、Extension、Profile、Runtime、项目范围、Source digest、Feature DAG、结果合同、Gate/Decision 和停止条件。相同输入必须产生相同摘要。
+
+## 节点与结果
+
+每个节点声明稳定 ID、模板、依赖、可选扇出、来源权限、允许/禁止路径、冲突键、步骤、验收条件和 `outputPorts`。每个端口固定 Schema ID；输出值和 Evidence 引用由结果合同校验。读写边界必须从 Feature 产生，不能靠 Prompt 约定。
+
+路线、扇出、分支和有界循环的完整规则见 `agent-harness docs show control`。特别注意：静态图只能向前依赖；循环通过带 `maxIterations` 的 repeat continuation 展开为新 Feature，不能建立环形 DAG。
+
+## Gate、Decision 与关闭
+
+Flow Policy 声明必需的 fresh final Gates、人工 Decisions、Finding 策略和关闭条件。业务语言、构建系统或项目专用 Gate 应放在项目 Descriptor 或显式集成变体，不进入 Kernel 和中立 Flow。质量检查只读；修复是单独的路径受限 Feature；修复后必须在新 Source digest 上全量复审。
+
+## 文档合同
+
+每条 Flow 的发布文档必须独立说明：用途与非用途、动作和预设、全部输入、节点图、分支/repeat、端口 Schema、Evidence、路径和来源权限、Gate/Decision、预算、失败恢复、Workspace 参数槽、宿主限制，以及一条达到 `closed` 的命令级场景。示例 JSON 必须通过同版本 Schema 测试。
+
+## 验收
+
+至少验证：非法后向依赖、重复节点、扇出预算、无匹配/多匹配分支、循环耗尽、结果端口错配、越权路径、缺失 Gate/Decision、Source 漂移、恢复和完整 `closed` Receipt。结构测试、合同测试和命令级合成闭环缺一不可；真实业务执行仍需单独授权。

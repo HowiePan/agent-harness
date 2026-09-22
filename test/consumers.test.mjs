@@ -2,15 +2,17 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   CARDWORLD_FINAL_GATE_IDS,
-  COLLECTION_FINAL_GATE_IDS,
   cardWorldCommandManifest,
   compileCardWorldFeatureGraph,
-  compileTabletopCollectionFeatureGraph,
   createCardWorldLifecyclePlan,
   createCardWorldProjectDescriptor,
+} from '../integrations/legacy-consumers/cardworld/index.mjs';
+import {
+  COLLECTION_FINAL_GATE_IDS,
+  compileTabletopCollectionFeatureGraph,
   createTabletopCollectionProjectDescriptor,
   tabletopCollectionCommandManifest,
-} from '../src/flows/index.mjs';
+} from '../integrations/legacy-consumers/collection/index.mjs';
 import { resolveLifecycleExecutionPolicy } from '../src/platform/plugins/runtime/execution-policy.mjs';
 import { sealKnownFindingInventory } from '../src/platform/execution/known-finding-inventory.mjs';
 import { deriveQualityTargetSnapshot } from '../src/platform/execution/quality-target.mjs';

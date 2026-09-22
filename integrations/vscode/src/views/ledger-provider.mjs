@@ -11,20 +11,8 @@ export class LedgerTreeProvider {
     const harness = typeof this.getHarness === 'function' ? await this.getHarness() : null;
     if (!harness) return [{ id: 'not-ready', label: 'Agent Harness Initializing...' }];
 
-    if (!element) {
-      return [
-        { id: 'open-findings', label: 'Open Findings (Blocking Closure)', collapsible: true },
-        { id: 'resolved-findings', label: 'Resolved Findings', collapsible: true },
-      ];
-    }
-
-    if (element.id === 'open-findings') {
-      return [
-        { id: 'finding-empty', label: 'No unresolved findings (Clean Ledger)', contextValue: 'clean' },
-      ];
-    }
-
-    return [];
+    if (element) return [];
+    return [{ id: 'unsupported', label: 'Finding ledger unavailable: verified VS Code host binding required', contextValue: 'unsupported' }];
   }
 
   getTreeItem(element) {

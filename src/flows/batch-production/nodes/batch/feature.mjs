@@ -16,7 +16,7 @@ export const createBatchFeatureFactory = ({ intent, batch, gateIds, sourceDigest
       forbiddenPaths: [...forbiddenPaths],
       conflictKeys: [`${conflictPrefix}:${itemId}`, `${action}:${intent.target}:${itemId}`], gatePlan: gateIds,
       metadata: { scope: intent.scope, sourcePolicy: qualityReview || readOnly ? 'read-only' : 'write', stage: action,
-        batchId: intent.target, [itemKey]: itemId, ruleStatus,
+        batchId: intent.target, itemId, [itemKey]: itemId, ruleStatus,
         ...(qualityReview ? { qualityReview: true, qualityFindingPolicy: 'repair-and-rereview', qualityRoot: `${qualityRootPrefix}:${intent.target}:${itemId}`, reviewRound: 1, reviewSourceDigest: sourceDigest, qualityContext: { batchId: intent.target, [itemKey]: itemId, ruleStatus } } : {}),
       },
     };

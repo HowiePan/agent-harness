@@ -37,8 +37,9 @@ const main = async () => {
   });
   if (!samePath(active.coordinatorEntrypoint, intent.harness.coordinatorEntrypoint) || !samePath(active.coordinatorEntrypoint, fileURLToPath(import.meta.url))) throw Object.assign(new Error('Visible lifecycle intent does not target this verified active Coordinator.'), { code: 'VISIBLE_LIFECYCLE_COORDINATOR_IDENTITY_MISMATCH' });
 
-  const releaseIdentity = await loadReleaseIdentity({ root: active.runtimeRoot, artifactDigest: active.artifactDigest });
-  const extensionRegistry = new ExtensionRegistry({ dataRoot: intent.harness.dataRoot, controlRoot: intent.harness.controlRoot });
+  const developmentMode = active.mode === 'source-link';
+  const releaseIdentity = developmentMode ? { version: active.version, artifactDigest: active.artifactDigest, verified: true, development: true } : await loadReleaseIdentity({ root: active.runtimeRoot, artifactDigest: active.artifactDigest });
+  const extensionRegistry = new ExtensionRegistry({ dataRoot: intent.harness.dataRoot, controlRoot: intent.harness.controlRoot, developmentMode });
   const extensions = await extensionRegistry.loadInstalled();
   const hostExchange = createHookHostExchange({ controlRoot: intent.harness.controlRoot, dataRoot: intent.harness.dataRoot, codexSessionId: intent.codexSessionId, onRejected: createHostExchangeDiagnosticWriter({ controlRoot: intent.harness.controlRoot, dataRoot: intent.harness.dataRoot }) });
   try {
@@ -54,6 +55,7 @@ const main = async () => {
       ...(intent.project.workspaceId ? { workspaceId: intent.project.workspaceId } : {}),
       releaseIdentity,
       extensions,
+      strictProjectIdentity: !developmentMode,
       agentAdapters: { 'codex-conversation-runtime': host.adapter },
     });
     const descriptor = await harness.projectRegistry.get(intent.project.projectId);

@@ -1,9 +1,12 @@
 import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { assert } from '../../../src/common/errors.mjs';
-import { WorkspaceRegistry, workspaceDecisionContext } from '../../../src/platform/workspace/workspace-registry.mjs';
+import { WorkspaceRegistry } from '../../../src/platform/workspace/workspace-registry.mjs';
 import { defaultDataRoot } from '../../../src/application/harness.mjs';
 import { harnessControlRoot } from '../../../src/common/write-boundary.mjs';
+import { applyProjectInitializationPlan, createProjectInitializationPlan, loadProjectHarnessConfig } from '../../../src/application/project-initialization.mjs';
+import { loadReleaseIdentity } from '../../../src/application/release-identity.mjs';
+import { newId } from '../../../src/common/canonical.mjs';
 
 /**
  * Native tool definitions exposable to OpenCode model context.
@@ -55,33 +58,45 @@ export const createOpenCodeTools = ({ harness = null, getHarness = null } = {}) 
 
   return {
     harness_init: {
-      description: 'Initialize and register an Agent Harness workspace from a local harness.json configuration file.',
+      description: 'Initialize and register an Agent Harness project or Workspace from its project-owned harness.json configuration.',
       parameters: {
         type: 'object',
         properties: {
-          actor: { type: 'string', description: 'The approving actor name (e.g. howie).' },
           file: { type: 'string', description: 'Path to workspace configuration file, defaults to harness.json.' },
+          decisionFile: { type: 'string', description: 'Path to an externally issued workspace-register Authority Decision.' },
+          projectRoot: { type: 'string', description: 'Project root used to resolve relative paths; defaults to the current directory.' },
         },
+        required: ['decisionFile'],
       },
-      execute: async ({ actor = 'howie', file = 'harness.json' } = {}) => {
-        const cleanActor = String(actor ?? '').trim() || 'howie';
+      execute: async ({ file = 'harness.json', decisionFile, projectRoot = process.cwd() } = {}) => {
         const cleanFile = String(file ?? '').trim() || 'harness.json';
+        const cleanDecisionFile = String(decisionFile ?? '').trim();
+        assert(cleanDecisionFile, 'WORKSPACE_DECISION_FILE_REQUIRED', 'Workspace initialization requires an externally issued Authority Decision file.');
         const controlRoot = harnessControlRoot();
         const dataRoot = defaultDataRoot(controlRoot);
         const resolvedPath = resolve(process.cwd(), cleanFile);
         const content = await readFile(resolvedPath, 'utf8');
         const input = JSON.parse(content);
+        if (input.kind === 'agent-harness-project') {
+          const releaseIdentity = await loadReleaseIdentity();
+          const plan = await createProjectInitializationPlan(resolvedPath, { projectRoot, controlRoot, dataRoot, releaseIdentity, mode: 'installed' });
+          const authorityDecision = JSON.parse(await readFile(resolve(process.cwd(), cleanDecisionFile), 'utf8'));
+          const output = await applyProjectInitializationPlan(plan, { controlRoot, dataRoot, releaseIdentity, commandId: newId('opencode-init'), authorityDecision });
+          const loaded = await loadProjectHarnessConfig(resolvedPath, { projectRoot });
+          return {
+            ok: true,
+            kind: input.kind,
+            projectId: loaded.request.binding.projectId,
+            alias: loaded.config.binding.alias ?? loaded.request.binding.projectId,
+            receipt: output.receipt,
+            message: `Project "${loaded.request.binding.projectId}" successfully initialized from its project-owned harness.json.`,
+          };
+        }
         const registry = new WorkspaceRegistry({ root: dataRoot, controlRoot });
         const current = await registry.get(input.workspaceId, { required: false, validate: false });
         const expectedRevision = current?.revision ?? 0;
         const commandId = `init-${Date.now()}`;
-        const authorityDecision = {
-          actor: cleanActor,
-          decision: 'approved',
-          action: 'workspace-register',
-          expiresAt: '2099-01-01T00:00:00.000Z',
-          context: workspaceDecisionContext({ current, input, expectedRevision }),
-        };
+        const authorityDecision = JSON.parse(await readFile(resolve(process.cwd(), cleanDecisionFile), 'utf8'));
         const workspace = await registry.register(input, { expectedRevision, commandId, authorityDecision });
         return {
           ok: true,

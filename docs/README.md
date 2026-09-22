@@ -4,9 +4,11 @@
 
 - [项目说明](./overview/project.md)：面向外部读者的完整介绍，不依赖其他文档。
 - [整体设计](./architecture/system-design.md)：当前架构、权威边界、Workspace、资源、Flow 包规范。
-- [接入指南](./guides/consumer-quickstart.md)、[Flow 开发](./guides/flow-authoring.md)、[Workspace 配置](./guides/workspace-configuration.md)。
+- 接入与配置：[接入指南](./guides/consumer-quickstart.md)、[项目配置](./guides/project-configuration.md)、[Workspace 配置](./guides/workspace-configuration.md)。
+- 编排与治理：[Flow 开发](./guides/flow-authoring.md)、[节点/分支/循环](./guides/control-flow.md)、[Gate 与 Decision](./guides/gates-and-decisions.md)。
+- 宿主与开发：[宿主插件](./guides/host-plugins.md)、[本地源码调试](./guides/local-debugging.md)。
 - 流程设计：[版本交付](./flows/delivery-lifecycle/design.md)、[批次生产](./flows/batch-production/design.md)、[需求与设计整理](./flows/requirements-design/design.md)、[知识问答](./flows/knowledge-qa/design.md)。
-- 参考：[协议](./reference/protocol.md)、[SDK](./reference/sdk.md)、[命令](./reference/commands.md)、[渠道打包](./reference/packaging.md)、[Legacy 兼容基线](./reference/legacy-compatibility.md)。
+- 参考：[完整配置 API](./reference/configuration-api.md)、[协议](./reference/protocol.md)、[SDK](./reference/sdk.md)、[命令](./reference/commands.md)、[渠道打包](./reference/packaging.md)、[Legacy 兼容基线](./reference/legacy-compatibility.md)。
 - [运行与恢复](./operations/README.md)。
 
 ## 历史与证据

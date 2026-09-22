@@ -1,5 +1,5 @@
-export const batchWorkflowId = 'collection-batch-production';
-export const batchProfileId = 'collection-batch';
+export const batchWorkflowId = 'batch-production';
+export const batchProfileId = 'batch-production';
 
 export const batchPorts = Object.freeze({
   rules: 'batch-rules-v1',

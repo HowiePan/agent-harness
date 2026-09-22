@@ -2,21 +2,13 @@ export {
   createBatchProductionProjectDescriptor,
   compileBatchProductionFeatureGraph,
 } from './descriptor.mjs';
+export { batchProductionCommandManifest } from './commands.mjs';
+export { createBatchProductionWorkflowDefinition, batchProductionWorkflowDefinition } from './graph/definition.mjs';
 export {
-  COLLECTION_FINAL_GATE_IDS,
-  createTabletopCollectionProjectDescriptor,
-  compileTabletopCollectionFeatureGraph,
-} from '../../../integrations/legacy-consumers/collection/variant/descriptor.mjs';
-export {
-  tabletopCollectionCommandManifest,
-  batchProductionCommandManifest,
-  collectionBatchCommandManifest,
-} from './commands.mjs';
-export { collectionWorkflowDefinition } from './graph/definition.mjs';
-export {
-  createTabletopCollectionLifecyclePlan,
+  createBatchProductionLifecyclePlanner,
   createBatchProductionLifecyclePlan,
 } from './planner.mjs';
+export { createBatchProductionProfile, batchProductionProfile } from './policy/index.mjs';
 export {
   batchPorts,
   batchValueSchemas,

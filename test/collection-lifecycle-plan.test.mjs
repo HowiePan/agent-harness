@@ -1,8 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { resolve } from 'node:path';
-import { createTabletopCollectionLifecyclePlan, createTabletopCollectionProjectDescriptor } from '../src/flows/batch-production/index.mjs';
-import { collectionBatchProfile } from '../src/flows/batch-production/policy/collection-batch.mjs';
+import { createTabletopCollectionLifecyclePlan, createTabletopCollectionProjectDescriptor, collectionBatchProfile } from '../integrations/legacy-consumers/collection/index.mjs';
 
 const games = ['doudizhu', 'gomoku', 'texas-holdem', 'chess', 'tycoon', 'liars-dice', 'junqi', 'bind-and-die', 'go', 'riichi'];
 const sourceDigest = 'a'.repeat(64);

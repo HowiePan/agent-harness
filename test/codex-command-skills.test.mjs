@@ -7,7 +7,8 @@ import { configureBindings } from '../integrations/codex/agent-harness-codex/scr
 import { hookResponse, loadBindings, parsePseudoCommand } from '../integrations/codex/agent-harness-codex/hooks/pseudo-command-router.mjs';
 import { decodeVisibleLifecycleIntent } from '../integrations/codex/agent-harness-codex/lib/visible-lifecycle-intent.mjs';
 import { resolveCommandIntent } from '../src/platform/extensions/command-contract.mjs';
-import { cardWorldCommandManifest, tabletopCollectionCommandManifest } from '../src/flows/index.mjs';
+import { cardWorldCommandManifest } from '../integrations/legacy-consumers/cardworld/index.mjs';
+import { tabletopCollectionCommandManifest } from '../integrations/legacy-consumers/collection/index.mjs';
 import { digestJson, sha256 } from '../src/common/canonical.mjs';
 
 const pluginRoot = resolve('integrations', 'codex', 'agent-harness-codex');
@@ -120,6 +121,8 @@ test('pseudo-command parser requires a project alias and supports h:where and h:
   assert.deepEqual(parsePseudoCommand('h:where'), { protocolVersion: '1.0', kind: 'where' });
   assert.deepEqual(parsePseudoCommand('h:where engine'), { protocolVersion: '1.0', kind: 'where', projectAlias: 'engine' });
   assert.deepEqual(parsePseudoCommand('h:report engine'), { protocolVersion: '1.0', kind: 'report', projectAlias: 'engine' });
+  assert.deepEqual(parsePseudoCommand('h:init --decision decision.json --source F:/agent-harness'), { protocolVersion: '1.0', kind: 'init', decisionFile: 'decision.json', configFile: 'harness.json', sourceRoot: 'F:/agent-harness' });
+  assert.equal(parsePseudoCommand('h:init --source F:/agent-harness').kind, 'invalid');
   assert.equal(parsePseudoCommand('h:report').kind, 'invalid');
   assert.equal(parsePseudoCommand('h:report engine extra').kind, 'invalid');
   assert.equal(parsePseudoCommand('h:quality V3.8.4 review-only').kind, 'invalid');

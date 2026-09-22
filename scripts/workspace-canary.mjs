@@ -4,8 +4,8 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import { createExecutionAuthorizationAdapter, createHarness, createInMemoryRuntime, defineMemorySpace, digestJson, harnessTemporaryRoot, loadExtensionPack, REFERENCE_MEMORY_PROVIDER, RunCoordinator, sealLifecycleExecutionGrant, workspaceDecisionContext, workspaceFromProjectDescriptor, WorkspaceRegistry } from '../src/index.mjs';
 import { parsePseudoCommand } from '../integrations/codex/agent-harness-codex/hooks/pseudo-command-router.mjs';
-import { createCardWorldProjectDescriptor } from '../src/flows/delivery-lifecycle/index.mjs';
-import { createTabletopCollectionProjectDescriptor } from '../src/flows/batch-production/index.mjs';
+import { createCardWorldProjectDescriptor } from '../integrations/legacy-consumers/cardworld/index.mjs';
+import { createTabletopCollectionProjectDescriptor } from '../integrations/legacy-consumers/collection/index.mjs';
 import { sha256 } from '../src/common/canonical.mjs';
 
 // Exercise the legacy Engine and Collection closure path in the same command Gate.
@@ -188,8 +188,8 @@ const runCommand = async (command, workflowInput, { expectClosed = true } = {}) 
 try {
   const alpha = await makeWorkspace('alpha', true);
   const beta = await makeWorkspace('beta', false);
-  const engineExtension = await loadExtensionPack('./src/flows/delivery-lifecycle/index.mjs', { cwd: process.cwd(), controlRoot: process.cwd() });
-  const collectionExtension = await loadExtensionPack('./src/flows/batch-production/index.mjs', { cwd: process.cwd(), controlRoot: process.cwd() });
+  const engineExtension = await loadExtensionPack('./integrations/legacy-consumers/cardworld/index.mjs', { cwd: process.cwd(), controlRoot: process.cwd() });
+  const collectionExtension = await loadExtensionPack('./integrations/legacy-consumers/collection/index.mjs', { cwd: process.cwd(), controlRoot: process.cwd() });
   const engineRoot = resolve(root, 'engine-output');
   const collectionRoot = resolve(root, 'collection-output');
   for (const path of [engineRoot, collectionRoot]) { await mkdir(resolve(path, '.git'), { recursive: true }); await writeFile(resolve(path, 'README.md'), legacyWorkspaceReadme); }

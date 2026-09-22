@@ -2,17 +2,43 @@ import { assert } from '../../../common/errors.mjs';
 import { validateWorkGraph } from '../../../kernel/work-graph.mjs';
 
 const select = (value, path) => String(path ?? '').split('.').filter(Boolean).reduce((current, segment) => current?.[segment], value);
+const repeatFeatureId = (id, ruleId, iteration) => `${id}--repeat-${ruleId}-${iteration}`;
+
+const expandRepeat = ({ rule, feature, iteration }) => {
+  const ids = new Set(rule.features.map(candidate => candidate.id));
+  const mapId = id => ids.has(id) ? repeatFeatureId(id, rule.id, iteration) : id;
+  return rule.features.map(candidate => {
+    const internalDependencies = (candidate.dependsOn ?? []).filter(id => ids.has(id));
+    const dependencies = (candidate.dependsOn ?? []).map(mapId);
+    if (!internalDependencies.length) dependencies.push(feature.id);
+    return {
+      ...structuredClone(candidate),
+      id: mapId(candidate.id),
+      dependsOn: [...new Set(dependencies)],
+      metadata: { ...(structuredClone(candidate.metadata ?? {})), repeat: { ruleId: rule.id, iteration } },
+    };
+  });
+};
 
 export const composableWorkflowProfile = Object.freeze({
   id: 'composable-workflow', version: '1.0.0',
   validateConfig(config) {
     const branches = structuredClone(config.branches ?? []);
+    const repeats = structuredClone(config.repeats ?? []);
     assert(Array.isArray(branches) && branches.length <= 32, 'WORKFLOW_BRANCH_BUDGET', 'Workflow accepts at most 32 continuation rules.');
     for (const branch of branches) {
       assert(branch.nodeId && branch.portId && branch.schemaId && branch.path && Array.isArray(branch.features) && branch.features.length > 0 && branch.features.length <= 20, 'WORKFLOW_BRANCH_INVALID', 'Continuation rule requires a node, typed output selector, and bounded Features.');
       assert(branch.features.every(feature => feature.executionClass === 'agent-reasoning'), 'WORKFLOW_BRANCH_CLASS_INVALID', 'Continuation may only append Agent Features.');
     }
-    return { requiredFinalGates: [...new Set(config.requiredFinalGates ?? [])], requiredDecisions: [...new Set(config.requiredDecisions ?? [])], branches };
+    assert(Array.isArray(repeats) && repeats.length <= 16, 'WORKFLOW_REPEAT_BUDGET', 'Workflow accepts at most 16 repeat rules.');
+    assert(new Set(repeats.map(rule => rule.id)).size === repeats.length, 'WORKFLOW_REPEAT_DUPLICATE', 'Workflow repeat rule IDs must be unique.');
+    assert(new Set(repeats.map(rule => rule.nodeId)).size === repeats.length, 'WORKFLOW_REPEAT_NODE_AMBIGUOUS', 'A workflow node may own at most one repeat rule.');
+    for (const rule of repeats) {
+      assert(rule.id && rule.nodeId && rule.portId && rule.schemaId && rule.path && Number.isInteger(rule.maxIterations) && rule.maxIterations >= 1 && rule.maxIterations <= 20 && rule.onExhausted === 'attention-required' && Array.isArray(rule.features) && rule.features.length > 0 && rule.features.length <= 20, 'WORKFLOW_REPEAT_INVALID', 'Repeat rule requires a typed stop selector, 1-20 maximum iterations, attention-required exhaustion, and bounded Features.');
+      assert(rule.features.every(feature => feature.executionClass === 'agent-reasoning'), 'WORKFLOW_REPEAT_CLASS_INVALID', 'Repeat body may only append Agent Features.');
+      validateWorkGraph(rule.features);
+    }
+    return { requiredFinalGates: [...new Set(config.requiredFinalGates ?? [])], requiredDecisions: [...new Set(config.requiredDecisions ?? [])], branches, repeats };
   },
   validateRun(state) { return state; },
   canDispatch() { return { ok: true }; },
@@ -35,6 +61,10 @@ export const composableWorkflowProfile = Object.freeze({
     const fingerprint = result.outputs?.answer?.value?.claimFingerprint;
     if (fingerprint && (state.metadata?.memorySnapshot ?? []).some(item => item.kind === 'negative' && item.topic === fingerprint && item.validity === 'current')) return { ok: false, reason: 'rejected-answer-repeated' };
     const nodeId = feature.metadata?.workflow?.nodeId;
+    for (const rule of (state.profile.config.repeats ?? []).filter(candidate => candidate.nodeId === nodeId)) {
+      const output = result.outputs?.[rule.portId];
+      if (!output || output.schemaId !== rule.schemaId) return { ok: false, reason: `missing-typed-output:${rule.portId}` };
+    }
     const rules = state.profile.config.branches.filter(branch => branch.nodeId === nodeId);
     for (const rule of rules) {
       const output = result.outputs?.[rule.portId];
@@ -45,6 +75,20 @@ export const composableWorkflowProfile = Object.freeze({
   createFollowUpFeatures({ state, feature, result }) {
     if (result.status !== 'completed') return [];
     const nodeId = feature.metadata?.workflow?.nodeId;
+    const repeat = (state.profile.config.repeats ?? []).find(rule => rule.nodeId === nodeId);
+    if (repeat) {
+      const output = result.outputs?.[repeat.portId];
+      assert(output?.schemaId === repeat.schemaId, 'WORKFLOW_REPEAT_OUTPUT_INVALID', `Repeat rule ${repeat.id} requires typed output ${repeat.portId}.`);
+      const finished = select(output.value, repeat.path) === repeat.until;
+      if (!finished) {
+        const currentIteration = feature.metadata?.repeat?.ruleId === repeat.id ? Number(feature.metadata.repeat.iteration) : 1;
+        assert(currentIteration < repeat.maxIterations, 'WORKFLOW_REPEAT_EXHAUSTED', `Repeat rule ${repeat.id} exhausted after ${currentIteration} iterations.`, { ruleId: repeat.id, maxIterations: repeat.maxIterations, onExhausted: repeat.onExhausted });
+        const appended = expandRepeat({ rule: repeat, feature, iteration: currentIteration + 1 });
+        assert(state.features.length + appended.length <= 100, 'WORKFLOW_FEATURE_BUDGET', 'Workflow repeat exceeds 100 Features.');
+        validateWorkGraph([...state.features, ...appended]);
+        return appended;
+      }
+    }
     const rules = state.profile.config.branches.filter(branch => branch.nodeId === nodeId);
     const matching = rules.filter(rule => select(result.outputs[rule.portId].value, rule.path) === rule.equals);
     if (rules.length) assert(matching.length > 0, 'WORKFLOW_BRANCH_UNMATCHED', `No continuation rule matched ${nodeId}.`);

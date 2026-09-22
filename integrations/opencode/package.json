@@ -1,7 +1,7 @@
 {
   "name": "agent-harness-opencode",
   "version": "1.0.0",
-  "description": "OpenCode native plugin for Agent Harness workflow orchestration and host coordination",
+  "description": "Experimental OpenCode channel for Agent Harness initialization, status, and fail-closed host integration",
   "type": "module",
   "license": "UNLICENSED",
   "engines": {

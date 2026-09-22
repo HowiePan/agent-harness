@@ -1,8 +1,9 @@
 ---
-description: Initialize and register Agent Harness workspace from local harness.json.
+description: Initialize and register Agent Harness from project-owned harness.json.
 agent: build
 ---
 
-Initialize and register the Agent Harness workspace for this project:
-1. Call the `harness_init` tool with actor="$ARGUMENTS" (if empty, default to "howie") and file="harness.json".
-2. Report the registration status, workspaceId, alias, revision, and configured sources and projects.
+Initialize and register Agent Harness for this project:
+1. Require an explicit Authority Decision file in `$ARGUMENTS`.
+2. Call the `harness_init` tool with decisionFile="$ARGUMENTS", file="harness.json", and projectRoot set to the current project. Never create or infer an approval.
+3. Report the initialization receipt, project or Workspace identity, alias, and revision.

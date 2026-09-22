@@ -7,6 +7,10 @@ const imports = /(?:\bfrom\s*|\bimport\s*\(|\bimport\s*)[('\s]*['"]([^'"]+)['"]/
 export const validateFlowImport = ({ root, flowId, file, specifier }) => {
   if (!specifier.startsWith('.')) return null;
   const target = resolve(dirname(file), specifier);
+  const legacyRoot = resolve(root, 'integrations', 'legacy-consumers');
+  if (!relative(legacyRoot, target).split(sep).includes('..')) {
+    return `${relative(root, file)} imports a legacy consumer implementation`;
+  }
   const flowsRoot = resolve(root, 'src', 'flows');
   const parts = relative(flowsRoot, target).split(sep);
   if (parts[0] === '..' || parts[0] === flowId || !['graph', 'nodes', 'policy'].includes(parts[1])) return null;

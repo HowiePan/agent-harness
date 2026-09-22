@@ -17,6 +17,7 @@
           "version": { "type": "string", "pattern": "^\\d+\\.\\d+\\.\\d+$" },
           "digest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
           "entry": { "type": "string", "minLength": 1 },
+          "artifactMode": { "enum": ["immutable", "source-link"] },
           "registeredAt": { "type": "string", "format": "date-time" }
         },
         "additionalProperties": false

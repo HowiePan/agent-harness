@@ -4,7 +4,7 @@ const qualityAllowedPaths = Object.freeze([
   'card_world_engine/src', 'card_world_engine/tests', 'card_world_engine/Cargo.toml', 'card_world_engine/Cargo.lock',
   'card_world_web/src', 'card_world_web/tests', 'docs/versions/v3/v3.8.4.md', 'docs/versions/INDEX.md', 'docs/integration_guide.md',
 ]);
-const actionPaths = Object.freeze({
+export const CARDWORLD_ACTION_PATHS = Object.freeze({
   requirements: ['docs/requirements.md', 'docs/versions'],
   plan: ['docs/versions', 'docs/requirements.md'],
   implement: [...qualityAllowedPaths],
@@ -14,7 +14,7 @@ const actionPaths = Object.freeze({
 });
 
 export const engineTemplates = createDeliveryTemplates({
-  actionPaths,
+  actionPaths: CARDWORLD_ACTION_PATHS,
   qualityRootPrefix: 'engine',
   forbiddenPaths: ['.git', '.agent-harness-data', '.cardworld-local'],
 });

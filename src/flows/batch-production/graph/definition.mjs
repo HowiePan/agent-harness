@@ -8,10 +8,10 @@ import { launchNode, closeNode } from '../nodes/lifecycle/index.mjs';
 
 const withDeps = (node, dependsOn) => ({ ...node, dependsOn });
 
-export const collectionWorkflowDefinition = defineWorkflowDefinition({
-  id: 'collection-batch-production',
+export const createBatchProductionWorkflowDefinition = ({ id = 'batch-production', profileId = 'batch-production' } = {}) => defineWorkflowDefinition({
+  id,
   version: '1.0.0',
-  profileId: 'collection-batch',
+  profileId,
   routes: {
     full: [rulesNode, produceNode, qualityNode, reviewNode, acceptNode],
     rules: [rulesNode],
@@ -23,3 +23,5 @@ export const collectionWorkflowDefinition = defineWorkflowDefinition({
     close: [closeNode],
   },
 });
+
+export const batchProductionWorkflowDefinition = createBatchProductionWorkflowDefinition();

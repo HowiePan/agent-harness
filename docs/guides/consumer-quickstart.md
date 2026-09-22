@@ -1,30 +1,44 @@
-# 业务方接入：从工作区到关闭的 Run
+# 业务项目接入：从 `harness.json` 到关闭 Run
 
-仓库中的独立示例 Flow 位于 `examples/onboarding/source-brief/`。它以自己的 Extension、Planner、图、节点、合同和策略接入；命令 `h:alpha flow source-brief summarize audit-trail` 读取工作区允许的多项目来源，写出 `docs/brief.md`，返回 `document-ref-v1`，并在同一 Canary 中关闭 Run。业务方可据此替换节点与合同，无需修改 Kernel。
+本指南只使用发布包提供的 CLI、Schema 和文档，不要求查看 Harness 源码。需要 Node.js 22+、一个位于业务仓之外的 Harness 控制根、已安装的 Extension 制品，以及外部签发的 Authority Decision。
 
-本指南用前端、后端、共享需求文档三个合成来源演示当前协议。Node.js 22+，在 Harness 项目根执行命令。合成执行由内存 Runtime 返回符合合同的结果，不调用真实业务仓或模型。
+## 1. 创建项目配置
 
-## 1. 运行完整样例
-
-```powershell
-npm run workspace:canary
-```
-
-脚本在临时控制范围内创建 `alpha`、`beta` 两个工作区。`alpha` 含前后端两个项目、三种 Source Binding、共享与项目级记忆、需求设计和知识问答两条精确 Workflow Binding；`beta` 使用同一知识问答流程但拥有独立来源和记忆。它还把两条旧业务流程显式转换成独立 Workspace。每条正向命令从 `parsePseudoCommand` 开始，经 `createWorkspaceLifecyclePlan`、执行预检、Runtime、Gate/Decision 到 `closed`。末尾 JSON 的 `runs` 数组给出命令、工作区、Workflow、项目范围、Run ID、Plan 摘要及最终状态；任何断言失败都会使命令失败。
-
-最小读法：先看 `scripts/workspace-canary.mjs` 的 `makeWorkspace()`。Descriptor 必须声明 Workspace ID/别名、`extensions` 的精确摘要、`workflows` 的 ID/版本/制品摘要、`projects`、`sources`、`executionTargets`、`resources` 与 `policy`。`WorkspaceRegistry.register()` 需要注册 Decision 和 command ID。然后看 `runCommand()`：命令解析后从 Registry 取 Workspace，创建 Plan、执行预检，最后调用 `executeLifecyclePlan()` 并断言 `closed`。
-
-## 2. 接入自己的流程
-
-在 `src/flows/<flow-id>/` 或独立 Extension 包中创建公开入口、Extension、Planner、Graph、阶段节点、合同和 Policy；提供自己的 `docs/flows/<flow-id>/design.md`。节点结果端口必须有 Schema ID，输出路径和来源证据要由 Planner/合同核验。使用 `defineExtensionPack()` 声明版本、Workflow、命令清单与 `pure-planner` operation。安装制品时提供完整文件清单并使用批准的 Extension Registry 回执；Workspace 只绑定精确摘要。一个新流程样例可以从 `requirements-design` 复制组织方式，但业务节点、输入和合同应由自己的需求重新定义。
-
-## 3. 配置工作区并启动
-
-用业务仓之外的控制根保存 Descriptor 和状态。先注册 Extension，再创建含前后端项目的 Workspace，分别授权共享文档和项目仓库来源；执行目标只授权写文档的项目。记忆资源声明工作区通用空间与前后端项目空间，读写项目列表明确填写。将已安装 Flow 绑定到 Workspace，指定默认项目范围。多条 Flow 可同时绑定，命令必须显式选择其中一条。
+在业务项目根执行：
 
 ```text
-h:alpha flow requirements-design analyze audit-trail
-h:alpha flow knowledge-qa ask audit-trail --project alpha-front
+agent-harness init create-config --config ./harness.json
+agent-harness config validate --config ./harness.json --project-root .
 ```
 
-生产宿主应把命令解析结果传给 `createWorkspaceLifecyclePlan()`，要求真实执行预检，再交由已授权 Runtime 执行；合成样例的 `headless` Grant 仅用于 Canary。新增后端仓库时提交新的 Workspace 修订和批准 Decision，重新固定来源覆盖范围，再运行受影响的知识复核。回滚产生新修订，不能编辑 Registry 活动文件。`npm run check`、`npm run test:conformance` 与命令闭环同时通过后，才说明新接入满足结构、合同和跨层运行边界。
+编辑 `harness.json`，固定项目 ID/别名、Extension ID/版本/模块、Descriptor 生成器、Profile 和 `workspaceRoot`。项目专属 Gate、排除目录、Runtime 和 Flow 参数属于该文件，不得放回 Harness 发布仓。简要步骤见 `agent-harness docs show configuration`，完整字段见 `agent-harness docs show configuration-api`。
+
+## 2. 生成初始化计划
+
+```text
+agent-harness init plan --config ./harness.json --project-root . --control-root <Harness控制根> --data-root <Harness数据根>
+```
+
+计划只读检查配置、Harness release、Extension manifest、现有 Registry 修订和工作区身份。检查输出中的 `planDigest`、Extension 动作和预期修订，再由外部 Authority 为该计划签发 Decision。CLI 和宿主不能把当前用户或参数转换成批准。
+
+## 3. 注册并检查
+
+```text
+agent-harness init apply --plan ./init-plan.json --command-id project-init-001 --decision ./decision.json
+agent-harness doctor --project <project-id> --profile <profile-id> --extension-id <extension-id>
+agent-harness workflow list --project <project-id>
+```
+
+成功结果是带摘要的 Init Receipt；它同时给出宿主 `hostBinding`。项目配置留在项目仓，Sealed Descriptor、Extension Registry、Authority 和 Evidence 留在控制根。
+
+## 4. 通过宿主运行
+
+Codex 使用 `h:<alias> flow <workflow-id> <action> <target>`；只有一条绑定流程时可用 Extension 声明的短命令。OpenCode 和 VS Code 当前可以初始化和只读检查，但缺完整可信可见宿主合同时会明确返回 unsupported，不创建 Run。独立 CLI 也不直接执行 Agent。
+
+宿主先解析唯一项目与 Workflow，再生成 Lifecycle Plan，执行短时预检，最后才创建 Run。运行依次经过 Dispatch、Lease、Submission、Finding、Gate/Decision 和关闭 Receipt。任何摘要漂移、权限缺失或宿主能力缺失都会在创建 Run 前失败。
+
+## 5. 更新与本地调试
+
+修改 `harness.json` 后重新计划并注册，产生新 Descriptor 修订；旧 Run 保持原身份。开发 Harness 自身时使用 `agent-harness dev execute` 和 development manifest，详见 `agent-harness docs show debug`。source-link 变化先经 H0–H4 分类：文档/测试与只影响未来编译结果的 H1 可以留 Receipt 后继续当前已冻结 Run；Profile、Gate、Runtime、Kernel 或 Authority 变化不能注入旧 Run。
+
+发布包自带 `examples/project-harness.json` 作为中立配置示例，`npm run workspace:canary` 仅供 Harness 开发者做合成闭环验证，不是消费者接入前置条件。

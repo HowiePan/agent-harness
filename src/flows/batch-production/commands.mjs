@@ -1,31 +1,31 @@
 import { defineCommandManifest } from '../../platform/extensions/command-contract.mjs';
 
-export const tabletopCollectionCommandManifest = defineCommandManifest({
+export const batchProductionCommandManifest = defineCommandManifest({
   protocolVersion: '1.0',
   id: 'batch-production-commands',
-  profileId: 'collection-batch',
-  workflowId: 'collection-batch-production',
+  profileId: 'batch-production',
+  workflowId: 'batch-production',
   actions: {
     full: { targetKind: 'batch-id', presets: { default: { scope: 'rule-readiness..release-receipt', stateChanging: true } } },
     rules: { targetKind: 'batch-id', presets: { default: { scope: 'rule-readiness', stateChanging: true } } },
     launch: { targetKind: 'batch-id', presets: { default: { scope: 'batch-launch', stateChanging: true } } },
-    produce: { targetKind: 'batch-id', presets: { default: { scope: 'round-production', stateChanging: true } } },
+    produce: { targetKind: 'batch-id', presets: { default: { scope: 'batch-production', stateChanging: true } } },
     quality: {
       aliases: ['qa'], targetKind: 'batch-id', defaultPreset: 'all', presets: {
-        all: { scope: 'game-harness-acceptance', stateChanging: true },
-        game: { scope: 'single-game-harness-acceptance', stateChanging: true, argumentPrefix: 'game:' },
+        all: { scope: 'item-harness-acceptance', stateChanging: true },
+        item: { scope: 'single-item-harness-acceptance', stateChanging: true, argumentPrefix: 'item:' },
       },
     },
     review: {
       targetKind: 'batch-id', defaultPreset: 'all', presets: {
         all: { scope: 'independent-release-review', stateChanging: true, sourcePolicy: 'read-only' },
-        game: { scope: 'single-game-release-review', stateChanging: true, sourcePolicy: 'read-only', argumentPrefix: 'game:' },
+        item: { scope: 'single-item-release-review', stateChanging: true, sourcePolicy: 'read-only', argumentPrefix: 'item:' },
       },
     },
     accept: {
       targetKind: 'batch-id', defaultPreset: 'all', presets: {
         all: { scope: 'user-acceptance', stateChanging: true },
-        game: { scope: 'single-game-user-acceptance', stateChanging: true, argumentPrefix: 'game:' },
+        item: { scope: 'single-item-user-acceptance', stateChanging: true, argumentPrefix: 'item:' },
       },
     },
     close: { targetKind: 'batch-id', presets: { default: { scope: 'batch-close..release-receipt', stateChanging: true } } },
@@ -39,6 +39,3 @@ export const tabletopCollectionCommandManifest = defineCommandManifest({
     },
   },
 });
-
-export const batchProductionCommandManifest = tabletopCollectionCommandManifest;
-export const collectionBatchCommandManifest = tabletopCollectionCommandManifest;

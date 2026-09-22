@@ -1,0 +1,47 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-harness.local/schemas/composable-workflow-profile.schema.json",
+  "title": "Composable Workflow Profile Configuration",
+  "type": "object",
+  "properties": {
+    "requiredFinalGates": { "type": "array", "uniqueItems": true, "items": { "type": "string" } },
+    "requiredDecisions": { "type": "array", "uniqueItems": true, "items": { "type": "string" } },
+    "branches": { "type": "array", "maxItems": 32, "items": { "$ref": "#/$defs/branch" } },
+    "repeats": { "type": "array", "maxItems": 16, "items": { "$ref": "#/$defs/repeat" } }
+  },
+  "additionalProperties": true,
+  "$defs": {
+    "selector": {
+      "type": "object",
+      "required": ["nodeId", "portId", "schemaId", "path", "features"],
+      "properties": {
+        "nodeId": { "type": "string", "minLength": 1 },
+        "portId": { "type": "string", "minLength": 1 },
+        "schemaId": { "type": "string", "minLength": 1 },
+        "path": { "type": "string", "minLength": 1 },
+        "features": { "type": "array", "minItems": 1, "maxItems": 20, "items": { "$ref": "feature.schema.json" } }
+      }
+    },
+    "branch": {
+      "allOf": [
+        { "$ref": "#/$defs/selector" },
+        { "type": "object", "required": ["equals"], "properties": { "equals": {} } }
+      ]
+    },
+    "repeat": {
+      "allOf": [
+        { "$ref": "#/$defs/selector" },
+        {
+          "type": "object",
+          "required": ["id", "until", "maxIterations", "onExhausted"],
+          "properties": {
+            "id": { "type": "string", "minLength": 1 },
+            "until": {},
+            "maxIterations": { "type": "integer", "minimum": 1, "maximum": 20 },
+            "onExhausted": { "const": "attention-required" }
+          }
+        }
+      ]
+    }
+  }
+}

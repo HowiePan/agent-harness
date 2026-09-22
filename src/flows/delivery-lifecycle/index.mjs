@@ -3,20 +3,15 @@ export {
   compileDeliveryFeatureGraph,
 } from './descriptor.mjs';
 export {
-  CARDWORLD_FINAL_GATE_IDS,
-  createCardWorldProjectDescriptor,
-  compileCardWorldFeatureGraph,
-} from '../../../integrations/legacy-consumers/cardworld/variant/descriptor.mjs';
-export {
-  cardWorldCommandManifest,
   deliveryLifecycleCommandManifest,
-  engineDeliveryCommandManifest,
+  createDeliveryCommandManifest,
 } from './commands.mjs';
-export { engineWorkflowDefinition } from './graph/definition.mjs';
+export { createDeliveryWorkflowDefinition, deliveryLifecycleWorkflowDefinition } from './graph/definition.mjs';
 export {
-  createCardWorldLifecyclePlan,
+  createDeliveryLifecyclePlanner,
   createDeliveryLifecyclePlan,
 } from './planner.mjs';
+export { createDeliveryLifecycleProfile, deliveryLifecycleProfile, DELIVERY_STAGES } from './policy/index.mjs';
 export {
   deliveryPorts,
   deliveryValueSchemas,

@@ -30,7 +30,6 @@ export const createDeliveryTemplates = ({ actionPaths, forbiddenPaths = ['.git',
   };
 
   return {
-    'engine-stage': stageTemplate,
     'delivery-stage': stageTemplate,
   };
 };

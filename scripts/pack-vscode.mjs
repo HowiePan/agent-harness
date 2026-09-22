@@ -71,9 +71,16 @@ try {
     npmCli: process.env.npm_execpath,
     expectedFiles: [...files.map(f => f.path), 'vscode-channel-manifest.json', 'package.json'],
     forbiddenPrefixes: ['src/', 'integrations/codex/', 'integrations/opencode/'],
-    identity: core.artifactDigest,
+    identity: channelManifest.artifactDigest,
   });
-  console.log(JSON.stringify({ ok: true, channel: 'vscode', ...result }, null, 2));
+  console.log(JSON.stringify({
+    ok: true,
+    ...result,
+    plugin: channelManifest.plugin,
+    requiredCorePackageDigest: core.artifactDigest,
+    contentDigest: channelManifest.contentDigest,
+    artifactDigest: channelManifest.artifactDigest,
+  }, null, 2));
 } finally {
   await rm(stage, { recursive: true, force: true });
 }

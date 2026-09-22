@@ -12,3 +12,7 @@ test('private cross-Flow imports are rejected', () => {
   assert.match(validateFlowImport({ root, flowId: 'knowledge-qa', file, specifier: '../requirements-design/nodes/intake/index.mjs' }), /private/);
   assert.equal(validateFlowImport({ root, flowId: 'knowledge-qa', file, specifier: '../requirements-design/index.mjs' }), null);
 });
+test('neutral Flow packages cannot depend on legacy consumer implementations', () => {
+  const file = resolve(root, 'src/flows/delivery-lifecycle/planner.mjs');
+  assert.match(validateFlowImport({ root, flowId: 'delivery-lifecycle', file, specifier: '../../../integrations/legacy-consumers/cardworld/index.mjs' }), /legacy consumer/);
+});

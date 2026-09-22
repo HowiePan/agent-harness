@@ -446,7 +446,7 @@ export const createHarness = async ({ controlRoot: controlRootInput, dataRoot: d
       assert(required.version === extension.version && required.digest === extension.digest, 'PROJECT_EXTENSION_IDENTITY_MISMATCH', `Project ${project.id} does not bind the active Extension ${extension.id}.`);
       if (strictProjectIdentity) assert(project.harness?.version === currentReleaseIdentity.version && project.harness?.artifactDigest === currentReleaseIdentity.artifactDigest, 'PROJECT_HARNESS_IDENTITY_MISMATCH', `Project ${project.id} does not bind the active Harness release.`);
       const snapshot = await captureWorkspace(workspace.root, { excluded: project.workspace.excluded ?? [] });
-      if (intent.workflowId === 'engine-delivery') {
+      if (extension.planningCapabilities.includes('quality-target')) {
         const inventoryDeclaration = project.policy?.knownFindingInventories?.[intent.target];
         const legacyInventory = inventoryDeclaration
           ? sealLegacyFindingInventory({ projectId: project.id, target: intent.target, declaration: inventoryDeclaration })

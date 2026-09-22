@@ -46,10 +46,10 @@ const inspectProject = async ({ project, extensionState, extensionVerification, 
   };
 };
 
-export const inspectLifecycleReadiness = async ({ controlRoot: controlRootInput, dataRoot: dataRootInput, releaseIdentity, projectId, profileId, extensionId, executionWorkspaceRoot } = {}) => {
+export const inspectLifecycleReadiness = async ({ controlRoot: controlRootInput, dataRoot: dataRootInput, releaseIdentity, projectId, profileId, extensionId, executionWorkspaceRoot, developmentMode = false } = {}) => {
   const controlRoot = harnessControlRoot(controlRootInput);
   const dataRoot = assertHarnessWritePath(dataRootInput ?? resolve(controlRoot, '.agent-harness-data'), 'Harness dataRoot', controlRoot);
-  const extensionRegistry = new ExtensionRegistry({ dataRoot, controlRoot });
+  const extensionRegistry = new ExtensionRegistry({ dataRoot, controlRoot, developmentMode });
   const projectRegistry = new ProjectRegistry({ root: dataRoot, controlRoot });
   const [extensionState, projects] = await Promise.all([extensionRegistry.list(), projectRegistry.list()]);
   const extensionVerification = new Map();
@@ -77,7 +77,7 @@ export const inspectLifecycleReadiness = async ({ controlRoot: controlRootInput,
   return {
     protocolVersion: '1.0',
     controlRoot,
-    controlRootMode: controlRoot === harnessProjectRoot() ? 'source-checkout' : 'installed',
+    controlRootMode: developmentMode ? 'source-link' : controlRoot === harnessProjectRoot() ? 'source-checkout' : 'installed',
     dataRoot,
     releaseVerified: Boolean(releaseIdentity?.verified),
     installationReady: Boolean(releaseIdentity?.verified) && storageReady && activeRelease,

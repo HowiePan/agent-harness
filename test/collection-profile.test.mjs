@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { collectionBatchProfile } from '../src/flows/batch-production/policy/collection-batch.mjs';
+import { collectionBatchProfile } from '../integrations/legacy-consumers/collection/index.mjs';
 import { command, feature, makeFixture, startRun } from './test-support.mjs';
 
 const gameFeature = (game, suffix = 'main', extra = {}) => {

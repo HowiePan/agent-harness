@@ -8,7 +8,7 @@ export const batchNode = (id, action, dependsOn = [], options = {}) => {
     : {};
   return {
     id,
-    template: 'collection-stage',
+    template: 'batch-stage',
     action,
     forEach: 'item',
     dependsOn,

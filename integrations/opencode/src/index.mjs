@@ -8,15 +8,13 @@ import { createOpenCodeVisibleHostAdapter, OPENCODE_HOST_PROVIDER } from './adap
 export const createOpenCodePlugin = (options = {}) => {
   return async ({ client, project, directory, $ } = {}) => {
     let harness = options.harness ?? null;
-    let currentScope = null;
-
     const tools = createOpenCodeTools({
       harness,
       getHarness: async () => harness,
     });
 
     const writeGuard = createWriteGuard({
-      getCurrentScope: async () => currentScope,
+      getCurrentScope: options.getCurrentScope ?? (async () => null),
     });
 
     return {
@@ -25,37 +23,27 @@ export const createOpenCodePlugin = (options = {}) => {
       config: cfg => {
         cfg.command ??= {};
         cfg.command['h'] = {
-          description: 'Route and execute an Agent Harness workflow action, or initialize workspace with "init [actor]".',
+          description: 'Inspect Agent Harness state and initialize a project or Workspace with an external Authority Decision. Lifecycle execution is unsupported in this channel.',
           template: [
             'Examine the requested Agent Harness argument: "$ARGUMENTS".',
-            '1. If $ARGUMENTS starts with "init":',
-            '   Call the `harness_init` tool with actor extracted from arguments (if empty, default to "howie") and file="harness.json". Report the registration result.',
+            '1. If $ARGUMENTS starts with "init <decision-file>":',
+            '   Call the `harness_init` tool with file="harness.json", projectRoot set to the current project, and decisionFile set to the explicit decision file. Never create or infer an approval.',
             '2. Otherwise:',
-            '   Execute the requested workflow action:',
-            '   - Resolve target project and workflow intent.',
-            '   - Query `harness_status` to ensure no conflicting active Run is running.',
-            '   - Coordinate execution through `harness-worker` following strict quality criteria.',
-            '   - Execute `harness_gate` before closing the lifecycle run.',
+            '   Query `harness_status` only, then report that OpenCode conversation-visible lifecycle execution is unsupported until a verified native host contract is installed.',
           ].join('\n'),
         };
 
         cfg.command['h:init'] = {
-          description: 'Initialize and register Agent Harness workspace from local harness.json.',
+          description: 'Initialize and register Agent Harness from project-owned harness.json.',
           template: [
             'Initialize and register the Agent Harness workspace for this project.',
-            'Call the `harness_init` tool with actor="$ARGUMENTS" (if empty, default to "howie") and file="harness.json".',
-            'Report the registration status, workspaceId, alias, revision, and configured sources and projects.',
+            'Require an explicit Authority Decision file in $ARGUMENTS. Call `harness_init` with decisionFile="$ARGUMENTS", file="harness.json", and projectRoot set to the current project. Never create or infer an approval.',
+            'Report the initialization receipt, project or workspace identity, alias, and revision.',
           ].join('\n'),
         };
 
         cfg.command['h-init'] = cfg.command['h:init'];
 
-        cfg.agent ??= {};
-        cfg.agent['harness-worker'] ??= {
-          description: 'Autonomous worker agent executing dispatched Agent Harness tasks.',
-          mode: 'subagent',
-          permission: { edit: 'allow', bash: 'ask' },
-        };
       },
     };
   };

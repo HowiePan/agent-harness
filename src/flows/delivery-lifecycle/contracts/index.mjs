@@ -1,5 +1,5 @@
-export const deliveryWorkflowId = 'engine-delivery';
-export const deliveryProfileId = 'engine-delivery';
+export const deliveryWorkflowId = 'delivery-lifecycle';
+export const deliveryProfileId = 'delivery-lifecycle';
 
 export const deliveryPorts = Object.freeze({
   intake: 'delivery-intake-v1',

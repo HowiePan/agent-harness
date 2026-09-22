@@ -1,11 +1,28 @@
-# 配置 Workspace
+# 配置多项目 Workspace
 
-Workspace 定义“这组项目使用哪些流程、来源、执行目标和资源”。Workflow Definition 独立发布；Workspace 只能绑定精确的 ID、版本与制品摘要，以及流程允许的参数槽。
+Workspace 把多条已发布 Flow 与多个项目、来源、执行目标和资源组合起来。项目仓内的 `harness.json` 用于单项目初始化；多项目 Workspace Descriptor 也应由拥有它的集成项目保存，再注册到业务仓之外的 Registry。
 
-1. 为每个业务范围分配稳定 `workspaceId` 和唯一别名；声明成员项目和默认项目范围。多流程时显式选 Flow，避免命令歧义。
-2. 逐个来源声明类型、根目录、所属项目、共享项目和允许的 Runtime；执行目标声明可写项目。不要把控制根放入业务仓，也不要让两个 Workspace 的执行目标重叠。
-3. 资源使用版本化 Provider，声明作用域和读写项目列表。工作区通用记忆只放跨项目业务概念；前后端实现细节各放项目记忆；流程/来源/会话资源继续限域。未核验导入知识不能直接成为答案依据。
-4. 用当前修订、唯一 command ID 和 `workspace-register` Authority Decision 注册。Plan 固定修订和来源；运行中对 Dispatch、读取和资源访问再次检查当前授权。
-5. 增仓或变更来源时提交新修订，验证覆盖摘要失效及受影响知识的复核。撤权应阻断后续访问；回滚以旧 Descriptor 内容创建新修订，旧 Run 不被改写。
+## 身份与 Flow
 
-可执行示例是 `npm run workspace:canary`：`alpha` 前后端共享需求文档和工作区记忆，分别拥有项目记忆；`beta` 使用相同 Flow 但完全独立。脚本还验证项目隔离、命令歧义、Provider 摘要不匹配、增仓、撤权、来源漂移与回滚后的继续执行。
+为工作区分配稳定 `workspaceId` 和唯一 `alias`。每条 Workflow Binding 固定 ID、版本、artifact digest、Extension、Profile、允许的项目、默认项目范围和执行目标。一个 Workspace 可绑定多条 Flow；命令歧义时必须显式选择 Workflow。Workspace 不能改变 Flow 节点、分支、repeat、Gate 或关闭规则。
+
+## 项目、来源和执行目标
+
+成员项目声明可见 Source 和可用 Execution Target。Source 固定类型、根目录、所有者、共享项目、允许接收者、路径和修订；实际读取还要通过 Run 内固定的 Source Manifest。Execution Target 明确可写项目，目标之间不得形成未声明的重叠写区域。控制根、Registry、Authority 和 Evidence 不得位于任一业务执行目标内。
+
+## 资源
+
+Resource Binding 固定 Provider ID/版本/摘要、作用域和项目读写列表。工作区资源只放跨项目概念；项目实现细节进入项目资源；流程、来源和会话资源继续限域。导入知识先是未核验候选，来源增加、变化或撤权会使覆盖摘要失效并触发复核。
+
+## 注册与变更
+
+```text
+agent-harness workspace register --input ./workspace.json --expected-revision 0 --command-id ws-001 --decision ./decision.json
+agent-harness workspace show --workspace-id <id>
+```
+
+Decision 必须未过期并精确绑定 `workspace-register` 上下文。增仓、来源授权、执行目标、资源或 Workflow 变化创建新修订；Plan 固定修订，旧 Run 不被改写。撤权立即阻断后续 Dispatch/读取；回滚使用 `workspace rollback` 创建新修订，不能编辑 Registry 文件。
+
+## 验收
+
+验证命令解析到唯一 Workspace/Flow，默认项目范围正确，跨项目 Source/Resource 未越权，执行目标不冲突，Provider 摘要匹配，增仓使知识覆盖失效，撤权阻断后续访问，旧 Plan 被拒绝，回滚产生新修订，并用合成 Runtime 到达 `closed`。真实业务运行、外部写入和 cutover 仍需对应 Gate。

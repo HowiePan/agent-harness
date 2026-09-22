@@ -28,11 +28,58 @@ const optionalLstat = async path => {
   catch (error) { if (error.code === 'ENOENT') return null; throw error; }
 };
 
+const validateDevelopmentBinding = async ({ controlRoot, dataRoot, entrypoint, declaredRelease, verifyAllFiles }) => {
+  const manifestFile = resolve(declaredRelease?.developmentManifest ?? '');
+  if (declaredRelease?.mode !== 'source-link' || !isAbsolute(declaredRelease.developmentManifest ?? '') || !inside(dataRoot, manifestFile)) throw new Error('source-link 绑定必须声明 dataRoot 内的 developmentManifest。');
+  const manifest = await readJson(manifestFile);
+  const unsigned = structuredClone(manifest);
+  delete unsigned.manifestDigest;
+  if (manifest?.protocolVersion !== '1.0' || manifest.kind !== 'development-source-manifest' || manifest.manifestDigest !== digestJson(unsigned) || !Array.isArray(manifest.files) || !manifest.files.length || !Array.isArray(manifest.sourceIdentity?.runtimeFiles) || !manifest.sourceIdentity.runtimeFiles.length) throw new Error(`development source manifest 无效：${manifestFile}`);
+  if (!samePath(manifest.sourceRoot, controlRoot) || !samePath(manifest.controlRoot, controlRoot) || !samePath(manifest.dataRoot, dataRoot) || !samePath(manifest.entrypoint, entrypoint)) throw new Error('source-link 绑定根目录或 entrypoint 与 development manifest 不一致。');
+  if (declaredRelease.version !== manifest.release?.version || declaredRelease.artifactDigest !== manifest.release?.artifactDigest) throw new Error('source-link release identity 已过期；请重新执行 dev rebind。');
+  if (manifest.release?.mode !== 'source-link' || manifest.release.artifactDigest !== digestJson(manifest.sourceIdentity.runtimeFiles) || manifest.release.artifactDigest !== manifest.sourceIdentity.runtimeDigest) throw new Error('development source 运行时文件清单摘要无效。');
+  const seen = new Set();
+  for (const item of manifest.files) {
+    const file = resolve(controlRoot, item?.path ?? '');
+    if (typeof item?.path !== 'string' || !item.path || isAbsolute(item.path) || !inside(controlRoot, file) || seen.has(item.path) || !/^[a-f0-9]{64}$/.test(item.sha256 ?? '') || !Number.isInteger(item.size) || item.size < 0) throw new Error(`development source 文件记录无效：${item?.path ?? '<unknown>'}`);
+    seen.add(item.path);
+  }
+  const runtimePaths = new Set();
+  for (const item of manifest.sourceIdentity.runtimeFiles) {
+    const declared = manifest.files.find(candidate => candidate.path === item?.path);
+    if (!declared || declared.sha256 !== item.sha256 || declared.size !== item.size || runtimePaths.has(item.path)) throw new Error(`development source 运行时文件记录无效：${item?.path ?? '<unknown>'}`);
+    runtimePaths.add(item.path);
+  }
+  if (manifest.sourceIdentity.supportFiles !== undefined) {
+    const supportPaths = new Set();
+    for (const item of manifest.sourceIdentity.supportFiles) {
+      const declared = manifest.files.find(candidate => candidate.path === item?.path);
+      if (!declared || declared.sha256 !== item.sha256 || declared.size !== item.size || runtimePaths.has(item.path) || supportPaths.has(item.path)) throw new Error(`development source 支持文件记录无效：${item?.path ?? '<unknown>'}`);
+      supportPaths.add(item.path);
+    }
+    if (runtimePaths.size + supportPaths.size !== manifest.files.length) throw new Error('development source 文件分组未完整覆盖 manifest。');
+  }
+  const requiredPaths = [relative(controlRoot, entrypoint).replaceAll('\\', '/'), relative(controlRoot, manifest.channels?.codex?.coordinatorEntrypoint ?? '').replaceAll('\\', '/'), relative(controlRoot, manifest.channels?.codex?.hostBridgeModule ?? '').replaceAll('\\', '/')];
+  if (!requiredPaths.every(path => seen.has(path))) throw new Error('development source manifest 未覆盖 CLI、Coordinator 或 Host bridge。');
+  const targets = verifyAllFiles ? manifest.files : manifest.sourceIdentity.runtimeFiles;
+  for (const item of targets) {
+    const bytes = await readFile(resolve(controlRoot, item.path));
+    if (bytes.length !== item.size || sha256(bytes) !== item.sha256) throw Object.assign(new Error(`Harness source 已变化：${item.path}；请执行 dev rebind。`), { code: 'HARNESS_SOURCE_IDENTITY_CHANGED' });
+  }
+  return Object.freeze({
+    mode: 'source-link', version: manifest.release.version, artifactDigest: manifest.release.artifactDigest,
+    channelArtifactDigest: manifest.release.artifactDigest, compositionDigest: null, generationId: `dev-${manifest.bindingId}`,
+    pointerDigest: manifest.manifestDigest, runtimeRoot: controlRoot, registryRoot: resolve(dataRoot, 'registry'), entrypoint,
+    coordinatorEntrypoint: resolve(manifest.channels.codex.coordinatorEntrypoint), hostBridgeModule: resolve(manifest.channels.codex.hostBridgeModule), developmentManifest: manifestFile,
+  });
+};
+
 export const validateActiveReleaseBinding = async ({ controlRoot: controlRootInput, dataRoot: dataRootInput, entrypoint: entrypointInput, declaredRelease = null, verifyAllFiles = false }) => {
   const controlRoot = resolve(controlRootInput);
   const dataRoot = resolve(dataRootInput);
   const entrypoint = resolve(entrypointInput);
   if (!inside(controlRoot, dataRoot) || !inside(controlRoot, entrypoint)) throw new Error('dataRoot 和 entrypoint 必须位于 controlRoot 内。');
+  if (declaredRelease?.mode === 'source-link') return validateDevelopmentBinding({ controlRoot, dataRoot, entrypoint, declaredRelease, verifyAllFiles });
   const pointerFile = resolve(dataRoot, 'registry', 'active-release.json');
   const pointer = await readJson(pointerFile);
   if (pointer?.protocolVersion !== '1.0' || pointer.kind !== 'active-release' || !pointer.generationId || !pointer.runtimeRoot || !pointer.runtimeEntrypoint || isAbsolute(pointer.runtimeRoot) || isAbsolute(pointer.runtimeEntrypoint)) throw new Error(`active release pointer 无效：${pointerFile}`);

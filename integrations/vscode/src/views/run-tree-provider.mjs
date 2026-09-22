@@ -11,28 +11,8 @@ export class RunTreeProvider {
     const harness = typeof this.getHarness === 'function' ? await this.getHarness() : null;
     if (!harness) return [{ id: 'not-ready', label: 'Agent Harness Initializing...' }];
 
-    if (!element) {
-      return [
-        { id: 'runs', label: 'Active Lifecycle Runs', collapsible: true },
-        { id: 'work-graph', label: 'Feature DAG Nodes', collapsible: true },
-      ];
-    }
-
-    if (element.id === 'runs') {
-      return [
-        { id: 'run-1', label: 'Run: Active (Epoch 1, Gen 1)', contextValue: 'run' },
-      ];
-    }
-
-    if (element.id === 'work-graph') {
-      return [
-        { id: 'feat-intake', label: 'intake: completed', contextValue: 'feature' },
-        { id: 'feat-plan', label: 'plan: completed', contextValue: 'feature' },
-        { id: 'feat-implement', label: 'implement: ready', contextValue: 'feature' },
-      ];
-    }
-
-    return [];
+    if (element) return [];
+    return [{ id: 'unsupported', label: 'Lifecycle view unavailable: verified VS Code host binding required', contextValue: 'unsupported' }];
   }
 
   getTreeItem(element) {

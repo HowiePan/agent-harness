@@ -10,10 +10,12 @@ export const createWriteGuard = ({ getCurrentScope = null } = {}) => {
     const toolName = input?.tool ?? input?.name;
     if (!['edit', 'write'].includes(toolName)) return;
     const scope = typeof getCurrentScope === 'function' ? await getCurrentScope() : null;
-    if (!scope || !Array.isArray(scope.allowedPaths)) return;
+    if (!scope?.managed) return;
+    assert(Array.isArray(scope.allowedPaths), 'WRITE_SCOPE_REQUIRED', 'A Harness-managed OpenCode write requires an authoritative allowedPaths scope.');
 
-    const targetPath = input.args?.filePath ?? input.args?.file ?? input.args?.path;
-    if (!targetPath) return;
+    const args = output?.args ?? {};
+    const targetPath = args.filePath ?? args.file ?? args.path;
+    assert(targetPath, 'WRITE_TARGET_REQUIRED', 'A Harness-managed OpenCode write requires an explicit target path.');
 
     const workspaceRoot = resolve(scope.workspaceRoot ?? process.cwd());
     const resolvedTarget = resolve(workspaceRoot, targetPath);

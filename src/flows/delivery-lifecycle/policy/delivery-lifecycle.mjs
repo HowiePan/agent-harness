@@ -2,15 +2,15 @@ import { assert } from '../../../common/errors.mjs';
 import { approvalSatisfied } from '../../../flow-kit/primitives.mjs';
 import { createQualityFollowUpFeatures, hasCurrentCleanQualityReview, validateQualityReviewPolicies } from '../../../flow-kit/profiles/quality-loop.mjs';
 
-export const ENGINE_STAGES = Object.freeze([
+export const DELIVERY_STAGES = Object.freeze([
   'requirement-intake', 'canonical-requirement', 'version-planning', 'implementation',
   'scope-resolution', 'docs-closeout', 'quality', 'quality-repair', 'quality-recheck', 'user-code-review', 'delivery-receipt',
 ]);
 
-const stageIndex = stage => ENGINE_STAGES.indexOf(stage);
+const stageIndex = stage => DELIVERY_STAGES.indexOf(stage);
 
-export const engineDeliveryProfile = Object.freeze({
-  id: 'engine-delivery',
+export const createDeliveryLifecycleProfile = (id = 'delivery-lifecycle') => Object.freeze({
+  id,
   version: '1.0.0',
 
   validateConfig(config) {
@@ -26,7 +26,7 @@ export const engineDeliveryProfile = Object.freeze({
     validateQualityReviewPolicies(state.features);
     for (const feature of state.features) {
       const stage = feature.metadata.stage;
-      assert(ENGINE_STAGES.includes(stage), 'ENGINE_STAGE_INVALID', `Engine Feature ${feature.id} has an invalid stage: ${stage}`);
+      assert(DELIVERY_STAGES.includes(stage), 'DELIVERY_STAGE_INVALID', `Delivery Feature ${feature.id} has an invalid stage: ${stage}`);
     }
     return state;
   },
@@ -95,7 +95,9 @@ export const engineDeliveryProfile = Object.freeze({
   },
 
   project(state) {
-    const byStage = Object.fromEntries(ENGINE_STAGES.map(stage => [stage, state.features.filter(feature => feature.metadata.stage === stage).map(feature => ({ id: feature.id, state: feature.state }))]));
+    const byStage = Object.fromEntries(DELIVERY_STAGES.map(stage => [stage, state.features.filter(feature => feature.metadata.stage === stage).map(feature => ({ id: feature.id, state: feature.state }))]));
     return { profile: this.id, status: state.status, epoch: state.epoch, generation: state.generation, stages: byStage, openFindings: state.findings.filter(finding => finding.status !== 'resolved') };
   },
 });
+
+export const deliveryLifecycleProfile = createDeliveryLifecycleProfile();

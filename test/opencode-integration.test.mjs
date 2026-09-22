@@ -10,8 +10,23 @@ import { createWriteGuard } from '../integrations/opencode/src/guard.mjs';
 import { createOpenCodeTools } from '../integrations/opencode/src/tools.mjs';
 import { isVisibleHostAdapter } from '../src/platform/plugins/runtime/visible-host-adapter.mjs';
 
-test('OpenCode host adapter conforms to VisibleHostAdapter contract', async () => {
-  const adapter = createOpenCodeVisibleHostAdapter();
+const nativeCapabilities = (overrides = {}) => ({
+  spawnTask: async input => ({ agentId: 'opencode-native-1', visibility: { mode: 'user-visible', surface: 'opencode-subagent', inspectRef: 'task:opencode-native-1' }, hostSpawnReceipt: { provider: OPENCODE_HOST_PROVIDER, dispatchId: input.dispatchId } }),
+  inspectTask: async input => ({ verified: true, status: 'running', assertionId: 'opencode-native-observation', observedAt: new Date().toISOString(), agentId: input.agentId, dispatchId: input.dispatchId, packetDigest: input.packetDigest, promptDigest: input.promptDigest, visibility: { mode: 'user-visible', surface: input.surface, inspectRef: input.inspectRef } }),
+  waitTask: async () => ({ status: 'completed', progress: '100%' }),
+  resultTask: async () => ({ result: { status: 'completed', summary: 'native result', changedFiles: [] }, receipt: { provider: OPENCODE_HOST_PROVIDER } }),
+  cancelTask: async () => ({ contained: true, provider: OPENCODE_HOST_PROVIDER }),
+  reconcileHostEffects: async () => ({ reconciled: true, ready: true, provider: OPENCODE_HOST_PROVIDER }),
+  confirmLease: async () => ({ confirmed: true, provider: OPENCODE_HOST_PROVIDER }),
+  ...overrides,
+});
+
+test('OpenCode host adapter fails closed without every native capability', () => {
+  assert.throws(() => createOpenCodeVisibleHostAdapter(), error => error.code === 'OPENCODE_VISIBLE_HOST_CAPABILITIES_REQUIRED');
+});
+
+test('OpenCode host adapter conforms only with a complete native contract', async () => {
+  const adapter = createOpenCodeVisibleHostAdapter(nativeCapabilities());
   assert.equal(isVisibleHostAdapter(adapter), true);
   assert.equal(adapter.provider, OPENCODE_HOST_PROVIDER);
   assert.equal(adapter.capabilities.spawn, true);
@@ -21,14 +36,14 @@ test('OpenCode host adapter conforms to VisibleHostAdapter contract', async () =
   assert.equal(adapter.capabilities.contain, true);
 });
 
-test('OpenCode host adapter executes full task lifecycle', async () => {
+test('OpenCode host adapter transports a native task lifecycle without synthesizing results', async () => {
   let spawned = null;
-  const adapter = createOpenCodeVisibleHostAdapter({
+  const adapter = createOpenCodeVisibleHostAdapter(nativeCapabilities({
     spawnTask: async input => {
       spawned = input;
-      return { agentId: 'custom-opencode-worker-1' };
+      return { agentId: 'custom-opencode-worker-1', visibility: { mode: 'user-visible', surface: 'opencode-subagent', inspectRef: 'task:custom-opencode-worker-1' }, hostSpawnReceipt: { provider: OPENCODE_HOST_PROVIDER, dispatchId: input.dispatchId } };
     },
-  });
+  }));
 
   const spawnedResult = await adapter.spawn({
     dispatchId: 'disp-1',
@@ -65,6 +80,7 @@ test('OpenCode host adapter executes full task lifecycle', async () => {
 test('OpenCode write guard blocks unauthorized file edits', async () => {
   const guard = createWriteGuard({
     getCurrentScope: async () => ({
+      managed: true,
       workspaceRoot: process.cwd(),
       allowedPaths: ['src/allowed', 'docs/readme.md'],
     }),
@@ -72,13 +88,13 @@ test('OpenCode write guard blocks unauthorized file edits', async () => {
 
   // Allowed edit should not throw
   await assert.doesNotReject(async () => {
-    await guard({ tool: 'edit', args: { filePath: 'src/allowed/file.js' } });
+    await guard({ tool: 'edit' }, { args: { filePath: 'src/allowed/file.js' } });
   });
 
   // Disallowed edit should throw WRITE_BOUNDARY_VIOLATION
   await assert.rejects(
     async () => {
-      await guard({ tool: 'write', args: { filePath: 'forbidden/secret.txt' } });
+      await guard({ tool: 'write' }, { args: { filePath: 'forbidden/secret.txt' } });
     },
     error => error.code === 'WRITE_BOUNDARY_VIOLATION'
   );
@@ -97,11 +113,12 @@ test('OpenCode tools expose init, status and gate interfaces', () => {
   });
 
   assert.equal(typeof tools.harness_init.execute, 'function');
+  assert.deepEqual(tools.harness_init.parameters.required, ['decisionFile']);
   assert.equal(typeof tools.harness_status.execute, 'function');
   assert.equal(typeof tools.harness_gate.execute, 'function');
 });
 
-test('OpenCode plugin registers /h and /h:init command and subagent in config hook', async () => {
+test('OpenCode plugin registers read-only/initialization commands without claiming a worker host', async () => {
   const plugin = await createOpenCodePlugin()({});
   assert.equal(typeof plugin.config, 'function');
 
@@ -109,13 +126,13 @@ test('OpenCode plugin registers /h and /h:init command and subagent in config ho
   plugin.config(cfg);
 
   assert.equal(typeof cfg.command?.h, 'object');
-  assert.match(cfg.command.h.description, /initialize workspace/);
+  assert.match(cfg.command.h.description, /Authority Decision/);
   assert.match(cfg.command.h.template, /harness_init/);
+  assert.match(cfg.command.h.template, /unsupported/);
 
   assert.equal(typeof cfg.command?.['h:init'], 'object');
   assert.match(cfg.command['h:init'].description, /harness\.json/);
   assert.match(cfg.command['h:init'].template, /harness_init/);
 
-  assert.equal(typeof cfg.agent?.['harness-worker'], 'object');
-  assert.equal(cfg.agent['harness-worker'].mode, 'subagent');
+  assert.equal(cfg.agent?.['harness-worker'], undefined);
 });

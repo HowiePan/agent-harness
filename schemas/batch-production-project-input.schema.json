@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-harness.local/schemas/batch-production-project-input.schema.json",
+  "title": "Batch Production Project Input",
+  "type": "object",
+  "properties": {
+    "id": { "type": "string", "minLength": 1, "maxLength": 128 },
+    "harness": { "$ref": "delivery-project-input.schema.json#/$defs/harness" },
+    "workspaceRoot": { "type": "string", "minLength": 1 },
+    "remote": { "type": "string", "minLength": 1 },
+    "runtimePluginId": { "$ref": "delivery-project-input.schema.json#/$defs/id" },
+    "runtimePluginIds": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "$ref": "delivery-project-input.schema.json#/$defs/id" } },
+    "agentExecutionMode": { "enum": ["conversation-visible", "headless"] },
+    "runtimeExtension": { "$ref": "delivery-project-input.schema.json#/$defs/extension" },
+    "headlessRuntimeExtension": { "$ref": "delivery-project-input.schema.json#/$defs/extension" },
+    "runtimeConfigs": { "type": "object", "additionalProperties": { "type": "object" } },
+    "extensions": { "type": "array", "items": { "$ref": "delivery-project-input.schema.json#/$defs/extension" } },
+    "model": { "type": "string", "minLength": 1 },
+    "gateRecipes": { "type": "array", "items": { "$ref": "project-descriptor-input.schema.json#/$defs/gateRecipe" } },
+    "maxConcurrency": { "type": "integer", "minimum": 1 },
+    "maxLogicalItems": { "type": "integer", "minimum": 1, "maximum": 100 },
+    "batches": { "type": "array", "items": { "$ref": "#/$defs/batch" } },
+    "itemKey": { "type": "string", "minLength": 1 },
+    "itemPaths": { "type": "object", "additionalProperties": { "type": "array", "items": { "type": "string" } } },
+    "excluded": { "type": "array", "uniqueItems": true, "items": { "type": "string" } }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "batch": {
+      "type": "object",
+      "required": ["id"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "ruleStatus": { "type": "string", "minLength": 1 },
+        "itemIds": { "type": "array", "uniqueItems": true, "items": { "type": "string" } },
+        "items": { "type": "array", "uniqueItems": true, "items": { "type": "string" } }
+      },
+      "additionalProperties": false
+    }
+  }
+}

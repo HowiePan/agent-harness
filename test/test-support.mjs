@@ -1,8 +1,8 @@
 import { mkdtemp, mkdir, rm, rmdir, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { createExecutionAuthorizationAdapter, createHarness, createInMemoryRuntime, createVisibleHostAdapter, harnessTemporaryRoot, projectExecutionPolicyDecisionContext, sealLifecycleExecutionGrant } from '../src/index.mjs';
-import { extensionPack as engineDeliveryExtension } from '../src/flows/delivery-lifecycle/index.mjs';
-import { extensionPack as collectionBatchExtension } from '../src/flows/batch-production/index.mjs';
+import { extensionPack as engineDeliveryExtension } from '../integrations/legacy-consumers/cardworld/index.mjs';
+import { extensionPack as collectionBatchExtension } from '../integrations/legacy-consumers/collection/index.mjs';
 
 let sequence = 0;
 export const command = state => ({ commandId: `test-command-${++sequence}`, ...(state ? { expectedRevision: state.revision } : {}) });

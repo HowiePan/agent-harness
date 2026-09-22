@@ -8,6 +8,7 @@ import { assertInside, assertNoLinkPath } from '../../common/paths.mjs';
 import { defineCommandManifest } from './command-contract.mjs';
 import { EXTENSION_OPERATION_CLASSES } from '../execution/boundary.mjs';
 import { defineWorkflowDefinition } from '../workflow/definition.mjs';
+import { assertJsonSchema, assertSchemaDefinition } from '../../common/json-schema.mjs';
 
 const semanticVersion = /^\d+\.\d+\.\d+$/;
 const verifiedArtifactPacks = new WeakSet();
@@ -16,6 +17,8 @@ export const defineExtensionPack = input => {
   assert(input?.id && /^[a-z0-9][a-z0-9.-]+$/.test(input.id), 'EXTENSION_ID_INVALID', 'Extension Pack requires a stable lowercase ID.');
   assert(semanticVersion.test(input.version ?? ''), 'EXTENSION_VERSION_INVALID', `Extension Pack ${input.id} requires a semantic version.`);
   const operations = { ...(input.operations ?? {}) };
+  const planningCapabilities = [...new Set(input.planningCapabilities ?? [])].sort();
+  for (const capability of planningCapabilities) assert(['quality-target'].includes(capability), 'EXTENSION_PLANNING_CAPABILITY_INVALID', `Extension Pack ${input.id} declares an unsupported planning capability: ${capability}`);
   const operationManifest = Object.fromEntries(Object.entries(input.operationManifest ?? {}).map(([name, declaration]) => [name, Object.freeze(structuredClone(declaration))]));
   const operationNames = Object.keys(operations).sort();
   const declaredOperationNames = Object.keys(operationManifest).sort();
@@ -23,6 +26,14 @@ export const defineExtensionPack = input => {
   for (const [name, declaration] of Object.entries(operationManifest)) {
     assert(/^[a-z][A-Za-z0-9]{0,63}$/.test(name), 'EXTENSION_OPERATION_ID_INVALID', `Extension Pack ${input.id} contains an invalid operation ID: ${name}`);
     assert(declaration?.executionClass === EXTENSION_OPERATION_CLASSES.PURE_PLANNER, 'EXTENSION_OPERATION_CLASS_INVALID', `Extension Pack ${input.id} operation ${name} must be a pure planner.`, { actual: declaration?.executionClass ?? null });
+  }
+  const projectConfiguration = input.projectConfiguration ? structuredClone(input.projectConfiguration) : null;
+  if (operations.createProjectDescriptor) {
+    assert(projectConfiguration?.schema, 'EXTENSION_PROJECT_CONFIGURATION_REQUIRED', `Extension Pack ${input.id} must publish the complete project input Schema used by createProjectDescriptor().`);
+    assertSchemaDefinition(projectConfiguration.schema, `Extension Pack ${input.id} project input Schema`);
+    for (const [name, dependency] of Object.entries(projectConfiguration.schemas ?? {})) assertSchemaDefinition(dependency, `Extension Pack ${input.id} project input dependency ${name}`);
+    assert(projectConfiguration.example && typeof projectConfiguration.example === 'object' && !Array.isArray(projectConfiguration.example), 'EXTENSION_PROJECT_CONFIGURATION_EXAMPLE_REQUIRED', `Extension Pack ${input.id} must publish a project input example.`);
+    assertJsonSchema(projectConfiguration.example, projectConfiguration.schema, { schemas: new Map(Object.entries(projectConfiguration.schemas ?? {})), code: 'EXTENSION_PROJECT_CONFIGURATION_EXAMPLE_INVALID', label: `Extension Pack ${input.id} project input example` });
   }
   const pack = {
     id: input.id,
@@ -35,6 +46,8 @@ export const defineExtensionPack = input => {
     workflows: Object.freeze((input.workflows ?? []).map(defineWorkflowDefinition)),
     operations: Object.freeze(operations),
     operationManifest: Object.freeze(operationManifest),
+    planningCapabilities: Object.freeze(planningCapabilities),
+    ...(projectConfiguration ? { projectConfiguration: Object.freeze(projectConfiguration) } : {}),
     ...(input.commandManifest ? { commandManifest: defineCommandManifest(input.commandManifest) } : {}),
   };
   assert(!pack.digest || /^[a-f0-9]{64}$/.test(pack.digest), 'EXTENSION_DIGEST_INVALID', `Extension Pack ${pack.id} digest must be SHA-256.`);

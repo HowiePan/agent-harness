@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { readFile } from 'node:fs/promises';
+import { readFile, readdir, watch } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { createHarness, defaultDataRoot } from '../../application/harness.mjs';
 import { applyBootstrapPlan, createBootstrapPlan } from '../../application/bootstrap.mjs';
@@ -22,6 +22,9 @@ import { handleMemoryCommand } from './commands/memory.mjs';
 import { AuthorityStore } from '../../kernel/authority-store.mjs';
 import { listIssueRecords, readIssueTriage, recordIssueTriage } from '../../platform/maintenance/issue-triage.mjs';
 import { applyReleaseActivationPlan, createReleaseActivationPlan } from '../../platform/maintenance/release-activation.mjs';
+import { applyProjectInitializationPlan, createProjectInitializationPlan, loadProjectHarnessConfig, writeProjectHarnessTemplate } from '../../application/project-initialization.mjs';
+import { verifyDevelopmentSourceManifest, writeDevelopmentSourceManifest } from '../../application/development-source.mjs';
+import { applyDevelopmentPatchPlan, createDevelopmentPatchPlan, rollbackDevelopmentPatch } from '../../application/development-patch.mjs';
 
 const argv = process.argv.slice(2);
 const take = name => {
@@ -58,6 +61,20 @@ const help = () => console.log(`Agent Harness V1.0.0
 Global options: [--control-root <path>] [--data-root <path>] [--memory-root <path>] [--extension <module>]... [--harness-digest <sha256>]
 
 agent-harness installation init --control-root <standalone-path>
+agent-harness init create-config [--config <project/harness.json>]
+agent-harness init validate [--config <project/harness.json>] [--project-root <path>]
+agent-harness init plan|execute --config <project/harness.json> [--project-root <path>]
+agent-harness init apply --plan <json|-> --command-id <id> --decision <json>
+agent-harness dev attach|rebind|execute --config <project/harness.json> [--project-root <path>] [--binding-id <id>]
+agent-harness dev apply --plan <json|-> --manifest <json> --command-id <id> --decision <json>
+agent-harness dev verify|doctor --manifest <json>
+agent-harness dev patch plan|status --manifest <json>
+agent-harness dev patch apply --manifest <json> --plan <json|-> --command-id <id> [--decision <json>]
+agent-harness dev patch rollback --manifest <json> --target-manifest <json> --command-id <id> --decision <json>
+agent-harness dev watch --manifest <json> [--once]
+agent-harness dev generations --manifest <json>
+agent-harness docs list|show <topic>
+agent-harness config schema|validate [--config <project/harness.json>]
 agent-harness doctor [--control-root <path>] [--data-root <path>]
 agent-harness extension register --module <module> --expected-revision <n> --command-id <id> --decision <json>
 agent-harness extension list
@@ -134,6 +151,121 @@ if (command === 'installation' && subject === 'init') {
 }
 
 const controlRoot = harnessControlRoot(take('--control-root'));
+if (command === 'init' && subject === 'create-config') {
+  const output = await writeProjectHarnessTemplate(take('--config') ?? resolve(process.cwd(), 'harness.json'), { force: has('--force') });
+  console.log(JSON.stringify({ ok: true, ...output }, null, 2));
+  process.exit(0);
+}
+if ((command === 'init' && subject === 'validate') || (command === 'config' && subject === 'validate')) {
+  const loaded = await loadProjectHarnessConfig(take('--config') ?? resolve(process.cwd(), 'harness.json'), { projectRoot: take('--project-root') });
+  console.log(JSON.stringify({ ok: true, configPath: loaded.configPath, configDigest: loaded.configDigest, projectRoot: loaded.projectRoot, projectId: loaded.request.binding.projectId, workspaceRoot: loaded.request.binding.workspaceRoot }, null, 2));
+  process.exit(0);
+}
+if (command === 'config' && subject === 'schema') {
+  console.log(await readFile(new URL('../../../schemas/project-harness-config.schema.json', import.meta.url), 'utf8'));
+  process.exit(0);
+}
+const docTopics = Object.freeze({
+  product: 'overview/project.md', quickstart: 'guides/consumer-quickstart.md', configuration: 'guides/project-configuration.md', 'configuration-api': 'reference/configuration-api.md', workspace: 'guides/workspace-configuration.md', flow: 'guides/flow-authoring.md', control: 'guides/control-flow.md', gates: 'guides/gates-and-decisions.md', plugins: 'guides/host-plugins.md', debug: 'guides/local-debugging.md', operations: 'operations/README.md', commands: 'reference/commands.md', sdk: 'reference/sdk.md',
+});
+if (command === 'docs' && subject === 'list') {
+  console.log(JSON.stringify({ ok: true, topics: Object.keys(docTopics) }, null, 2));
+  process.exit(0);
+}
+if (command === 'docs' && subject === 'show') {
+  const topic = argv[2];
+  if (!docTopics[topic]) throw Object.assign(new Error(`Unknown documentation topic: ${topic}`), { code: 'DOC_TOPIC_UNKNOWN' });
+  process.stdout.write(await readFile(new URL(`../../../docs/${docTopics[topic]}`, import.meta.url), 'utf8'));
+  process.exit(0);
+}
+if (command === 'dev' && subject === 'patch' && ['plan', 'status'].includes(argv[2])) {
+  console.log(JSON.stringify({ ok: true, plan: await createDevelopmentPatchPlan(take('--manifest')) }, null, 2));
+  process.exit(0);
+}
+if (command === 'dev' && subject === 'patch' && argv[2] === 'apply') {
+  const planInput = await jsonInput('--plan');
+  const plan = planInput.plan ?? planInput;
+  const declaredManifest = take('--manifest');
+  if (declaredManifest && resolve(declaredManifest) !== resolve(plan.manifestFile)) throw Object.assign(new Error('--manifest does not match the development patch plan.'), { code: 'DEVELOPMENT_PATCH_MANIFEST_MISMATCH' });
+  const decision = take('--decision') ? await jsonFile(take('--decision')) : null;
+  const patched = await applyDevelopmentPatchPlan(plan, { commandId: take('--command-id'), authorityDecision: decision });
+  let initialization = null;
+  if (plan.disposition.requiresRebind) {
+    const loaded = await loadProjectHarnessConfig(patched.manifest.configPath, { projectRoot: patched.manifest.projectRoot });
+    const releaseIdentity = { version: patched.manifest.release.version, artifactDigest: patched.manifest.release.artifactDigest, verified: true, development: true };
+    const initPlan = await createProjectInitializationPlan(patched.manifest.configPath, { projectRoot: loaded.projectRoot, controlRoot: patched.manifest.controlRoot, dataRoot: patched.manifest.dataRoot, releaseIdentity, mode: 'source-link' });
+    initialization = await applyProjectInitializationPlan(initPlan, { controlRoot: patched.manifest.controlRoot, dataRoot: patched.manifest.dataRoot, releaseIdentity, commandId: `${take('--command-id')}.rebind`, authorityDecision: decision });
+  }
+  console.log(JSON.stringify({ ok: true, ...patched, initialization, continuation: plan.disposition.requiresNewRun ? 'restart-coordinator-and-start-new-run' : 'continue-same-run' }, null, 2));
+  process.exit(0);
+}
+if (command === 'dev' && subject === 'patch' && argv[2] === 'rollback') {
+  const decision = await jsonFile(take('--decision'));
+  const rolledBack = await rollbackDevelopmentPatch({ manifestFile: take('--manifest'), targetManifestFile: take('--target-manifest'), commandId: take('--command-id'), authorityDecision: decision });
+  const loaded = await loadProjectHarnessConfig(rolledBack.manifest.configPath, { projectRoot: rolledBack.manifest.projectRoot });
+  const releaseIdentity = { version: rolledBack.manifest.release.version, artifactDigest: rolledBack.manifest.release.artifactDigest, verified: true, development: true };
+  const initPlan = await createProjectInitializationPlan(rolledBack.manifest.configPath, { projectRoot: loaded.projectRoot, controlRoot: rolledBack.manifest.controlRoot, dataRoot: rolledBack.manifest.dataRoot, releaseIdentity, mode: 'source-link' });
+  const initialization = await applyProjectInitializationPlan(initPlan, { controlRoot: rolledBack.manifest.controlRoot, dataRoot: rolledBack.manifest.dataRoot, releaseIdentity, commandId: `${take('--command-id')}.rebind`, authorityDecision: decision });
+  console.log(JSON.stringify({ ok: true, ...rolledBack, initialization, continuation: 'restart-coordinator-and-resume-same-run' }, null, 2));
+  process.exit(0);
+}
+if (command === 'dev' && subject === 'generations') {
+  const verified = await verifyDevelopmentSourceManifest(take('--manifest'));
+  const directory = resolve(verified.manifest.dataRoot, 'development', 'generations');
+  let generations = [];
+  try { generations = (await readdir(directory, { withFileTypes: true })).filter(entry => entry.isDirectory()).map(entry => entry.name).sort(); }
+  catch (error) { if (error.code !== 'ENOENT') throw error; }
+  console.log(JSON.stringify({ ok: true, bindingId: verified.manifest.bindingId, current: verified.manifest.release.artifactDigest, generations }, null, 2));
+  process.exit(0);
+}
+if (command === 'dev' && subject === 'watch') {
+  const manifestFile = take('--manifest');
+  const initial = await createDevelopmentPatchPlan(manifestFile);
+  process.stdout.write(`${JSON.stringify({ type: 'agent-harness.development-patch', plan: initial })}\n`);
+  if (has('--once')) process.exit(0);
+  for await (const event of watch(initial.sourceRoot, { recursive: true })) {
+    if (String(event.filename ?? '').includes('.agent-harness-data')) continue;
+    const plan = await createDevelopmentPatchPlan(manifestFile);
+    process.stdout.write(`${JSON.stringify({ type: 'agent-harness.development-patch', event: event.eventType, path: event.filename ?? null, plan })}\n`);
+  }
+  process.exit(0);
+}
+if (command === 'dev' && ['attach', 'rebind', 'execute'].includes(subject)) {
+  const configPath = resolve(take('--config') ?? resolve(process.cwd(), 'harness.json'));
+  const loaded = await loadProjectHarnessConfig(configPath, { projectRoot: take('--project-root') });
+  const bindingId = take('--binding-id') ?? loaded.config.binding.alias ?? loaded.request.binding.projectId;
+  const devDataRoot = resolve(take('--data-root') ?? resolve(controlRoot, '.agent-harness-data', 'development', bindingId));
+  const development = await writeDevelopmentSourceManifest({ bindingId, sourceRoot: harnessProjectRoot(), controlRoot, dataRoot: devDataRoot, configPath, projectRoot: loaded.projectRoot });
+  const releaseIdentity = { version: development.manifest.release.version, artifactDigest: development.manifest.release.artifactDigest, verified: true, development: true };
+  const plan = await createProjectInitializationPlan(configPath, { projectRoot: loaded.projectRoot, controlRoot, dataRoot: devDataRoot, releaseIdentity, mode: 'source-link' });
+  if (subject === 'execute') {
+    const output = await applyProjectInitializationPlan(plan, { controlRoot, dataRoot: devDataRoot, releaseIdentity, commandId: take('--command-id'), authorityDecision: await jsonFile(take('--decision')) });
+    console.log(JSON.stringify({ ok: true, mode: 'source-link', manifestFile: development.file, manifest: development.manifest, plan, ...output }, null, 2));
+    process.exit(0);
+  }
+  console.log(JSON.stringify({ ok: true, mode: 'source-link', manifestFile: development.file, manifest: development.manifest, plan, next: 'agent-harness dev apply --manifest <manifestFile> --plan <planFile> --command-id <id> --decision <decision.json>' }, null, 2));
+  process.exit(0);
+}
+if (command === 'dev' && subject === 'verify') {
+  const verified = await verifyDevelopmentSourceManifest(take('--manifest'));
+  console.log(JSON.stringify({ ok: true, manifest: verified.manifest, releaseIdentity: verified.releaseIdentity }, null, 2));
+  process.exit(0);
+}
+if (command === 'dev' && subject === 'apply') {
+  const verified = await verifyDevelopmentSourceManifest(take('--manifest'));
+  const plan = await jsonInput('--plan');
+  if (plan.bootstrapPlan?.harness?.artifactDigest !== verified.releaseIdentity.artifactDigest) throw Object.assign(new Error('Development manifest does not match the initialization plan.'), { code: 'DEVELOPMENT_INIT_IDENTITY_MISMATCH' });
+  const output = await applyProjectInitializationPlan(plan, { controlRoot: verified.manifest.controlRoot, dataRoot: verified.manifest.dataRoot, releaseIdentity: verified.releaseIdentity, commandId: take('--command-id'), authorityDecision: await jsonFile(take('--decision')) });
+  console.log(JSON.stringify({ ok: true, ...output, developmentManifest: take('--manifest') }, null, 2));
+  process.exit(0);
+}
+if (command === 'dev' && subject === 'doctor') {
+  const verified = await verifyDevelopmentSourceManifest(take('--manifest'));
+  const loaded = await loadProjectHarnessConfig(verified.manifest.configPath, { projectRoot: verified.manifest.projectRoot });
+  const readiness = await inspectLifecycleReadiness({ controlRoot: verified.manifest.controlRoot, dataRoot: verified.manifest.dataRoot, releaseIdentity: verified.releaseIdentity, projectId: loaded.request.binding.projectId, profileId: loaded.request.binding.profileId, extensionId: loaded.request.binding.extensionId, executionWorkspaceRoot: loaded.request.binding.workspaceRoot, developmentMode: true });
+  console.log(JSON.stringify({ ok: readiness.registryReady, mode: 'source-link', sourceDigest: verified.releaseIdentity.artifactDigest, readiness }, null, 2));
+  process.exit(0);
+}
 if (command === 'issue' && subject === 'record') {
   const receipt = await recordIssueIntake(await jsonInput('--input'), { controlRoot, commandId: take('--command-id') });
   console.log(JSON.stringify({ ok: true, receipt }, null, 2));
@@ -163,6 +295,25 @@ if (scopedWorkspaceId) safeSegment(scopedWorkspaceId, 'workspaceId');
 const runDataRoot = scopedWorkspaceId ? resolve(dataRoot, 'workspaces', scopedWorkspaceId) : dataRoot;
 const releaseIdentity = await loadReleaseIdentity({ artifactDigest: take('--harness-digest') });
 const extensionRegistry = new ExtensionRegistry({ dataRoot, controlRoot });
+
+if (command === 'init' && subject === 'plan') {
+  const configPath = take('--config') ?? resolve(process.cwd(), 'harness.json');
+  const plan = await createProjectInitializationPlan(configPath, { projectRoot: take('--project-root'), controlRoot, dataRoot, releaseIdentity, mode: 'installed' });
+  console.log(JSON.stringify({ ok: true, plan }, null, 2));
+  process.exit(0);
+}
+if (command === 'init' && subject === 'execute') {
+  const configPath = take('--config') ?? resolve(process.cwd(), 'harness.json');
+  const plan = await createProjectInitializationPlan(configPath, { projectRoot: take('--project-root'), controlRoot, dataRoot, releaseIdentity, mode: 'installed' });
+  const output = await applyProjectInitializationPlan(plan, { controlRoot, dataRoot, releaseIdentity, commandId: take('--command-id'), authorityDecision: await jsonFile(take('--decision')) });
+  console.log(JSON.stringify({ ok: true, plan, ...output }, null, 2));
+  process.exit(0);
+}
+if (command === 'init' && subject === 'apply') {
+  const output = await applyProjectInitializationPlan(await jsonInput('--plan'), { controlRoot, dataRoot, releaseIdentity, commandId: take('--command-id'), authorityDecision: await jsonFile(take('--decision')) });
+  console.log(JSON.stringify({ ok: true, ...output }, null, 2));
+  process.exit(0);
+}
 
 if (command === 'release' && subject === 'activation-plan') {
   const projectDescriptors = await Promise.all(takeAll('--project-descriptor').map(jsonFile));
