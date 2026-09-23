@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { existsSync } from 'node:fs';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { applyProjectInitializationPlan, createProjectInitializationPlan, harnessProjectRoot, harnessTemporaryRoot, loadProjectHarnessConfig } from '../src/index.mjs';
@@ -43,7 +44,7 @@ test('project initialization plan is invalidated when harness.json changes', asy
   await mkdir(parent, { recursive: true });
   const root = await mkdtemp(resolve(parent, 'drift-'));
   const projectRoot = resolve(root, 'consumer');
-  await mkdir(projectRoot, { recursive: true });
+  await mkdir(resolve(projectRoot, '.git'), { recursive: true });
   const configPath = resolve(projectRoot, 'harness.json');
   const config = { schemaVersion: '1.0', kind: 'agent-harness-project', extensions: [{ id: 'delivery-lifecycle-profile', version: '1.0.0', module: 'agent-harness/consumers/delivery-lifecycle' }], project: { generatorExtensionId: 'delivery-lifecycle-profile', input: {} }, binding: { projectId: 'consumer', profileId: 'delivery-lifecycle', extensionId: 'delivery-lifecycle-profile', workspaceRoot: '.' } };
   await writeFile(configPath, JSON.stringify(config));
@@ -51,4 +52,30 @@ test('project initialization plan is invalidated when harness.json changes', asy
   const plan = await createProjectInitializationPlan(configPath, { projectRoot, controlRoot, dataRoot: resolve(root, 'data'), releaseIdentity: { version: '1.0.0', artifactDigest: 'e'.repeat(64), verified: true }, mode: 'source-link' });
   await writeFile(configPath, `${JSON.stringify(config)}\n`);
   await assert.rejects(() => applyProjectInitializationPlan(plan, { controlRoot, dataRoot: resolve(root, 'data'), releaseIdentity: { version: '1.0.0', artifactDigest: 'e'.repeat(64), verified: true }, commandId: 'changed', authorityDecision: { actor: 'owner', decision: 'approved' } }), error => error.code === 'PROJECT_INIT_CONFIG_CHANGED');
+});
+
+test('source-link initialization checks Git workspace identity before writing Registry state', async t => {
+  const controlRoot = harnessProjectRoot();
+  const parent = resolve(harnessTemporaryRoot(), 'project-initialization-tests');
+  await mkdir(parent, { recursive: true });
+  const root = await mkdtemp(resolve(parent, 'missing-git-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const projectRoot = resolve(root, 'consumer');
+  const dataRoot = resolve(root, 'data');
+  await mkdir(projectRoot, { recursive: true });
+  const configPath = resolve(projectRoot, 'harness.json');
+  await writeFile(configPath, JSON.stringify({
+    schemaVersion: '1.0', kind: 'agent-harness-project',
+    extensions: [
+      { id: 'delivery-lifecycle-profile', version: '1.0.0', module: 'agent-harness/consumers/delivery-lifecycle' },
+      { id: 'codex-runtime', version: '1.0.0', module: 'agent-harness/extensions/codex-runtime' },
+    ],
+    project: { generatorExtensionId: 'delivery-lifecycle-profile', input: { gateRecipes: [] } },
+    binding: { projectId: 'missing-git', profileId: 'delivery-lifecycle', extensionId: 'delivery-lifecycle-profile', workspaceRoot: '.' },
+  }));
+  await assert.rejects(
+    () => createProjectInitializationPlan(configPath, { projectRoot, controlRoot, dataRoot, releaseIdentity: { version: '1.0.0', artifactDigest: 'e'.repeat(64), verified: true }, mode: 'source-link' }),
+    error => error.code === 'WORKSPACE_GIT_METADATA_REQUIRED',
+  );
+  assert.equal(existsSync(dataRoot), false);
 });

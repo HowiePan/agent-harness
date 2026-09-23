@@ -58,7 +58,7 @@ const subject = argv[1];
 
 const help = () => console.log(`Agent Harness V1.0.0
 
-Global options: [--control-root <path>] [--data-root <path>] [--memory-root <path>] [--extension <module>]... [--harness-digest <sha256>]
+Global options: [--control-root <path>] [--data-root <path>] [--memory-root <path>] [--extension <module>]... [--harness-digest <sha256>] [--development-manifest <json>]
 
 agent-harness installation init --control-root <standalone-path>
 agent-harness init create-config [--config <project/harness.json>]
@@ -289,12 +289,21 @@ if (command === 'issue' && subject === 'triage') {
   console.log(JSON.stringify({ ok: true, ...output }, null, 2));
   process.exit(0);
 }
-const dataRoot = resolve(take('--data-root') ?? defaultDataRoot(controlRoot));
+const developmentManifestFile = take('--development-manifest');
+const development = developmentManifestFile ? await verifyDevelopmentSourceManifest(developmentManifestFile) : null;
+const samePath = (left, right) => process.platform === 'win32' ? resolve(left).toLowerCase() === resolve(right).toLowerCase() : resolve(left) === resolve(right);
+const dataRoot = resolve(take('--data-root') ?? development?.manifest.dataRoot ?? defaultDataRoot(controlRoot));
+if (development) {
+  if (!samePath(controlRoot, development.manifest.controlRoot) || !samePath(dataRoot, development.manifest.dataRoot)) throw Object.assign(new Error('Development manifest does not match the selected control and data roots.'), { code: 'DEVELOPMENT_MANIFEST_ROOT_MISMATCH' });
+  if (take('--harness-digest') && take('--harness-digest') !== development.releaseIdentity.artifactDigest) throw Object.assign(new Error('Development manifest does not match --harness-digest.'), { code: 'DEVELOPMENT_MANIFEST_RELEASE_MISMATCH' });
+  const developmentCommandAllowed = (command === 'workflow' && subject === 'list') || (command === 'lifecycle' && ['plan', 'preflight'].includes(subject)) || (command === 'project' && subject === 'list') || (command === 'extension' && subject === 'list') || command === 'doctor';
+  if (!developmentCommandAllowed) throw Object.assign(new Error('Development manifest is limited to inspection, planning, and preflight. Use the dev commands for source binding changes.'), { code: 'DEVELOPMENT_MANIFEST_COMMAND_UNSUPPORTED' });
+}
 const scopedWorkspaceId = take('--workspace-id') ?? null;
 if (scopedWorkspaceId) safeSegment(scopedWorkspaceId, 'workspaceId');
 const runDataRoot = scopedWorkspaceId ? resolve(dataRoot, 'workspaces', scopedWorkspaceId) : dataRoot;
-const releaseIdentity = await loadReleaseIdentity({ artifactDigest: take('--harness-digest') });
-const extensionRegistry = new ExtensionRegistry({ dataRoot, controlRoot });
+const releaseIdentity = development?.releaseIdentity ?? await loadReleaseIdentity({ artifactDigest: take('--harness-digest') });
+const extensionRegistry = new ExtensionRegistry({ dataRoot, controlRoot, developmentMode: Boolean(development) });
 
 if (command === 'init' && subject === 'plan') {
   const configPath = take('--config') ?? resolve(process.cwd(), 'harness.json');
@@ -371,6 +380,7 @@ if (command === 'doctor') {
     profileId: take('--profile'),
     extensionId: take('--extension-id'),
     executionWorkspaceRoot: take('--execution-workspace') ? resolve(take('--execution-workspace')) : undefined,
+    developmentMode: Boolean(development),
   });
   console.log(JSON.stringify({
     ok: true,
@@ -405,7 +415,7 @@ if (command === 'run' && subject === 'status') {
 }
 
 const registeredExtensions = await extensionRegistry.loadInstalled();
-const explicitExtensions = await Promise.all(takeAll('--extension').map(module => loadExtensionPack(module, { cwd: process.cwd(), controlRoot, requireArtifactManifest: true })));
+const explicitExtensions = await Promise.all(takeAll('--extension').map(module => loadExtensionPack(module, { cwd: process.cwd(), controlRoot, requireArtifactManifest: !development })));
 const extensionsById = new Map(registeredExtensions.map(pack => [pack.id, pack]));
 for (const pack of explicitExtensions) {
   const prior = extensionsById.get(pack.id);
@@ -423,7 +433,7 @@ if (command === 'workflow' && subject === 'list') {
 if (command === 'lifecycle' && subject === 'plan') {
   const input = await jsonInput('--input');
   const selectedWorkspace = input.workspaceId ?? scopedWorkspaceId ?? (input.workspaceAlias ? (await new WorkspaceRegistry({ root: dataRoot, controlRoot }).resolveAlias(input.workspaceAlias)).workspaceId : null);
-  const harness = await createHarness({ controlRoot, dataRoot, workspaceId: selectedWorkspace, memoryRoot: take('--memory-root'), extensions, releaseIdentity, initializeStorage: false });
+  const harness = await createHarness({ controlRoot, dataRoot, workspaceId: selectedWorkspace, memoryRoot: take('--memory-root'), extensions, releaseIdentity, strictProjectIdentity: !development, initializeStorage: false });
   const plan = await harness.createLifecyclePlan(input);
   console.log(JSON.stringify({ ok: true, plan }, null, 2));
   process.exit(0);
@@ -453,7 +463,7 @@ if (command === 'features' && subject === 'compile') {
 }
 
   const readOnlyHarness = command === 'recovery' && ['assess', 'plan'].includes(subject);
-  const harness = await createHarness({ controlRoot, dataRoot, workspaceId: scopedWorkspaceId, memoryRoot: take('--memory-root'), extensions, releaseIdentity, initializeStorage: !readOnlyHarness });
+  const harness = await createHarness({ controlRoot, dataRoot, workspaceId: scopedWorkspaceId, memoryRoot: take('--memory-root'), extensions, releaseIdentity, strictProjectIdentity: !development, initializeStorage: !readOnlyHarness });
   if (command === 'project' && subject === 'register') {
     const runtimePluginId = take('--runtime');
     const rawInput = take('--descriptor') ? await jsonFile(take('--descriptor')) : { id: take('--id'), workspace: { root: resolve(take('--workspace')) }, profiles: String(take('--profiles') ?? '').split(',').filter(Boolean), policy: { agentExecutionMode: take('--agent-execution-mode'), defaultRuntimePlugin: runtimePluginId, runtimePlugins: runtimePluginId ? [runtimePluginId] : [], promptCodecPlugin: take('--prompt-codec') } };

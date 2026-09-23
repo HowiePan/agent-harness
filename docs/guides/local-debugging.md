@@ -2,6 +2,8 @@
 
 `source-link` 让真实项目直接使用当前 Agent Harness checkout，无需每次打包、卸载、重装。它只放宽开发态制品来源，不放宽 Authority、路径、Gate、宿主证明或执行授权。完整字段和命令见[配置 API](../reference/configuration-api.md#8-本地源码调试与热更新)。
 
+项目工作区必须已有可解析的 `.git` 元数据。`dev execute` 在写入 Registry 前检查工作区身份；没有 `.git` 时返回 `WORKSPACE_GIT_METADATA_REQUIRED`。
+
 ## 建立绑定
 
 在业务项目目录执行：
@@ -16,6 +18,21 @@ node <Harness源码根>/bin/agent-harness.mjs dev execute \
 ```
 
 命令生成 `development-source-manifest`，分别固定 Runtime 文件摘要与文档/测试支持文件摘要，在 Harness 控制根保存 Runtime generation 快照，注册 source-link Extension 和 Project Descriptor，并返回 Init Receipt。本机源码绝对路径只存在控制根，不写入项目配置。
+
+## 只读计划与动作预检
+
+完成绑定后，用同一个 manifest 读取 source-link Extension，并固定当前源码身份：
+
+```text
+agent-harness workflow list --project <project-id> --development-manifest <manifest.json>
+agent-harness lifecycle plan --input <request.json> --development-manifest <manifest.json>
+agent-harness lifecycle preflight --plan <plan.json> --development-manifest <manifest.json>
+```
+
+`--development-manifest` 仅用于只读检查、计划和预检；控制根、数据根和源码摘要必须与 manifest 一致。预检会单独验证当前动作所需的可见宿主能力。缺少可信 Host Adapter 时，返回 `executionReady=false` 和 `VISIBLE_AGENT_HOST_COORDINATOR_UNAVAILABLE`，不会创建 Run。独立 CLI 不能用此参数启动 Agent；实际执行仍需满足 Operator Contract 的可信宿主回调。
+预检默认会在独立控制根内做原子写入探针；需要纯只读诊断时可加 `--no-write-probe`，但这样的报告不能用于启动 Run。
+
+本地调试的源码绑定、计划和合成闭环可以独立验收；真实 Codex 插件安装与 `PostToolUse` 投递属于另一个宿主验收关口。合成闭环不构成真实业务质量准出。
 
 ## 变化检测与应用
 

@@ -13,6 +13,7 @@ import { inspectLifecycleReadiness } from './readiness.mjs';
 import { ProjectRegistry } from '../platform/registry/project-registry.mjs';
 import { assertProjectDescriptorInput } from '../platform/registry/project-contract.mjs';
 import { assertHarnessWritePath, harnessControlRoot } from '../common/write-boundary.mjs';
+import { resolveProjectWorkspace } from '../common/workspace-identity.mjs';
 import { activeReleaseFile } from '../platform/registry/active-generation.mjs';
 
 const requestSchema = JSON.parse(readFileSync(new URL('../../schemas/bootstrap-request.schema.json', import.meta.url), 'utf8'));
@@ -68,6 +69,11 @@ export const createBootstrapPlan = async (input, { controlRoot: controlRootInput
   const generatorArtifact = extensions.find(item => item.id === request.project.generatorExtensionId);
   const generator = await loadExtensionPack(resolve(controlRoot, generatorArtifact.entry), { controlRoot, expectedDigest: generatorArtifact.artifactDigest, requireArtifactManifest: !developmentMode });
   validateGeneratorProjectInput(generator, request.project.input);
+  const draft = generator.operations.createProjectDescriptor(request.project.input);
+  assert(draft.id === request.binding.projectId, 'BOOTSTRAP_PROJECT_ID_MISMATCH', 'Generated Project Descriptor does not match the binding project ID.');
+  assert(draft.profiles.includes(request.binding.profileId), 'BOOTSTRAP_PROFILE_MISMATCH', 'Generated Project Descriptor does not include the bound Profile.');
+  assert(resolve(draft.workspace.root) === resolve(request.binding.workspaceRoot), 'BOOTSTRAP_WORKSPACE_MISMATCH', 'Generated Project Descriptor does not match the bound workspace.');
+  await resolveProjectWorkspace(draft, request.binding.workspaceRoot);
   const body = {
     protocolVersion: '1.0',
     kind: 'bootstrap-plan',

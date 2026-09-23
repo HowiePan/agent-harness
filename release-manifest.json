@@ -67,8 +67,8 @@
     },
     {
       "path": "docs/guides/local-debugging.md",
-      "sha256": "e5cb29ad6581a573f40478ec82077c5ad8e10ab1fcb35abc1c110e172f17aa22",
-      "size": 3356
+      "sha256": "18e25bb58f6a0bb64e18bd1d12519573139a0064f2072862f22b89ef62ec80e5",
+      "size": 4760
     },
     {
       "path": "docs/guides/project-configuration.md",
@@ -312,8 +312,8 @@
     },
     {
       "path": "docs/reference/commands.md",
-      "sha256": "f8960e16c909c748036369f081605244f216bf4c4d1d07779d89223f67323459",
-      "size": 3509
+      "sha256": "d012a184c3c9c4f42db6633ed02a66915b97fbd283ce36cadf5c0faa1218b649",
+      "size": 3659
     },
     {
       "path": "docs/reference/configuration-api.md",
@@ -787,8 +787,8 @@
     },
     {
       "path": "src/application/bootstrap.mjs",
-      "sha256": "c3fcbea2943484c186833cbaf54b274be8cda86632076a42fdd647470f7c977f",
-      "size": 12934
+      "sha256": "e30d81e3fa7a49e08f3a451932ee8be1a664660bb23cacc1599d7b0c97bff299",
+      "size": 13664
     },
     {
       "path": "src/application/development-patch.mjs",
@@ -1262,8 +1262,8 @@
     },
     {
       "path": "src/interfaces/cli/index.mjs",
-      "sha256": "402097d708680f191a9d8e5cb43c01fb8801be2e999d7c90adf6150897fff6bb",
-      "size": 46778
+      "sha256": "59d779271f802d8fa2899d3922965783d3c7c30c99755a4d3f5327c524226376",
+      "size": 48449
     },
     {
       "path": "src/kernel/atomic-io.mjs",
@@ -1646,7 +1646,7 @@
       "size": 19877
     }
   ],
-  "packageDigest": "acf6f72ad2e1c50bcb34c1969b24454eeaa0e214eae7a898f7d3370a468798b0",
+  "packageDigest": "ee2a6cea16055281683e27f54bf2837ae0b4e814a6982121a81fed71e3fe842d",
   "metadataFiles": [
     "release-manifest.json",
     "sbom.spdx.json"

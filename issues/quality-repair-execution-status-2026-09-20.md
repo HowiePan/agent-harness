@@ -4,11 +4,11 @@
 
 下文记录的是 2026-09-21 的现场故障。当前安装缓存中的 `post-tool-host-bridge.mjs` 已可直接导入，原先的静态模块缺失不再可复现；但本任务以当前已安装插件发出一次真实 `collaboration.list_agents` 后，45 秒内没有新的 Hook 阶段回执或 Host 响应，仍以 `CODEX_HOST_HOOK_RESPONSE_TIMEOUT` 停止，未创建 Run。根据现有证据，只能确定当前任务未观察到 Hook 投递，不能把原因确定为信任、matcher 或宿主工具覆盖中的任何单项。
 
-Harness 源码现已同时接受 Codex Hook 的裸函数名和 `collaboration.` 前缀名，并在渠道包组合检查中使用裸 `list_agents` 完成合成事件往返。`npm run check`、宿主快测 35/35、Core/Codex 打包、渠道组合 Hook 往返和 residue 检查均通过。第一次完整 `npm test` 为 311/312；唯一失败由仓库内一个空 Issue 目录残留造成，确认它为空且不是链接后已清理，对应 CLI 用例复测 3/3，随后完整复跑 **312/312** 通过。当前源码尚未重装为 Codex 插件，也没有新的真实宿主探针通过证据，因此 G2 仍未通过，G3 不得启动。
+Harness 源码已同时接受 Codex Hook 的裸函数名和 `collaboration.` 前缀名，并在渠道包组合检查中使用裸 `list_agents` 完成合成事件往返。冻结提交 `5b21abddffa85188fa5d398110c5e39330055066` 的完整测试 **312/312**、发布准备、不可变组合激活、同版本插件重装和缓存 bootstrap 均通过。用户随后信任了两项插件 Hook；新建 Desktop 任务的真实 `list_agents` 仍未投递可观察的 `PostToolUse` 阶段或 Host 响应。当前问题已登记为 `AH-20260923-19EAAB8C220E`，G2 继续未通过，G3 不得启动。本地源码调试改按 `issues/local-debug-acceptance-2026-09-23.md` 独立验收。
 
 ## 结论
 
-**V3.8.4 质量流程未准出。** G1 代码与本地发布流程已通过；G2 真实 Codex 宿主 Canary 在插件重装后新建任务中仍于 PostToolUse 原生结果回传处超时，且首个可复现故障已收窄为安装缓存中的 Hook 模块图无法加载，尚未形成合成质量闭环。G3 CardWorld 真实业务评审→修复→复审→Gate→Authority Closure 未启动；不得用本报告的测试或插件安装成功替代业务 Closure Receipt。
+**V3.8.4 质量流程未准出。** G1 代码与本地发布流程已通过；安装缓存中的 Hook 模块图缺失已修复并通过 bootstrap 探针。G2 真实 Codex 宿主 Canary 仍在 Desktop `PostToolUse` 自动回传处超时，尚未形成真实宿主合成质量闭环，根因未定。G3 CardWorld 真实业务评审→修复→复审→Gate→Authority Closure 未启动；不得用本地调试、测试或插件安装成功替代业务 Closure Receipt。
 
 ## 本次变更
 
@@ -27,7 +27,7 @@ Harness 源码现已同时接受 Codex Hook 的裸函数名和 `collaboration.` 
 | clean-room | 从本次最新源码打包、安装、重启、注册 Extension 的检查通过。 |
 | `npm run check`、`workspace:canary`、`check:residue`、渠道组合 | 通过；包版本 1.0.0，未发现临时目录或禁止残留。 |
 | 本地插件发布 | 提交 `d469a339e4c4d1652dc3f8fab8d0b86e2cad62bb` 的 `release:codex:local` 完成：Core `d30fd89d…`、Codex 渠道 `6e4797e9…`；同版本 remove/add 清缓存、安装绑定校验和后续 `release:codex:check` 均通过。 |
-| G2 真实宿主 | **阻断。** 插件重装后新建任务按活动 Runtime 的 `createHookHostExchange` 创建绑定真实 `CODEX_SESSION_ID` 的 20 秒请求，并且只调用一次原生 `collaboration.list_agents({})`；原生结果为当前 `/root` running，但请求目录没有 `.response.json`，以 `CODEX_HOST_HOOK_RESPONSE_TIMEOUT` 停止。安装缓存 Hook 入口随后以只读直接加载复现 `ERR_MODULE_NOT_FOUND`，缺失模块为 `C:\Users\86150\.codex\plugins\cache\src\common\canonical.mjs`。没有手工填充响应，没有创建合成质量 Run。 |
+| G2 真实宿主 | **阻断。** 2026-09-23 当前冻结制品重装及 Hook 信任后，新建 Desktop 任务只调用一次原生 `collaboration.list_agents({})`；原生结果为当前 `/root` running，但请求目录没有 `.response.json`，以 `CODEX_HOST_HOOK_RESPONSE_TIMEOUT` 停止，也没有新 Hook 阶段。先前 `ERR_MODULE_NOT_FOUND` 已修复，不再作为当前根因。没有手工填充响应，没有创建合成质量 Run。 |
 | G3 真实业务 | 未执行；只读复核现有 Run `v3.8.4-quality-69b43609437505f3` 仍为 running、revision 15、Submission 0、Finding 0、Closure Receipt 0。 |
 
 初次沙箱运行产生 `spawn EPERM`，未计为通过；完整回归、Conformance、clean-room 与打包检查均在允许本地测试子进程的环境重跑并通过。
@@ -36,8 +36,8 @@ Harness 源码现已同时接受 Codex Hook 的裸函数名和 `collaboration.` 
 
 ## 继续执行的门槛
 
-1. G2 须先修复 Codex 渠道安装布局或 Hook 导入边界，使安装缓存中的 `hooks/post-tool-host-bridge.mjs` 能独立加载其全部依赖；重新打包、同版本 remove/add 并在另一个新建任务中只做一次绑定真实 session 的 `collaboration.list_agents` 短探针。当前失败发生在 Hook 模块加载层，不能靠调整 matcher、事件字段、重复探针或启动质量 Run 猜测。
-2. 原生短探针通过后，在独立合成仓种入 1 个已知 Finding，用同一安装制品完成 review→Authority Submission→repair dispatch→verified repair→full re-review→final Gates→Closure Receipt，再做传输故障和重启续接。未通过前不启动 CardWorld 真实质量 Run，也不恢复人工转录。
+1. 插件渠道的当前 G2 故障由 `AH-20260923-19EAAB8C220E` 跟踪。真正需要打包插件并验证真实宿主时，先区分 Desktop Hook 装载、信任配置刷新和原生工具投递，再用同一不可变制品完成绑定真实 session 的短探针；不再把已修复的模块导入问题当作当前阻断，也不靠重复重装猜测。
+2. 原生短探针通过后，在独立合成仓种入 1 个已知 Finding，用同一安装制品完成 review→Authority Submission→repair dispatch→verified repair→full re-review→final Gates→Closure Receipt，再做传输故障和重启续接。本地 `source-link` 调试按独立验收口径推进，不等待 G2；但它不替代真实宿主证据。未通过前不启动 CardWorld 真实质量 Run，也不恢复人工转录。
 3. G3 清单至少含已报告的 `R008-FSW-001`～`006`、`V384-R06`～`R08`。只读业务文档又标出 `V384-R01`～`R05` 五个 P1 为“历史关闭结论；当前未收口”；它们必须独立处置或与前六项建立证据支持的显式 alias 映射。不得以原 9 项清单推断全部 P0–P3 已关闭。
    `issues/cardworld-v3.8.4-known-finding-inventory.proposed.json` 已列出 14 个候选 ID 和两个当前匹配的文档 SHA-256，仅供 G3 注册前审查，尚未写入 Project Registry 或提升为 Authority Finding。
 4. 完成 G2 后，再按准确业务目标、Registry/Release/Extension/Plan/Run 谱系和写入授权执行 G3。每次新故障先回放到短层回归；只有真实 Authority Closure Receipt 和全部最终 Gate 证据才能报告准出。

@@ -1,0 +1,68 @@
+{
+  "protocolVersion": "1.0",
+  "projectAlias": "harness",
+  "project": {
+    "projectId": "agent-harness",
+    "profileId": "codex-channel",
+    "extensionId": "agent-harness-codex"
+  },
+  "observedAt": "2026-09-23T14:36:27.617Z",
+  "summary": "已安装并信任的 Codex 插件未收到 list_agents 的 PostToolUse，真实宿主交换超时",
+  "severity": "P1",
+  "environment": {
+    "harnessVersion": "1.0.0",
+    "codexCliVersion": "0.155.0-alpha.9.2",
+    "releaseCommit": "5b21abddffa85188fa5d398110c5e39330055066",
+    "pluginId": "agent-harness-codex@agent-harness-local",
+    "activeCompositionDigest": "b789c425f4080d19a0a8c1f070522753ea916eafc15a5093f6c2e251d38cd539"
+  },
+  "expected": {
+    "outcome": "真实 Codex list_agents 调用完成后，已信任的 PostToolUse Hook 自动提交与当前待处理请求绑定的 Host 响应。"
+  },
+  "actual": {
+    "nativeToolResult": "list_agents 正常返回当前 Agent 状态",
+    "hostExchangeCode": "CODEX_HOST_HOOK_RESPONSE_TIMEOUT",
+    "hostResponseCreated": false,
+    "newHookStageObserved": false,
+    "scope": "G2 真实宿主短探针；尚未创建合成质量 Run"
+  },
+  "reproduction": {
+    "steps": [
+      "从已验证的不可变 Core/Codex 组合完成同版本插件 remove/add 并检查安装缓存。",
+      "在 CLI /hooks 审核并信任当前插件 PostToolUse 与 UserPromptSubmit，确认 Active 1、Review 0。",
+      "新建 Codex Desktop 任务，以真实会话 ID 创建一条限时 Host 请求，然后调用一次 collaboration.list_agents({})。",
+      "检查原生结果、对应 response.json、Hook 阶段目录与超时拒绝回执。"
+    ]
+  },
+  "conversation": {
+    "source": "current-thread",
+    "excerpts": [
+      {
+        "role": "user",
+        "text": "授权你信任 agent-harness-codex@agent-harness-local 当前的 PostToolUse 和 UserPromptSubmit Hook。"
+      },
+      {
+        "role": "user",
+        "text": "我觉得可以记录下来G2真实遇到的问题，留作后续真正需要打包插件时再排查的问题。然后先放宽能跑下去，以保证本地调试能正常执行为目标，继续推进到准出为止"
+      }
+    ]
+  },
+  "missingEvidence": [
+    "Desktop 当前构建对 list_agents 的 Hook 启动、匹配及完成事件。",
+    "同一安装制品在独立合成项目中的真实 Host 请求/响应和质量闭环回执。"
+  ],
+  "correlation": {
+    "category": "codex-plugin-host-bridge",
+    "failureCode": "CODEX_HOST_HOOK_RESPONSE_TIMEOUT",
+    "scope": "PostToolUse/list_agents/desktop"
+  },
+  "sanitization": {
+    "confirmed": true,
+    "removed": [
+      "用户账户路径",
+      "原始日志中的非必要会话内容"
+    ]
+  },
+  "incidentFingerprint": "eb79cad9a01e2fae5905fb8b7d22dee8666c6ac2d7e79eb57cf9f7cf7193ae8a",
+  "intakeDigest": "19eaab8c220e896a0fa129d217c8f2c6ee09087a48028b8b32319be7ba6f9a4c"
+}

@@ -46,7 +46,7 @@ test('CLI read-only registries and issue register respond without a project', as
     assert.deepEqual(JSON.parse(await cli(['project', 'list'], dataRoot)).projects, []);
     const issues = JSON.parse(await cli(['issue', 'list']));
     assert.ok(Array.isArray(issues.issues));
-    assert.ok(issues.issues.every(issue => issue.triage !== null));
+    assert.ok(issues.issues.every(issue => /^AH-\d{8}-[A-F0-9]{12}$/.test(issue.issueId) && (issue.triage === null || issue.triage.revision >= 1)));
     const doctor = JSON.parse(await cli(['doctor'], dataRoot));
     assert.equal(doctor.ok, true);
     assert.equal(doctor.writeBoundary, 'standalone-control-root-only');
