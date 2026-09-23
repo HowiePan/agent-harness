@@ -1,4 +1,5 @@
 import { deliveryNode, deliveryTask } from '../node.mjs';
+import { expansionNode } from '../expansion/index.mjs';
 
 export const intakeNode = deliveryNode('intake', 'requirements-intake', 'requirement-intake', [], {
   task: deliveryTask({
@@ -10,7 +11,7 @@ export const intakeNode = deliveryNode('intake', 'requirements-intake', 'require
   }),
 });
 
-export const canonicalNode = deliveryNode('canonical', 'canonical-requirement', 'canonical-requirement', ['intake'], {
+export const canonicalNode = deliveryNode('canonical', 'canonical-requirement', 'canonical-requirement', ['expansion'], {
   task: deliveryTask({
     role: { id: 'requirements-owner', description: 'Converts the approved intake into one canonical delivery contract.' },
     objective: 'Produce the single canonical requirement that governs the remaining delivery lifecycle.',
@@ -20,4 +21,4 @@ export const canonicalNode = deliveryNode('canonical', 'canonical-requirement', 
   }),
 });
 
-export const intakeNodes = [intakeNode, canonicalNode];
+export const intakeNodes = [intakeNode, expansionNode, canonicalNode];

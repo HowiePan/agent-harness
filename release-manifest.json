@@ -27,8 +27,8 @@
     },
     {
       "path": "docs/flows/delivery-lifecycle/design.md",
-      "sha256": "746da11a3cf76d5513e4cbe2bd9e65ffaf59f42335efe61603894d1c38117158",
-      "size": 5029
+      "sha256": "7675bc865fe9fe8287bf78f22c029a7ed86c81275513b8822b3fed9db1572f83",
+      "size": 5588
     },
     {
       "path": "docs/flows/knowledge-qa/design.md",
@@ -317,8 +317,8 @@
     },
     {
       "path": "docs/reference/configuration-api.md",
-      "sha256": "002274b0f2de8a2d903c4709e6fc8a7b79974346e51138e1a6fb4ce861b236d5",
-      "size": 28672
+      "sha256": "ae9d226981a73085ad40ff3eeedcc8139bf2d6407f29c20ecb3c841e6cd26ca8",
+      "size": 28846
     },
     {
       "path": "docs/reference/legacy-compatibility.md",
@@ -772,13 +772,13 @@
     },
     {
       "path": "scripts/workflow-canary.mjs",
-      "sha256": "761cbda6b1facb7cc86d8bcebb699bf5f4b1a7d13a54a02f7b5b97156850b12c",
-      "size": 26590
+      "sha256": "910221d10786864afd4587f0bc33de79e49661506cfa6c560fdbca22eba8a060",
+      "size": 26778
     },
     {
       "path": "scripts/workspace-canary.mjs",
-      "sha256": "bbf6a9f251cf2a52d56907e9234bd1eddf413a85fc9aed96f3855879ba293ac5",
-      "size": 36711
+      "sha256": "a6f8ddf3912d58d9e2e14ffbf181cbe8a7b56ad562abb2dd145858c2c80a3406",
+      "size": 36911
     },
     {
       "path": "SECURITY.md",
@@ -1012,13 +1012,13 @@
     },
     {
       "path": "src/flows/delivery-lifecycle/commands.mjs",
-      "sha256": "351dcda54c2ea85a3c7e558d37ec27b4cfaeb9b5fe21cda0d679392f363e0e68",
-      "size": 2662
+      "sha256": "d8848a9df41d8590650794ef230b40c93038dc886a461b5622027cf9ebc9c893",
+      "size": 2761
     },
     {
       "path": "src/flows/delivery-lifecycle/contracts/index.mjs",
-      "sha256": "c40037c796d48c367cfc9e6987e7e322bac05a3ef504a492a2aa2e8b8ad56520",
-      "size": 1909
+      "sha256": "5d975c3e61789a4d7c609072285a8c5b435fdb303bb52ae88e95cc4b7f0f3cfa",
+      "size": 2170
     },
     {
       "path": "src/flows/delivery-lifecycle/descriptor.mjs",
@@ -1032,8 +1032,8 @@
     },
     {
       "path": "src/flows/delivery-lifecycle/graph/definition.mjs",
-      "sha256": "a12d4f4f6b76eca8880d9f35421ee017a49015ea58b8dd79b0587423bc009c1b",
-      "size": 1465
+      "sha256": "49c67ad92f9ddd8b9d3bef5ac6b522dc054621656d44e5652fd67cb0bf09e58e",
+      "size": 1741
     },
     {
       "path": "src/flows/delivery-lifecycle/index.mjs",
@@ -1047,13 +1047,18 @@
     },
     {
       "path": "src/flows/delivery-lifecycle/nodes/delivery/feature.mjs",
-      "sha256": "782abc9823d7923b1670f23b97a2c9f7f9e64d50defcbe0df257fdaa06a212d7",
-      "size": 3452
+      "sha256": "a0b1f14793134acfcc336a740a22d6eba0191890892578c1bd2aa0c1876ca002",
+      "size": 3467
     },
     {
       "path": "src/flows/delivery-lifecycle/nodes/docs/index.mjs",
       "sha256": "6226753bb770ec507d6c8972ecbaa898c8e57c81c49d496b4e0657de650d73fb",
       "size": 1289
+    },
+    {
+      "path": "src/flows/delivery-lifecycle/nodes/expansion/index.mjs",
+      "sha256": "69596704ab032f086f84b9fb910492b04074c8b5046673ac8d172ee4b5f3003b",
+      "size": 1578
     },
     {
       "path": "src/flows/delivery-lifecycle/nodes/implement/index.mjs",
@@ -1062,8 +1067,8 @@
     },
     {
       "path": "src/flows/delivery-lifecycle/nodes/intake/index.mjs",
-      "sha256": "49eb454684528177b7a910f397ea9d137d6c39e2055ccfe3ebd1421bfd661a89",
-      "size": 2154
+      "sha256": "53c616050b01c3696a244157b4ae17b3c613858e5ae2dcff35d270caac838bde",
+      "size": 2228
     },
     {
       "path": "src/flows/delivery-lifecycle/nodes/node.mjs",
@@ -1092,13 +1097,13 @@
     },
     {
       "path": "src/flows/delivery-lifecycle/planner.mjs",
-      "sha256": "312b29e887346b00ccbe90357b81cae89b5d2cd43602075ebc2e1ff1cc6c7726",
-      "size": 4015
+      "sha256": "45547103e18af559a71d8ea542ffddafd4bcb3bdc31e191969fea2c1d948ba5f",
+      "size": 4365
     },
     {
       "path": "src/flows/delivery-lifecycle/policy/delivery-lifecycle.mjs",
-      "sha256": "185ffbbbdd35dbb390d14d3579f06a34f223cde40244dd2d6ebc62208172107f",
-      "size": 6993
+      "sha256": "7d02cbe60a504d3bcb83c93fb94326482b063f407781c2d6b3d84ef5fc167944",
+      "size": 7018
     },
     {
       "path": "src/flows/delivery-lifecycle/policy/index.mjs",
@@ -1641,7 +1646,7 @@
       "size": 19877
     }
   ],
-  "packageDigest": "3a00e46137b86596a5b44af22ed47d8456f39f63268f11cf928c00243ede8bd6",
+  "packageDigest": "4faee22159bdfe2e3177f7b254809eb49183df7bcf019574a972dab9fceb3360",
   "metadataFiles": [
     "release-manifest.json",
     "sbom.spdx.json"

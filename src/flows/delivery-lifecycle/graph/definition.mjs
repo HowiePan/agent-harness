@@ -1,6 +1,7 @@
 import { defineWorkflowDefinition } from '../../../platform/workflow/definition.mjs';
 import { withDeps } from '../../../flow-kit/primitives.mjs';
 import { intakeNode, canonicalNode } from '../nodes/intake/index.mjs';
+import { expansionNode } from '../nodes/expansion/index.mjs';
 import { planNode } from '../nodes/plan/index.mjs';
 import { implementNode } from '../nodes/implement/index.mjs';
 import { scopeNode } from '../nodes/scope/index.mjs';
@@ -16,6 +17,7 @@ export const createDeliveryWorkflowDefinition = ({ id = 'delivery-lifecycle', pr
   routes: {
     full: [
       intakeNode,
+      expansionNode,
       canonicalNode,
       planNode,
       implementNode,
@@ -25,7 +27,9 @@ export const createDeliveryWorkflowDefinition = ({ id = 'delivery-lifecycle', pr
       reviewNode,
       deliverNode,
     ],
-    requirements: [intakeNode, canonicalNode, planNode],
+    requirements: [intakeNode, expansionNode, canonicalNode],
+    'expand-to-plan': [intakeNode, expansionNode, canonicalNode, planNode],
+    direct: [withDeps(intakeNode, []), withDeps(canonicalNode, ['intake']), withDeps(planNode, ['canonical'])],
     deliver: [withDeps(qualityNode, []), withDeps(deliverNode, ['quality'])],
     quality: [withDeps(qualityNode, [])],
     plan: [withDeps(planNode, [])],

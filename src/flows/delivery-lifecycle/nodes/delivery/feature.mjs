@@ -21,7 +21,7 @@ export const createDeliveryTemplates = ({ actionPaths, forbiddenPaths = ['.git',
   const stageTemplate = ({ context, node, dependsOn }) => {
     const readOnly = node.readOnly || context.intent.sourcePolicy === 'read-only' || node.qualityReview;
     const pathsSource = context.intent?.actionPaths ?? context.project?.policy?.actionPaths ?? actionPaths ?? {};
-    const pathsForAction = node.action === 'requirements-intake' || node.action === 'canonical-requirement' ? pathsSource.requirements : pathsSource[node.action];
+    const pathsForAction = ['requirements-intake', 'requirement-expansion', 'canonical-requirement'].includes(node.action) ? pathsSource.requirements : pathsSource[node.action];
     const resolvedPaths = Array.isArray(pathsForAction) ? pathsForAction : [];
     return makeFeature({ action: node.action, target: context.intent.target, stage: node.stage, dependsOn,
       allowedPaths: readOnly ? [] : resolvedPaths, sourcePolicy: readOnly ? 'read-only' : 'write',

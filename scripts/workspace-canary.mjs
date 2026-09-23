@@ -22,6 +22,7 @@ const out = (schemaId, value, evidenceRefs = []) => ({ schemaId, value, evidence
 const legacyWorkflowOutputs = Object.freeze({
   'engine-delivery': Object.freeze({
     intake: ['intake', 'delivery-intake-v1', { requirements: ['Synthetic workspace requirement.'] }],
+    expansion: ['expansion', 'delivery-expansion-v1', { expandedRequirements: ['Synthetic expanded workspace requirement.'], derivedFrom: ['docs/requirements.md'], assumptions: [], unresolved: [] }],
     canonical: ['canonical', 'canonical-requirement-v1', { id: 'workspace-requirement', acceptance: ['Synthetic acceptance is satisfied.'] }],
     plan: ['plan', 'delivery-plan-v1', { features: ['synthetic-feature'] }],
     implement: ['implement', 'delivery-implementation-v1', { changedFiles: [] }],

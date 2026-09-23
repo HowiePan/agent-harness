@@ -138,7 +138,7 @@ Extension 身份对象的字段是 `id`、`version`、可选或注册后必需�
 | `actionPaths` | 内置默认路径 | action 到允许写路径数组的映射。支持 `requirements`、`plan`、`implement`、`scope`、`docs`、`review`、`deliver` 等动作键。 |
 | `excluded` | `.git`、`.agent-harness-data`、`node_modules` | 工作区排除/禁止路径。 |
 
-内置 action：`full`、`requirements`/`req`、`plan`、`implement`/`impl`、`scope`、`quality`/`qa`、`docs`、`review`、`deliver`、`status`、`resume`、`recover`。质量 preset 为 `full`、`review-only`、`recheck`；需求 preset 为 `full`、`expand-to-plan`、`plan-only`。
+内置 action：`full`、`requirements`/`req`、`plan`、`implement`/`impl`、`scope`、`quality`/`qa`、`docs`、`review`、`deliver`、`status`、`resume`、`recover`。质量 preset 为 `full`、`review-only`、`recheck`；需求 preset 为 `full`（默认，`intake → expansion → canonical`）、`expand-to-plan`（`intake → expansion → canonical → plan`）、`direct`（不扩展，`intake → canonical → plan`）、`plan-only`（`plan`）。
 
 初始化：
 

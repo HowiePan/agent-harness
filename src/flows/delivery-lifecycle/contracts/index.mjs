@@ -5,6 +5,7 @@ export const deliveryProfileId = 'delivery-lifecycle';
 
 export const deliveryPorts = Object.freeze({
   intake: 'delivery-intake-v1',
+  expansion: 'delivery-expansion-v1',
   canonical: 'canonical-requirement-v1',
   plan: 'delivery-plan-v1',
   implement: 'delivery-implementation-v1',
@@ -17,6 +18,7 @@ export const deliveryPorts = Object.freeze({
 
 export const deliveryValueSchemas = Object.freeze({
   'delivery-intake-v1': { type: 'object', required: ['requirements'], properties: { requirements: strings }, additionalProperties: true },
+  'delivery-expansion-v1': { type: 'object', required: ['expandedRequirements'], properties: { expandedRequirements: strings, derivedFrom: strings, assumptions: strings, unresolved: strings }, additionalProperties: true },
   'canonical-requirement-v1': { type: 'object', required: ['id', 'acceptance'], properties: { id: string, acceptance: strings }, additionalProperties: true },
   'delivery-plan-v1': { type: 'object', required: ['features'], properties: { features: strings }, additionalProperties: true },
   'delivery-implementation-v1': { type: 'object', required: ['changedFiles'], properties: { changedFiles: strings }, additionalProperties: true },

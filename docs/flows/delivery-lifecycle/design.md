@@ -4,7 +4,7 @@
 
 ## 用途和合同
 
-适用于一个版本/功能的需求到交付闭环。输入是动作、目标版本、Feature、已批准的项目 Descriptor、执行模式、Gate Recipe，以及 Harness 从 Run Authority 派生的 `QualityTargetSnapshot`。`full` 路由顺序为 `intake → canonical → plan → implement → scope → docs → quality → review → deliver`。`requirements` 和 `deliver` 可选择部分路线，其他阶段动作也可独立启动。端口依次使用 `delivery-intake-v1`、`canonical-requirement-v1`、`delivery-plan-v1`、`delivery-implementation-v1`、`delivery-scope-v1`、`delivery-docs-v1`、`delivery-quality-v1`、`delivery-review-v1` 与 `delivery-receipt-v1`。节点由 `graph/definition.mjs` 声明，`nodes/delivery/` 生成 Feature，`policy/` 固定质量、评审和关闭规则。
+适用于一个版本/功能的需求到交付闭环。输入是动作、目标版本、Feature、已批准的项目 Descriptor、执行模式、Gate Recipe，以及 Harness 从 Run Authority 派生的 `QualityTargetSnapshot`。`full` 路由顺序为 `intake → expansion → canonical → plan → implement → scope → docs → quality → review → deliver`。`requirements` 动作有四个 preset：`full`（默认，`intake → expansion → canonical`）、`expand-to-plan`（`intake → expansion → canonical → plan`）、`direct`（不扩展，`intake → canonical → plan`）、`plan-only`（`plan`）；`deliver` 可选择部分路线，其他阶段动作也可独立启动。端口依次使用 `delivery-intake-v1`、`delivery-expansion-v1`、`canonical-requirement-v1`、`delivery-plan-v1`、`delivery-implementation-v1`、`delivery-scope-v1`、`delivery-docs-v1`、`delivery-quality-v1`、`delivery-review-v1` 与 `delivery-receipt-v1`。节点由 `graph/definition.mjs` 声明，`nodes/delivery/` 生成 Feature，`policy/` 固定质量、评审和关闭规则。
 
 结果须符合 Feature/Profile 合同并附来源和变更文件证据。`quality` 是质量检查点，`review`/`deliver` 是只读阶段；当前周期 P0–P3 必须关闭，必要人工 Decision 与最终 Gate Receipt 齐全才能关闭 Run。失败按 Attempt 预算处理；恢复只能遵守固定 Run 身份和 Epoch 规则。
 
@@ -16,7 +16,7 @@
 
 ## Node Task Contract 与 Prompt
 
-九个节点分别发布完整 Task Contract，而不是共享“完成 action”式默认 Prompt：`intake` 负责来源化需求盘点，`canonical` 固化唯一需求合同，`plan` 生成覆盖/依赖/冲突图，`implement` 完成受限实现，`scope` 对账计划与实际范围，`docs` 同步外部合同，`quality` 执行只读 P0–P3 全量审查，`review` 独立评审，`deliver` 验证 Gate/Decision/Finding 后封存回执。每个合同包含角色、唯一目标、执行说明、输入、步骤、约束、验收和证据要求。
+十个节点分别发布完整 Task Contract，而不是共享“完成 action”式默认 Prompt：`intake` 负责来源化需求盘点，`expansion` 在采集后依据需求方向、已绑定文档与项目实际推导并补全需求（不臆造方向外范围），`canonical` 固化唯一需求合同，`plan` 生成覆盖/依赖/冲突图，`implement` 完成受限实现，`scope` 对账计划与实际范围，`docs` 同步外部合同，`quality` 执行只读 P0–P3 全量审查，`review` 独立评审，`deliver` 验证 Gate/Decision/Finding 后封存回执。`expansion` 阶段序号先于 `canonical`，因此不要求 `canonical-requirement-approved` 决策；用户批准的是补全后的 canonical 需求。每个合同包含角色、唯一目标、执行说明、输入、步骤、约束、验收和证据要求。
 
 Workflow 编译器根据当前 route 的真实 `dependsOn` 自动把前序 typed output 绑定为 Task 输入，因此独立 `quality`、`plan` 等路线不会伪造不存在的上游，而 `full` 路线会逐阶段传递结果。编译后的 Feature 必须保留 Task、端口和值 Schema；Prompt Contract 1.3 显示 Task 摘要、已解析输入、结果合同和 Dispatch 摘要。质量修复、复审和动态开发 follow-up 也生成独立 Task Contract。
 

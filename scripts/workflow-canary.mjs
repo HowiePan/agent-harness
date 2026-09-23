@@ -44,6 +44,7 @@ const out = (schemaId, value, evidenceRefs = []) => ({ schemaId, value, evidence
 
 const lifecycleCanaryOutputs = Object.freeze({
   intake: ['intake', 'delivery-intake-v1', { requirements: ['Synthetic canary requirement.'] }],
+  expansion: ['expansion', 'delivery-expansion-v1', { expandedRequirements: ['Synthetic expanded requirement.'], derivedFrom: ['docs/requirements.md'], assumptions: [], unresolved: [] }],
   canonical: ['canonical', 'canonical-requirement-v1', { id: 'canary-requirement', acceptance: ['Synthetic acceptance is satisfied.'] }],
   plan: ['plan', 'delivery-plan-v1', { features: ['synthetic-feature'] }],
   implement: ['implement', 'delivery-implementation-v1', { changedFiles: [] }],

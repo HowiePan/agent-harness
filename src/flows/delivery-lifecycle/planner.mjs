@@ -4,6 +4,16 @@ import { resolveStageGates } from '../../flow-kit/primitives.mjs';
 import { deliveryLifecycleWorkflowDefinition } from './graph/definition.mjs';
 import { createDeliveryTemplates } from './nodes/delivery/feature.mjs';
 
+const resolveDeliveryRoute = intent => {
+  if (intent.action !== 'requirements') return intent.action;
+  const scope = intent.scope ?? '';
+  if (scope === 'version-planning') return 'plan';
+  if (scope.startsWith('requirement-expansion')) return 'expand-to-plan';
+  if (scope.endsWith('canonical-requirement')) return 'requirements';
+  if (scope.endsWith('version-plan')) return 'direct';
+  return 'requirements';
+};
+
 const defaultActionPaths = Object.freeze({
   requirements: ['docs/requirements.md', 'docs/versions'],
   plan: ['docs/versions', 'docs/requirements.md'],
@@ -38,7 +48,7 @@ export const createDeliveryLifecyclePlanner = ({
     requireUserCodeReview: full || intent.action === 'deliver',
     requireFinalQualityReview: full || quality || intent.action === 'deliver',
   };
-  const routeId = intent.action === 'requirements' && intent.scope === 'version-planning' ? 'plan' : intent.action;
+  const routeId = resolveDeliveryRoute(intent);
   const actionPaths = intent.actionPaths ?? project.policy?.actionPaths ?? defaultActionPaths;
   const templates = createDeliveryTemplates({
     actionPaths,

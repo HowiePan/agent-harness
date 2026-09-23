@@ -4,7 +4,7 @@ import { approvalSatisfied } from '../../../flow-kit/primitives.mjs';
 import { createQualityFollowUpFeatures, hasCurrentCleanQualityReview, validateQualityReviewPolicies } from '../../../flow-kit/profiles/quality-loop.mjs';
 
 export const DELIVERY_STAGES = Object.freeze([
-  'requirement-intake', 'canonical-requirement', 'version-planning', 'implementation',
+  'requirement-intake', 'requirement-expansion', 'canonical-requirement', 'version-planning', 'implementation',
   'scope-resolution', 'docs-closeout', 'quality', 'quality-repair', 'quality-recheck', 'user-code-review', 'delivery-receipt',
 ]);
 

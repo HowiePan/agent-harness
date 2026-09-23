@@ -9,8 +9,9 @@ export const createDeliveryCommandManifest = ({ id = 'delivery-lifecycle-command
     full: { targetKind: 'version', presets: { default: { scope: 'requirement-intake..delivery-receipt', stateChanging: true } } },
     requirements: {
       aliases: ['req'], targetKind: 'version', defaultPreset: 'full', presets: {
-        full: { scope: 'requirements..version-plan', stateChanging: true },
+        full: { scope: 'requirement-intake..canonical-requirement', stateChanging: true },
         'expand-to-plan': { scope: 'requirement-expansion..version-plan', stateChanging: true },
+        direct: { scope: 'requirement-intake..version-plan', stateChanging: true },
         'plan-only': { scope: 'version-planning', stateChanging: true },
       },
     },
