@@ -2,6 +2,7 @@ import { newId } from '../../../common/canonical.mjs';
 import { assert } from '../../../common/errors.mjs';
 import { AUTO_CONCURRENCY, AUTO_CONCURRENCY_LIMIT, resolveConcurrencyLimit } from '../../../common/concurrency.mjs';
 import { assertAgentRuntimeCompatible, resolveLifecycleExecutionPolicy } from '../../plugins/runtime/execution-policy.mjs';
+import { runPendingFeatureGates } from '../gates/project-gate-runner.mjs';
 
 const parseLastJsonObject = text => {
   const lines = String(text ?? '').split(/\r?\n/).filter(Boolean);
@@ -25,9 +26,10 @@ export const businessResultFromRuntime = payload => {
 };
 
 export class RunCoordinator {
-  constructor({ harness, id = newId }) {
+  constructor({ harness, id = newId, onGateProgress = null }) {
     this.harness = harness;
     this.id = id;
+    this.onGateProgress = onGateProgress;
   }
 
   async tick({ projectId, runId, runtimePluginId, maxConcurrency } = {}) {
@@ -46,13 +48,15 @@ export class RunCoordinator {
     await this.harness.assertRunExecutionAuthorized(projectId, runId);
     const orphaned = state.leases.filter(lease => lease.status === 'active');
     if (orphaned.length) return { status: 'attention-required', reason: 'active-leases-require-original-runtime-or-resume', leaseIds: orphaned.map(lease => lease.leaseId), state };
+    const featureGates = await runPendingFeatureGates({ harness: this.harness, projectId, runId, onProgress: this.onGateProgress });
+    state = featureGates.state;
     let dispatches = state.dispatches.filter(dispatch => dispatch.status === 'requested');
     if (!dispatches.length) {
       const scheduled = await this.harness.dispatch(projectId, runId, { maxConcurrency: physicalLimit, runtimePluginId: selectedRuntime }, { expectedRevision: state.revision, commandId: this.id('coordinator-schedule') });
       state = scheduled.state;
       dispatches = scheduled.result.dispatches;
     }
-    if (!dispatches.length) return { status: 'idle', reason: state.status, state, physicalLimit };
+    if (!dispatches.length) return featureGates.ok ? { status: 'idle', reason: state.status, state, physicalLimit } : { status: 'attention-required', reason: 'feature-gates-not-passed', gates: featureGates.results, featureId: featureGates.featureId, state, physicalLimit };
     dispatches = dispatches.slice(0, physicalLimit);
     const spawned = [];
     const cleanedAgents = new Set();

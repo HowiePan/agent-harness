@@ -148,7 +148,9 @@ export class HarnessKernel {
       const profile = this.profile(state.profile.id);
       const activeFeatures = [...new Set([...state.leases.filter(activeLease).map(lease => lease.featureId), ...state.dispatches.filter(activeDispatch).map(dispatch => dispatch.featureId)])];
       const capacity = Math.max(0, Number(input.maxConcurrency ?? 1) - activeFeatures.length);
-      const selected = scheduleFeatures({ features: state.features, activeFeatureIds: activeFeatures, limit: capacity, canDispatch: feature => profile.canDispatch(feature, state).ok, candidateFeatureIds: input.candidateFeatureIds ?? null });
+      const featureGateIds = new Set((state.metadata?.gateRecipes ?? []).filter(recipe => recipe.scope === 'feature').map(recipe => recipe.id));
+      const gateComplete = feature => feature.gatePlan.filter(id => featureGateIds.has(id)).every(id => state.gates.some(gate => gate.id === id && gate.scope === 'feature' && gate.featureId === feature.id && gate.status === 'passed' && gate.sourceDigest === state.sourceDigest));
+      const selected = scheduleFeatures({ features: state.features, activeFeatureIds: activeFeatures, limit: capacity, canDispatch: feature => profile.canDispatch(feature, state).ok && feature.dependsOn.every(id => gateComplete(state.features.find(item => item.id === id))), candidateFeatureIds: input.candidateFeatureIds ?? null });
       const dispatches = selected.map(feature => {
         const dispatchId = this.id('dispatch');
         const outputRef = resolve(this.authorityStore.root, 'outputs', state.projectId, state.runId, `epoch-${state.epoch}`, `generation-${state.generation}`, `${dispatchId}.json`);
@@ -339,12 +341,37 @@ export class HarnessKernel {
   }
 
   async recordGate(projectId, runId, input, command) {
-    for (const ref of input.evidenceRefs ?? []) await this.evidenceStore.read(ref);
+    const evidence = [];
+    for (const ref of input.evidenceRefs ?? []) {
+      const record = await this.evidenceStore.read(ref);
+      const body = JSON.parse(record.bytes.toString('utf8'));
+      if (body.cacheHit) {
+        assert(body.cacheOriginRef && body.cacheOriginRef !== ref, 'GATE_CACHE_EVIDENCE_INVALID', 'Cached Gate result requires a distinct origin Evidence.');
+        const origin = await this.evidenceStore.read(body.cacheOriginRef);
+        const original = JSON.parse(origin.bytes.toString('utf8'));
+        assert(origin.metadata.sourceDigest === record.metadata.sourceDigest && origin.metadata.gateSpecDigest === record.metadata.gateSpecDigest && origin.metadata.toolchainDigest === record.metadata.toolchainDigest && original.cacheHit === false && original.status === 'passed' && original.sourceDrift === false && digestJson(original.executorReceipt) === digestJson(body.executorReceipt), 'GATE_CACHE_EVIDENCE_INVALID', 'Cached Gate origin does not substantiate the current result.');
+      }
+      evidence.push(record);
+    }
     return this.authorityStore.transact(projectId, runId, { expectedRevision: command.expectedRevision, commandId: command.commandId, payload: input }, state => {
-      assert(input.id && ['passed', 'failed', 'environment-failed'].includes(input.status), 'GATE_RESULT_INVALID', 'Gate result requires id and a valid status.');
+      assert(input.id && ['passed', 'failed', 'environment-failed', 'budget-exceeded'].includes(input.status), 'GATE_RESULT_INVALID', 'Gate result requires id and a valid status.');
       const gate = { id: input.id, scope: input.scope ?? 'run', featureId: input.featureId ?? null, specDigest: input.specDigest, sourceDigest: input.sourceDigest, toolchainDigest: input.toolchainDigest, status: input.status, evidenceRefs: [...new Set(input.evidenceRefs ?? [])], forcedFresh: Boolean(input.forcedFresh), recordedAt: this.now() };
       assert(gate.specDigest && gate.sourceDigest && gate.toolchainDigest && gate.evidenceRefs.length > 0, 'GATE_EVIDENCE_INCOMPLETE', 'Gate results require spec, source, toolchain, and evidence digests.');
       assert(gate.sourceDigest === state.sourceDigest, 'GATE_SOURCE_STALE', 'Gate result does not bind the active source digest.');
+      const declared = state.metadata?.gateRecipes?.find(recipe => recipe.id === gate.id && (recipe.scope ?? 'feature') === gate.scope);
+      assert(declared, 'GATE_RECIPE_NOT_BOUND', 'Gate result must match a Recipe pinned by this Run.');
+      assert(gate.scope !== 'feature' || state.features.some(feature => feature.id === gate.featureId && feature.gatePlan.includes(gate.id) && feature.state === 'completed'), 'GATE_FEATURE_INVALID', 'Feature Gate requires a completed, bound Feature.');
+      assert(gate.scope === 'feature' || gate.featureId === null, 'GATE_FEATURE_INVALID', 'Only a Feature Gate may name a Feature.');
+      assert(evidence.length === gate.evidenceRefs.length, 'GATE_EVIDENCE_INCOMPLETE', 'Gate Evidence references must be unique.');
+      for (const record of evidence) {
+        const meta = record.metadata;
+        assert(meta.projectId === projectId && meta.runId === runId && meta.epoch === state.epoch && meta.generation === state.generation && meta.sourceDigest === gate.sourceDigest && meta.artifactDigest === state.artifactDigest && meta.policyDigest === state.policyDigest && meta.pluginSetDigest === state.pluginSetDigest && meta.toolchainDigest === gate.toolchainDigest && meta.gateSpecDigest === gate.specDigest && meta.labels.includes('gate-result') && meta.labels.includes(`gate:${gate.id}`), 'GATE_EVIDENCE_CONTEXT_MISMATCH', 'Gate Evidence does not bind the current Run and Gate identity.');
+        let body;
+        try { body = JSON.parse(record.bytes.toString('utf8')); } catch { assert(false, 'GATE_EVIDENCE_INVALID', 'Gate Evidence must contain a JSON result.'); }
+        const expectedStatus = body.sourceDrift ? 'failed' : body.executorReceipt?.payload?.status;
+        assert(body.recipe?.id === gate.id && digestJson(body.recipe) === digestJson({ scope: 'feature', required: true, ...declared, command: declared.command.map(String) }) && (body.recipe.scope ?? 'feature') === gate.scope && body.status === gate.status && body.specDigest === gate.specDigest && body.specDigest === digestJson({ recipe: body.recipe, featureId: gate.featureId, command: body.recipe.command, cwd: body.recipe.cwd ?? '.', timeoutMs: body.recipe.timeoutMs ?? 300000 }) && body.spec?.featureId === gate.featureId && body.sourceBefore === gate.sourceDigest && (body.sourceDrift === (body.sourceAfter !== gate.sourceDigest)) && expectedStatus === gate.status && body.executorReceipt?.type === 'receipt' && body.executorReceipt.payload?.operation === 'gate' && body.executorReceipt.payload?.gateId === gate.id && body.executorReceipt.pluginId === body.executorPlugin?.id && body.executorReceipt.pluginVersion === body.executorPlugin?.version && (!gate.forcedFresh || body.cacheHit === false) && body.cacheHit === Boolean(input.cacheHit) && (!body.cacheHit || body.cacheOriginRef), 'GATE_EVIDENCE_INVALID', 'Gate Evidence does not substantiate the recorded result.');
+        if (!body.cacheHit) assert(body.executorReceipt.payload.specDigest === digestJson(body.spec) && body.spec.projectId === projectId && body.spec.runId === runId && body.spec.epoch === state.epoch && body.spec.generation === state.generation && body.spec.sourceDigest === state.sourceDigest && body.spec.featureId === gate.featureId, 'GATE_INVOCATION_MISMATCH', 'Gate Receipt does not bind the current invocation.');
+      }
       state.gates = state.gates.filter(item => !(item.id === gate.id && item.scope === gate.scope && item.featureId === gate.featureId));
       state.gates.push(gate);
       event(state, 'gate.recorded', { id: gate.id, status: gate.status, featureId: gate.featureId }, this.now);
@@ -558,7 +585,11 @@ export class HarnessKernel {
     const closure = profile.canClose(current);
     assert(current.features.every(feature => feature.state === 'completed'), 'FEATURES_INCOMPLETE', 'All Features must be completed before closure.');
     assert(qualityCanClose(current.findings), 'QUALITY_FINDINGS_OPEN', 'All P0-P3 findings must be resolved before closure.');
-    assert(current.gates.every(gate => gate.status === 'passed'), 'GATES_NOT_PASSED', 'All current Gate results must pass before closure.');
+    assert(current.gates.every(gate => gate.status === 'passed' && gate.sourceDigest === current.sourceDigest), 'GATES_NOT_PASSED', 'All current Gate results must pass on the active source before closure.');
+    const gateRecipes = current.metadata?.gateRecipes ?? [];
+    const featureGateIds = new Set(gateRecipes.filter(recipe => recipe.scope === 'feature').map(recipe => recipe.id));
+    for (const feature of current.features) for (const id of feature.gatePlan.filter(value => featureGateIds.has(value))) assert(current.gates.some(gate => gate.id === id && gate.scope === 'feature' && gate.featureId === feature.id && gate.status === 'passed' && gate.sourceDigest === current.sourceDigest), 'FEATURE_GATE_REQUIRED', `Feature ${feature.id} requires Gate ${id}.`);
+    for (const recipe of gateRecipes.filter(item => item.scope === 'stable' && item.required !== false)) assert(current.gates.some(gate => gate.id === recipe.id && gate.scope === 'stable' && gate.status === 'passed' && gate.sourceDigest === current.sourceDigest), 'STABLE_GATE_REQUIRED', `Stable Gate ${recipe.id} must pass.`);
     assert(closure.ok, 'PROFILE_CLOSURE_BLOCKED', closure.reason ?? 'Profile closure policy rejected the run.');
     const staged = structuredClone(current);
     staged.revision = current.revision + 1;

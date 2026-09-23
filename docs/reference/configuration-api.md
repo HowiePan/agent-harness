@@ -346,6 +346,7 @@ Delivery Profile 还使用 `requireCanonicalDecision`、`requireUserCodeReview`�
 |---|---:|---|---|
 | `id` | 是 | 非空 | Gate ID。 |
 | `executionClass` | 是 | 固定 `deterministic-process` | 不允许用 Agent 推理冒充可复现 Gate。 |
+| `executorPluginId` | 否 | 已安装的 Gate Executor ID | 省略时使用内置进程执行器。 |
 | `command` | 是 | 非空字符串数组 | 可执行文件与参数；不经过 shell 拼接。 |
 | `scope` | 否 | `feature`、`stable`、`final` | Gate 生命周期范围。 |
 | `required` | 否 | 默认由 Planner 解释为 required | 是否进入必过集合。 |
@@ -360,7 +361,7 @@ Delivery Profile 还使用 `requireCanonicalDecision`、`requireUserCodeReview`�
 
 每个 `outputs[]` 项包含 `id`、`retention`、`maxBytes`、`maxFiles`，以及可选 `environment` 数组。`retention` 支持 `ephemeral`、`evidence-then-delete`、`cache`、`artifact`。命令参数可用 `{{output:<id>}}` 引用受管路径；未声明端口、超字节或超文件数都会失败。
 
-Gate 通过至少绑定 recipe/spec、`sourceDigest`、`toolchainDigest`、Evidence 与 fresh 状态。缓存命中不能把旧来源结果升级为当前 fresh 结论。正式质量关闭要求当前周期 P0–P3 Finding 全部关闭。
+Gate 通过至少绑定 Run/Epoch、recipe/spec、`sourceDigest`、实测工具链、执行插件、Evidence 与 fresh 状态。Feature Gate 按 `gatePlan` 在对应 Feature 完成后执行，并阻断依赖 Feature 发车；必需的 stable Gate 在最终关闭前执行。缓存命中必须产生当前 Run 的派生 Evidence，不能把旧 Run 的引用直接升级为当前 fresh 结论。正式质量关闭要求当前周期 P0–P3 Finding 全部关闭。
 
 ## 7. 初始化、校验与宿主绑定
 

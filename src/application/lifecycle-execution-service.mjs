@@ -1,7 +1,7 @@
 import { assert } from '../common/errors.mjs';
 import { AUTO_CONCURRENCY, AUTO_CONCURRENCY_LIMIT, resolveConcurrencyLimit } from '../common/concurrency.mjs';
 import { RunCoordinator } from '../platform/workflow/coordinator/run-coordinator.mjs';
-import { ProjectGateRunner } from '../platform/workflow/gates/project-gate-runner.mjs';
+import { ProjectGateRunner, runPendingFeatureGates } from '../platform/workflow/gates/project-gate-runner.mjs';
 import { isVisibleHostAdapter } from '../platform/plugins/runtime/visible-host-adapter.mjs';
 
 export const executeHeadlessLifecyclePlan = async (context, api, planInput, { commandId, preflightReport, maxConcurrency, maxRounds = 100, forceFreshGates = true, onGateProgress = null } = {}) => {
@@ -22,11 +22,18 @@ export const executeHeadlessLifecyclePlan = async (context, api, planInput, { co
   assert(state.status !== 'superseded', 'LIFECYCLE_PLAN_RUN_SUPERSEDED', 'Lifecycle execution cannot resume a superseded Run.');
   if (runtimePolicy.hostOrchestrated) return { status: 'attention-required', reason: 'user-visible-runtime-requires-host-orchestration', planDigest: plan.planDigest, state };
   const activeRunId = state.runId;
-  const coordinator = new RunCoordinator({ harness: api });
+  const coordinator = new RunCoordinator({ harness: api, onGateProgress });
   const execution = await coordinator.run({ projectId: plan.project.id, runId: activeRunId, runtimePluginId: plan.run.runtimePluginId, maxConcurrency, maxRounds });
   state = await authorityStore.read(plan.project.id, activeRunId);
   if (!state.features.every(feature => feature.state === 'completed')) return { status: execution.status, planDigest: plan.planDigest, execution, state };
   const gateRunner = new ProjectGateRunner({ harness: api, onProgress: onGateProgress });
+  const featureGates = await runPendingFeatureGates({ harness: api, projectId: plan.project.id, runId: activeRunId, onProgress: onGateProgress });
+  if (!featureGates.ok) return { status: 'attention-required', reason: 'feature-gates-not-passed', planDigest: plan.planDigest, execution, gates: featureGates.results, state: featureGates.state };
+  const stableGateIds = (featureGates.state.metadata?.gateRecipes ?? []).filter(recipe => recipe.scope === 'stable' && recipe.required !== false).map(recipe => recipe.id);
+  if (stableGateIds.length) {
+    const stable = await gateRunner.run({ projectId: plan.project.id, runId: activeRunId, scope: 'stable', forceFresh: true, gateIds: stableGateIds });
+    if (!stable.results.every(gate => gate.status === 'passed')) return { status: 'attention-required', reason: 'stable-gates-not-passed', planDigest: plan.planDigest, execution, gates: stable, state: stable.state };
+  }
   const gates = plan.stopCondition.requiredFinalGates?.length
     ? await gateRunner.run({ projectId: plan.project.id, runId: activeRunId, scope: 'final', forceFresh: forceFreshGates, gateIds: plan.stopCondition.requiredFinalGates })
     : { results: [], state };
@@ -66,7 +73,10 @@ export const executeVisibleLifecyclePlan = async (context, api, planInput, { com
     state = await authorityStore.read(plan.project.id, activeRunId);
     if (state.status === 'closed') return { status: 'closed', planDigest: plan.planDigest, rounds, state };
     const activeLeases = state.leases.filter(lease => lease.status === 'active');
+    let featureGates = null;
     if (!activeLeases.length) {
+      featureGates = await runPendingFeatureGates({ harness: api, projectId: plan.project.id, runId: activeRunId, onProgress: onGateProgress });
+      state = featureGates.state;
       let requested = state.dispatches.filter(dispatch => dispatch.status === 'requested');
       if (!requested.length && !state.features.every(feature => feature.state === 'completed')) {
         const scheduled = await api.dispatch(plan.project.id, activeRunId, { maxConcurrency: physicalLimit, runtimePluginId: plan.run.runtimePluginId }, { expectedRevision: state.revision, commandId: `${commandId}.schedule.${state.revision}` });
@@ -116,6 +126,7 @@ export const executeVisibleLifecyclePlan = async (context, api, planInput, { com
     const leases = state.leases.filter(lease => lease.status === 'active');
     if (!leases.length) {
       if (state.features.every(feature => feature.state === 'completed')) break;
+      if (featureGates && !featureGates.ok) return { status: 'attention-required', reason: 'feature-gates-not-passed', planDigest: plan.planDigest, rounds, gates: featureGates.results, state };
       rounds.push({ round, status: 'attention-required', reason: state.status });
       return { status: 'attention-required', reason: state.status, planDigest: plan.planDigest, rounds, state };
     }
@@ -136,6 +147,13 @@ export const executeVisibleLifecyclePlan = async (context, api, planInput, { com
   state = await authorityStore.read(plan.project.id, activeRunId);
   if (!state.features.every(feature => feature.state === 'completed')) return { status: 'attention-required', reason: 'visible-coordinator-round-limit', planDigest: plan.planDigest, rounds, state };
   const gateRunner = new ProjectGateRunner({ harness: api, onProgress: onGateProgress });
+  const featureGates = await runPendingFeatureGates({ harness: api, projectId: plan.project.id, runId: activeRunId, onProgress: onGateProgress });
+  if (!featureGates.ok) return { status: 'attention-required', reason: 'feature-gates-not-passed', planDigest: plan.planDigest, rounds, gates: featureGates.results, state: featureGates.state };
+  const stableGateIds = (featureGates.state.metadata?.gateRecipes ?? []).filter(recipe => recipe.scope === 'stable' && recipe.required !== false).map(recipe => recipe.id);
+  if (stableGateIds.length) {
+    const stable = await gateRunner.run({ projectId: plan.project.id, runId: activeRunId, scope: 'stable', forceFresh: true, gateIds: stableGateIds });
+    if (!stable.results.every(gate => gate.status === 'passed')) return { status: 'attention-required', reason: 'stable-gates-not-passed', planDigest: plan.planDigest, rounds, gates: stable, state: stable.state };
+  }
   const gates = plan.stopCondition.requiredFinalGates?.length
     ? await gateRunner.run({ projectId: plan.project.id, runId: activeRunId, scope: 'final', forceFresh: forceFreshGates, gateIds: plan.stopCondition.requiredFinalGates })
     : { results: [], state };

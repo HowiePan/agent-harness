@@ -4,6 +4,7 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { inspectProjectGateCapabilities } from '../src/platform/workflow/gates/project-gate-runner.mjs';
 import { harnessTemporaryRoot } from '../src/common/write-boundary.mjs';
+import { PluginHost } from '../src/platform/plugins/host.mjs';
 
 test('Gate preflight aggregates observer, recipe, script, package-script, and sandbox blockers', async t => {
   const parent = resolve(harnessTemporaryRoot(), 'gate-preflight');
@@ -23,6 +24,13 @@ test('Gate preflight aggregates observer, recipe, script, package-script, and sa
   const codes = report.issues.map(issue => issue.code);
   assert.equal(report.ready, false);
   for (const code of ['PROCESS_PROGRESS_OBSERVER_REQUIRED', 'GATE_RECIPE_NOT_FOUND', 'GATE_SCRIPT_UNAVAILABLE', 'GATE_PACKAGE_SCRIPT_UNAVAILABLE', 'OS_SANDBOX_REQUIRED']) assert.equal(codes.includes(code), true, code);
+});
+
+test('Gate preflight accepts an installed required sandbox provider', async () => {
+  const host = new PluginHost();
+  host.register({ id: 'test-sandbox', kind: 'os-sandbox', version: '1.0.0', capabilities: [], permissions: [] }, { prepare: async launch => launch });
+  const report = await inspectProjectGateCapabilities({ project: { id: 'sandbox-project', gateRecipes: [{ id: 'sandboxed', executionClass: 'deterministic-process', scope: 'final', command: [process.execPath, '-e', 'process.exit(0)'], sandboxMode: 'required', sandboxPluginId: 'test-sandbox' }] }, workspaceRoot: process.cwd(), onProgress: () => {}, pluginHost: host });
+  assert.equal(report.ready, true);
 });
 
 test('new Gate nodes fail before process inspection unless classified as deterministic processes', async () => {

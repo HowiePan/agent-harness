@@ -34,9 +34,9 @@ Extension 注册核对完整制品清单、入口、版本和摘要；Project/Wo
 
 ## Gate Recipe
 
-Recipe 必填 `id`、`executionClass: deterministic-process` 和非空 `command`。可选字段为 `scope`（`feature`、`stable`、`final`）、`required`、`forceFresh`、`cwd`、`timeoutMs`、字符串环境变量、受管 `outputs`、`sandboxMode`、`sandboxPluginId` 和 `toolchainDigest`。工作目录必须留在执行工作区；进程必须有实时进度观察器；Gate 前后 Source digest 不一致会失败。
+Recipe 必填 `id`、`executionClass: deterministic-process` 和非空 `command`。可选字段为 `scope`（`feature`、`stable`、`final`）、`required`、`forceFresh`、`cwd`、`timeoutMs`、字符串环境变量、受管 `outputs`、`sandboxMode`、`sandboxPluginId`、`executorPluginId` 和 `toolchainDigest`。省略 `executorPluginId` 时使用内置进程执行器；指定时必须绑定已安装的 Gate Executor 插件。工作目录必须留在执行工作区；进程必须有实时进度观察器；Gate 前后 Source digest 不一致会失败。
 
-成功缓存同时绑定 Gate spec、Source、工具链、环境和插件摘要。正式 final Gate 应设置 `forceFresh`，关闭策略还会要求 fresh receipt。
+`feature` Gate 由 Feature 的 `gatePlan` 绑定，在该 Feature 完成后执行；其依赖 Feature 必须等待检查通过。必需的 `stable` Gate 在全部 Feature 完成后、final Gate 前执行。成功缓存绑定 Gate spec、Source、实际可执行文件摘要、环境、Policy 和插件摘要；跨 Run 命中缓存仍须为当前 Run 写入派生 Evidence，并保留原始 Evidence 引用。关闭策略要求当前 Source 上的 fresh final Receipt；原始 Gate 结果不能通过任意 JSON 直接提交。
 
 ## Run 关闭条件
 

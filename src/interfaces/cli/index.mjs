@@ -508,9 +508,7 @@ if (command === 'features' && subject === 'compile') {
     const output = await harness.kernel.recordDecision(state.projectId, state.runId, decision, { expectedRevision: state.revision, commandId: take('--command-id') ?? newId('command') });
     console.log(JSON.stringify({ ok: true, decision: output.result.decision, revision: output.state.revision }, null, 2));
   } else if (command === 'run' && subject === 'gate') {
-    const state = await harness.authorityStore.read(take('--project'), take('--run'));
-    const output = await harness.kernel.recordGate(state.projectId, state.runId, await jsonFile(take('--gate-result')), { expectedRevision: state.revision, commandId: take('--command-id') ?? newId('command') });
-    console.log(JSON.stringify({ ok: true, gate: output.result.gate, revision: output.state.revision }, null, 2));
+    throw Object.assign(new Error('Submit Gate results through run gates, which executes the pinned Recipe and verifies its Receipt.'), { code: 'DIRECT_GATE_RESULT_DENIED' });
   } else if (command === 'run' && subject === 'finding-open') {
     const state = await harness.authorityStore.read(take('--project'), take('--run'));
     const output = await harness.kernel.recordFinding(state.projectId, state.runId, await jsonFile(take('--finding')), { expectedRevision: state.revision, commandId: take('--command-id') ?? newId('command') });

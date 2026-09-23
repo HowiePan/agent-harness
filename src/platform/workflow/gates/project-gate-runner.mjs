@@ -1,4 +1,6 @@
 import { digestJson, newId } from '../../../common/canonical.mjs';
+import { createHash } from 'node:crypto';
+import { createReadStream } from 'node:fs';
 import { assert } from '../../../common/errors.mjs';
 import { EXECUTION_CLASSES, assertExecutionClass } from '../../execution/boundary.mjs';
 import { GateCache } from '../../../kernel/gate-cache.mjs';
@@ -11,6 +13,44 @@ import { constants } from 'node:fs';
 import { delimiter, isAbsolute, relative, resolve } from 'node:path';
 
 const manifest = Object.freeze({ id: 'project-process-gates', kind: 'gate-executor', version: '1.0.0', capabilities: ['process', 'success-cache', 'fresh-final', 'managed-outputs'], permissions: ['gate.execute'], execution: { outputs: DEFAULT_PROCESS_OUTPUTS, sandbox: { mode: 'optional' } } });
+const issuedGateSubmissions = new WeakSet();
+const issuedGateInvocations = new WeakSet();
+export const assertIssuedGateInvocation = spec => {
+  assert(spec && typeof spec === 'object' && issuedGateInvocations.has(spec), 'GATE_INVOCATION_UNTRUSTED', 'Gate Executor invocation must come from the Gate Runner.');
+  issuedGateInvocations.delete(spec);
+};
+export const assertIssuedGateSubmission = input => {
+  assert(input && typeof input === 'object' && issuedGateSubmissions.has(input), 'GATE_SUBMISSION_UNTRUSTED', 'Gate Authority updates require a result issued by the Gate Runner.');
+  issuedGateSubmissions.delete(input);
+};
+const fileDigest = path => new Promise((resolveDigest, reject) => {
+  const hash = createHash('sha256');
+  const stream = createReadStream(path);
+  stream.on('data', chunk => hash.update(chunk));
+  stream.on('error', reject);
+  stream.on('end', () => resolveDigest(hash.digest('hex')));
+});
+const toolchainInputs = async (recipe, cwd) => {
+  const name = recipe.command[0].split(/[\\/]/).at(-1).toLowerCase().replace(/\.(exe|cmd|bat)$/, '');
+  const args = recipe.command.slice(1);
+  const paths = [];
+  if (name === 'node' && !args.some(arg => ['-e', '--eval'].includes(arg))) {
+    const script = args.find(arg => !arg.startsWith('-'));
+    if (script) paths.push(script);
+  }
+  if (['powershell', 'pwsh'].includes(name)) {
+    const index = args.findIndex(arg => arg.toLowerCase() === '-file');
+    if (index >= 0 && args[index + 1]) paths.push(args[index + 1]);
+  }
+  if (['npm', 'pnpm', 'yarn'].includes(name)) paths.push('package.json', 'package-lock.json', 'pnpm-lock.yaml', 'yarn.lock');
+  const digests = [];
+  for (const path of paths) {
+    const resolved = isAbsolute(path) ? path : resolve(cwd, path);
+    try { digests.push({ path: resolved, digest: await fileDigest(resolved) }); }
+    catch (error) { if (error.code !== 'ENOENT') throw error; }
+  }
+  return digests;
+};
 
 const validateRecipe = recipe => {
   assert(recipe?.id && Array.isArray(recipe.command) && recipe.command.length > 0, 'GATE_RECIPE_INVALID', 'Gate Recipe requires an id and non-empty command array.');
@@ -61,11 +101,22 @@ const commandPrerequisiteIssues = async (recipe, cwd) => {
       }
     }
   }
-  if (recipe.sandboxMode === 'required') issues.push({ code: 'OS_SANDBOX_REQUIRED', message: `Gate ${recipe.id} requires an OS sandbox provider, but the Project Gate Runner has no bound provider.` });
   return issues;
 };
 
-export const inspectProjectGateCapabilities = async ({ project, workspaceRoot, scope = 'final', gateIds = [], onProgress = null } = {}) => {
+const sandboxPrerequisiteIssues = (recipe, pluginHost) => {
+  const issues = [];
+  if (recipe.sandboxMode === 'required') {
+    let available = false;
+    if (recipe.sandboxPluginId && pluginHost) {
+      try { available = pluginHost.get(recipe.sandboxPluginId, 'os-sandbox').manifest !== undefined; } catch {}
+    }
+    if (!available) issues.push({ code: 'OS_SANDBOX_REQUIRED', message: `Gate ${recipe.id} requires an installed OS sandbox provider.` });
+  }
+  return issues;
+};
+
+export const inspectProjectGateCapabilities = async ({ project, workspaceRoot, scope = 'final', gateIds = [], onProgress = null, pluginHost = null } = {}) => {
   const recipes = (project?.gateRecipes ?? []).map(validateRecipe).filter(recipe => recipe.scope === scope && (!gateIds.length || gateIds.includes(recipe.id)));
   const issues = [];
   if (typeof onProgress !== 'function') issues.push({ code: 'PROCESS_PROGRESS_OBSERVER_REQUIRED', message: 'Project Gate execution requires a live progress observer.' });
@@ -74,14 +125,18 @@ export const inspectProjectGateCapabilities = async ({ project, workspaceRoot, s
   const gates = [];
   for (const recipe of recipes) {
     const cwd = resolve(workspaceRoot, recipe.cwd ?? '.');
-    const executable = await executableAvailable(recipe.command[0], cwd);
+    const executable = recipe.executorPluginId ? null : await executableAvailable(recipe.command[0], cwd);
     const gateIssues = [];
     const relativeCwd = relative(resolve(workspaceRoot), cwd);
     if (relativeCwd.startsWith('..') || isAbsolute(relativeCwd)) gateIssues.push({ code: 'GATE_WORKING_DIRECTORY_OUTSIDE_WORKSPACE', message: `Gate ${recipe.id} working directory escapes the Project workspace: ${cwd}` });
     try { await access(cwd, constants.R_OK); }
     catch { gateIssues.push({ code: 'GATE_WORKING_DIRECTORY_UNAVAILABLE', message: `Gate ${recipe.id} working directory is unavailable: ${cwd}` }); }
-    if (!executable) gateIssues.push({ code: 'GATE_EXECUTABLE_UNAVAILABLE', message: `Gate ${recipe.id} executable is unavailable: ${recipe.command[0]}` });
-    gateIssues.push(...await commandPrerequisiteIssues(recipe, cwd));
+    if (!recipe.executorPluginId && !executable) gateIssues.push({ code: 'GATE_EXECUTABLE_UNAVAILABLE', message: `Gate ${recipe.id} executable is unavailable: ${recipe.command[0]}` });
+    if (recipe.executorPluginId) {
+      try { assert(pluginHost?.get(recipe.executorPluginId, 'gate-executor')?.manifest, 'GATE_EXECUTOR_UNAVAILABLE', 'Gate Executor is not installed.'); }
+      catch { gateIssues.push({ code: 'GATE_EXECUTOR_UNAVAILABLE', message: `Gate ${recipe.id} Executor is unavailable: ${recipe.executorPluginId}` }); }
+    } else gateIssues.push(...await commandPrerequisiteIssues(recipe, cwd));
+    gateIssues.push(...sandboxPrerequisiteIssues(recipe, pluginHost));
     issues.push(...gateIssues);
     gates.push({ id: recipe.id, ready: gateIssues.length === 0, command: [...recipe.command], cwd, executable, issues: gateIssues });
   }
@@ -98,16 +153,20 @@ export class ProjectGateRunner {
 
   async preflight({ projectId, scope = 'final', gateIds = [], workspaceRoot = null } = {}) {
     const project = await this.harness.projectRegistry.get(projectId);
-    return inspectProjectGateCapabilities({ project, workspaceRoot: workspaceRoot ?? project.workspace.root, scope, gateIds, onProgress: this.onProgress });
+    return inspectProjectGateCapabilities({ project, workspaceRoot: workspaceRoot ?? project.workspace.root, scope, gateIds, onProgress: this.onProgress, pluginHost: this.harness.pluginHost });
   }
 
-  async run({ projectId, runId, scope = 'final', forceFresh = false, gateIds = [] }) {
+  async run({ projectId, runId, scope = 'final', featureId = null, forceFresh = false, gateIds = [] }) {
     assert(typeof this.onProgress === 'function', 'PROCESS_PROGRESS_OBSERVER_REQUIRED', 'Project Gate execution requires a live progress observer.');
     const project = await this.harness.projectRegistry.get(projectId);
     let state = await this.harness.authorityStore.read(projectId, runId);
+    const currentPluginSetDigest = digestJson({ plugins: this.harness.pluginHost.snapshot().manifests, extensions: this.harness.extensionSet.installed });
+    assert(currentPluginSetDigest === state.pluginSetDigest, 'GATE_PLUGIN_SET_DRIFT', 'Installed Gate plugins differ from the Run plugin composition.');
     const workspaceRoot = state.metadata?.workspace?.root ?? project.workspace.root;
-    const recipes = (project.gateRecipes ?? []).map(validateRecipe).filter(recipe => recipe.scope === scope && (!gateIds.length || gateIds.includes(recipe.id)));
+    const recipes = (state.metadata?.gateRecipes ?? []).map(validateRecipe).filter(recipe => recipe.scope === scope && (!gateIds.length || gateIds.includes(recipe.id)));
     assert(recipes.length > 0, 'GATE_RECIPE_NOT_FOUND', `Project ${projectId} has no Gate Recipes for scope ${scope}.`);
+    for (const gateId of gateIds) assert(recipes.some(recipe => recipe.id === gateId), 'GATE_RECIPE_NOT_FOUND', `Project ${projectId} does not declare Gate ${gateId} for scope ${scope}.`);
+    assert(scope !== 'feature' || state.features.some(feature => feature.id === featureId && feature.state === 'completed'), 'GATE_FEATURE_INVALID', 'Feature Gate requires a completed Feature.');
     const host = new PluginHost({ allowedPermissions: ['gate.execute'] });
     host.register(manifest, createProcessGateExecutor({
       manifest,
@@ -121,34 +180,65 @@ export class ProjectGateRunner {
     const results = [];
     for (const recipe of recipes) {
       state = await this.harness.authorityStore.read(projectId, runId);
-      const before = await captureWorkspace(workspaceRoot, { excluded: project.workspace.excluded ?? [] });
+      const before = await captureWorkspace(workspaceRoot, { excluded: state.metadata?.workspace?.excluded ?? [] });
       assert(before.digest === state.sourceDigest, 'WORKSPACE_SOURCE_DRIFT', 'Workspace changed before Gate execution.', { authoritySourceDigest: state.sourceDigest, workspaceSourceDigest: before.digest });
-      const spec = { id: recipe.id, commandId: recipe.id, args: [] };
+      const spec = { id: recipe.id, commandId: recipe.id, args: [], recipe: structuredClone(recipe), projectId, runId, epoch: state.epoch, generation: state.generation, sourceDigest: state.sourceDigest, featureId };
       if (recipe.cwd !== undefined) spec.cwd = recipe.cwd;
       if (recipe.timeoutMs !== undefined) spec.timeoutMs = recipe.timeoutMs;
-      const specDigest = digestJson({ recipe, spec });
-      const toolchainDigest = recipe.toolchainDigest ?? digestJson({ executable: recipe.command[0], arguments: recipe.command.slice(1), node: process.version });
-      const cacheKey = { gateId: recipe.id, specDigest, sourceDigest: state.sourceDigest, toolchainDigest, environmentDigest: digestJson({ platform: process.platform, arch: process.arch }), pluginDigest: digestJson(manifest) };
+      const specDigest = digestJson({ recipe, featureId, command: recipe.command, cwd: recipe.cwd ?? '.', timeoutMs: recipe.timeoutMs ?? 300000 });
+      const executorPlugin = recipe.executorPluginId ? this.harness.pluginHost.get(recipe.executorPluginId, 'gate-executor').manifest : manifest;
+      const executable = recipe.executorPluginId ? null : await executableAvailable(recipe.command[0], resolve(workspaceRoot, recipe.cwd ?? '.'));
+      assert(recipe.executorPluginId || executable, 'GATE_EXECUTABLE_UNAVAILABLE', `Gate ${recipe.id} executable is unavailable.`);
+      const toolchainDigest = digestJson({ declared: recipe.toolchainDigest ?? null, executable, executableDigest: executable ? await fileDigest(executable) : null, inputs: recipe.executorPluginId ? [] : await toolchainInputs(recipe, resolve(workspaceRoot, recipe.cwd ?? '.')), executorPlugin });
+      const cacheKey = { gateId: recipe.id, specDigest, sourceDigest: state.sourceDigest, artifactDigest: state.artifactDigest, policyDigest: state.policyDigest, toolchainDigest, environmentDigest: digestJson({ platform: process.platform, arch: process.arch, inherited: process.env }), pluginDigest: digestJson({ executorPlugin, pluginSetDigest: state.pluginSetDigest, harnessDigest: state.metadata?.lifecycleExecution?.harnessArtifactDigest ?? this.harness.releaseIdentity.artifactDigest }) };
       const cached = await this.cache.get(cacheKey, { forceFresh: forceFresh || recipe.forceFresh === true });
       let status;
       let evidenceRefs;
       let executorReceipt = null;
+      let cacheOriginRef = null;
+      let after = before;
       if (cached.hit) {
-        this.onProgress({ gateId: recipe.id, phase: 'cache-hit', status: 'passed' });
-        status = 'passed';
-        evidenceRefs = cached.value.result.evidenceRefs;
+        cacheOriginRef = cached.value.result.evidenceRefs?.[0];
+        const origin = await this.harness.evidenceStore.read(cacheOriginRef);
+        const originBody = JSON.parse(origin.bytes.toString('utf8'));
+        assert(origin.metadata.sourceDigest === state.sourceDigest && origin.metadata.gateSpecDigest === specDigest && origin.metadata.toolchainDigest === toolchainDigest && originBody.status === 'passed' && originBody.executorReceipt?.payload?.status === 'passed', 'GATE_CACHE_EVIDENCE_INVALID', 'Cached Gate Evidence is not reusable.');
+        executorReceipt = originBody.executorReceipt;
+        after = await captureWorkspace(workspaceRoot, { excluded: state.metadata?.workspace?.excluded ?? [] });
+        status = after.digest === before.digest ? 'passed' : 'failed';
+        this.onProgress({ gateId: recipe.id, phase: 'cache-hit', status });
       } else {
-        executorReceipt = await host.invoke(manifest.id, 'execute', spec);
-        const after = await captureWorkspace(workspaceRoot, { excluded: project.workspace.excluded ?? [] });
+        if (recipe.executorPluginId) issuedGateInvocations.add(spec);
+        executorReceipt = recipe.executorPluginId ? await this.harness.invokeGateExecutor(recipe.executorPluginId, spec, { onProgress: this.onProgress }) : await host.invoke(manifest.id, 'execute', spec);
+        assert(executorReceipt.type === 'receipt' && executorReceipt.pluginId === executorPlugin.id && executorReceipt.pluginVersion === executorPlugin.version && executorReceipt.payload?.operation === 'gate' && executorReceipt.payload?.gateId === recipe.id && executorReceipt.payload?.specDigest === digestJson(spec) && ['passed', 'failed', 'environment-failed', 'budget-exceeded'].includes(executorReceipt.payload?.status), 'GATE_EXECUTOR_RECEIPT_INVALID', 'Gate Executor returned a mismatched Receipt.');
+        if (recipe.sandboxMode === 'required') assert(executorReceipt.payload.sandboxReceipt?.applied === true, 'GATE_SANDBOX_RECEIPT_REQUIRED', 'Required Gate sandbox was not applied.');
+        after = await captureWorkspace(workspaceRoot, { excluded: state.metadata?.workspace?.excluded ?? [] });
         status = after.digest === before.digest ? executorReceipt.payload.status : 'failed';
-        const evidence = await this.harness.evidenceStore.put({ recipe, executorReceipt, sourceBefore: before.digest, sourceAfter: after.digest, sourceDrift: after.digest !== before.digest }, { mediaType: 'application/json', projectId, ...(state.metadata?.workspaceRef ? { workspaceRef: state.metadata.workspaceRef } : {}), runId, epoch: state.epoch, generation: state.generation, sourceDigest: state.sourceDigest, artifactDigest: state.artifactDigest, policyDigest: state.policyDigest, pluginSetDigest: state.pluginSetDigest, toolchainDigest, gateSpecDigest: specDigest, labels: ['gate-result', `gate:${recipe.id}`] });
-        evidenceRefs = [evidence.ref];
-        if (status === 'passed') await this.cache.put(cacheKey, { status, evidenceRefs });
       }
+      assert(after.digest === before.digest || status === 'failed', 'GATE_SOURCE_DRIFT', 'Gate changed its source workspace.');
+      const evidence = await this.harness.evidenceStore.put({ recipe, spec, specDigest, status, executorPlugin: { id: executorPlugin.id, version: executorPlugin.version }, executorReceipt, sourceBefore: before.digest, sourceAfter: after.digest, sourceDrift: after.digest !== before.digest, cacheHit: cached.hit, cacheOriginRef }, { mediaType: 'application/json', projectId, ...(state.metadata?.workspaceRef ? { workspaceRef: state.metadata.workspaceRef } : {}), runId, epoch: state.epoch, generation: state.generation, sourceDigest: state.sourceDigest, artifactDigest: state.artifactDigest, policyDigest: state.policyDigest, pluginSetDigest: state.pluginSetDigest, toolchainDigest, gateSpecDigest: specDigest, labels: ['gate-result', `gate:${recipe.id}`] });
+      evidenceRefs = [evidence.ref];
+      if (status === 'passed' && !cached.hit) await this.cache.put(cacheKey, { status, evidenceRefs });
       state = await this.harness.authorityStore.read(projectId, runId);
-      const recorded = await this.harness.kernel.recordGate(projectId, runId, { id: recipe.id, scope, specDigest, sourceDigest: state.sourceDigest, toolchainDigest, status, evidenceRefs, forcedFresh: forceFresh || recipe.forceFresh === true, cacheHit: cached.hit }, { expectedRevision: state.revision, commandId: this.id('gate-record') });
+      const submission = { id: recipe.id, scope, featureId, specDigest, sourceDigest: state.sourceDigest, toolchainDigest, status, evidenceRefs, forcedFresh: !cached.hit, cacheHit: cached.hit };
+      issuedGateSubmissions.add(submission);
+      const recorded = await this.harness.recordVerifiedGate(projectId, runId, submission, { expectedRevision: state.revision, commandId: this.id('gate-record') });
       results.push({ id: recipe.id, status, cacheHit: cached.hit, evidenceRefs, executorReceipt, revision: recorded.state.revision });
     }
     return { projectId, runId, scope, forceFresh, results, state: await this.harness.authorityStore.read(projectId, runId) };
   }
 }
+
+export const runPendingFeatureGates = async ({ harness, projectId, runId, onProgress }) => {
+  const runner = new ProjectGateRunner({ harness, onProgress });
+  let state = await harness.authorityStore.read(projectId, runId);
+  const recipes = new Set((state.metadata?.gateRecipes ?? []).filter(recipe => recipe.scope === 'feature').map(recipe => recipe.id));
+  const failures = [];
+  for (const feature of state.features.filter(item => item.state === 'completed')) {
+    const ids = feature.gatePlan.filter(id => recipes.has(id) && !state.gates.some(gate => gate.id === id && gate.scope === 'feature' && gate.featureId === feature.id && gate.status === 'passed' && gate.sourceDigest === state.sourceDigest));
+    if (!ids.length) continue;
+    const result = await runner.run({ projectId, runId, scope: 'feature', featureId: feature.id, gateIds: ids, forceFresh: true });
+    state = result.state;
+    if (!result.results.every(gate => gate.status === 'passed')) failures.push({ featureId: feature.id, results: result.results });
+  }
+  return { ok: failures.length === 0, state, failures, results: failures.flatMap(item => item.results), featureId: failures[0]?.featureId ?? null };
+};

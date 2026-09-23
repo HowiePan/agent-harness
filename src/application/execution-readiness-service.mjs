@@ -168,9 +168,11 @@ export const createExecutionReadinessReport = async (context, planInput, { onGat
       add('active-leases', leaseIssues.length === 0, { count: activeLeases.length, observations }, leaseIssues);
     }
     const requiredGateIds = plan.stopCondition.requiredFinalGates ?? [];
-    if (requiredGateIds.length) {
-      const gateReport = await inspectProjectGateCapabilities({ project, workspaceRoot: plan.run.executionWorkspaceRoot, scope: 'final', gateIds: requiredGateIds, onProgress: onGateProgress });
-      add('gates', gateReport.ready, { gates: gateReport.gates }, gateReport.issues);
+    const featureGateIds = [...new Set((plan.run.features ?? []).flatMap(feature => feature.gatePlan ?? []))].filter(id => project.gateRecipes?.some(recipe => recipe.id === id && recipe.scope === 'feature'));
+    const stableGateIds = (project.gateRecipes ?? []).filter(recipe => recipe.scope === 'stable' && recipe.required !== false).map(recipe => recipe.id);
+    if (requiredGateIds.length || featureGateIds.length || stableGateIds.length) {
+      const reports = await Promise.all([['feature', featureGateIds], ['stable', stableGateIds], ['final', requiredGateIds]].filter(([, ids]) => ids.length).map(([scope, gateIds]) => inspectProjectGateCapabilities({ project, workspaceRoot: plan.run.executionWorkspaceRoot, scope, gateIds, onProgress: onGateProgress, pluginHost })));
+      add('gates', reports.every(report => report.ready), { gates: reports.flatMap(report => report.gates) }, reports.flatMap(report => report.issues));
     } else add('gates', true, { required: false });
   }
   let writeProbe = { attempted: false, ready: false, cleaned: true };

@@ -27,6 +27,7 @@ export const assertProjectDescriptorInput = (input, { strictIdentity = true } = 
   assert(Array.isArray(input.gateRecipes ?? []), 'PROJECT_GATE_RECIPES_INVALID', 'Project Descriptor gateRecipes must be an array.');
   assert((input.gateRecipes ?? []).every(value => value && typeof value === 'object' && !Array.isArray(value)), 'PROJECT_GATE_RECIPES_INVALID', 'Every Project gate recipe must be an object.');
   for (const recipe of input.gateRecipes ?? []) assertExecutionClass(recipe.executionClass, EXECUTION_CLASSES.DETERMINISTIC_PROCESS, { code: 'GATE_EXECUTION_CLASS_INVALID', subject: `Gate Recipe ${recipe.id ?? '<unknown>'}` });
+  assert(new Set((input.gateRecipes ?? []).map(recipe => recipe.id)).size === (input.gateRecipes ?? []).length, 'GATE_RECIPE_DUPLICATE', 'Gate Recipe IDs must be unique within a Project.');
   assert(Array.isArray(input.artifactProviders ?? []), 'PROJECT_ARTIFACT_PROVIDERS_INVALID', 'Project Descriptor artifactProviders must be an array.');
   assert(Array.isArray(input.workflows ?? []), 'PROJECT_WORKFLOWS_INVALID', 'Project Descriptor workflows must be an array.');
   const workflowIds = new Set();

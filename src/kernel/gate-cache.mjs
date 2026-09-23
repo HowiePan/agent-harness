@@ -5,7 +5,7 @@ import { assert } from '../common/errors.mjs';
 import { atomicWriteJson, readJson } from './atomic-io.mjs';
 import { assertHarnessWritePath } from '../common/write-boundary.mjs';
 
-export const gateCacheKey = input => digestJson({ gateId: input.gateId, specDigest: input.specDigest, sourceDigest: input.sourceDigest, toolchainDigest: input.toolchainDigest, lockDigest: input.lockDigest ?? null, environmentDigest: input.environmentDigest, pluginDigest: input.pluginDigest });
+export const gateCacheKey = input => digestJson({ gateId: input.gateId, specDigest: input.specDigest, sourceDigest: input.sourceDigest, artifactDigest: input.artifactDigest ?? null, policyDigest: input.policyDigest ?? null, toolchainDigest: input.toolchainDigest, lockDigest: input.lockDigest ?? null, environmentDigest: input.environmentDigest, pluginDigest: input.pluginDigest });
 
 export class GateCache {
   constructor({ root, controlRoot, now = () => new Date().toISOString() }) { this.root = assertHarnessWritePath(root, 'Gate cache root', controlRoot); this.directory = resolve(this.root, 'cache', 'gates'); this.now = now; }

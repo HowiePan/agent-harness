@@ -34,7 +34,7 @@ import { createWorkspaceLifecyclePlanner } from './workspace-lifecycle-planner.m
 import { assertHarnessWritePath, harnessControlRoot, harnessProjectRoot } from '../common/write-boundary.mjs';
 import { RunCoordinator } from '../platform/workflow/coordinator/run-coordinator.mjs';
 import { AUTO_CONCURRENCY, AUTO_CONCURRENCY_LIMIT, resolveConcurrencyLimit } from '../common/concurrency.mjs';
-import { ProjectGateRunner, inspectProjectGateCapabilities } from '../platform/workflow/gates/project-gate-runner.mjs';
+import { ProjectGateRunner, assertIssuedGateInvocation, assertIssuedGateSubmission, inspectProjectGateCapabilities } from '../platform/workflow/gates/project-gate-runner.mjs';
 import { assertAgentRuntimeCompatible, assertRuntimeTransportReceipt, resolveLifecycleExecutionPolicy } from '../platform/plugins/runtime/execution-policy.mjs';
 import { assertFreshVisibleObservation, isVisibleHostAdapter } from '../platform/plugins/runtime/visible-host-adapter.mjs';
 import { assertVisibleHostReceiptOwner, createVisibleHostBindings } from '../platform/plugins/runtime/visible-host-bindings.mjs';
@@ -114,7 +114,7 @@ export const createHarness = async ({ controlRoot: controlRootInput, dataRoot: d
   const extensionPacks = new Map(extensions.map(extension => [extension.id, extension]));
   const publicKernel = new Proxy(kernel, {
     get(target, property) {
-      if (['bindLease', 'heartbeat'].includes(property)) return async () => assert(false, property === 'heartbeat' ? 'DIRECT_HEARTBEAT_DENIED' : 'DIRECT_LEASE_BIND_DENIED', property === 'heartbeat' ? 'Heartbeat must use the policy-aware Harness recordHeartbeat API.' : 'Lease binding must use the policy-aware Harness bindDispatch API.');
+      if (['bindLease', 'heartbeat', 'recordGate'].includes(property)) return async () => assert(false, property === 'heartbeat' ? 'DIRECT_HEARTBEAT_DENIED' : property === 'bindLease' ? 'DIRECT_LEASE_BIND_DENIED' : 'DIRECT_GATE_RESULT_DENIED', property === 'heartbeat' ? 'Heartbeat must use the policy-aware Harness recordHeartbeat API.' : property === 'bindLease' ? 'Lease binding must use the policy-aware Harness bindDispatch API.' : 'Gate results must come from a verified Gate Runner.');
       const value = Reflect.get(target, property, target);
       return typeof value === 'function' ? value.bind(target) : value;
     },
@@ -419,6 +419,17 @@ export const createHarness = async ({ controlRoot: controlRootInput, dataRoot: d
       return executeHeadlessLifecyclePlan(serviceContext, api, planInput, options);
     },
 
+    async invokeGateExecutor(pluginId, spec, options = {}) {
+      assertIssuedGateInvocation(spec);
+      pluginHost.get(pluginId, 'gate-executor');
+      return pluginHost.invoke(pluginId, 'execute', spec, options);
+    },
+
+    async recordVerifiedGate(projectId, runId, input, command) {
+      assertIssuedGateSubmission(input);
+      return kernel.recordGate(projectId, runId, input, command);
+    },
+
     async executeVisibleLifecyclePlan(planInput, options) {
       return runVisibleLifecyclePlan(serviceContext, api, planInput, options);
     },
@@ -504,7 +515,7 @@ export const createHarness = async ({ controlRoot: controlRootInput, dataRoot: d
         }
         await verifyHeadlessExecutionGrant({ adapter: trustedExecutionAuthorizationAdapter, grant: executionGrant, context, manifest: runtimeManifest, now: kernel.now });
       }
-      return kernel.startRun({ ...input, profileConfig, policyDigest, sourceDigest: input.sourceDigest ?? snapshot.digest, pluginSetDigest: input.pluginSetDigest ?? installedCompositionDigest, metadata: { ...input.metadata, ...(lifecycleExecution ? { lifecycleExecution } : {}), workspace: structuredClone(workspace), projectDescriptorDigest: project.descriptorDigest, extensionSetDigest: extensionSet.digest } }, command);
+      return kernel.startRun({ ...input, profileConfig, policyDigest, sourceDigest: input.sourceDigest ?? snapshot.digest, pluginSetDigest: input.pluginSetDigest ?? installedCompositionDigest, metadata: { ...input.metadata, ...(lifecycleExecution ? { lifecycleExecution } : {}), workspace: structuredClone(workspace), gateRecipes: structuredClone(project.gateRecipes ?? []), projectDescriptorDigest: project.descriptorDigest, extensionSetDigest: extensionSet.digest } }, command);
     },
 
     async dispatch(projectId, runId, input, command) {
@@ -551,7 +562,12 @@ export const createHarness = async ({ controlRoot: controlRootInput, dataRoot: d
         return kernel.schedule(projectId, runId, { ...scheduledInput, executionByFeatureId }, command);
       }
       const activeFeatureIds = [...new Set([...state.leases.filter(lease => ['requested', 'active'].includes(lease.status)).map(lease => lease.featureId), ...state.dispatches.filter(dispatch => ['requested', 'assigned'].includes(dispatch.status)).map(dispatch => dispatch.featureId)])];
-      const strategy = await pluginHost.invoke(input.schedulerPluginId ?? manifests.scheduler.id, 'select', { revision: state.revision, features: state.features, activeFeatureIds, limit: schedulingLimit, deniedFeatureIds: [] });
+      const featureGateIds = new Set((state.metadata?.gateRecipes ?? []).filter(recipe => recipe.scope === 'feature').map(recipe => recipe.id));
+      const deniedFeatureIds = state.features.filter(feature => feature.dependsOn.some(id => {
+        const dependency = state.features.find(item => item.id === id);
+        return dependency?.gatePlan.some(gateId => featureGateIds.has(gateId) && !state.gates.some(gate => gate.id === gateId && gate.scope === 'feature' && gate.featureId === id && gate.status === 'passed' && gate.sourceDigest === state.sourceDigest));
+      })).map(feature => feature.id);
+      const strategy = await pluginHost.invoke(input.schedulerPluginId ?? manifests.scheduler.id, 'select', { revision: state.revision, features: state.features, activeFeatureIds, limit: schedulingLimit, deniedFeatureIds });
       const executionByFeatureId = {};
       const modelRouterPluginId = input.modelRouterPluginId ?? project.policy?.modelRouterPlugin ?? null;
       const toolBrokerPluginId = input.toolBrokerPluginId ?? project.policy?.toolBrokerPlugin ?? null;
