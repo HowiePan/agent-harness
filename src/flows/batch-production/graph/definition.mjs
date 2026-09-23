@@ -1,12 +1,11 @@
 import { defineWorkflowDefinition } from '../../../platform/workflow/definition.mjs';
+import { withDeps } from '../../../flow-kit/primitives.mjs';
 import { rulesNode } from '../nodes/rules/index.mjs';
 import { produceNode } from '../nodes/produce/index.mjs';
 import { qualityNode } from '../nodes/quality/index.mjs';
 import { reviewNode } from '../nodes/review/index.mjs';
 import { acceptNode } from '../nodes/accept/index.mjs';
 import { launchNode, closeNode } from '../nodes/lifecycle/index.mjs';
-
-const withDeps = (node, dependsOn) => ({ ...node, dependsOn });
 
 export const createBatchProductionWorkflowDefinition = ({ id = 'batch-production', profileId = 'batch-production' } = {}) => defineWorkflowDefinition({
   id,

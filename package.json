@@ -66,6 +66,7 @@
     "workflow:canary": "node scripts/workflow-canary.mjs",
     "workspace:canary": "node scripts/workspace-canary.mjs",
     "check": "node scripts/check-project.mjs",
+    "check:context-budget": "node scripts/check-context-budget.mjs",
     "check:clean-room": "node scripts/check-clean-room.mjs",
     "check:residue": "node scripts/check-residue.mjs",
     "build:release-metadata": "node scripts/build-release-metadata.mjs",

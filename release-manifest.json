@@ -302,8 +302,8 @@
     },
     {
       "path": "docs/overview/project.md",
-      "sha256": "f0ced899a5767cc9c18a653d641064dfa1d75e81ac6c979b4e2867ed56c53b54",
-      "size": 6090
+      "sha256": "1bced40a32a05b1b10cc3d0881ad6842df69bf7ede0262944e2ee302f27fc1a8",
+      "size": 6469
     },
     {
       "path": "docs/README.md",
@@ -502,8 +502,8 @@
     },
     {
       "path": "package.json",
-      "sha256": "6da849d230f3105971649299eccbc11b58e36328c7f121f475303b4d95760277",
-      "size": 4268
+      "sha256": "b4775f0bebcd1ed9f55784879f3054095013c328bb6427f4692b68dd0650649f",
+      "size": 4337
     },
     {
       "path": "plugins/codex-cli-runtime.plugin.json",
@@ -552,8 +552,8 @@
     },
     {
       "path": "README.md",
-      "sha256": "91f4428e75aa59913c9a7ffbbead31de5d66c86931d92ea49174197dfa929fd1",
-      "size": 2067
+      "sha256": "81c3137affe227793aa2c6e09889b3f631c5d5a6541590909d31aa3c0ed42caf",
+      "size": 2261
     },
     {
       "path": "schemas/authority.schema.json",
@@ -647,8 +647,8 @@
     },
     {
       "path": "schemas/issue-triage-input.schema.json",
-      "sha256": "d572f6598520d860a231313cda1648b580123addbe1466e8c20b449643202200",
-      "size": 1286
+      "sha256": "a9ab7fb5aeef7443b5b7e1d9e63f95c1bab3c3d3c32a7f5d90f2bcc2101735d0",
+      "size": 1298
     },
     {
       "path": "schemas/issue-triage-state.schema.json",
@@ -756,14 +756,19 @@
       "size": 2264
     },
     {
+      "path": "schemas/workflow-profile.schema.json",
+      "sha256": "2d8430e85ff0d6c8ffa472a88bf3a25b9356977b7c8afb549c73ff9fe7c776d4",
+      "size": 1570
+    },
+    {
       "path": "schemas/workspace-descriptor.schema.json",
       "sha256": "ae79b6b98f2ef48125386bbe87457e30b6c5648e25a0b5b5d6304b5b02e857e4",
       "size": 4801
     },
     {
       "path": "scripts/check-context-budget.mjs",
-      "sha256": "e06ac6949ccac59ed865da1dc98df50568c5ddae813a9bffd4c76fee42416549",
-      "size": 2489
+      "sha256": "3abf9bd267a49d04edb3feedc6253781b15c05d82ed9fda94890541d3134588b",
+      "size": 2520
     },
     {
       "path": "scripts/workflow-canary.mjs",
@@ -796,24 +801,34 @@
       "size": 9297
     },
     {
+      "path": "src/application/execution-readiness-service.mjs",
+      "sha256": "cbf104d3b96c98013ec1eab6b5a39dc6c15c0fc1b2d7674b13b2f0177a6123e9",
+      "size": 16871
+    },
+    {
       "path": "src/application/execution-readiness.mjs",
       "sha256": "592f03cc094aa95c2e8f0e7a72ef7634d2b670c10f081221cd855d2ebd2d411e",
       "size": 2908
     },
     {
       "path": "src/application/harness.mjs",
-      "sha256": "dd1f9d2925288ffabd716a602528f30e02e0d6de765d3a77101263ba73be75c4",
-      "size": 98495
+      "sha256": "961fd6b3098332a83add8dd04f1326477585232f474627f9049415dd2bc5937a",
+      "size": 71155
     },
     {
       "path": "src/application/installation.mjs",
-      "sha256": "b6e56ef8480794baf93a654d801842152bc87ebc3a2e822cb926f57b902134fb",
-      "size": 2656
+      "sha256": "c2256fa74ce57d89dfea6f87116383ba7f7d83b1ab0fd69acb7a8df95468d7a2",
+      "size": 2507
     },
     {
       "path": "src/application/lifecycle-command-plan.mjs",
       "sha256": "d69ddafeeca2df8a83dfce4bf0dfe64ac28295436b5a1fe2d56dc20c1fd99795",
       "size": 12191
+    },
+    {
+      "path": "src/application/lifecycle-execution-service.mjs",
+      "sha256": "38e4febc8f75c9484690adacec9c0a2743444c35a853b3bc319fc1a0f308cf6d",
+      "size": 12546
     },
     {
       "path": "src/application/lineage.mjs",
@@ -882,13 +897,13 @@
     },
     {
       "path": "src/common/write-boundary.mjs",
-      "sha256": "30fa83155aec17a4a009c7be83d70466f52e472def1bd0308e87fcc6fc72bb3b",
-      "size": 3759
+      "sha256": "ee871d92a81833b5a69ee58b3bfdddd2d7bc0bda8b4aa55e40fde546fa07f7af",
+      "size": 3766
     },
     {
       "path": "src/flow-kit/primitives.mjs",
-      "sha256": "bc7e3591f46ba20474d6046de0e4dd4e103bd04046c2bc7f755e47d64f5402d4",
-      "size": 1573
+      "sha256": "a60725bc25a347b927829f1209e62ae331cb1662431cabd154d5ae1d22edef1a",
+      "size": 1967
     },
     {
       "path": "src/flow-kit/profiles/feature-delivery.mjs",
@@ -906,14 +921,19 @@
       "size": 2764
     },
     {
+      "path": "src/flow-kit/schema.mjs",
+      "sha256": "939aab2652c0917eaa299f9eadcba8ca6ca1b3b8498620e67959d48d7d7d53b7",
+      "size": 161
+    },
+    {
       "path": "src/flows/batch-production/commands.mjs",
       "sha256": "c852ddd40a963ea10a47af65652f41a05f150c8ce2095f774f5908421890fa55",
       "size": 2389
     },
     {
       "path": "src/flows/batch-production/contracts/index.mjs",
-      "sha256": "2909e5a6faf45c839496ea7fc7e692bd87c5e70fc44cb1bbd6cfff97c64ff3ff",
-      "size": 1469
+      "sha256": "ad064665cdb4a6fb8a2fb3ea394c2dcb6bdb7638f9f08cb2e980815987935ce5",
+      "size": 1467
     },
     {
       "path": "src/flows/batch-production/descriptor.mjs",
@@ -927,8 +947,8 @@
     },
     {
       "path": "src/flows/batch-production/graph/definition.mjs",
-      "sha256": "c9153cbcb4488b9eb53c9a7a58465b1960d9214c702f093223fa0d26a46e913f",
-      "size": 1120
+      "sha256": "0ec0f00f6ebc2803d987763bb17b7c30fa702e77d270bd48633e82112b81d430",
+      "size": 1116
     },
     {
       "path": "src/flows/batch-production/index.mjs",
@@ -977,8 +997,8 @@
     },
     {
       "path": "src/flows/batch-production/planner.mjs",
-      "sha256": "6f1df9a35d3be7cee50231808c53821f4384a0da41e0916dc39d94c763180e8e",
-      "size": 5344
+      "sha256": "ad86a32a0dcdb27b7f6830949ac35852e832da0a9f1b9411461b107398968c08",
+      "size": 5086
     },
     {
       "path": "src/flows/batch-production/policy/batch-production.mjs",
@@ -997,8 +1017,8 @@
     },
     {
       "path": "src/flows/delivery-lifecycle/contracts/index.mjs",
-      "sha256": "39d19d62ae8655b1647068d0a516d9883c800236b58d3c12fb9e863ac0ac01ef",
-      "size": 1911
+      "sha256": "c40037c796d48c367cfc9e6987e7e322bac05a3ef504a492a2aa2e8b8ad56520",
+      "size": 1909
     },
     {
       "path": "src/flows/delivery-lifecycle/descriptor.mjs",
@@ -1012,8 +1032,8 @@
     },
     {
       "path": "src/flows/delivery-lifecycle/graph/definition.mjs",
-      "sha256": "5d173280f6023cd74279fb67623435f2ea5bd4c64432057b2111c1473205457b",
-      "size": 1469
+      "sha256": "a12d4f4f6b76eca8880d9f35421ee017a49015ea58b8dd79b0587423bc009c1b",
+      "size": 1465
     },
     {
       "path": "src/flows/delivery-lifecycle/index.mjs",
@@ -1072,8 +1092,8 @@
     },
     {
       "path": "src/flows/delivery-lifecycle/planner.mjs",
-      "sha256": "a190ad1848c7155ebf6c1a68d5aa0f59b92e0fef8a0c525d7db3c3b114d21cd1",
-      "size": 4273
+      "sha256": "312b29e887346b00ccbe90357b81cae89b5d2cd43602075ebc2e1ff1cc6c7726",
+      "size": 4015
     },
     {
       "path": "src/flows/delivery-lifecycle/policy/delivery-lifecycle.mjs",
@@ -1097,8 +1117,8 @@
     },
     {
       "path": "src/flows/knowledge-qa/contracts/index.mjs",
-      "sha256": "702b704f4d4f6e6350c6a3ac4adb57a00971f228fba369bf1a1e503c91fc6a0c",
-      "size": 1218
+      "sha256": "a1c4892ff13480e80168aa8cd96ccea6fc8abd8770c11f0dbacfde684ac20174",
+      "size": 1241
     },
     {
       "path": "src/flows/knowledge-qa/extension.mjs",
@@ -1162,8 +1182,8 @@
     },
     {
       "path": "src/flows/requirements-design/contracts/index.mjs",
-      "sha256": "a8ed4ea0fe6cb8b79162196c9004d56d17103f148d731c13ec67997ece9482a5",
-      "size": 1884
+      "sha256": "9944f023e23503664c9f09a62f49cbffad2263de004fef470af7bfb6c03c51f0",
+      "size": 1883
     },
     {
       "path": "src/flows/requirements-design/extension.mjs",
@@ -1282,8 +1302,8 @@
     },
     {
       "path": "src/kernel/work-graph.mjs",
-      "sha256": "7bea66f39197d766f40d0e7933240304afb226bf0b1f50d257a852a5208c2f8a",
-      "size": 5903
+      "sha256": "fd53ac66d41d405102536510c51b362e6c4316462373c8f6694375118b9a3bac",
+      "size": 5885
     },
     {
       "path": "src/platform/execution/authorization.mjs",
@@ -1621,7 +1641,7 @@
       "size": 19877
     }
   ],
-  "packageDigest": "c2b873d4e0b54e0bd454de8f46e0aa978819971f5de1269a2c1764817aacd85f",
+  "packageDigest": "3a00e46137b86596a5b44af22ed47d8456f39f63268f11cf928c00243ede8bd6",
   "metadataFiles": [
     "release-manifest.json",
     "sbom.spdx.json"

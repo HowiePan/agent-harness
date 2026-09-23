@@ -7,7 +7,7 @@ import { assertNoLinkPath } from './paths.mjs';
 export const harnessProjectRoot = () => resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
 
 const installationMarker = '.agent-harness-installation.json';
-const insideOrEqual = (root, target) => {
+export const insideOrEqual = (root, target) => {
   const rel = relative(root, target);
   return rel === '' || (!rel.startsWith('..') && !isAbsolute(rel));
 };

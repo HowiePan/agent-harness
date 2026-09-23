@@ -1,3 +1,5 @@
+import { stringSchema as string, stringsSchema as strings } from '../../../flow-kit/schema.mjs';
+
 export const requirementsPorts = Object.freeze({
   facts: 'source-facts-v1',
   requirements: 'requirements-v1',
@@ -9,8 +11,6 @@ export const requirementsPorts = Object.freeze({
   knowledge: 'memory-candidates-v1',
 });
 
-const string = { type: 'string', minLength: 1 };
-const strings = { type: 'array', items: string };
 export const requirementsValueSchemas = Object.freeze({
   'source-facts-v1': { type: 'object', required: ['text', 'sourceId'], properties: { text: string, sourceId: string }, additionalProperties: true },
   'requirements-v1': { type: 'object', required: ['facts'], properties: { facts: strings }, additionalProperties: true },

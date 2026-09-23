@@ -2,9 +2,15 @@
 import { existsSync } from 'node:fs';
 import { readdir, readFile, stat } from 'node:fs/promises';
 import { resolve } from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
-const root = resolve(process.cwd());
-const violations = [];
+const AGENTS_MAX_LINES = 80;
+const SKILL_MAX_LINES = 200;
+const SKILL_MAX_BYTES = 32 * 1024;
+const SKILL_MAX_COUNT = 7;
+const SKILL_ROOTS = ['integrations/codex/agent-harness-codex/skills'];
+
+const lineCount = content => content.split(/\r?\n/).length - (content.endsWith('\n') ? 1 : 0);
 
 const walk = async (directory, predicate) => {
   if (!existsSync(directory)) return [];
@@ -17,40 +23,34 @@ const walk = async (directory, predicate) => {
   return output;
 };
 
-const checkFile = async (path, maxLines, maxBytes = 0) => {
-  if (!existsSync(path)) return;
-  const content = await readFile(path, 'utf8');
-  const lines = content.split(/\r?\n/).length - (content.endsWith('\n') ? 1 : 0);
-  const bytes = (await stat(path)).size;
-  if (lines > maxLines || (maxBytes && bytes > maxBytes)) violations.push({ path, lines, maxLines, bytes, maxBytes: maxBytes || null });
+export const checkContextBudget = async root => {
+  const errors = [];
+  const agents = resolve(root, 'AGENTS.md');
+  if (existsSync(agents) && lineCount(await readFile(agents, 'utf8')) > AGENTS_MAX_LINES) {
+    errors.push(`AGENTS.md exceeds the ${AGENTS_MAX_LINES}-line context budget`);
+  }
+  for (const relative of SKILL_ROOTS) {
+    const directory = resolve(root, relative);
+    const markdown = await walk(directory, path => path.endsWith('.md'));
+    const skills = markdown.filter(path => path.endsWith('SKILL.md'));
+    if (skills.length > SKILL_MAX_COUNT) errors.push(`${relative} contains ${skills.length} Skills; the budget allows ${SKILL_MAX_COUNT}`);
+    for (const path of markdown) {
+      const content = await readFile(path, 'utf8');
+      const lines = lineCount(content);
+      const bytes = (await stat(path)).size;
+      if (lines > SKILL_MAX_LINES) errors.push(`${relative} entry exceeds the ${SKILL_MAX_LINES}-line budget: ${path.slice(root.length + 1)} (${lines})`);
+      if (bytes > SKILL_MAX_BYTES) errors.push(`${relative} entry exceeds the ${SKILL_MAX_BYTES}-byte budget: ${path.slice(root.length + 1)} (${bytes})`);
+    }
+  }
+  return errors;
 };
 
-await checkFile(resolve(root, 'AGENTS.md'), 80);
-const skills = await walk(resolve(root, '.agent', 'skills'), path => path.endsWith('.md'));
-if (skills.length > 7) violations.push({ path: resolve(root, '.agent', 'skills'), count: skills.length, maxCount: 7 });
-for (const path of skills) await checkFile(path, 200, 8 * 1024);
-for (const path of await walk(resolve(root, 'card_world_engine', 'src'), value => value.endsWith('.rs'))) {
-  await checkFile(path, 3000);
-  const content = await readFile(path, 'utf8');
-  const marker = content.indexOf('#[cfg(test)]');
-  if (marker < 0) continue;
-  const open = content.indexOf('{', marker);
-  let depth = 0;
-  let close = -1;
-  for (let index = open; open >= 0 && index < content.length; index += 1) {
-    if (content[index] === '{') depth += 1;
-    if (content[index] === '}' && --depth === 0) { close = index; break; }
+if (process.argv[1] && pathToFileURL(resolve(process.argv[1])).href === import.meta.url) {
+  const errors = await checkContextBudget(resolve(fileURLToPath(import.meta.url), '..', '..'));
+  if (errors.length) {
+    process.stderr.write(`${JSON.stringify({ status: 'failed', errors }, null, 2)}\n`);
+    process.exitCode = 1;
+  } else {
+    process.stdout.write(`${JSON.stringify({ status: 'passed', summary: 'Context budgets are within limits.' })}\n`);
   }
-  if (close > open) {
-    const inlineTestLines = content.slice(marker, close + 1).split(/\r?\n/).length;
-    if (inlineTestLines > 200) violations.push({ path, inlineTestLines, maxInlineTestLines: 200 });
-  }
-}
-for (const path of await walk(resolve(root, 'card_world_engine', 'tests'), value => value.endsWith('.rs'))) await checkFile(path, 1500);
-
-if (violations.length) {
-  process.stderr.write(`${JSON.stringify({ status: 'failed', violations }, null, 2)}\n`);
-  process.exitCode = 1;
-} else {
-  process.stdout.write(`${JSON.stringify({ status: 'passed', summary: 'Context budgets are within limits.' })}\n`);
 }

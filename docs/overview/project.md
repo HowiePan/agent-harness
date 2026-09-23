@@ -45,3 +45,5 @@ Harness 不能自行批准受保护动作、猜测未绑定的项目或 Workflow
 ## 当前验证范围
 
 本地合成 Canary 已通过命令解析、Workspace 绑定、Plan、预检、Dispatch、Submission、Gate/Decision 和关闭路径运行四条流程，并验证两个工作区、同一工作区多项目、来源及记忆隔离、增仓、撤权和回滚。它证明 Harness 协议和参考执行路径可闭环。真实 Codex 宿主在真实业务仓的执行质量、旧 Run 切换、远端发布和签名仍分别需要现场 Gate 与所有者决定。当前版本是 `1.0.0` 的 Migration Code Ready 候选。
+
+这里存在两条不可互相替代的就绪轴：**仓库与打包就绪**已达成（`check`、测试、干净室与本地候选全部通过）；**真实主机与业务就绪**尚未达成，真实 Codex 主机质量链当前受阻（G2 未通过），详见 `issues/quality-repair-execution-status-2026-09-20.md`。仓库候选通过不构成真实主机或业务准出。

@@ -1,0 +1,34 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-harness.local/schemas/workflow-profile.schema.json",
+  "title": "Agent Harness Workflow Profile",
+  "type": "object",
+  "required": ["id", "version", "stages", "quality"],
+  "properties": {
+    "id": { "type": "string", "minLength": 1 },
+    "version": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$" },
+    "stages": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "type": "string", "minLength": 1 } },
+    "quality": {
+      "type": "object",
+      "required": ["blockingSeverities", "allowCurrentDebt"],
+      "properties": {
+        "blockingSeverities": { "type": "array", "uniqueItems": true, "items": { "enum": ["P0", "P1", "P2", "P3"] } },
+        "allowCurrentDebt": { "type": "boolean" }
+      },
+      "additionalProperties": false
+    },
+    "decisions": { "type": "array", "uniqueItems": true, "items": { "type": "string", "minLength": 1 } },
+    "concurrency": {
+      "type": "object",
+      "properties": {
+        "maxLogicalItems": { "type": "integer", "minimum": 1, "maximum": 100 },
+        "maxLogicalGames": { "type": "integer", "minimum": 1, "maximum": 100 },
+        "physicalConcurrency": { "type": "string", "minLength": 1 }
+      },
+      "additionalProperties": false
+    },
+    "barriers": { "type": "array", "uniqueItems": true, "items": { "type": "string", "minLength": 1 } },
+    "acceptance": { "type": "array", "uniqueItems": true, "items": { "type": "string", "minLength": 1 } }
+  },
+  "additionalProperties": false
+}

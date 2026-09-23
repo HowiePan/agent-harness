@@ -12,7 +12,7 @@ export const normalizeFeature = feature => ({
   kind: String(feature.kind ?? 'implementation'),
   ownerRole: String(feature.ownerRole ?? 'worker'),
   logicalRoot: String(feature.logicalRoot ?? feature.id ?? ''),
-  laneId: String(feature.laneId ?? feature.gameId ?? feature.ownerRole ?? 'default'),
+  laneId: String(feature.laneId ?? feature.ownerRole ?? 'default'),
   ...(feature.task ? { task: structuredClone(defineNodeTaskContract(feature.task)) } : {}),
   acceptance: list(feature.acceptance),
   steps: Array.isArray(feature.steps) ? feature.steps.map((step, index) => ({ id: String(step.id ?? `step-${index + 1}`), title: String(step.title ?? step.id ?? `Step ${index + 1}`) })) : [],

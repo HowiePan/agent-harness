@@ -2,7 +2,7 @@
 
 Agent Harness 是业务仓库之外的持久化 Agent 流程控制面。它用 Workspace 绑定项目、来源、资源与版本化 Workflow，由 Kernel 管理调度、证据、Gate、人工决定和恢复。业务方可以实现自己的流程和 Runtime，而无需改动 Kernel。
 
-当前 V1.0.0 为 Migration Code Ready 候选；真实业务 Run 切换、远端发布、签名和旧文件清理由各自 Gate 与所有者决定。
+当前 V1.0.0 为 Migration Code Ready 候选；真实业务 Run 切换、远端发布、签名和旧文件清理由各自 Gate 与所有者决定。仓库与打包链路就绪，但真实 Codex 主机质量链当前受阻（G2 未通过），详见 `issues/quality-repair-execution-status-2026-09-20.md`；两条就绪轴不可互相替代。
 
 ## 已实现流程
 

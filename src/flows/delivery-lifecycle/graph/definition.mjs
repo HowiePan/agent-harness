@@ -1,4 +1,5 @@
 import { defineWorkflowDefinition } from '../../../platform/workflow/definition.mjs';
+import { withDeps } from '../../../flow-kit/primitives.mjs';
 import { intakeNode, canonicalNode } from '../nodes/intake/index.mjs';
 import { planNode } from '../nodes/plan/index.mjs';
 import { implementNode } from '../nodes/implement/index.mjs';
@@ -7,8 +8,6 @@ import { docsNode } from '../nodes/docs/index.mjs';
 import { qualityNode } from '../nodes/quality/index.mjs';
 import { reviewNode } from '../nodes/review/index.mjs';
 import { deliverNode } from '../nodes/deliver/index.mjs';
-
-const withDeps = (node, dependsOn) => ({ ...node, dependsOn });
 
 export const createDeliveryWorkflowDefinition = ({ id = 'delivery-lifecycle', profileId = 'delivery-lifecycle' } = {}) => defineWorkflowDefinition({
   id,

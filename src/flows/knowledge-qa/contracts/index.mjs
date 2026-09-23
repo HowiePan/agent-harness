@@ -1,8 +1,9 @@
+import { stringSchema as string } from '../../../flow-kit/schema.mjs';
+
 export const qaPorts = Object.freeze({
   question: 'question-v1', match: 'memory-match-v1', candidate: 'qa-candidate-v1', answer: 'qa-answer-v1', clarification: 'qa-clarification-v1',
 });
 
-const string = { type: 'string', minLength: 1 };
 export const qaValueSchemas = Object.freeze({
   'question-v1': { type: 'object', required: ['question', 'revision'], properties: { question: string, revision: { type: 'integer', minimum: 1 } }, additionalProperties: true },
   'memory-match-v1': { type: 'object', required: ['hit'], properties: { hit: { type: 'boolean' } }, additionalProperties: true },

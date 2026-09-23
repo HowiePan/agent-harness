@@ -1,3 +1,5 @@
+import { stringSchema as string, stringsSchema as strings } from '../../../flow-kit/schema.mjs';
+
 export const deliveryWorkflowId = 'delivery-lifecycle';
 export const deliveryProfileId = 'delivery-lifecycle';
 
@@ -12,9 +14,6 @@ export const deliveryPorts = Object.freeze({
   review: 'delivery-review-v1',
   deliver: 'delivery-receipt-v1',
 });
-
-const string = { type: 'string', minLength: 1 };
-const strings = { type: 'array', items: string };
 
 export const deliveryValueSchemas = Object.freeze({
   'delivery-intake-v1': { type: 'object', required: ['requirements'], properties: { requirements: strings }, additionalProperties: true },

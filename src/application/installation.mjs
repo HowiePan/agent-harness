@@ -1,13 +1,8 @@
 import { mkdir } from 'node:fs/promises';
-import { isAbsolute, relative, resolve } from 'node:path';
+import { relative, resolve } from 'node:path';
 import { atomicWriteJson, readJson } from '../kernel/atomic-io.mjs';
 import { assert } from '../common/errors.mjs';
-import { harnessProjectRoot, installationMarkerName } from '../common/write-boundary.mjs';
-
-const insideOrEqual = (root, target) => {
-  const rel = relative(root, target);
-  return rel === '' || (!rel.startsWith('..') && !isAbsolute(rel));
-};
+import { harnessProjectRoot, insideOrEqual, installationMarkerName } from '../common/write-boundary.mjs';
 
 export const initializeHarnessInstallation = async ({ controlRoot, now = () => new Date().toISOString() }) => {
   assert(controlRoot, 'HARNESS_CONTROL_ROOT_REQUIRED', 'Installation initialization requires an explicit standalone control root.');

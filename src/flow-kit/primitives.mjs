@@ -3,6 +3,15 @@ import { openBlockingFindings } from '../kernel/quality.mjs';
 
 export const approvalSatisfied = (state, decisionId, expected = 'approved') => state.decisions.some(decision => decision.id === decisionId && decision.decision === expected);
 
+export const withDeps = (node, dependsOn) => ({ ...node, dependsOn });
+
+export const resolveStageGates = (gateBindings, action) => {
+  const configured = gateBindings?.[action];
+  if (Array.isArray(configured)) return configured;
+  if (configured && typeof configured === 'object') return [...(configured.pre ?? []), ...(configured.post ?? []), ...(configured.final ?? [])];
+  return null;
+};
+
 export const orderedBarrier = ({ currentId, entries, isClosed = entry => entry.status === 'closed' }) => {
   const current = entries.find(entry => entry.id === currentId);
   assert(current, 'BARRIER_CURRENT_UNKNOWN', `Barrier entry not found: ${currentId}`);

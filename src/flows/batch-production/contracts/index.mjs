@@ -1,3 +1,5 @@
+import { stringSchema as string, stringsSchema as strings } from '../../../flow-kit/schema.mjs';
+
 export const batchWorkflowId = 'batch-production';
 export const batchProfileId = 'batch-production';
 
@@ -10,9 +12,6 @@ export const batchPorts = Object.freeze({
   launch: 'batch-launch-v1',
   close: 'batch-close-v1',
 });
-
-const string = { type: 'string', minLength: 1 };
-const strings = { type: 'array', items: string };
 
 export const batchValueSchemas = Object.freeze({
   'batch-rules-v1': { type: 'object', required: ['ready'], properties: { ready: { type: 'boolean' } }, additionalProperties: true },

@@ -7,12 +7,14 @@ import { assertSchemaDefinition, validateJsonSchema } from '../src/common/json-s
 import { createDeliveryProjectDescriptor } from '../src/flows/delivery-lifecycle/descriptor.mjs';
 import { validateReleaseVersionContract } from './release-version-contract.mjs';
 import { checkFlowStructure } from './check-flow-structure.mjs';
+import { checkContextBudget } from './check-context-budget.mjs';
 import { checkCurrentDocs } from './check-current-docs.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const packageJson = JSON.parse(await readFile(resolve(root, 'package.json'), 'utf8'));
 const errors = [];
 errors.push(...await checkFlowStructure(root));
+errors.push(...await checkContextBudget(root));
 errors.push(...await checkCurrentDocs(root));
 const schemas = new Map();
 if (packageJson.version !== '1.0.0') errors.push('package version must be 1.0.0');
@@ -65,6 +67,9 @@ for (const directory of ['profiles', 'plugins']) {
         if (!schemaResult.valid) errors.push(`plugin manifest violates Schema: plugins/${name}: ${schemaResult.errors.join('; ')}`);
         if (!value.entry) errors.push(`plugin manifest has no entry: plugins/${name}`);
         else try { await access(resolve(root, directory, value.entry)); } catch { errors.push(`plugin manifest entry is missing: plugins/${name} -> ${value.entry}`); }
+      } else {
+        const schemaResult = validateJsonSchema(value, schemas.get('workflow-profile.schema.json'), { schemas });
+        if (!schemaResult.valid) errors.push(`workflow profile violates Schema: profiles/${name}: ${schemaResult.errors.join('; ')}`);
       }
     } catch (error) { errors.push(`invalid JSON/contract: ${directory}/${name}: ${error.code ?? error.message}`); }
   }
@@ -101,7 +106,7 @@ const extensionFiles = [{ path: 'extension.mjs', sha256: exactDigest, size: 1 }]
 const extensionArtifact = { protocolVersion: '1.0', id: 'schema-probe', version: packageJson.version, entry: 'extension.mjs', files: extensionFiles, artifactDigest: digestJson(extensionFiles) };
 const extensionArtifactResult = validateJsonSchema(extensionArtifact, schemas.get('extension-artifact.schema.json'), { schemas });
 if (!extensionArtifactResult.valid) errors.push(`Extension artifact baseline violates Schema: ${extensionArtifactResult.errors.join('; ')}`);
-const banned = /CardWorld|Collection|\bGame\b|\bBatch\b|Codex|Rust|WASM/;
+const banned = /cardworld|collection|\bgame\w*|\bbatch\w*|codex|\brust\b|\bwasm\b/i;
 const bannedWriteRoots = /(?:node:os|os\.tmpdir|homedir\(|LOCALAPPDATA|USERPROFILE)/;
 const walk = async directory => {
   for (const entry of await readdir(directory, { withFileTypes: true })) {
@@ -142,4 +147,4 @@ for (const name of await readdir(skillsRoot)) {
 if (errors.length) {
   console.error(errors.join('\n'));
   process.exitCode = 1;
-} else console.log(JSON.stringify({ ok: true, version: packageJson.version, checked: ['exports', 'schema-definitions', 'schema-references', 'descriptor-inputs', 'descriptor-registry-round-trip', 'profiles', 'plugins', 'extensions', 'skills', 'flow-structure', 'current-docs', 'kernel-boundary', 'default-composition', 'write-boundary', 'zero-runtime-dependencies'] }, null, 2));
+} else console.log(JSON.stringify({ ok: true, version: packageJson.version, checked: ['exports', 'schema-definitions', 'schema-references', 'descriptor-inputs', 'descriptor-registry-round-trip', 'profiles', 'plugins', 'extensions', 'skills', 'flow-structure', 'context-budget', 'current-docs', 'kernel-boundary', 'default-composition', 'write-boundary', 'zero-runtime-dependencies'] }, null, 2));

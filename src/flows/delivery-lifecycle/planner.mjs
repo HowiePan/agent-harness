@@ -1,5 +1,6 @@
 import { compileWorkflowFeatures } from '../../platform/workflow/definition.mjs';
 import { assert } from '../../common/errors.mjs';
+import { resolveStageGates } from '../../flow-kit/primitives.mjs';
 import { deliveryLifecycleWorkflowDefinition } from './graph/definition.mjs';
 import { createDeliveryTemplates } from './nodes/delivery/feature.mjs';
 
@@ -12,15 +13,6 @@ const defaultActionPaths = Object.freeze({
   review: [],
   deliver: [],
 });
-
-const resolveStageGates = (gateBindings, action) => {
-  const configured = gateBindings?.[action];
-  if (Array.isArray(configured)) return configured;
-  if (configured && typeof configured === 'object') {
-    return [...(configured.pre ?? []), ...(configured.post ?? []), ...(configured.final ?? [])];
-  }
-  return null;
-};
 
 /**
  * Compile the action-level plan consumed by the neutral lifecycle executor.

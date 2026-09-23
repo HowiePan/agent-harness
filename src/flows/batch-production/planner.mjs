@@ -1,16 +1,8 @@
 import { assert } from '../../common/errors.mjs';
 import { compileWorkflowFeatures } from '../../platform/workflow/definition.mjs';
+import { resolveStageGates } from '../../flow-kit/primitives.mjs';
 import { batchProductionWorkflowDefinition } from './graph/definition.mjs';
 import { createBatchFeatureFactory } from './nodes/batch/feature.mjs';
-
-const resolveStageGates = (gateBindings, action) => {
-  const configured = gateBindings?.[action];
-  if (Array.isArray(configured)) return configured;
-  if (configured && typeof configured === 'object') {
-    return [...(configured.pre ?? []), ...(configured.post ?? []), ...(configured.final ?? [])];
-  }
-  return null;
-};
 
 export const createBatchProductionLifecyclePlanner = ({
   workflowDefinition = batchProductionWorkflowDefinition,

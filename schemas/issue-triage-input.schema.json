@@ -16,7 +16,7 @@
   },
   "required": ["status", "classification", "severity", "summary", "relations", "resolutionEvidence"],
   "properties": {
-    "status": { "enum": ["pending", "accepted", "resolved", "closed", "duplicate"] },
+    "status": { "enum": ["pending", "accepted", "reopened", "resolved", "closed", "duplicate"] },
     "classification": { "enum": ["defect", "deployment-incident", "configuration", "process", "documentation", "unknown"] },
     "severity": { "enum": ["P0", "P1", "P2", "P3", "unclassified"] },
     "summary": { "type": "string", "minLength": 1, "maxLength": 2048 },
