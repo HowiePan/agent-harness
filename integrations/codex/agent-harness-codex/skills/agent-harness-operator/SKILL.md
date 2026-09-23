@@ -5,6 +5,8 @@ description: Operate, resume, inspect, or recover an Agent Harness run while pre
 
 # Agent Harness Operator
 
+In `source-link` local development, the verified development manifest supplies the Coordinator and the trusted project Hook supplies native results; no newly packaged Codex plugin is required. Apply the same Host Adapter, Lease, Evidence, and Authority rules below. Missing native Hook delivery remains `attention-required`.
+
 ## Project-local write boundary
 
 Treat the exact user-selected project checkout as the only source-edit destination. Before any filesystem mutation, resolve the physical current workspace/worktree, Git top-level and common directory, registered project root, and every intended source, control, data, temporary, build, cache, package, install, and generated-artifact destination. Source changes are allowed only when the write target is inside the exact checkout the user reviews and `git status` from that checkout will show them. Sharing a Git common directory is not sufficient. Do not create or use a sibling worktree, clone, mirror, staging repository, or project-external directory to bypass a workspace, sandbox, or permission boundary unless the user explicitly requested that exact location. If the active task is attached to another checkout, stop before writing and require the task to be opened or rebound to the registered project checkout.

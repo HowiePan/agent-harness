@@ -34,6 +34,30 @@ agent-harness lifecycle preflight --plan <plan.json> --development-manifest <man
 
 本地调试的源码绑定、计划和合成闭环可以独立验收；真实 Codex 插件安装与 `PostToolUse` 投递属于另一个宿主验收关口。合成闭环不构成真实业务质量准出。
 
+## 项目级 Codex Hook：不打包插件的真实宿主路径
+
+`source-link` 的计划命令不注入 Host Adapter；需要原生 Codex Agent 时，当前 Codex 项目必须加载受信的 `PostToolUse` 与 `UserPromptSubmit` Hook。Codex 支持可信项目的 `.codex/hooks.json`，所以本地开发可直接指向当前 Harness 源码，无需每次打包安装插件。项目 Hook 仍需由用户在 Codex `/hooks` 审核并信任；原生 collaboration 工具是否投递 `PostToolUse` 必须做真实短探针，不能由脚本模拟结果代替。
+
+先用 `dev execute` 的 `hostBinding` 回执和 development manifest 配置本地绑定。以下路径全部是绝对路径；`--plugin-root` 仅是控制根内的本地绑定目录，不是插件安装目录：
+
+```text
+node <Harness源码根>/integrations/codex/agent-harness-codex/scripts/configure-bindings.mjs \
+  --plugin-root <Harness数据根>/development/local-codex \
+  --control-root <Harness源码根> \
+  --entrypoint bin/agent-harness.mjs \
+  --data-root <Harness数据根> \
+  --development-manifest <development-manifest.json> \
+  --project '<alias>|<projectId>|<profileId>|<extensionId>|<项目绝对根>' \
+  --workflow '<alias>|<workflowId>|<version>|<artifactDigest>|<profileId>|<extensionId>'
+
+node <Harness源码根>/integrations/codex/agent-harness-codex/hooks/local-source-hook.mjs \
+  --print-config <Harness数据根>/development/local-codex/.plugin-data
+```
+
+第二条命令输出可供项目 `.codex/hooks.json` 使用的完整 JSON。它把 Hook 命令固定到当前源码入口及控制根内的绑定目录。只在明确选用本地开发接入的项目中放置该配置；不要把 Harness 源码、运行状态或绑定文件复制到业务仓。新建 Codex 任务后在 `/hooks` 检查并信任当前定义，输入 `h:probe`；本地 `UserPromptSubmit` Hook 会给出只读短探针命令及当前 session ID。短探针只请求一次原生 `collaboration.list_agents`，核对 `PostToolUse` 阶段和 Host 响应，不创建 Run。若没有投递，停止于 `attention-required`，不得启动质量 Run。
+
+本地入口每次先核验 source-link 绑定、源码/制品摘要、控制根和当前 Hook 所在源码一致；`UserPromptSubmit` 指向同一 checkout 的命令适配说明，`PostToolUse` 使用现有 Host 交换的 session、参数摘要和调用 ID 校验。它不会把模型转录的 JSON 当作原生 Host 结果。原生短探针通过后，还需在独立合成项目完成真实 Agent 的 review→repair→re-review→Gate→Closure 和重启恢复，才可宣布本地真实宿主路径准出。CardWorld 真实 Run 仍由单独授权和业务 Gate 控制。
+
 ## 变化检测与应用
 
 ```text

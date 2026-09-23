@@ -67,8 +67,8 @@
     },
     {
       "path": "docs/guides/local-debugging.md",
-      "sha256": "18e25bb58f6a0bb64e18bd1d12519573139a0064f2072862f22b89ef62ec80e5",
-      "size": 4760
+      "sha256": "479a20f39c809afe01b8711dd2a2ae0792a6570be2f3032cad08cb0f3dc8fe25",
+      "size": 7445
     },
     {
       "path": "docs/guides/project-configuration.md",
@@ -1646,7 +1646,7 @@
       "size": 19877
     }
   ],
-  "packageDigest": "ee2a6cea16055281683e27f54bf2837ae0b4e814a6982121a81fed71e3fe842d",
+  "packageDigest": "f4c3c8b962ed8ea70668246228a4c7e9f3d920c4ae15e02eb30347f9d7debf83",
   "metadataFiles": [
     "release-manifest.json",
     "sbom.spdx.json"
