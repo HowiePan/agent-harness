@@ -162,7 +162,7 @@ test('installed Hook probe is bounded and invokes the exact cached PostToolUse e
   await mkdir(pluginData, { recursive: true });
   const bindingFile = resolve(pluginData, 'bindings.json');
   await writeFile(bindingFile, '{}\n');
-  await writeFile(resolve(pluginRoot, 'hooks', 'post-tool-host-bridge.mjs'), "let raw = ''; for await (const chunk of process.stdin) raw += chunk; const event = JSON.parse(raw); if (event.tool_name !== 'collaboration.list_agents') process.exitCode = 2; else process.stdout.write('{}');\n");
+  await writeFile(resolve(pluginRoot, 'hooks', 'post-tool-host-bridge.mjs'), "let raw = ''; for await (const chunk of process.stdin) raw += chunk; const event = JSON.parse(raw); if (event.tool_name !== 'list_agents') process.exitCode = 2; else process.stdout.write('{}');\n");
   const result = await probeInstalledPostToolHook({ root, installedBindings: { bindingFile }, timeoutMs: 1000 });
   assert.match(result.probeDigest, /^[a-f0-9]{64}$/);
   assert.equal(result.hook, resolve(pluginRoot, 'hooks', 'post-tool-host-bridge.mjs'));

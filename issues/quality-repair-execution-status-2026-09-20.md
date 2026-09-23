@@ -1,5 +1,11 @@
 # V1.0.0 质量修复执行状态（更新于 2026-09-21）
 
+## 2026-09-23 源码修复进展（待审核）
+
+下文记录的是 2026-09-21 的现场故障。当前安装缓存中的 `post-tool-host-bridge.mjs` 已可直接导入，原先的静态模块缺失不再可复现；但本任务以当前已安装插件发出一次真实 `collaboration.list_agents` 后，45 秒内没有新的 Hook 阶段回执或 Host 响应，仍以 `CODEX_HOST_HOOK_RESPONSE_TIMEOUT` 停止，未创建 Run。根据现有证据，只能确定当前任务未观察到 Hook 投递，不能把原因确定为信任、matcher 或宿主工具覆盖中的任何单项。
+
+Harness 源码现已同时接受 Codex Hook 的裸函数名和 `collaboration.` 前缀名，并在渠道包组合检查中使用裸 `list_agents` 完成合成事件往返。`npm run check`、宿主快测 35/35、Core/Codex 打包、渠道组合 Hook 往返和 residue 检查均通过。第一次完整 `npm test` 为 311/312；唯一失败由仓库内一个空 Issue 目录残留造成，确认它为空且不是链接后已清理，对应 CLI 用例复测 3/3，随后完整复跑 **312/312** 通过。当前源码尚未重装为 Codex 插件，也没有新的真实宿主探针通过证据，因此 G2 仍未通过，G3 不得启动。
+
 ## 结论
 
 **V3.8.4 质量流程未准出。** G1 代码与本地发布流程已通过；G2 真实 Codex 宿主 Canary 在插件重装后新建任务中仍于 PostToolUse 原生结果回传处超时，且首个可复现故障已收窄为安装缓存中的 Hook 模块图无法加载，尚未形成合成质量闭环。G3 CardWorld 真实业务评审→修复→复审→Gate→Authority Closure 未启动；不得用本报告的测试或插件安装成功替代业务 Closure Receipt。

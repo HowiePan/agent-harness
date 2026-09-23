@@ -3,7 +3,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { createHookBootstrapTrace } from '../lib/hook-bootstrap-diagnostics.mjs';
 import { loadBindings } from './pseudo-command-router.mjs';
 
-const relevant = name => name === 'Agent' || /^collaboration\.(spawn_agent|list_agents|wait_agent|interrupt_agent)$/.test(name ?? '');
+const relevant = name => name === 'Agent' || /^(?:collaboration\.)?(?:spawn_agent|list_agents|wait_agent|interrupt_agent)$/.test(name ?? '');
 
 export const capturePostToolUse = async (event, options = {}) => {
   const trace = options.trace ?? await createHookBootstrapTrace({ event, options });

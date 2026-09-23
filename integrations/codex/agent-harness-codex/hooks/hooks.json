@@ -3,7 +3,7 @@
   "hooks": {
     "PostToolUse": [
       {
-        "matcher": "^(Agent|collaboration\\.(spawn_agent|list_agents|wait_agent|interrupt_agent))$",
+        "matcher": "^(Agent|(collaboration\\.)?(spawn_agent|list_agents|wait_agent|interrupt_agent))$",
         "hooks": [
           {
             "type": "command",

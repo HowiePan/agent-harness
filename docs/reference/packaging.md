@@ -21,7 +21,7 @@
 
 部署命令不会再向活动 Core 目录叠加文件，而是在 `.agent-harness-data/compositions/<version>/<compositionDigest>/` 创建同时固定 Core `packageDigest`、Codex `artifactDigest` 与逐文件摘要的不可变组合。需要使用该组合时，先把部署回执传给 `release activation-plan --runtime-composition-receipt <receipt.json>`，再走既有 Authority activation Gate；激活计划、活动指针和插件绑定都会保留同一 `compositionDigest`。生成组合本身不构成激活授权。
 
-准备与安装严格分离。`prepare` 失败只修源码或协议并重跑无安装阶段；`local --prepared` 不再重跑构建和测试，也不能接受另一个 commit、Core、Codex 渠道或被修改的归档。安装完成后只执行一次最长五秒的有界缓存 Hook bootstrap 探针，验证已安装 Hook、bindings 与 active Runtime bridge 能被实际加载；没有 pending Host request 时立即以精确 reason code 收束，不再等待二十秒超时。这样真实安装只承担最终宿主缓存与加载验证，不承担逐个发现源码缺陷的职责。
+准备与安装严格分离。`prepare` 失败只修源码或协议并重跑无安装阶段；`local --prepared` 不再重跑构建和测试，也不能接受另一个 commit、Core、Codex 渠道或被修改的归档。安装完成后只执行一次最长五秒的有界缓存 Hook bootstrap 探针，验证已安装 Hook、bindings 与 active Runtime bridge 能被实际加载；没有 pending Host request 时立即以精确 reason code 收束，不再等待二十秒超时。这样真实安装只承担最终宿主缓存与加载验证，不承担逐个发现源码缺陷的职责。该进程探针不能证明当前 Codex 任务已信任插件 Hook 或会投递原生 `PostToolUse`；G2 仍需新任务的真实 `list_agents` 请求/响应短探针，且在得到 Host 响应前不得创建业务 Run。
 
 OpenCode 与 VS Code 归档当前只验证渠道结构和适配边界。两者的 adapter 都要求宿主注入完整的 spawn、inspect、wait、result、cancel、Host Effect reconciliation 与 Lease confirmation 原生能力；缺一项即拒绝执行。OpenCode 只开放初始化/状态/Gate 工具和受管写保护，VS Code 只开放状态、空态树与 diff 查看；`full`/`quality` 明确返回 unsupported 且不创建 Run。这些归档不进入 Codex 组合、安装或发布 Gate。
 

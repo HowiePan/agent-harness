@@ -8,7 +8,7 @@ import { createHostResponseEnvelope } from './stdio-host-exchange.mjs';
 const fail = (code, message) => { throw Object.assign(new Error(message), { code }); };
 const delay = ms => new Promise(done => setTimeout(done, ms));
 const allowedTools = new Set(['collaboration.spawn_agent', 'collaboration.list_agents', 'collaboration.wait_agent', 'collaboration.interrupt_agent']);
-const hookToolName = (name, requested) => name === requested || name === 'Agent' && requested === 'collaboration.spawn_agent';
+const hookToolName = (name, requested) => name === requested || name === requested.slice('collaboration.'.length) || name === 'Agent' && requested === 'collaboration.spawn_agent';
 const safeId = value => typeof value === 'string' && /^[a-zA-Z0-9_-]{1,128}$/.test(value);
 const toolUseId = value => typeof value === 'string' && value.length > 0 && value.length <= 256;
 

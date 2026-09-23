@@ -115,7 +115,7 @@ try {
     child.stderr.on('data', chunk => { stderr += chunk; });
     child.on('error', reject);
     child.on('close', (code, signal) => code === 0 && !signal ? resolveRun({ stdout, stderr }) : reject(Object.assign(new Error(`Isolated Codex PostToolUse Hook failed: ${stderr.trim() || signal || code}`), { code: 'CHANNEL_PROBE_POST_TOOL_HOOK_FAILED' })));
-    child.stdin.end(JSON.stringify({ hook_event_name: 'PostToolUse', tool_name: 'collaboration.list_agents', tool_use_id: 'tool-channel-probe', tool_input: {}, tool_response: { agents: [] }, session_id: request.sessionId, turn_id: 'turn-channel-probe' }));
+    child.stdin.end(JSON.stringify({ hook_event_name: 'PostToolUse', tool_name: 'list_agents', tool_use_id: 'tool-channel-probe', tool_input: {}, tool_response: { agents: [] }, session_id: request.sessionId, turn_id: 'turn-channel-probe' }));
   });
   assert(hookResult.stdout === '{}', 'CHANNEL_PROBE_POST_TOOL_HOOK_OUTPUT_INVALID', 'Codex PostToolUse Hook returned an unexpected stdout envelope.');
   assert(hookResult.stderr === '', 'CHANNEL_PROBE_POST_TOOL_HOOK_STDERR_INVALID', 'Codex PostToolUse Hook wrote unexpected stderr output.');

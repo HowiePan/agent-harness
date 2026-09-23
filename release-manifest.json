@@ -327,8 +327,8 @@
     },
     {
       "path": "docs/reference/packaging.md",
-      "sha256": "2a79e1ef01f054ba9bfd6508ac3e09cb19b6b355995c5b47df5e42f8bab7c911",
-      "size": 4407
+      "sha256": "27e640675f979a9708030c2ebd2ddfa0a93df51a4041c98cd38d708f94d66749",
+      "size": 4628
     },
     {
       "path": "docs/reference/protocol.md",
@@ -1646,7 +1646,7 @@
       "size": 19877
     }
   ],
-  "packageDigest": "121e6da9e51c22476323a5a16f689f068699a03525f8e82836be9af97cfc368f",
+  "packageDigest": "acf6f72ad2e1c50bcb34c1969b24454eeaa0e214eae7a898f7d3370a468798b0",
   "metadataFiles": [
     "release-manifest.json",
     "sbom.spdx.json"

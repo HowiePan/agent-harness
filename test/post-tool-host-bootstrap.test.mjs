@@ -7,7 +7,7 @@ import { capturePostToolUse } from '../integrations/codex/agent-harness-codex/ho
 
 const event = {
   hook_event_name: 'PostToolUse',
-  tool_name: 'collaboration.list_agents',
+  tool_name: 'list_agents',
   tool_use_id: 'tool-bootstrap-test',
   tool_input: {},
   tool_response: { agents: [] },

@@ -258,7 +258,7 @@ export const probeInstalledPostToolHook = async ({ root, installedBindings, time
   assert(bindingFile && dirname(pluginData) === pluginRoot && (await stat(bindingFile)).isFile(), 'LOCAL_RELEASE_INSTALLED_BINDINGS_MISSING', 'Installed Hook probe requires the verified installed binding file.');
   const hook = resolve(pluginRoot, 'hooks', 'post-tool-host-bridge.mjs');
   assert((await stat(hook)).isFile(), 'LOCAL_RELEASE_INSTALLED_HOOK_MISSING', 'Installed PostToolUse Hook is missing.');
-  const event = { hook_event_name: 'PostToolUse', tool_name: 'collaboration.list_agents', tool_use_id: 'local-release-installed-probe', tool_input: {}, tool_response: { agents: [] }, session_id: 'local-release-installed-probe', turn_id: 'local-release-installed-probe' };
+  const event = { hook_event_name: 'PostToolUse', tool_name: 'list_agents', tool_use_id: 'local-release-installed-probe', tool_input: {}, tool_response: { agents: [] }, session_id: 'local-release-installed-probe', turn_id: 'local-release-installed-probe' };
   const result = await new Promise((resolveProbe, reject) => {
     const child = spawn(process.execPath, [hook], { cwd: root, env: { ...process.env, PLUGIN_ROOT: pluginRoot, PLUGIN_DATA: pluginData }, windowsHide: true, shell: false, stdio: ['pipe', 'pipe', 'pipe'] });
     let stdout = '';

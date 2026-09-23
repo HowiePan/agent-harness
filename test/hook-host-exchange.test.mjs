@@ -29,7 +29,7 @@ test('PostToolUse captures the exact native result for one pending request', asy
   assert.equal(wrong.captured, false);
   const otherSession = await captureHookToolResult({ hook_event_name: 'PostToolUse', tool_name: 'collaboration.list_agents', tool_use_id: 'tool-other-session', tool_input: {}, tool_response: { agents: [] }, session_id: 'another-session' }, { controlRoot, dataRoot });
   assert.equal(otherSession.captured, false);
-  const captured = await captureHookToolResult({ hook_event_name: 'PostToolUse', tool_name: 'collaboration.list_agents', tool_use_id: 'tool-correct', tool_input: {}, tool_response: { agents: [] }, session_id: 'parent-session', turn_id: 'turn-1' }, { controlRoot, dataRoot });
+  const captured = await captureHookToolResult({ hook_event_name: 'PostToolUse', tool_name: 'list_agents', tool_use_id: 'tool-correct', tool_input: {}, tool_response: { agents: [] }, session_id: 'parent-session', turn_id: 'turn-1' }, { controlRoot, dataRoot });
   assert.equal(captured.captured, true);
   assert.equal(captured.requestId, pendingRequest.requestId);
   assert.deepEqual(await pending, { agents: [] });

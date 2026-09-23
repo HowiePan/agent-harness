@@ -108,6 +108,9 @@ test('Codex plugin exposes one explicit-project pseudo-command router', async ()
   assert.match(metadata, /allow_implicit_invocation: true/);
   assert.match(metadata, /h:report/);
   assert.match(hooks, /UserPromptSubmit/);
+  const postToolMatcher = new RegExp(JSON.parse(hooks).hooks.PostToolUse[0].matcher);
+  for (const toolName of ['Agent', 'spawn_agent', 'list_agents', 'wait_agent', 'interrupt_agent', 'collaboration.spawn_agent', 'collaboration.list_agents', 'collaboration.wait_agent', 'collaboration.interrupt_agent']) assert.equal(postToolMatcher.test(toolName), true, toolName);
+  for (const toolName of ['Bash', 'spawn_agents', 'other.list_agents']) assert.equal(postToolMatcher.test(toolName), false, toolName);
   const reference = skill.match(/\]\(([^)]+pseudo-command-contract\.md)\)/)?.[1];
   assert(reference);
   await access(resolve(dirname(skillPath), reference));
