@@ -14,7 +14,8 @@
 - 禁止复制、移动、改写或删除 `tools/agent-harness/**`。
 - 禁止复制、移动、改写或删除 `docs/agent-harness/**` 与 `docs/versions/tech/**`。
 - 禁止复制、移动、改写或删除 `tabletop-collection` 中的 Harness 代码、文档和运行状态。
-- 禁止启动、恢复、迁移或重建 CardWorld、V3.8.4、Collection B1 等真实 Run。
+- 未经用户针对目标和动作明确授权，禁止从 Agent Harness 对话跨项目启动、恢复、迁移或重建 CardWorld、V3.8.4、Collection B1 等下游真实 Run。
+- 由下游项目 checkout 的对话主动发起其已绑定项目的本地 Harness 命令，不受上述跨项目调用禁令限制；仍须通过项目绑定、Authority、Gate、路径和运行期保护检查。仅把 Harness 对话中的命令工作目录切到下游仓库，不构成下游项目对话发起，也不授权 Harness 对话反向调用其他项目。
 - 禁止因迁移准出、零驻留或 Recovery Capsule 创建而自动删除、移动或归档旧 Harness；必须取得用户对准确目标的单独批准。
 - 旧 Harness 只能在用户明确启动 V1.0.0 对应 Wave 后，通过只读 Inventory 和显式迁移流程接入。
 - 本轮已获得 V1.0.0 实施授权；G0 只读审计允许执行，真实 Run 恢复、业务仓清理和最终切换仍必须经过对应 Gate。

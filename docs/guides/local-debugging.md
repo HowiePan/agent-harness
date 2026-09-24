@@ -1,6 +1,6 @@
 # 本地源码调试模式
 
-`source-link` 让项目直接使用当前 Agent Harness checkout，无需每次打包、卸载、重装。从项目 checkout 主动运行 `dev` 命令即授权本地源码绑定及 H0–H3 同步；应用层根据这次调用生成绑定具体计划和命令的 Authority Decision，无需人工另行签发。从 Harness checkout 指向项目执行相同写入时仍需外部 Decision。路径、Gate、宿主证明和运行期保护操作继续按原合同检查。完整字段和命令见[配置 API](../reference/configuration-api.md#8-本地源码调试与热更新)。
+`source-link` 让项目直接使用当前 Agent Harness checkout，无需每次打包、卸载、重装。从项目 checkout 主动运行 `dev` 命令或发送 `h:local` 命令即授权本地源码绑定及 H0–H3 同步；应用层根据这次调用生成绑定具体计划和命令的 Authority Decision，无需人工另行签发。从 Harness checkout 指向项目执行相同写入时仍需外部 Decision。路径、Gate、宿主证明和运行期保护操作继续按原合同检查。完整字段和命令见[配置 API](../reference/configuration-api.md#8-本地源码调试与热更新)。
 
 项目工作区必须已有可解析的 `.git` 元数据。`dev execute` 在写入 Registry 前检查工作区身份；没有 `.git` 时返回 `WORKSPACE_GIT_METADATA_REQUIRED`。
 
@@ -66,13 +66,13 @@ node <Harness源码根>/integrations/codex/agent-harness-codex/scripts/local-sou
 
 入口核验绑定、Git 工作区身份、Workflow 与当前源码摘要，返回 `coordinatorEntrypoint` 和 `coordinationIntent`。在同一 Codex 任务中先调用 `node <coordinatorEntrypoint> --intent <coordinationIntent> --preflight-only` 可执行完整计划和动作预检，不创建 Run；需要按终端请求调用原生 collaboration 工具。确认预检通过并决定启动后，再用新生成的意图调用 `node <coordinatorEntrypoint> --intent <coordinationIntent>`，保持终端可观察，并依次执行 Coordinator 发出的原生 collaboration 请求。`spawn_agent` 的 `message` 必须逐字使用请求中的完整生成 Prompt；不要缩写或用路径引用代替。仅在动作预检返回 `executionReady: true` 后 Coordinator 才创建 Run。审查发现问题时，继续处理修复、复审和 Gate，直到 `closed` 或明确的 `attention-required`。
 
-也可以在业务项目的 `.codex/hooks.json` 中配置由 `local-source-hook.mjs --print-config --bindings-dir <绑定目录>` 生成的 `UserPromptSubmit` Hook。项目 Hook 只保存指向 Harness 源码和外部数据根的命令，项目仓库不保存 Harness 实现或运行状态。经 Codex 审核并信任该项目 Hook 后，在绑定的项目任务中发送 `h:local engine quality V3.8.4`；`h:local where engine` 是只读绑定检查。安装态 Hook 忽略 `h:local`，本地 Hook 忽略安装态的 `h:engine`。源码模式的原生工具回执由当前 Codex session rollout 核验，不依赖安装态 `PostToolUse` Hook。新建任务或变更 Hook 定义后需重新核对信任状态。
+也可以在业务项目的 `.codex/hooks.json` 中配置由 `local-source-hook.mjs --print-config --bindings-dir <绑定目录>` 生成的 `UserPromptSubmit` Hook。项目 Hook 只保存指向 Harness 源码和外部数据根的命令，项目仓库不保存 Harness 实现或运行状态。经 Codex 审核并信任该项目 Hook 后，在绑定的项目任务中发送 `h:local engine quality V3.8.4`。Hook 校验到 source-link 源码或绑定摘要过期时，只在进程实际工作目录与已绑定项目 checkout 一致的情况下自动执行 `dev sync`，重新验证绑定后继续解析原命令；H4 或同步失败时停止，不生成执行意图。`h:local where engine` 平时只读，但绑定过期时也会触发这次同步。安装态 Hook 忽略 `h:local`，本地 Hook 忽略安装态的 `h:engine`，安装态命令不自动同步。源码模式的原生工具回执由当前 Codex session rollout 核验，不依赖安装态 `PostToolUse` Hook。新建任务或变更 Hook 定义后需重新核对信任状态；旧 Hook 配置的 `timeout: 15` 应使用 `--print-config` 生成的 `timeout: 120` 更新。
 
 可见 Agent Prompt 1.4 将完整的 Dispatch packet 写到控制根下的摘要绑定文件。Agent 必须读取该文件并校验精确字节的 SHA-256。读取 Coordinator 的终端请求时要给足输出预算；若输出出现截断标记，不能据此调用 `spawn_agent`。Codex 当前宿主会加密长 `spawn_agent.message`，父任务 rollout 只能证明原生调用、确定性的任务名及宿主截断元数据，不能独立复算实际传给 Agent 的完整 Prompt 字节；Host Receipt 将此标为 `host-redacted-message`，操作人仍须逐字传递生成 Prompt。
 
 源码 Coordinator 在创建 Run 前检查确定性进程 Gate 所需的带输出捕获子进程能力；若当前任务的进程权限返回 `LOCAL_PROCESS_GATE_HOST_UNAVAILABLE`，应在获准的进程权限下重新执行同一入口。不要绕过 Gate 或手写 Gate 结果。
 
-隔离合成项目已通过真实 Codex Agent 的审查、P1 修复、独立复审和固定最终 Gate，并由 Authority 关闭 Run。该证据证明当前本地源码路径可完成合成质量闭环；CardWorld 真实 Run 仍由用户审核实现后另行决定。Coordinator 重启后的真实宿主恢复与加密 Prompt 字节级证明仍是单独的可靠性跟踪项。
+隔离合成项目已通过真实 Codex Agent 的审查、P1 修复、独立复审和固定最终 Gate，并由 Authority 关闭 Run。该证据证明当前本地源码路径可完成合成质量闭环。下游项目 checkout 的对话主动发起已绑定的本地命令，不适用 Harness 对话跨项目调用下游的授权禁令；Harness 对话要调用 CardWorld 等下游真实 Run，仍需用户针对目标和动作明确授权。Coordinator 重启后的真实宿主恢复与加密 Prompt 字节级证明仍是单独的可靠性跟踪项。
 
 ## 变化检测与应用
 

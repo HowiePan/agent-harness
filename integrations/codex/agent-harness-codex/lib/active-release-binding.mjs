@@ -36,7 +36,7 @@ const validateDevelopmentBinding = async ({ controlRoot, dataRoot, entrypoint, d
   delete unsigned.manifestDigest;
   if (manifest?.protocolVersion !== '1.0' || manifest.kind !== 'development-source-manifest' || manifest.manifestDigest !== digestJson(unsigned) || !Array.isArray(manifest.files) || !manifest.files.length || !Array.isArray(manifest.sourceIdentity?.runtimeFiles) || !manifest.sourceIdentity.runtimeFiles.length) throw new Error(`development source manifest 无效：${manifestFile}`);
   if (!samePath(manifest.sourceRoot, controlRoot) || !samePath(manifest.controlRoot, controlRoot) || !samePath(manifest.dataRoot, dataRoot) || !samePath(manifest.entrypoint, entrypoint)) throw new Error('source-link 绑定根目录或 entrypoint 与 development manifest 不一致。');
-  if (declaredRelease.version !== manifest.release?.version || declaredRelease.artifactDigest !== manifest.release?.artifactDigest) throw new Error('source-link release identity 已过期；请重新执行 dev rebind。');
+  if (declaredRelease.version !== manifest.release?.version || declaredRelease.artifactDigest !== manifest.release?.artifactDigest) throw Object.assign(new Error('source-link release identity 已过期；请从项目 checkout 执行 dev sync。'), { code: 'SOURCE_LINK_RELEASE_STALE' });
   if (manifest.release?.mode !== 'source-link' || manifest.release.artifactDigest !== digestJson(manifest.sourceIdentity.runtimeFiles) || manifest.release.artifactDigest !== manifest.sourceIdentity.runtimeDigest) throw new Error('development source 运行时文件清单摘要无效。');
   const seen = new Set();
   for (const item of manifest.files) {
@@ -64,7 +64,7 @@ const validateDevelopmentBinding = async ({ controlRoot, dataRoot, entrypoint, d
   const targets = verifyAllFiles ? manifest.files : manifest.sourceIdentity.runtimeFiles;
   for (const item of targets) {
     const bytes = await readFile(resolve(controlRoot, item.path));
-    if (bytes.length !== item.size || sha256(bytes) !== item.sha256) throw Object.assign(new Error(`Harness source 已变化：${item.path}；请执行 dev rebind。`), { code: 'HARNESS_SOURCE_IDENTITY_CHANGED' });
+    if (bytes.length !== item.size || sha256(bytes) !== item.sha256) throw Object.assign(new Error(`Harness source 已变化：${item.path}；请从项目 checkout 执行 dev sync。`), { code: 'HARNESS_SOURCE_IDENTITY_CHANGED' });
   }
   return Object.freeze({
     mode: 'source-link', version: manifest.release.version, artifactDigest: manifest.release.artifactDigest,

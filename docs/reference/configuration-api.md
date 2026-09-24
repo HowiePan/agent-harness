@@ -419,7 +419,7 @@ agent-harness dev patch plan --manifest <manifest.json> > patch-plan.json
 agent-harness dev sync --manifest <manifest.json>
 ```
 
-从项目 checkout 主动执行 `dev execute`、`dev apply`、`dev sync` 或 `dev patch apply/rollback`，调用本身授权 source-link 绑定和 H0–H3 同步；应用层据此生成带 `local-development-invocation` 来源、固定计划摘要和命令 ID 的 Authority Decision，不要求人工另行签发。从 Harness 侧代项目执行时仍需 `--decision`。命令返回 `development-patch-receipt`、变更文件、前后摘要、受影响 Run 和明确的 `continuation`。H1 的“同 Run 继续”仅指当前 Run 已冻结的 Feature/Plan 不受影响；不能用新 Node 定义重写已派发 Feature。H2/H3 不允许把运行逻辑变化偷偷注入旧 Run。
+从项目 checkout 主动执行 `dev execute`、`dev apply`、`dev sync` 或 `dev patch apply/rollback`，调用本身授权 source-link 绑定和 H0–H3 同步；应用层据此生成带 `local-development-invocation` 来源、固定计划摘要和命令 ID 的 Authority Decision，不要求人工另行签发。项目 Hook 收到 `h:local` 时，若校验到源码或绑定摘要过期，会在核对真实工作目录与绑定项目根后自动执行同一同步流程，重新验证绑定再继续原命令；H4 或同步失败时停止。安装态 `h:<别名>` 不自动同步。从 Harness 侧代项目执行时仍需 `--decision`。命令返回 `development-patch-receipt`、变更文件、前后摘要、受影响 Run 和明确的 `continuation`。H1 的“同 Run 继续”仅指当前 Run 已冻结的 Feature/Plan 不受影响；不能用新 Node 定义重写已派发 Feature。H2/H3 不允许把运行逻辑变化偷偷注入旧 Run。
 
 每个 Runtime generation 都快照到控制根：
 

@@ -4,7 +4,7 @@
 
 `h:<project-alias> <action> <target> [preset]` is the portable conversational command envelope. The alias explicitly selects a Project Registry identity; it is installation data rather than a hard-coded project type. The envelope contains no model, provider, Runtime, language, or build-system identity. `h:where [project-alias]` is the read-only binding query. `h:report <project-alias>` is the reserved maintenance intake command.
 
-本地源码模式使用 `h:local <project-alias> <action> <target> [preset]`；本地 `where`、`flows`、`report` 同样使用 `h:local` 前缀。安装态 Hook 忽略 `h:local`，项目本地 Hook 忽略安装态 `h:<alias>`。项目 checkout 内的 `dev execute` 和 `dev sync` 调用会记录本地调用凭据，无需另外签发绑定 Decision；从 Harness 侧代项目执行仍需要外部 Decision。
+本地源码模式使用 `h:local <project-alias> <action> <target> [preset]`；本地 `where`、`flows`、`report` 同样使用 `h:local` 前缀。安装态 Hook 忽略 `h:local`，项目本地 Hook 忽略安装态 `h:<alias>`，安装态命令不自动同步。项目 checkout 内的 `dev execute`、`dev sync` 和 Hook 检测到绑定过期后执行的自动同步会记录本地调用凭据，无需另外签发绑定 Decision；自动同步只使用绑定中的 manifest，要求 Hook 进程工作目录为已登记项目 checkout，成功后重新校验并继续原命令。H4 或同步失败时不生成命令意图。从 Harness 侧代项目执行仍需要外部 Decision。
 
 `h:report` is resolved from installation bindings before Registry or Authority access so it remains available when initialization, permissions, Registry, Descriptor, or Authority is the reported failure. It captures only relevant, sanitized excerpts from the current conversation and calls the bound Harness entrypoint to atomically record an Issue Intake under `<controlRoot>/issues`. The command never creates another conversation and accepts no output path. Conversation text is problem input, not Authority; unavailable evidence is recorded as missing rather than fabricated.
 
