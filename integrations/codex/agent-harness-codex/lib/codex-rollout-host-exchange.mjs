@@ -76,14 +76,20 @@ const parseNativeLine = (line, request, calls) => {
   if (!safeId(item.id) || item.internal_chat_message_metadata_passthrough?.turn_id !== call.turnId || !call.turnId || typeof item.output !== 'string') fail('CODEX_ROLLOUT_OUTPUT_INVALID', 'Native collaboration output lacks a bound call, turn, or output frame.');
   const executed = item.internal_chat_message_metadata_passthrough?.executed_tool_calls;
   if (call.argumentAttestation === 'host-redacted-message') {
-    const metadata = executed?.[0]?.arguments?._codex_executed_tool_call_truncated;
-    if (!Array.isArray(executed) || executed.length !== 1 || executed[0]?.name !== `${namespace}__${name}` || !Number.isSafeInteger(metadata?.original_bytes) || metadata.original_bytes < Buffer.byteLength(request.arguments.message) || !Number.isSafeInteger(metadata?.max_bytes)) fail('CODEX_ROLLOUT_TOOL_METADATA_MISMATCH', 'Codex redacted spawn metadata does not bind a native tool execution.');
+    // Some Codex hosts omit executed_tool_calls for an otherwise bound native
+    // call. The call/output IDs and turn still prove native execution, while
+    // the encrypted message cannot prove the original Prompt bytes.
+    if (executed !== undefined) {
+      const metadata = executed?.[0]?.arguments?._codex_executed_tool_call_truncated;
+      if (!Array.isArray(executed) || executed.length !== 1 || executed[0]?.name !== `${namespace}__${name}` || !Number.isSafeInteger(metadata?.original_bytes) || metadata.original_bytes < Buffer.byteLength(request.arguments.message) || !Number.isSafeInteger(metadata?.max_bytes)) fail('CODEX_ROLLOUT_TOOL_METADATA_MISMATCH', 'Codex redacted spawn metadata conflicts with the native tool execution.');
+    }
   } else if (executed && (!Array.isArray(executed) || executed.length !== 1 || executed[0]?.name !== `${namespace}__${name}` || digestJson(executed[0]?.arguments) !== digestJson(request.arguments))) fail('CODEX_ROLLOUT_TOOL_METADATA_MISMATCH', 'Codex executed-tool metadata differs from the pending native call.');
   let result;
   try { result = JSON.parse(item.output); }
   catch { fail('CODEX_ROLLOUT_RESULT_JSON_INVALID', 'Native collaboration output is not a JSON object.'); }
   if (!result || typeof result !== 'object' || Array.isArray(result)) fail('CODEX_ROLLOUT_RESULT_INVALID', 'Native collaboration output is not an object.');
-  return { result, callId: item.call_id, outputId: item.id, turnId: call.turnId, ordinal: record.ordinal, argumentAttestation: call.argumentAttestation };
+  if (call.argumentAttestation === 'host-redacted-message' && (Object.keys(result).length !== 1 || typeof result.task_name !== 'string' || !result.task_name.endsWith(`/${request.arguments.task_name}`))) fail('CODEX_ROLLOUT_SPAWN_RESULT_MISMATCH', 'Redacted native spawn output does not identify the requested task.');
+  return { result, callId: item.call_id, outputId: item.id, turnId: call.turnId, ordinal: record.ordinal, argumentAttestation: call.argumentAttestation, executedToolMetadata: executed === undefined ? 'absent' : 'present' };
 };
 
 export const createCodexRolloutHostExchange = ({ controlRoot, dataRoot, codexSessionId, codexHome, stateDbPath, expectedCwd = process.cwd(), output = process.stdout, onRejected = null, responseTimeoutMs = 120000, pollMs = 50, requestReminderMs = 5000, locate = locateCodexRollout } = {}) => {
@@ -142,7 +148,7 @@ export const createCodexRolloutHostExchange = ({ controlRoot, dataRoot, codexSes
               if (!native) continue;
               if (consumedCalls.has(native.callId)) await reject('CODEX_ROLLOUT_CALL_REPLAYED', 'Native Codex call ID was already consumed.', request);
               consumedCalls.add(native.callId);
-              const receipt = { protocolVersion: '1.0', kind: 'codex-rollout-host-receipt', sessionId: codexSessionId, requestId: request.requestId, requestDigest: request.requestDigest, argumentsDigest: digestJson(request.arguments), argumentAttestation: native.argumentAttestation, tool: request.tool, callId: native.callId, outputId: native.outputId, turnId: native.turnId, ordinal: native.ordinal, resultDigest: digestJson(native.result), rolloutPathDigest: sha256(host.path), codexVersion: host.cliVersion, observedAt: new Date().toISOString() };
+              const receipt = { protocolVersion: '1.0', kind: 'codex-rollout-host-receipt', sessionId: codexSessionId, requestId: request.requestId, requestDigest: request.requestDigest, argumentsDigest: digestJson(request.arguments), argumentAttestation: native.argumentAttestation, executedToolMetadata: native.executedToolMetadata, tool: request.tool, callId: native.callId, outputId: native.outputId, turnId: native.turnId, ordinal: native.ordinal, resultDigest: digestJson(native.result), rolloutPathDigest: sha256(host.path), codexVersion: host.cliVersion, observedAt: new Date().toISOString() };
               await atomicWriteJson(resolve(receiptRoot, `${request.requestId}-${randomUUID()}.json`), { ...receipt, receiptDigest: digestJson(receipt) }, { root: controlRoot });
               return structuredClone(createHostResponseEnvelope(request, native.result).result);
             }

@@ -6,6 +6,8 @@ import { resolve } from 'node:path';
 import { PassThrough } from 'node:stream';
 import { harnessProjectRoot, harnessTemporaryRoot, writeDevelopmentSourceManifest } from '../src/index.mjs';
 import { digestJson } from '../src/common/canonical.mjs';
+import { resolveCommandIntent } from '../src/platform/extensions/command-contract.mjs';
+import { deliveryLifecycleCommandManifest } from '../src/flows/delivery-lifecycle/commands.mjs';
 import { configureBindings } from '../integrations/codex/agent-harness-codex/scripts/configure-bindings.mjs';
 import { handleLocalSourceHook, renderLocalSourceHooks } from '../integrations/codex/agent-harness-codex/hooks/local-source-hook.mjs';
 import { resolveProbeSessionId, runLocalSourceHostProbe } from '../integrations/codex/agent-harness-codex/scripts/local-source-host-probe.mjs';
@@ -54,7 +56,16 @@ test('source-linked project hooks route native tool evidence without a packaged 
   const routed = await handleLocalSourceHook({ hook_event_name: 'UserPromptSubmit', prompt: 'h:local local-debug quality fixture-v1', cwd: projectRoot, session_id: 'local-source-session' }, { bindingsDir });
   assert.match(routed.hookSpecificOutput.additionalContext, /本地源码 Coordinator/);
   const routedIntent = JSON.parse(routed.hookSpecificOutput.additionalContext.split('解析结果：').at(-1));
-  assert.equal(decodeVisibleLifecycleIntent(routedIntent.coordinationIntent).command.target, 'fixture-v1');
+  const qualityCommand = decodeVisibleLifecycleIntent(routedIntent.coordinationIntent).command;
+  assert.equal(qualityCommand.target, 'fixture-v1');
+  assert.equal(resolveCommandIntent(deliveryLifecycleCommandManifest, qualityCommand).sourcePolicy, 'review-and-repair');
+  const unknownAlias = await handleLocalSourceHook({ hook_event_name: 'UserPromptSubmit', prompt: 'h:local unknown quality fixture-v1', cwd: projectRoot, session_id: 'local-source-session' }, { bindingsDir });
+  assert.equal(unknownAlias.decision, 'block');
+  assert.match(unknownAlias.reason, /LOCAL_SOURCE_COMMAND_INTENT_MISSING/);
+  assert.match(unknownAlias.reason, /P2/);
+  assert.match(unknownAlias.reason, /restore-trusted-binding-then-retry-command/);
+  const malformed = await handleLocalSourceHook({ hook_event_name: 'UserPromptSubmit', prompt: 'h:local local-debug quality', cwd: projectRoot, session_id: 'local-source-session' }, { bindingsDir });
+  assert.equal(malformed.decision, 'block');
   assert.deepEqual(await handleLocalSourceHook({ hook_event_name: 'UserPromptSubmit', prompt: 'h:local-debug quality fixture-v1', cwd: projectRoot, session_id: 'local-source-session' }, { bindingsDir }), {});
   assert.deepEqual(await handleLocalSourceHook({ hook_event_name: 'UserPromptSubmit', prompt: 'ordinary request', cwd: projectRoot, session_id: 'local-source-session' }, { bindingsDir }), {});
 
@@ -85,8 +96,9 @@ test('source-linked project hooks route native tool evidence without a packaged 
   staleBinding.harness.release.artifactDigest = staleManifest.release.artifactDigest;
   await writeFile(configured.bindingFile, JSON.stringify(staleBinding));
   const staleResponse = await handleLocalSourceHook({ hook_event_name: 'UserPromptSubmit', prompt: 'h:local local-debug quality fixture-v1', cwd: projectRoot, session_id: 'local-source-session' }, { bindingsDir });
-  assert.match(staleResponse.hookSpecificOutput.additionalContext, /LOCAL_SOURCE_HOOK_CWD_MISMATCH/);
-  assert.doesNotMatch(staleResponse.hookSpecificOutput.additionalContext, /coordinationIntent/);
+  assert.equal(staleResponse.decision, 'block');
+  assert.match(staleResponse.reason, /LOCAL_SOURCE_HOOK_CWD_MISMATCH/);
+  assert.doesNotMatch(staleResponse.reason, /coordinationIntent/);
 
   const previousCwd = process.cwd();
   let synced;
@@ -129,7 +141,9 @@ test('source-linked project hooks route native tool evidence without a packaged 
     process.chdir(projectRoot);
     h4Response = await handleLocalSourceHook({ hook_event_name: 'UserPromptSubmit', prompt: 'h:local local-debug quality fixture-v1', cwd: projectRoot, session_id: 'local-source-session' }, { bindingsDir });
   } finally { process.chdir(previousCwd); }
-  assert.match(h4Response.hookSpecificOutput.additionalContext, /H4，不能自动同步/);
-  assert.doesNotMatch(h4Response.hookSpecificOutput.additionalContext, /coordinationIntent/);
+  assert.equal(h4Response.decision, 'block');
+  assert.match(h4Response.reason, /H4，不能自动同步/);
+  assert.match(h4Response.reason, /review-migration-or-release-plan/);
+  assert.doesNotMatch(h4Response.reason, /coordinationIntent/);
   assert.equal(JSON.parse(await readFile(source.file, 'utf8')).manifestDigest, h4Manifest.manifestDigest);
 });

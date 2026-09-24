@@ -85,6 +85,44 @@ test('rollout Host exchange records the limited attestation of a redacted native
   const files = await readdir(resolve(dataRoot, 'host-bridge', 'rollout-receipts'));
   const receipt = JSON.parse(await readFile(resolve(dataRoot, 'host-bridge', 'rollout-receipts', files[0]), 'utf8'));
   assert.equal(receipt.argumentAttestation, 'host-redacted-message');
+  assert.equal(receipt.executedToolMetadata, 'present');
   assert.equal(receipt.callId, 'spawn-call');
+  exchange.close();
+});
+
+test('rollout Host exchange binds a redacted spawn when Codex omits executed tool metadata', async t => {
+  const { controlRoot, dataRoot, codexHome, rollout } = await fixture(t);
+  const binding = { projectId: 'fixture', runId: 'run-1', dispatchId: 'dispatch-1', packetDigest: 'a'.repeat(64), promptDigest: 'b'.repeat(64) };
+  const taskName = `ah_${digestJson({ sessionId, ...binding }).slice(0, 20)}`;
+  const argumentsForSpawn = { task_name: taskName, fork_turns: 'none', message: 'exact generated Prompt text' };
+  const body = { protocolVersion: '1.0', kind: 'codex-visible-host-request', tool: 'collaboration.spawn_agent', arguments: argumentsForSpawn, sessionId, requestId: `rollout_${crypto.randomUUID()}`, operation: 'spawn', binding, createdAt: new Date().toISOString() };
+  const request = { ...body, requestDigest: digestJson(body) };
+  const output = new PassThrough();
+  const exchange = createCodexRolloutHostExchange({ controlRoot, dataRoot, codexHome, codexSessionId: sessionId, expectedCwd: controlRoot, output, responseTimeoutMs: 1000, pollMs: 5 });
+  const pending = exchange.exchange(request);
+  await once(output, 'data');
+  await appendFile(rollout, line({ type: 'function_call', namespace: 'collaboration', name: 'spawn_agent', call_id: 'spawn-call', arguments: JSON.stringify({ ...argumentsForSpawn, message: `gAAAA${'a'.repeat(80)}` }), internal_chat_message_metadata_passthrough: { turn_id: 'turn-spawn' } }));
+  await appendFile(rollout, line({ type: 'function_call_output', id: 'spawn-output', call_id: 'spawn-call', output: JSON.stringify({ task_name: `/root/${taskName}` }), internal_chat_message_metadata_passthrough: { turn_id: 'turn-spawn', create_time: 1790242151 } }));
+  assert.deepEqual(await pending, { task_name: `/root/${taskName}` });
+  const files = await readdir(resolve(dataRoot, 'host-bridge', 'rollout-receipts'));
+  const receipt = JSON.parse(await readFile(resolve(dataRoot, 'host-bridge', 'rollout-receipts', files[0]), 'utf8'));
+  assert.equal(receipt.argumentAttestation, 'host-redacted-message');
+  assert.equal(receipt.executedToolMetadata, 'absent');
+  assert.equal(receipt.callId, 'spawn-call');
+  exchange.close();
+});
+
+test('rollout Host exchange rejects a redacted spawn result for another task', async t => {
+  const { controlRoot, dataRoot, codexHome, rollout } = await fixture(t);
+  const binding = { projectId: 'fixture', runId: 'run-1', dispatchId: 'dispatch-1', packetDigest: 'a'.repeat(64), promptDigest: 'b'.repeat(64) };
+  const argumentsForSpawn = { task_name: `ah_${digestJson({ sessionId, ...binding }).slice(0, 20)}`, fork_turns: 'none', message: 'exact generated Prompt text' };
+  const body = { protocolVersion: '1.0', kind: 'codex-visible-host-request', tool: 'collaboration.spawn_agent', arguments: argumentsForSpawn, sessionId, requestId: `rollout_${crypto.randomUUID()}`, operation: 'spawn', binding, createdAt: new Date().toISOString() };
+  const output = new PassThrough();
+  const exchange = createCodexRolloutHostExchange({ controlRoot, dataRoot, codexHome, codexSessionId: sessionId, expectedCwd: controlRoot, output, responseTimeoutMs: 1000, pollMs: 5 });
+  const pending = exchange.exchange({ ...body, requestDigest: digestJson(body) });
+  await once(output, 'data');
+  await appendFile(rollout, line({ type: 'function_call', namespace: 'collaboration', name: 'spawn_agent', call_id: 'spawn-call', arguments: JSON.stringify({ ...argumentsForSpawn, message: `gAAAA${'a'.repeat(80)}` }), internal_chat_message_metadata_passthrough: { turn_id: 'turn-spawn' } }));
+  await appendFile(rollout, line({ type: 'function_call_output', id: 'spawn-output', call_id: 'spawn-call', output: JSON.stringify({ task_name: '/root/unrelated' }), internal_chat_message_metadata_passthrough: { turn_id: 'turn-spawn' } }));
+  await assert.rejects(() => pending, { code: 'CODEX_ROLLOUT_SPAWN_RESULT_MISMATCH' });
   exchange.close();
 });

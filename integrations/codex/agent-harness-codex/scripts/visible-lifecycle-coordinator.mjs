@@ -14,12 +14,14 @@ import { createHostExchangeDiagnosticWriter } from '../lib/host-exchange-diagnos
 import { decodeVisibleLifecycleIntent } from '../lib/visible-lifecycle-intent.mjs';
 import { createPlannedLifecycleEvent, createPreflightLifecycleEvent } from '../lib/visible-lifecycle-events.mjs';
 import { captureSourceManifest } from '../../../../src/platform/workflow/source-manifest.mjs';
+import { classifyLocalIncident } from '../../../../src/application/local-incident.mjs';
 
 const samePath = (left, right) => process.platform === 'win32'
   ? resolve(left).toLowerCase() === resolve(right).toLowerCase()
   : resolve(left) === resolve(right);
 
 const emit = value => process.stdout.write(`${JSON.stringify({ protocolVersion: '1.0', ...value })}\n`);
+let localIncidentContext = null;
 const renderWorkflowInput = (value, intent) => {
   if (value === '{command-timestamp}') return Date.parse(intent.createdAt);
   if (typeof value === 'string') return value.replaceAll('{target}', intent.command.target);
@@ -32,6 +34,7 @@ const main = async () => {
   const preflightOnly = process.argv.length === 5 && process.argv[4] === '--preflight-only';
   if (![4, 5].includes(process.argv.length) || process.argv[2] !== '--intent' || (process.argv.length === 5 && !preflightOnly)) throw Object.assign(new Error('Usage: visible-lifecycle-coordinator.mjs --intent <base64url-intent> [--preflight-only]'), { code: 'VISIBLE_LIFECYCLE_COORDINATOR_ARGUMENTS_INVALID' });
   const intent = decodeVisibleLifecycleIntent(process.argv[3]);
+  if (intent.harness.release.mode === 'source-link') localIncidentContext = { phase: 'binding', projectId: intent.project.projectId, workflowId: intent.project.workflowId, action: intent.command.action, target: intent.command.target };
   const active = await validateActiveReleaseBinding({
     controlRoot: intent.harness.controlRoot,
     dataRoot: intent.harness.dataRoot,
@@ -90,6 +93,7 @@ const main = async () => {
       arguments: intent.command.arguments,
       executionWorkspaceRoot: intent.executionWorkspaceRoot,
     });
+    if (localIncidentContext) localIncidentContext = { ...localIncidentContext, phase: 'planned', runId: plan.run.runId };
     if (intent.project.workflowId && (plan.workflow?.id !== intent.project.workflowId || plan.workflow.version !== intent.project.workflowVersion || plan.workflow.artifactDigest !== intent.project.workflowDigest)) throw Object.assign(new Error('Visible lifecycle Plan differs from the verified Workflow binding.'), { code: 'VISIBLE_LIFECYCLE_WORKFLOW_IDENTITY_MISMATCH' });
     emit(createPlannedLifecycleEvent({ commandId: intent.commandId, intentDigest: intent.intentDigest, plan }));
     assertMachineBoundQualityTransport(hostExchange, intent.command.action);
@@ -98,12 +102,32 @@ const main = async () => {
     const preflight = await harness.createExecutionReadinessReport(plan, { onGateProgress });
     emit(createPreflightLifecycleEvent({ commandId: intent.commandId, intentDigest: intent.intentDigest, planDigest: plan.planDigest, report: preflight }));
     if (!preflight.executionReady) {
+      if (localIncidentContext) {
+        const blockers = preflight.checks.filter(check => !check.ready);
+        const seen = new Set();
+        for (const check of blockers) for (const issue of check.issues) {
+          const code = issue.code ?? 'UNKNOWN_READINESS_ISSUE';
+          if (seen.has(code)) continue;
+          seen.add(code);
+          const incident = classifyLocalIncident({ error: code, ...localIncidentContext, phase: 'preflight' });
+          emit({ kind: 'codex-visible-lifecycle-incident', code, incident, details: { checkId: check.id } });
+        }
+        if (!seen.size) {
+          const incident = classifyLocalIncident({ error: 'PREFLIGHT_NOT_READY', ...localIncidentContext, phase: 'preflight' });
+          emit({ kind: 'codex-visible-lifecycle-incident', code: incident.code, incident, details: { blockerCount: blockers.length } });
+        }
+      }
       process.exitCode = 2;
       return;
     }
     if (preflightOnly) return;
+    if (localIncidentContext) localIncidentContext = { ...localIncidentContext, phase: 'execution' };
     const result = await harness.executeVisibleLifecyclePlan(plan, { commandId: intent.commandId, preflightReport: preflight, onGateProgress });
     emit({ kind: 'codex-visible-lifecycle-event', phase: 'complete', commandId: intent.commandId, intentDigest: intent.intentDigest, planDigest: plan.planDigest, status: result.status, result });
+    if (localIncidentContext && result.status === 'attention-required' && result.reason) {
+      const incident = classifyLocalIncident({ error: result.reason, ...localIncidentContext });
+      emit({ kind: 'codex-visible-lifecycle-incident', code: incident.code, incident, details: { reason: result.reason } });
+    }
     if (!['closed', 'completed'].includes(result.status)) process.exitCode = 3;
   } finally {
     hostExchange.close();
@@ -111,6 +135,9 @@ const main = async () => {
 };
 
 main().catch(error => {
-  emit({ kind: 'codex-visible-lifecycle-error', code: error?.code ?? 'UNEXPECTED_ERROR', message: error?.message ?? String(error), details: error?.details ?? null });
+  if (localIncidentContext) {
+    const incident = classifyLocalIncident({ error, ...localIncidentContext });
+    emit({ kind: 'codex-visible-lifecycle-error', code: incident.code, message: error?.message ?? String(error), incident, details: error?.details ?? null });
+  } else emit({ kind: 'codex-visible-lifecycle-error', code: error?.code ?? 'UNEXPECTED_ERROR', message: error?.message ?? String(error), details: error?.details ?? null });
   process.exitCode = 1;
 });

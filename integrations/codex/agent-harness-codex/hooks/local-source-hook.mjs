@@ -3,6 +3,7 @@ import { readFile } from 'node:fs/promises';
 import { dirname, isAbsolute, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { syncDevelopmentSource } from '../../../../src/interfaces/cli/local-development-sync.mjs';
+import { classifyLocalIncident } from '../../../../src/application/local-incident.mjs';
 import { capturePostToolUse } from './post-tool-host-bridge.mjs';
 import { hookResponse, loadBindings, parsePseudoCommand } from './pseudo-command-router.mjs';
 
@@ -12,13 +13,20 @@ const inside = (parent, child) => { const path = relative(parent, child); return
 const integrationRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const sourceRoot = resolve(integrationRoot, '..', '..', '..');
 const staleBindingCodes = new Set(['HARNESS_SOURCE_IDENTITY_CHANGED', 'SOURCE_LINK_RELEASE_STALE']);
+const blockLocalCommand = (code, detail) => {
+  const incident = classifyLocalIncident({ error: code, phase: 'hook' });
+  return {
+    decision: 'block',
+    reason: `Agent Harness 本地命令已阻断（${code}，${incident.severity}，${incident.severityStatus}）：${detail} 处置：${incident.disposition}；后续：${incident.continuation}。先核查本地绑定与故障证据；确认为 Harness 缺陷后在独立 Harness 维护上下文修复，并按 H0–H4 判定补丁对 Run 的影响；不得改由普通对话或仓库脚本执行。故障 ID：${incident.incidentId}`,
+  };
+};
 const bindingFailureContext = error => {
   const code = error?.code ?? 'LOCAL_SOURCE_BINDING_UNAVAILABLE';
   const stale = staleBindingCodes.has(code);
   const detail = stale
     ? `本地 source-link 绑定已过期（${code}）。请从已绑定的项目 checkout 运行 agent-harness dev sync --manifest <development-manifest>，同步成功后重新发送本地命令。`
     : `本地 source-link 绑定校验失败（${code}）。请检查项目 Hook 和绑定配置。`;
-  return { hookSpecificOutput: { hookEventName: 'UserPromptSubmit', additionalContext: `${detail} 当前命令没有可信项目绑定或命令意图；不得启动 Run、执行 Gate 或修改 Harness 状态。` } };
+  return blockLocalCommand(code, detail);
 };
 
 const syncLocalSourceBinding = async ({ event, parsed, bindingsDir, forceRebind }) => {
@@ -46,7 +54,21 @@ const autoSyncFailureContext = error => {
   const detail = code === 'DEVELOPMENT_PATCH_INCOMPATIBLE'
     ? '源码变更为 H4，不能自动同步；需要显式迁移或新 Release。'
     : '本地源码自动同步未完成。请检查项目 checkout、绑定和同步诊断。';
-  return { hookSpecificOutput: { hookEventName: 'UserPromptSubmit', additionalContext: `${detail} 错误码：${code}。当前命令没有可信命令意图；不得启动 Run、执行 Gate 或修改 Harness 状态。` } };
+  return blockLocalCommand(code, detail);
+};
+
+const verifiedCommandResponse = (response, parsed) => {
+  const context = response?.hookSpecificOutput?.additionalContext;
+  const marker = '解析结果：';
+  let intent;
+  try { intent = JSON.parse(context.slice(context.lastIndexOf(marker) + marker.length)); }
+  catch { return false; }
+  return context.includes(marker)
+    && intent?.projectAlias === parsed.projectAlias
+    && intent?.action === parsed.action
+    && intent?.target === parsed.target
+    && typeof intent.coordinationIntent === 'string'
+    && typeof intent.coordinationIntentDigest === 'string';
 };
 
 export const loadLocalSourceBindings = async bindingsDir => {
@@ -74,11 +96,11 @@ export const handleLocalSourceHook = async (event, { bindingsDir } = {}) => {
   if (event?.hook_event_name === 'UserPromptSubmit') {
     if (typeof event.prompt !== 'string' || !/^h:local(?:\s|$)/.test(event.prompt)) return {};
     const match = event.prompt.match(/^h:local\s+(.+)$/);
-    if (!match) return { hookSpecificOutput: { hookEventName: 'UserPromptSubmit', additionalContext: '本地命令语法为 h:local <项目别名> <动作> <目标> [预设]。' } };
-    if (match[1].startsWith('init ')) return { hookSpecificOutput: { hookEventName: 'UserPromptSubmit', additionalContext: '首次本地绑定请从项目 checkout 运行 agent-harness dev execute；项目内发起无需 Decision。' } };
+    if (!match) return blockLocalCommand('LOCAL_SOURCE_COMMAND_INVALID', '命令语法为 h:local <项目别名> <动作> <目标> [预设]。');
+    if (match[1].startsWith('init ')) return blockLocalCommand('LOCAL_SOURCE_INITIALIZATION_REQUIRED', '首次本地绑定请从项目 checkout 运行 agent-harness dev execute。');
     const prompt = `h:${match[1]}`;
     const parsed = parsePseudoCommand(prompt);
-    if (parsed?.kind === 'invalid') return await hookResponse({ ...event, prompt });
+    if (!parsed || parsed.kind === 'invalid') return blockLocalCommand('LOCAL_SOURCE_COMMAND_INVALID', parsed?.error ?? '无法解析本地命令。');
     let bindingOptions;
     let synchronized = null;
     try { ({ bindingOptions } = await loadLocalSourceBindings(bindingsDir)); }
@@ -89,7 +111,10 @@ export const handleLocalSourceHook = async (event, { bindingsDir } = {}) => {
       try { ({ bindingOptions } = await loadLocalSourceBindings(bindingsDir)); }
       catch (retryError) { return bindingFailureContext(retryError); }
     }
-    const response = await hookResponse({ ...event, prompt }, bindingOptions) ?? {};
+    let response;
+    try { response = await hookResponse({ ...event, prompt }, bindingOptions) ?? {}; }
+    catch (error) { return blockLocalCommand(error?.code ?? 'LOCAL_SOURCE_ROUTING_FAILED', '命令意图生成失败。'); }
+    if (parsed.kind === 'command' && !verifiedCommandResponse(response, parsed)) return blockLocalCommand('LOCAL_SOURCE_COMMAND_INTENT_MISSING', '没有取得与项目、动作和目标一致的可信 Coordinator 意图。');
     if (synchronized && response.hookSpecificOutput?.additionalContext) response.hookSpecificOutput.additionalContext = `本地 source-link 已自动同步（${synchronized.level ?? '无源码差异'}；${synchronized.continuation ?? '已更新绑定'}）。${response.hookSpecificOutput.additionalContext}`;
     return response;
   }

@@ -119,9 +119,20 @@ const walk = async directory => {
   }
 };
 await walk(resolve(root, 'src', 'kernel'));
-for (const file of [resolve(root, 'src', 'index.mjs'), resolve(root, 'src', 'application', 'harness.mjs'), resolve(root, 'src', 'interfaces', 'cli', 'index.mjs'), resolve(root, 'src', 'platform', 'plugins', 'index.mjs'), resolve(root, 'src', 'platform', 'workflow', 'profiles', 'index.mjs'), resolve(root, 'src', 'platform', 'recovery', 'index.mjs')]) {
+for (const file of [resolve(root, 'src', 'index.mjs'), resolve(root, 'src', 'application', 'harness.mjs'), resolve(root, 'src', 'platform', 'plugins', 'index.mjs'), resolve(root, 'src', 'platform', 'workflow', 'profiles', 'index.mjs'), resolve(root, 'src', 'platform', 'recovery', 'index.mjs')]) {
   const text = await readFile(file, 'utf8');
   if (banned.test(text)) errors.push(`business/provider term leaked into default composition: ${file.slice(root.length + 1)}`);
+}
+// The CLI explicitly refreshes the local Codex binding for source-linked
+// development. That host operation is outside createHarness()'s neutral default
+// composition; keep its exception exact so other provider references still fail.
+const cliFile = resolve(root, 'src', 'interfaces', 'cli', 'index.mjs');
+const allowedCliProviderLines = new Set([
+  "import { applySourcePatch, refreshLocalCodexBindings, syncDevelopmentSource } from './local-development-sync.mjs';",
+  "const bindingFile = await refreshLocalCodexBindings(take('--manifest'), rolledBack.manifest, initialization);",
+]);
+for (const [index, line] of (await readFile(cliFile, 'utf8')).split(/\r?\n/).entries()) {
+  if (banned.test(line) && !allowedCliProviderLines.has(line.trim())) errors.push(`business/provider term leaked into CLI outside local binding integration: src/interfaces/cli/index.mjs:${index + 1}`);
 }
 const auditWriteRoots = async directory => {
   for (const entry of await readdir(directory, { withFileTypes: true })) {

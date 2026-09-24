@@ -66,9 +66,24 @@ node <Harness源码根>/integrations/codex/agent-harness-codex/scripts/local-sou
 
 入口核验绑定、Git 工作区身份、Workflow 与当前源码摘要，返回 `coordinatorEntrypoint` 和 `coordinationIntent`。在同一 Codex 任务中先调用 `node <coordinatorEntrypoint> --intent <coordinationIntent> --preflight-only` 可执行完整计划和动作预检，不创建 Run；需要按终端请求调用原生 collaboration 工具。确认预检通过并决定启动后，再用新生成的意图调用 `node <coordinatorEntrypoint> --intent <coordinationIntent>`，保持终端可观察，并依次执行 Coordinator 发出的原生 collaboration 请求。`spawn_agent` 的 `message` 必须逐字使用请求中的完整生成 Prompt；不要缩写或用路径引用代替。仅在动作预检返回 `executionReady: true` 后 Coordinator 才创建 Run。审查发现问题时，继续处理修复、复审和 Gate，直到 `closed` 或明确的 `attention-required`。
 
-也可以在业务项目的 `.codex/hooks.json` 中配置由 `local-source-hook.mjs --print-config --bindings-dir <绑定目录>` 生成的 `UserPromptSubmit` Hook。项目 Hook 只保存指向 Harness 源码和外部数据根的命令，项目仓库不保存 Harness 实现或运行状态。经 Codex 审核并信任该项目 Hook 后，在绑定的项目任务中发送 `h:local engine quality V3.8.4`。Hook 校验到 source-link 源码或绑定摘要过期时，只在进程实际工作目录与已绑定项目 checkout 一致的情况下自动执行 `dev sync`，重新验证绑定后继续解析原命令；H4 或同步失败时停止，不生成执行意图。`h:local where engine` 平时只读，但绑定过期时也会触发这次同步。安装态 Hook 忽略 `h:local`，本地 Hook 忽略安装态的 `h:engine`，安装态命令不自动同步。源码模式的原生工具回执由当前 Codex session rollout 核验，不依赖安装态 `PostToolUse` Hook。新建任务或变更 Hook 定义后需重新核对信任状态；旧 Hook 配置的 `timeout: 15` 应使用 `--print-config` 生成的 `timeout: 120` 更新。
+也可以在业务项目的 `.codex/hooks.json` 中配置由 `local-source-hook.mjs --print-config --bindings-dir <绑定目录>` 生成的 `UserPromptSubmit` Hook。项目 Hook 只保存指向 Harness 源码和外部数据根的命令，项目仓库不保存 Harness 实现或运行状态。经 Codex 审核并信任该项目 Hook 后，在绑定的项目任务中发送 `h:local engine quality V3.8.4`。Hook 校验到 source-link 源码或绑定摘要过期时，只在进程实际工作目录与已绑定项目 checkout 一致的情况下自动执行 `dev sync`，重新验证绑定后继续解析原命令；H4 或同步失败时返回 Codex `decision:block`，不生成执行意图。已识别的本地质量命令若无法生成可信 Coordinator 意图，也会被阻断，不得用手动构建命令代替。`h:local where engine` 平时只读，但绑定过期时也会触发这次同步。安装态 Hook 忽略 `h:local`，本地 Hook 忽略安装态的 `h:engine`，安装态命令不自动同步。源码模式的原生工具回执由当前 Codex session rollout 核验，不依赖安装态 `PostToolUse` Hook。新建任务或变更 Hook 定义后需重新核对信任状态；旧 Hook 配置的 `timeout: 15` 应使用 `--print-config` 生成的 `timeout: 120` 更新。
 
-可见 Agent Prompt 1.4 将完整的 Dispatch packet 写到控制根下的摘要绑定文件。Agent 必须读取该文件并校验精确字节的 SHA-256。读取 Coordinator 的终端请求时要给足输出预算；若输出出现截断标记，不能据此调用 `spawn_agent`。Codex 当前宿主会加密长 `spawn_agent.message`，父任务 rollout 只能证明原生调用、确定性的任务名及宿主截断元数据，不能独立复算实际传给 Agent 的完整 Prompt 字节；Host Receipt 将此标为 `host-redacted-message`，操作人仍须逐字传递生成 Prompt。
+可见 Agent Prompt 1.4 将完整的 Dispatch packet 写到控制根下的摘要绑定文件。Agent 必须读取该文件并校验精确字节的 SHA-256。读取 Coordinator 的终端请求时要给足输出预算；若输出出现截断标记，不能据此调用 `spawn_agent`。Codex 当前宿主会加密长 `spawn_agent.message`；有些宿主版本也不会在工具输出附带 `executed_tool_calls`。本地 Host 通过确定性任务名、原生调用/输出的 `call_id` 与 `turn_id`、返回的任务名和后续 Agent 可见性核验派发；若宿主提供截断元数据，则额外严格核对。Host Receipt 将证明强度标为 `host-redacted-message`，不宣称能独立复算实际 Prompt 字节；操作人仍须逐字传递生成 Prompt。字段存在但冲突、任务名错配或 Agent 不可观察时，继续拒绝绑定。
+
+### 本地故障的分级与接续
+
+所有 source-link Workflow 共用故障处置规则，先区分问题来源和 P0–P3 严重度，再根据**实际补丁文件**判定下表的 H0–H4 影响等级。Host 回执失配属于 Harness 宿主集成故障，初判 P1；涉及 `integrations/codex/` 的修复为 H3。未知错误标为来源未定，P1 只是待复核的保守初判；先核查证据，不能自动登记为 Harness 缺陷。Gate 失败属于项目结果，也不能自动登记为 Harness 缺陷。
+
+| 严重度 | 初判处置 |
+|:---|:---|
+| P0 | Authority 完整性异常：保留现场，先核验状态与迁移方案。 |
+| P1 | 宿主调用/Host Effect 异常，或来源未定的保守初判：有未决 Effect 时先隔离和核验，再查明来源。 |
+| P2 | 绑定、环境、Gate 或不兼容补丁：按具体来源修复；Gate 失败仍是项目结果。 |
+| P3 | 本地命令语法或初始化用法：更正命令后重新提交。 |
+
+本地 Coordinator 在异常时保留 `codex-visible-lifecycle-error` 事件并附加 `incident`；`attention-required` 则额外输出 `codex-visible-lifecycle-incident`。两者携带错误码、阶段、Project/Workflow/目标/Run、故障 ID、初判等级、隔离状态和接续动作。活动 Host Effect 若失去可信证明，先按原 Host Adapter 合同隔离并核验；该隔离不是整个用户任务的最终结论。维护者在独立 Harness checkout 修复并验证源码，随后运行 `dev patch plan`/`dev sync`，依据 H0–H4 的处置恢复原目标。原项目 Run 不获得 Harness 源码写权限；H2/H3 不复用旧 Plan、预检或 Lease。当前用户若要求先审核实现，审核完成前不得启动替代质量 Run。
+
+Hook 在绑定、同步或路由失败时仍用 `decision:block` 阻止无可信意图的业务命令，并在原因中输出故障等级、ID 和维护方向。这个阻断仅针对本次不可信命令；收到原因后应处理 Harness 故障，再按补丁级别重新发出原命令。不能用普通对话或业务脚本绕过 Hook。
 
 源码 Coordinator 在创建 Run 前检查确定性进程 Gate 所需的带输出捕获子进程能力；若当前任务的进程权限返回 `LOCAL_PROCESS_GATE_HOST_UNAVAILABLE`，应在获准的进程权限下重新执行同一入口。不要绕过 Gate 或手写 Gate 结果。
 
