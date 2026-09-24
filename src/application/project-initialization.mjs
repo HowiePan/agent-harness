@@ -6,6 +6,7 @@ import { assert } from '../common/errors.mjs';
 import { digestJson, sha256, withoutKeys } from '../common/canonical.mjs';
 import { applyBootstrapPlan, createBootstrapPlan } from './bootstrap.mjs';
 import { ExtensionRegistry } from '../platform/extensions/registry.mjs';
+import { assertLocalDevelopmentInvocation, decisionFromLocalDevelopmentInvocation } from './local-development-invocation.mjs';
 
 const schema = JSON.parse(readFileSync(new URL('../../schemas/project-harness-config.schema.json', import.meta.url), 'utf8'));
 
@@ -86,7 +87,13 @@ export const verifyProjectInitializationPlan = async plan => {
 
 export const applyProjectInitializationPlan = async (planInput, options = {}) => {
   const plan = await verifyProjectInitializationPlan(planInput);
-  const result = await applyBootstrapPlan(plan.bootstrapPlan, { ...options, developmentMode: plan.mode === 'source-link' });
+  const developmentInvocation = options.developmentInvocation
+    ? assertLocalDevelopmentInvocation(options.developmentInvocation, { projectRoot: plan.projectRoot, configPath: plan.configPath, controlRoot: plan.bootstrapPlan.controlRoot, dataRoot: plan.bootstrapPlan.dataRoot })
+    : null;
+  const authorityDecision = options.authorityDecision ?? (plan.mode === 'source-link' && developmentInvocation
+    ? decisionFromLocalDevelopmentInvocation(developmentInvocation, { action: 'project-init', planDigest: plan.planDigest, commandId: options.commandId, projectId: plan.bootstrapPlan.request.binding.projectId, harnessArtifactDigest: plan.bootstrapPlan.harness.artifactDigest, expectedExtensionRevision: plan.bootstrapPlan.expectedExtensionRevision, expectedProjectRevision: plan.bootstrapPlan.expectedProjectRevision })
+    : null);
+  const result = await applyBootstrapPlan(plan.bootstrapPlan, { ...options, authorityDecision, developmentMode: plan.mode === 'source-link' });
   const extensionRegistry = new ExtensionRegistry({ controlRoot: options.controlRoot ?? plan.bootstrapPlan.controlRoot, dataRoot: options.dataRoot ?? plan.bootstrapPlan.dataRoot, developmentMode: plan.mode === 'source-link' });
   const boundExtension = await extensionRegistry.loadOne(plan.bootstrapPlan.request.binding.extensionId);
   const workflows = (boundExtension.workflows ?? []).map(workflow => ({ id: workflow.id, version: workflow.version, artifactDigest: workflow.artifactDigest, profileId: workflow.profileId, extensionId: boundExtension.id }));

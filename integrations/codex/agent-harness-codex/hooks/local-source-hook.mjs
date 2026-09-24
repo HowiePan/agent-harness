@@ -2,7 +2,7 @@
 import { dirname, isAbsolute, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { capturePostToolUse } from './post-tool-host-bridge.mjs';
-import { loadBindings } from './pseudo-command-router.mjs';
+import { hookResponse, loadBindings } from './pseudo-command-router.mjs';
 
 const fail = (code, message) => { throw Object.assign(new Error(message), { code }); };
 const samePath = (left, right) => process.platform === 'win32' ? resolve(left).toLowerCase() === resolve(right).toLowerCase() : resolve(left) === resolve(right);
@@ -25,18 +25,26 @@ export const renderLocalSourceHooks = async ({ bindingsDir } = {}) => {
   const quote = value => process.platform === 'win32' ? `"${value}"` : `'${value.replaceAll("'", "'\\''")}'`;
   const command = paths.map(quote).join(' ');
   const handler = { type: 'command', command, ...(process.platform === 'win32' ? { commandWindows: command } : {}), timeout: 15 };
-  return { description: 'Agent Harness source-link local development Host bridge.', hooks: {
-    PostToolUse: [{ matcher: '^(Agent|(collaboration\\.)?(spawn_agent|list_agents|wait_agent|interrupt_agent))$', hooks: [handler] }],
+  return { description: 'Agent Harness source-link local command router.', hooks: {
+    UserPromptSubmit: [{ hooks: [handler] }],
   } };
 };
 
 export const handleLocalSourceHook = async (event, { bindingsDir } = {}) => {
+  if (event?.hook_event_name === 'UserPromptSubmit') {
+    if (typeof event.prompt !== 'string' || !/^h:local(?:\s|$)/.test(event.prompt)) return {};
+    const match = event.prompt.match(/^h:local\s+(.+)$/);
+    if (!match) return { hookSpecificOutput: { hookEventName: 'UserPromptSubmit', additionalContext: '本地命令语法为 h:local <项目别名> <动作> <目标> [预设]。' } };
+    if (match[1].startsWith('init ')) return { hookSpecificOutput: { hookEventName: 'UserPromptSubmit', additionalContext: '首次本地绑定请从项目 checkout 运行 agent-harness dev execute；项目内发起无需 Decision。' } };
+    const { bindingOptions } = await loadLocalSourceBindings(bindingsDir);
+    return await hookResponse({ ...event, prompt: `h:${match[1]}` }, bindingOptions) ?? {};
+  }
   if (event?.hook_event_name === 'PostToolUse') {
     const { bindings, bindingOptions } = await loadLocalSourceBindings(bindingsDir);
     await capturePostToolUse(event, { ...bindingOptions, bindings });
     return {};
   }
-  fail('LOCAL_SOURCE_HOOK_EVENT_UNSUPPORTED', 'Local source Hook accepts only PostToolUse.');
+  fail('LOCAL_SOURCE_HOOK_EVENT_UNSUPPORTED', 'Local source Hook accepts only UserPromptSubmit or PostToolUse.');
 };
 
 const main = async () => {

@@ -4,6 +4,7 @@ import { existsSync } from 'node:fs';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { applyProjectInitializationPlan, createProjectInitializationPlan, harnessProjectRoot, harnessTemporaryRoot, loadProjectHarnessConfig } from '../src/index.mjs';
+import { createLocalDevelopmentInvocation } from '../src/application/local-development-invocation.mjs';
 
 test('project-owned harness.json compiles to an approved source-link initialization receipt', async t => {
   const controlRoot = harnessProjectRoot();
@@ -31,11 +32,27 @@ test('project-owned harness.json compiles to an approved source-link initializat
   assert.equal(loaded.request.binding.workspaceRoot, projectRoot);
   const releaseIdentity = { version: '1.0.0', artifactDigest: 'd'.repeat(64), verified: true, development: true };
   const plan = await createProjectInitializationPlan(configPath, { projectRoot, controlRoot, dataRoot, releaseIdentity, mode: 'source-link' });
-  const output = await applyProjectInitializationPlan(plan, { controlRoot, dataRoot, releaseIdentity, commandId: 'source-init', authorityDecision: { actor: 'project-owner', decision: 'approved', action: 'project-init' } });
+  const developmentInvocation = await createLocalDevelopmentInvocation({ projectRoot, configPath, controlRoot, dataRoot, cwd: projectRoot });
+  const output = await applyProjectInitializationPlan(plan, { controlRoot, dataRoot, releaseIdentity, commandId: 'source-init', developmentInvocation });
   assert.equal(output.receipt.mode, 'source-link');
+  assert.equal(output.receipt.bootstrapReceipt.authorityDecision.authorityBasis, 'local-development-invocation');
+  assert.equal(output.receipt.bootstrapReceipt.authorityDecision.context.projectRoot, projectRoot);
   assert.equal(output.receipt.hostBinding.projectId, 'consumer');
   assert.deepEqual(output.receipt.hostBinding.workflows.map(item => item.id), ['delivery-lifecycle']);
   assert.match(output.receipt.receiptDigest, /^[a-f0-9]{64}$/);
+});
+
+test('local development invocation rejects a Harness-side checkout context', async t => {
+  const controlRoot = harnessProjectRoot();
+  const parent = resolve(harnessTemporaryRoot(), 'project-initialization-tests');
+  await mkdir(parent, { recursive: true });
+  const root = await mkdtemp(resolve(parent, 'context-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const projectRoot = resolve(root, 'consumer');
+  await mkdir(resolve(projectRoot, '.git'), { recursive: true });
+  const configPath = resolve(projectRoot, 'harness.json');
+  await writeFile(configPath, '{}');
+  await assert.rejects(() => createLocalDevelopmentInvocation({ projectRoot, configPath, controlRoot, dataRoot: resolve(root, 'data'), cwd: controlRoot }), { code: 'LOCAL_DEVELOPMENT_PROJECT_CONTEXT_REQUIRED' });
 });
 
 test('project initialization plan is invalidated when harness.json changes', async t => {

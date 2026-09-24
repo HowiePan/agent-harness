@@ -392,7 +392,7 @@ agent-harness init execute --config ./harness.json --project-root . --command-id
 建立 source-link：
 
 ```text
-node <Harness源码根>/bin/agent-harness.mjs dev execute --config ./harness.json --project-root . --binding-id my-project --command-id dev-init-001 --decision ./decision.json
+node <Harness源码根>/bin/agent-harness.mjs dev execute --config ./harness.json --project-root . --binding-id my-project
 ```
 
 检查变化：
@@ -416,16 +416,16 @@ agent-harness dev watch --manifest <manifest.json>
 
 ```text
 agent-harness dev patch plan --manifest <manifest.json> > patch-plan.json
-agent-harness dev patch apply --manifest <manifest.json> --plan patch-plan.json --command-id patch-001 --decision ./decision.json
+agent-harness dev sync --manifest <manifest.json>
 ```
 
-H0 不要求 Decision；H1–H3 因改变已注册 Runtime/Extension 身份而要求批准。命令返回 `development-patch-receipt`、变更文件、前后摘要、受影响 Run 和明确的 `continuation`。H1 的“同 Run 继续”仅指当前 Run 已冻结的 Feature/Plan 不受影响；不能用新 Node 定义重写已派发 Feature。H2/H3 不允许把运行逻辑变化偷偷注入旧 Run。
+从项目 checkout 主动执行 `dev execute`、`dev apply`、`dev sync` 或 `dev patch apply/rollback`，调用本身授权 source-link 绑定和 H0–H3 同步；应用层据此生成带 `local-development-invocation` 来源、固定计划摘要和命令 ID 的 Authority Decision，不要求人工另行签发。从 Harness 侧代项目执行时仍需 `--decision`。命令返回 `development-patch-receipt`、变更文件、前后摘要、受影响 Run 和明确的 `continuation`。H1 的“同 Run 继续”仅指当前 Run 已冻结的 Feature/Plan 不受影响；不能用新 Node 定义重写已派发 Feature。H2/H3 不允许把运行逻辑变化偷偷注入旧 Run。
 
 每个 Runtime generation 都快照到控制根：
 
 ```text
 agent-harness dev generations --manifest <manifest.json>
-agent-harness dev patch rollback --manifest <manifest.json> --target-manifest <old-generation-manifest.json> --command-id rollback-001 --decision ./decision.json
+agent-harness dev patch rollback --manifest <manifest.json> --target-manifest <old-generation-manifest.json>
 ```
 
 Rollback 要求工作树已经恢复到目标 Runtime 摘要；它不会替用户改源码。source-link Receipt 只用于开发验证，不能充当发布、签名或生产切换证据。

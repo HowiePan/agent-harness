@@ -118,13 +118,15 @@ test('Codex plugin exposes one explicit-project pseudo-command router', async ()
 
 test('pseudo-command parser requires a project alias and supports h:where and h:report', () => {
   assert.equal(parsePseudoCommand('普通对话'), null);
+  assert.equal(parsePseudoCommand('h:local engine quality V3.8.4'), null);
   assert.deepEqual(parsePseudoCommand('h:engine quality V3.8.4 review-only'), {
     protocolVersion: '1.0', kind: 'command', projectAlias: 'engine', action: 'quality', target: 'V3.8.4', arguments: ['review-only'],
   });
   assert.deepEqual(parsePseudoCommand('h:where'), { protocolVersion: '1.0', kind: 'where' });
   assert.deepEqual(parsePseudoCommand('h:where engine'), { protocolVersion: '1.0', kind: 'where', projectAlias: 'engine' });
   assert.deepEqual(parsePseudoCommand('h:report engine'), { protocolVersion: '1.0', kind: 'report', projectAlias: 'engine' });
-  assert.deepEqual(parsePseudoCommand('h:init --decision decision.json --source F:/agent-harness'), { protocolVersion: '1.0', kind: 'init', decisionFile: 'decision.json', configFile: 'harness.json', sourceRoot: 'F:/agent-harness' });
+  assert.deepEqual(parsePseudoCommand('h:init --decision decision.json --entrypoint F:/agent-harness/bin/agent-harness.mjs'), { protocolVersion: '1.0', kind: 'init', decisionFile: 'decision.json', configFile: 'harness.json', entrypoint: 'F:/agent-harness/bin/agent-harness.mjs' });
+  assert.equal(parsePseudoCommand('h:init --decision decision.json --source F:/agent-harness').kind, 'invalid');
   assert.equal(parsePseudoCommand('h:init --source F:/agent-harness').kind, 'invalid');
   assert.equal(parsePseudoCommand('h:report').kind, 'invalid');
   assert.equal(parsePseudoCommand('h:report engine extra').kind, 'invalid');

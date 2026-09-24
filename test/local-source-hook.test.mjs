@@ -29,9 +29,8 @@ test('source-linked project hooks route native tool evidence without a packaged 
   const configured = await configureBindings({ pluginRoot, controlRoot, entrypoint: 'bin/agent-harness.mjs', dataRoot, projectSpecs: [`local-debug|local-debug-fixture|delivery-lifecycle|delivery-lifecycle-profile|${projectRoot}`], workflowSpecs: [`local-debug|delivery-lifecycle|1.0.0|${'a'.repeat(64)}|delivery-lifecycle|delivery-lifecycle-profile`], developmentManifest: source.file });
   const bindingsDir = resolve(pluginRoot, '.plugin-data');
   const hooks = await renderLocalSourceHooks({ bindingsDir });
-  assert.match(hooks.hooks.PostToolUse[0].matcher, /list_agents/);
-  assert.match(hooks.hooks.PostToolUse[0].hooks[0].command, /local-source-hook\.mjs/);
-  assert.equal(hooks.hooks.UserPromptSubmit, undefined);
+  assert.equal(hooks.hooks.PostToolUse, undefined);
+  assert.match(hooks.hooks.UserPromptSubmit[0].hooks[0].command, /local-source-hook\.mjs/);
   assert.equal(JSON.parse(await readFile(configured.bindingFile, 'utf8')).harness.release.mode, 'source-link');
   assert.equal(resolveProbeSessionId({ environmentSessionId: 'local-source-session' }), 'local-source-session');
   assert.throws(() => resolveProbeSessionId({ explicitSessionId: 'other-session', environmentSessionId: 'local-source-session' }), { code: 'LOCAL_SOURCE_HOST_PROBE_SESSION_MISMATCH' });
@@ -42,6 +41,12 @@ test('source-linked project hooks route native tool evidence without a packaged 
   assert.equal(localIntent.codexSessionId, 'local-source-session');
   assert.equal(localIntent.project.projectId, 'local-debug-fixture');
   await assert.rejects(() => createLocalSourceLifecycleCommand({ bindingsDir, alias: 'unknown', action: 'quality', target: 'fixture-v1', sessionId: 'local-source-session' }), { code: 'LOCAL_SOURCE_PROJECT_ALIAS_UNKNOWN' });
+  const routed = await handleLocalSourceHook({ hook_event_name: 'UserPromptSubmit', prompt: 'h:local local-debug quality fixture-v1', cwd: projectRoot, session_id: 'local-source-session' }, { bindingsDir });
+  assert.match(routed.hookSpecificOutput.additionalContext, /本地源码 Coordinator/);
+  const routedIntent = JSON.parse(routed.hookSpecificOutput.additionalContext.split('解析结果：').at(-1));
+  assert.equal(decodeVisibleLifecycleIntent(routedIntent.coordinationIntent).command.target, 'fixture-v1');
+  assert.deepEqual(await handleLocalSourceHook({ hook_event_name: 'UserPromptSubmit', prompt: 'h:local-debug quality fixture-v1', cwd: projectRoot, session_id: 'local-source-session' }, { bindingsDir }), {});
+  assert.deepEqual(await handleLocalSourceHook({ hook_event_name: 'UserPromptSubmit', prompt: 'ordinary request', cwd: projectRoot, session_id: 'local-source-session' }, { bindingsDir }), {});
 
   const output = new PassThrough();
   const probe = runLocalSourceHostProbe({ bindingsDir, sessionId: 'local-source-session', output, responseTimeoutMs: 1000, transport: 'hook' });

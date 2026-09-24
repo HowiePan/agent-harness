@@ -6,6 +6,7 @@ import { atomicWriteJson, readJson } from '../kernel/atomic-io.mjs';
 import { AuthorityStore } from '../kernel/authority-store.mjs';
 import { assertHarnessWritePath, harnessControlRoot } from '../common/write-boundary.mjs';
 import { safeSegment } from '../common/paths.mjs';
+import { assertLocalDevelopmentInvocation, decisionFromLocalDevelopmentInvocation } from './local-development-invocation.mjs';
 import {
   captureDevelopmentSourceIdentity,
   developmentSourceManifestDigest,
@@ -102,12 +103,14 @@ export const verifyDevelopmentPatchPlan = async plan => {
   return { plan: structuredClone(plan), manifest, current };
 };
 
-export const applyDevelopmentPatchPlan = async (planInput, { commandId, authorityDecision, now = () => new Date().toISOString() } = {}) => {
+export const applyDevelopmentPatchPlan = async (planInput, { commandId, authorityDecision, developmentInvocation = null, now = () => new Date().toISOString() } = {}) => {
   const { plan, manifest, current } = await verifyDevelopmentPatchPlan(planInput);
   assert(commandId, 'COMMAND_ID_REQUIRED', 'Development patch apply requires a command ID.');
   assert(plan.changes.length > 0, 'DEVELOPMENT_PATCH_NOT_REQUIRED', 'Harness source matches the active development binding; no patch is required.');
   assert(plan.level !== 'H4', 'DEVELOPMENT_PATCH_INCOMPATIBLE', 'H4 changes require an explicit state migration or a new Run and cannot be hot-applied.', { changes: plan.changes.map(change => change.path) });
-  if (plan.level !== 'H0') assert(authorityDecision?.actor && authorityDecision?.decision === 'approved', 'DEVELOPMENT_PATCH_DECISION_REQUIRED', 'Runtime development patches require an approved Authority Decision.');
+  if (developmentInvocation) assertLocalDevelopmentInvocation(developmentInvocation, { projectRoot: manifest.projectRoot, configPath: manifest.configPath, controlRoot: plan.controlRoot, dataRoot: plan.dataRoot });
+  const resolvedDecision = authorityDecision ?? (developmentInvocation ? decisionFromLocalDevelopmentInvocation(developmentInvocation, { action: 'development-patch', planDigest: plan.planDigest, commandId, bindingId: plan.bindingId, beforeRuntimeDigest: plan.before.runtimeDigest, afterRuntimeDigest: plan.after.runtimeDigest, level: plan.level }) : null);
+  if (plan.level !== 'H0') assert(resolvedDecision?.actor && resolvedDecision?.decision === 'approved', 'DEVELOPMENT_PATCH_DECISION_REQUIRED', 'Runtime development patches require an approved Authority Decision or a local development invocation.');
   const controlRoot = harnessControlRoot(plan.controlRoot);
   const dataRoot = assertHarnessWritePath(plan.dataRoot, 'Development data root', controlRoot);
   const safeCommandId = safeSegment(commandId, 'commandId');
@@ -135,7 +138,7 @@ export const applyDevelopmentPatchPlan = async (planInput, { commandId, authorit
     generation: generationNumber, sameRun: plan.disposition.sameRun,
     requiresCoordinatorRestart: plan.disposition.requiresCoordinatorRestart,
     affectedRuns: plan.activeRuns, changes: plan.changes.map(({ path, change, level, impact }) => ({ path, change, level, impact })),
-    authorityDecision: authorityDecision ? structuredClone(authorityDecision) : null,
+    authorityDecision: resolvedDecision ? structuredClone(resolvedDecision) : null,
     appliedAt: now(), manifestDigest: next.manifestDigest,
   };
   const receipt = { ...receiptBody, receiptDigest: developmentPatchReceiptDigest(receiptBody) };
@@ -144,10 +147,12 @@ export const applyDevelopmentPatchPlan = async (planInput, { commandId, authorit
   return { manifest: next, receipt, receiptFile, generation: generation.metadata };
 };
 
-export const rollbackDevelopmentPatch = async ({ manifestFile, targetManifestFile, commandId, authorityDecision, now = () => new Date().toISOString() } = {}) => {
+export const rollbackDevelopmentPatch = async ({ manifestFile, targetManifestFile, commandId, authorityDecision, developmentInvocation = null, now = () => new Date().toISOString() } = {}) => {
   assert(commandId, 'COMMAND_ID_REQUIRED', 'Development rollback requires a command ID.');
-  assert(authorityDecision?.actor && authorityDecision?.decision === 'approved', 'DEVELOPMENT_PATCH_DECISION_REQUIRED', 'Development rollback requires an approved Authority Decision.');
   const currentBinding = await readManifest(manifestFile);
+  if (developmentInvocation) assertLocalDevelopmentInvocation(developmentInvocation, { projectRoot: currentBinding.manifest.projectRoot, configPath: currentBinding.manifest.configPath, controlRoot: currentBinding.manifest.controlRoot, dataRoot: currentBinding.manifest.dataRoot });
+  const resolvedDecision = authorityDecision ?? (developmentInvocation ? decisionFromLocalDevelopmentInvocation(developmentInvocation, { action: 'development-patch-rollback', planDigest: currentBinding.manifest.manifestDigest, commandId, bindingId: currentBinding.manifest.bindingId }) : null);
+  assert(resolvedDecision?.actor && resolvedDecision?.decision === 'approved', 'DEVELOPMENT_PATCH_DECISION_REQUIRED', 'Development rollback requires an approved Authority Decision or a local development invocation.');
   const target = await readManifest(targetManifestFile);
   assert(currentBinding.manifest.bindingId === target.manifest.bindingId, 'DEVELOPMENT_PATCH_ROLLBACK_BINDING_MISMATCH', 'Rollback target belongs to another development binding.');
   const source = await captureDevelopmentSourceIdentity({ sourceRoot: currentBinding.manifest.sourceRoot });
@@ -165,7 +170,7 @@ export const rollbackDevelopmentPatch = async ({ manifestFile, targetManifestFil
     protocolVersion: '1.0', kind: 'development-patch-rollback-receipt',
     commandId: safeSegment(commandId, 'commandId'), bindingId: next.bindingId,
     fromManifestDigest: currentBinding.manifest.manifestDigest, toManifestDigest: next.manifestDigest,
-    runtimeDigest: next.release.artifactDigest, authorityDecision: structuredClone(authorityDecision), rolledBackAt: now(),
+    runtimeDigest: next.release.artifactDigest, authorityDecision: structuredClone(resolvedDecision), rolledBackAt: now(),
   };
   const receipt = { ...receiptBody, receiptDigest: developmentPatchReceiptDigest(receiptBody) };
   const receiptFile = resolve(dataRoot, 'development', 'patches', `${safeSegment(commandId, 'commandId')}.json`);

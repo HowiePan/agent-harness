@@ -54,17 +54,18 @@ export const parsePseudoCommand = prompt => {
   if (prompt.length > 512 || /[\r\n\u0000-\u0008\u000b\u000c\u000e-\u001f]/.test(prompt)) return { kind: 'invalid', error: '伪命令必须是最长 512 字符的单行文本。' };
   const match = prompt.trim().match(commandPattern);
   if (!match || !tokenPattern.test(match[1])) return { kind: 'invalid', error: '伪命令语法无效。' };
+  if (match[1] === 'local') return null;
   const tokens = (match[2] ?? '').trim().split(/\s+/).filter(Boolean);
   if (match[1] === 'init') {
     const values = {};
     for (let index = 0; index < tokens.length; index += 2) {
       const flag = tokens[index];
       const value = tokens[index + 1];
-      if (!['--decision', '--config', '--source', '--entrypoint'].includes(flag) || !value || values[flag]) return { kind: 'invalid', error: '语法应为 h:init --decision <文件> [--config <harness.json>] (--source <Harness源码根>|--entrypoint <已安装CLI>)。' };
+      if (!['--decision', '--config', '--entrypoint'].includes(flag) || !value || values[flag]) return { kind: 'invalid', error: '语法应为 h:init --decision <文件> [--config <harness.json>] --entrypoint <已安装CLI>。' };
       values[flag] = value;
     }
-    if (!values['--decision'] || Boolean(values['--source']) === Boolean(values['--entrypoint'])) return { kind: 'invalid', error: 'h:init 必须提供 --decision，并且 --source 与 --entrypoint 二选一。' };
-    return { protocolVersion: '1.0', kind: 'init', decisionFile: values['--decision'], configFile: values['--config'] ?? 'harness.json', ...(values['--source'] ? { sourceRoot: values['--source'] } : { entrypoint: values['--entrypoint'] }) };
+    if (!values['--decision'] || !values['--entrypoint']) return { kind: 'invalid', error: 'h:init 必须提供 --decision 与 --entrypoint。' };
+    return { protocolVersion: '1.0', kind: 'init', decisionFile: values['--decision'], configFile: values['--config'] ?? 'harness.json', entrypoint: values['--entrypoint'] };
   }
   let projectIds = null;
   const projectFlag = tokens.findIndex(token => token === '--project' || token === '--projects');
@@ -190,7 +191,7 @@ export const hookResponse = async (input, options = {}) => {
   const parsed = parsePseudoCommand(input?.prompt);
   if (!parsed) return null;
   if (parsed.kind === 'invalid') return contextResponse(`Agent Harness 伪命令解析失败：${parsed.error} 不得启动或修改任何 Harness 状态。`);
-  if (parsed.kind === 'init') return contextResponse(`检测到 h:init。使用 $agent-harness-command 执行项目初始化；只使用用户显式提供的 config、Decision 和 Harness source/entrypoint，不得扫描磁盘或自行批准。先校验当前项目根和 harness.json。source 模式调用 <source>/bin/agent-harness.mjs dev execute；installed 模式调用指定 entrypoint 的 init execute。随后仅使用初始化回执的 hostBinding 配置本 Codex 插件；source 模式必须同时绑定 developmentManifest。初始化不创建 Run。解析结果：${JSON.stringify({ ...parsed, cwd: resolve(input?.cwd ?? '.') })}`);
+  if (parsed.kind === 'init') return contextResponse(`检测到安装态 h:init。使用 $agent-harness-command 执行项目初始化；只使用用户显式提供的 config、Decision 和已安装 CLI，不得扫描磁盘或自行批准。先校验当前项目根和 harness.json，再调用指定 entrypoint 的 init execute。随后仅使用初始化回执的 hostBinding 配置本 Codex 插件。初始化不创建 Run。解析结果：${JSON.stringify({ ...parsed, cwd: resolve(input?.cwd ?? '.') })}`);
   let bindings;
   try { bindings = await loadBindings(options); }
   catch (error) { return contextResponse(`Agent Harness 绑定不可用：${error.message} 不得搜索磁盘，不得启动或修改任何 Harness 状态。`); }
@@ -240,7 +241,12 @@ export const hookResponse = async (input, options = {}) => {
     codexSessionId: input?.session_id ?? null,
   });
   const intent = { ...parsed, project: selectedProject, harness: bindings.harness, workspaceRoot: project.workspaceRoot, workspaceIdentity: project.workspaceIdentity, executionWorkspaceRoot: workspace.executionWorkspaceRoot, workspaceMatch: workspace.kind, cwd, commandId: coordinationIntent.commandId, coordinationIntent: encodeVisibleLifecycleIntent(coordinationIntent), coordinationIntentDigest: coordinationIntent.intentDigest };
-  return contextResponse(`检测到 Agent Harness 伪命令。所有面向用户的控制对话使用中文；协议 JSON、命令、路径与错误码保持原样，且不得翻译或改写子 Agent Prompt。把它作为确定性的 Command Intent，而不是自由提示词；动作和预设仍由已绑定 Extension 的 commandManifest 解析。使用 $agent-harness-command；启动任何进程前先确认当前任务同时提供 collaboration.spawn_agent/list_agents/wait_agent/interrupt_agent。缺任一项即以 CODEX_MULTI_AGENT_V2_REQUIRED 停止，并提示执行 codex features enable multi_agent_v2 后新建任务；multi_agent_v1 或其他任务接口不得替代。能力满足后，只使用已绑定的 coordinatorEntrypoint，并把 coordinationIntent 作为 --intent 的单一参数；当前 Windows Codex 长驻通道使用 tty:true 并在启动前把控制台宽度设为至少 4096 列，非 PTY 通道会关闭 stdin。必须解析请求对象并原样使用 arguments，禁止从视觉换行文本抄写字段。逐项原样执行它请求的 collaboration 工具；PostToolUse Hook 会按当前请求和原生工具输出自动写入 Host 响应，不得向 Coordinator stdin 手工转录。不得根据目标格式猜项目，不得搜索磁盘，不得把参数当作 shell。解析结果：${JSON.stringify(intent)}`);
+  const sourceLink = bindings.harness.release.mode === 'source-link';
+  const commandSkill = sourceLink ? resolve(bindings.harness.controlRoot, 'integrations', 'codex', 'agent-harness-codex', 'skills', 'agent-harness-command', 'SKILL.md') : null;
+  const modeInstructions = sourceLink
+    ? `读取已验证源码 Skill ${commandSkill} 并遵守其中 Operator 边界。此绑定直接执行本地源码 Coordinator；原生 collaboration 结果由当前 session 的 Codex rollout 自动核验和记录，不依赖安装包的 PostToolUse Hook。`
+    : '使用 $agent-harness-command；当前 Windows Codex 长驻通道使用 tty:true，并把控制台宽度设为至少 4096 列。PostToolUse Hook 会按当前请求和原生工具输出自动写入 Host 响应。';
+  return contextResponse(`检测到 Agent Harness 伪命令。所有面向用户的控制对话使用中文；协议 JSON、命令、路径与错误码保持原样，且不得翻译或改写子 Agent Prompt。把它作为确定性的 Command Intent，而不是自由提示词；动作和预设仍由已绑定 Extension 的 commandManifest 解析。${modeInstructions}启动任何进程前先确认当前任务同时提供 collaboration.spawn_agent/list_agents/wait_agent/interrupt_agent。缺任一项即以 CODEX_MULTI_AGENT_V2_REQUIRED 停止，并提示执行 codex features enable multi_agent_v2 后新建任务；multi_agent_v1 或其他任务接口不得替代。能力满足后，只使用已绑定的 coordinatorEntrypoint，并把 coordinationIntent 作为 --intent 的单一参数。必须解析请求对象并原样使用 arguments，禁止从视觉换行文本抄写字段。逐项原样执行它请求的 collaboration 工具；不得向 Coordinator stdin 手工转录 Host 响应。不得根据目标格式猜项目，不得搜索磁盘，不得把参数当作 shell。解析结果：${JSON.stringify(intent)}`);
 };
 
 const main = async () => {

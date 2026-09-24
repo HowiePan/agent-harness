@@ -25,6 +25,8 @@ import { applyReleaseActivationPlan, createReleaseActivationPlan } from '../../p
 import { applyProjectInitializationPlan, createProjectInitializationPlan, loadProjectHarnessConfig, writeProjectHarnessTemplate } from '../../application/project-initialization.mjs';
 import { verifyDevelopmentSourceManifest, writeDevelopmentSourceManifest } from '../../application/development-source.mjs';
 import { applyDevelopmentPatchPlan, createDevelopmentPatchPlan, rollbackDevelopmentPatch } from '../../application/development-patch.mjs';
+import { createLocalDevelopmentInvocation } from '../../application/local-development-invocation.mjs';
+import { configureBindings } from '../../../integrations/codex/agent-harness-codex/scripts/configure-bindings.mjs';
 
 const argv = process.argv.slice(2);
 const take = name => {
@@ -38,6 +40,12 @@ const optionalNumber = name => {
   return value === undefined ? undefined : Number(value);
 };
 const jsonFile = async name => JSON.parse(await readFile(resolve(name), 'utf8'));
+const externalDevelopmentDecision = async name => {
+  if (!name) return null;
+  const decision = await jsonFile(name);
+  if (decision?.authorityBasis === 'local-development-invocation' || decision?.actor === 'project-local-invocation') throw Object.assign(new Error('A project-local invocation Decision cannot be supplied as an external Decision.'), { code: 'LOCAL_DEVELOPMENT_DECISION_REPLAY_DENIED' });
+  return decision;
+};
 const jsonInput = async name => {
   const source = take(name);
   if (!source) throw Object.assign(new Error(`Missing ${name}`), { code: 'INPUT_REQUIRED' });
@@ -53,6 +61,40 @@ const preflightInput = async () => {
   return input.report ?? input;
 };
 const progressWriter = event => process.stderr.write(`${JSON.stringify({ type: 'agent-harness.progress', ...event })}\n`);
+const refreshLocalCodexBindings = async (manifestFile, manifest, initialization) => {
+  if (!initialization) return null;
+  const pluginRoot = resolve(manifest.dataRoot, 'development', 'local-codex');
+  const bindingFile = resolve(pluginRoot, '.plugin-data', 'bindings.json');
+  let existing;
+  try { existing = JSON.parse(await readFile(bindingFile, 'utf8')); }
+  catch (error) { if (error.code === 'ENOENT') return null; throw error; }
+  if (existing.harness?.release?.mode !== 'source-link'
+    || resolve(existing.harness.release.developmentManifest) !== resolve(manifestFile)
+    || resolve(existing.harness.controlRoot) !== resolve(manifest.controlRoot)
+    || resolve(existing.harness.dataRoot) !== resolve(manifest.dataRoot)) throw Object.assign(new Error('Local Codex binding does not match the development manifest.'), { code: 'LOCAL_CODEX_BINDING_MISMATCH' });
+  const alias = initialization.receipt.hostBinding.alias;
+  if (!existing.projects?.[alias]) return null;
+  const projectSpecs = Object.entries(existing.projects).map(([name, project]) => `${name}|${project.projectId}|${project.profileId}|${project.extensionId}|${project.workspaceRoot}`);
+  const workspaceSpecs = Object.entries(existing.workspaces ?? {}).map(([name, workspace]) => `${name}|${workspace.workspaceId}|${workspace.executionTargetId}|${workspace.workspaceRoot}`);
+  const workflowSpecs = [...Object.entries(existing.projects), ...Object.entries(existing.workspaces ?? {})].flatMap(([name, binding]) =>
+    (name === alias ? initialization.receipt.hostBinding.workflows : binding.workflows ?? []).map(workflow => `${name}|${workflow.id}|${workflow.version}|${workflow.artifactDigest}|${workflow.profileId}|${workflow.extensionId}`));
+  const refreshed = await configureBindings({ pluginRoot, controlRoot: manifest.controlRoot, entrypoint: existing.harness.entrypoint, dataRoot: manifest.dataRoot, memoryRoot: existing.harness.memoryRoot, projectSpecs, workspaceSpecs, workflowSpecs, developmentManifest: manifestFile });
+  return refreshed.bindingFile;
+};
+const applySourcePatch = async (plan, { decision, commandId }) => {
+  const patchManifest = JSON.parse(await readFile(resolve(plan.manifestFile), 'utf8'));
+  const developmentInvocation = decision ? null : await createLocalDevelopmentInvocation({ projectRoot: patchManifest.projectRoot, configPath: patchManifest.configPath, controlRoot: plan.controlRoot, dataRoot: plan.dataRoot });
+  const patched = await applyDevelopmentPatchPlan(plan, { commandId, authorityDecision: decision, developmentInvocation });
+  let initialization = null;
+  if (plan.disposition.requiresRebind) {
+    const loaded = await loadProjectHarnessConfig(patched.manifest.configPath, { projectRoot: patched.manifest.projectRoot });
+    const releaseIdentity = { version: patched.manifest.release.version, artifactDigest: patched.manifest.release.artifactDigest, verified: true, development: true };
+    const initPlan = await createProjectInitializationPlan(patched.manifest.configPath, { projectRoot: loaded.projectRoot, controlRoot: patched.manifest.controlRoot, dataRoot: patched.manifest.dataRoot, releaseIdentity, mode: 'source-link' });
+    initialization = await applyProjectInitializationPlan(initPlan, { controlRoot: patched.manifest.controlRoot, dataRoot: patched.manifest.dataRoot, releaseIdentity, commandId: `${commandId}.rebind`, authorityDecision: decision, developmentInvocation });
+  }
+  const bindingFile = await refreshLocalCodexBindings(plan.manifestFile, patched.manifest, initialization);
+  return { ...patched, initialization, bindingFile, continuation: plan.disposition.requiresNewRun ? 'restart-coordinator-and-start-new-run' : 'continue-same-run' };
+};
 const command = argv[0] ?? 'help';
 const subject = argv[1];
 
@@ -65,12 +107,13 @@ agent-harness init create-config [--config <project/harness.json>]
 agent-harness init validate [--config <project/harness.json>] [--project-root <path>]
 agent-harness init plan|execute --config <project/harness.json> [--project-root <path>]
 agent-harness init apply --plan <json|-> --command-id <id> --decision <json>
-agent-harness dev attach|rebind|execute --config <project/harness.json> [--project-root <path>] [--binding-id <id>]
-agent-harness dev apply --plan <json|-> --manifest <json> --command-id <id> --decision <json>
+agent-harness dev attach|rebind|execute --config <project/harness.json> [--project-root <path>] [--binding-id <id>] [--decision <json>]
+agent-harness dev apply --plan <json|-> --manifest <json> [--command-id <id>] [--decision <json>]
 agent-harness dev verify|doctor --manifest <json>
+agent-harness dev sync --manifest <json> [--command-id <id>] [--decision <json>]
 agent-harness dev patch plan|status --manifest <json>
-agent-harness dev patch apply --manifest <json> --plan <json|-> --command-id <id> [--decision <json>]
-agent-harness dev patch rollback --manifest <json> --target-manifest <json> --command-id <id> --decision <json>
+agent-harness dev patch apply --manifest <json> --plan <json|-> [--command-id <id>] [--decision <json>]
+agent-harness dev patch rollback --manifest <json> --target-manifest <json> [--command-id <id>] [--decision <json>]
 agent-harness dev watch --manifest <json> [--once]
 agent-harness dev generations --manifest <json>
 agent-harness docs list|show <topic>
@@ -182,31 +225,38 @@ if (command === 'dev' && subject === 'patch' && ['plan', 'status'].includes(argv
   console.log(JSON.stringify({ ok: true, plan: await createDevelopmentPatchPlan(take('--manifest')) }, null, 2));
   process.exit(0);
 }
+if (command === 'dev' && subject === 'sync') {
+  const plan = await createDevelopmentPatchPlan(take('--manifest'));
+  if (!plan.changes.length) {
+    console.log(JSON.stringify({ ok: true, unchanged: true, planDigest: plan.planDigest, continuation: 'continue-same-run' }, null, 2));
+    process.exit(0);
+  }
+  const decision = await externalDevelopmentDecision(take('--decision'));
+  const result = await applySourcePatch(plan, { decision, commandId: take('--command-id') ?? newId('dev-sync') });
+  console.log(JSON.stringify({ ok: true, ...result }, null, 2));
+  process.exit(0);
+}
 if (command === 'dev' && subject === 'patch' && argv[2] === 'apply') {
   const planInput = await jsonInput('--plan');
   const plan = planInput.plan ?? planInput;
   const declaredManifest = take('--manifest');
   if (declaredManifest && resolve(declaredManifest) !== resolve(plan.manifestFile)) throw Object.assign(new Error('--manifest does not match the development patch plan.'), { code: 'DEVELOPMENT_PATCH_MANIFEST_MISMATCH' });
-  const decision = take('--decision') ? await jsonFile(take('--decision')) : null;
-  const patched = await applyDevelopmentPatchPlan(plan, { commandId: take('--command-id'), authorityDecision: decision });
-  let initialization = null;
-  if (plan.disposition.requiresRebind) {
-    const loaded = await loadProjectHarnessConfig(patched.manifest.configPath, { projectRoot: patched.manifest.projectRoot });
-    const releaseIdentity = { version: patched.manifest.release.version, artifactDigest: patched.manifest.release.artifactDigest, verified: true, development: true };
-    const initPlan = await createProjectInitializationPlan(patched.manifest.configPath, { projectRoot: loaded.projectRoot, controlRoot: patched.manifest.controlRoot, dataRoot: patched.manifest.dataRoot, releaseIdentity, mode: 'source-link' });
-    initialization = await applyProjectInitializationPlan(initPlan, { controlRoot: patched.manifest.controlRoot, dataRoot: patched.manifest.dataRoot, releaseIdentity, commandId: `${take('--command-id')}.rebind`, authorityDecision: decision });
-  }
-  console.log(JSON.stringify({ ok: true, ...patched, initialization, continuation: plan.disposition.requiresNewRun ? 'restart-coordinator-and-start-new-run' : 'continue-same-run' }, null, 2));
+  const decision = await externalDevelopmentDecision(take('--decision'));
+  console.log(JSON.stringify({ ok: true, ...await applySourcePatch(plan, { decision, commandId: take('--command-id') ?? newId('dev-patch') }) }, null, 2));
   process.exit(0);
 }
 if (command === 'dev' && subject === 'patch' && argv[2] === 'rollback') {
-  const decision = await jsonFile(take('--decision'));
-  const rolledBack = await rollbackDevelopmentPatch({ manifestFile: take('--manifest'), targetManifestFile: take('--target-manifest'), commandId: take('--command-id'), authorityDecision: decision });
+  const decision = await externalDevelopmentDecision(take('--decision'));
+  const currentManifest = JSON.parse(await readFile(resolve(take('--manifest')), 'utf8'));
+  const developmentInvocation = decision ? null : await createLocalDevelopmentInvocation({ projectRoot: currentManifest.projectRoot, configPath: currentManifest.configPath, controlRoot: currentManifest.controlRoot, dataRoot: currentManifest.dataRoot });
+  const commandId = take('--command-id') ?? newId('dev-rollback');
+  const rolledBack = await rollbackDevelopmentPatch({ manifestFile: take('--manifest'), targetManifestFile: take('--target-manifest'), commandId, authorityDecision: decision, developmentInvocation });
   const loaded = await loadProjectHarnessConfig(rolledBack.manifest.configPath, { projectRoot: rolledBack.manifest.projectRoot });
   const releaseIdentity = { version: rolledBack.manifest.release.version, artifactDigest: rolledBack.manifest.release.artifactDigest, verified: true, development: true };
   const initPlan = await createProjectInitializationPlan(rolledBack.manifest.configPath, { projectRoot: loaded.projectRoot, controlRoot: rolledBack.manifest.controlRoot, dataRoot: rolledBack.manifest.dataRoot, releaseIdentity, mode: 'source-link' });
-  const initialization = await applyProjectInitializationPlan(initPlan, { controlRoot: rolledBack.manifest.controlRoot, dataRoot: rolledBack.manifest.dataRoot, releaseIdentity, commandId: `${take('--command-id')}.rebind`, authorityDecision: decision });
-  console.log(JSON.stringify({ ok: true, ...rolledBack, initialization, continuation: 'restart-coordinator-and-resume-same-run' }, null, 2));
+  const initialization = await applyProjectInitializationPlan(initPlan, { controlRoot: rolledBack.manifest.controlRoot, dataRoot: rolledBack.manifest.dataRoot, releaseIdentity, commandId: `${commandId}.rebind`, authorityDecision: decision, developmentInvocation });
+  const bindingFile = await refreshLocalCodexBindings(take('--manifest'), rolledBack.manifest, initialization);
+  console.log(JSON.stringify({ ok: true, ...rolledBack, initialization, bindingFile, continuation: 'restart-coordinator-and-resume-same-run' }, null, 2));
   process.exit(0);
 }
 if (command === 'dev' && subject === 'generations') {
@@ -235,15 +285,17 @@ if (command === 'dev' && ['attach', 'rebind', 'execute'].includes(subject)) {
   const loaded = await loadProjectHarnessConfig(configPath, { projectRoot: take('--project-root') });
   const bindingId = take('--binding-id') ?? loaded.config.binding.alias ?? loaded.request.binding.projectId;
   const devDataRoot = resolve(take('--data-root') ?? resolve(controlRoot, '.agent-harness-data', 'development', bindingId));
+  const decision = await externalDevelopmentDecision(take('--decision'));
+  const developmentInvocation = decision ? null : await createLocalDevelopmentInvocation({ projectRoot: loaded.projectRoot, configPath, controlRoot, dataRoot: devDataRoot });
   const development = await writeDevelopmentSourceManifest({ bindingId, sourceRoot: harnessProjectRoot(), controlRoot, dataRoot: devDataRoot, configPath, projectRoot: loaded.projectRoot });
   const releaseIdentity = { version: development.manifest.release.version, artifactDigest: development.manifest.release.artifactDigest, verified: true, development: true };
   const plan = await createProjectInitializationPlan(configPath, { projectRoot: loaded.projectRoot, controlRoot, dataRoot: devDataRoot, releaseIdentity, mode: 'source-link' });
   if (subject === 'execute') {
-    const output = await applyProjectInitializationPlan(plan, { controlRoot, dataRoot: devDataRoot, releaseIdentity, commandId: take('--command-id'), authorityDecision: await jsonFile(take('--decision')) });
+    const output = await applyProjectInitializationPlan(plan, { controlRoot, dataRoot: devDataRoot, releaseIdentity, commandId: take('--command-id') ?? newId('dev-init'), authorityDecision: decision, developmentInvocation });
     console.log(JSON.stringify({ ok: true, mode: 'source-link', manifestFile: development.file, manifest: development.manifest, plan, ...output }, null, 2));
     process.exit(0);
   }
-  console.log(JSON.stringify({ ok: true, mode: 'source-link', manifestFile: development.file, manifest: development.manifest, plan, next: 'agent-harness dev apply --manifest <manifestFile> --plan <planFile> --command-id <id> --decision <decision.json>' }, null, 2));
+  console.log(JSON.stringify({ ok: true, mode: 'source-link', manifestFile: development.file, manifest: development.manifest, plan, next: 'agent-harness dev apply --manifest <manifestFile> --plan <planFile> [--command-id <id>] [--decision <decision.json>]' }, null, 2));
   process.exit(0);
 }
 if (command === 'dev' && subject === 'verify') {
@@ -255,7 +307,9 @@ if (command === 'dev' && subject === 'apply') {
   const verified = await verifyDevelopmentSourceManifest(take('--manifest'));
   const plan = await jsonInput('--plan');
   if (plan.bootstrapPlan?.harness?.artifactDigest !== verified.releaseIdentity.artifactDigest) throw Object.assign(new Error('Development manifest does not match the initialization plan.'), { code: 'DEVELOPMENT_INIT_IDENTITY_MISMATCH' });
-  const output = await applyProjectInitializationPlan(plan, { controlRoot: verified.manifest.controlRoot, dataRoot: verified.manifest.dataRoot, releaseIdentity: verified.releaseIdentity, commandId: take('--command-id'), authorityDecision: await jsonFile(take('--decision')) });
+  const decision = await externalDevelopmentDecision(take('--decision'));
+  const developmentInvocation = decision ? null : await createLocalDevelopmentInvocation({ projectRoot: verified.manifest.projectRoot, configPath: verified.manifest.configPath, controlRoot: verified.manifest.controlRoot, dataRoot: verified.manifest.dataRoot });
+  const output = await applyProjectInitializationPlan(plan, { controlRoot: verified.manifest.controlRoot, dataRoot: verified.manifest.dataRoot, releaseIdentity: verified.releaseIdentity, commandId: take('--command-id') ?? newId('dev-apply'), authorityDecision: decision, developmentInvocation });
   console.log(JSON.stringify({ ok: true, ...output, developmentManifest: take('--manifest') }, null, 2));
   process.exit(0);
 }

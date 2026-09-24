@@ -5,7 +5,7 @@
 | 宿主 | 初始化入口 | 生命周期执行 |
 |---|---|---|
 | CLI | `agent-harness init ...` / `dev ...` | 独立 CLI 禁止 Agent 执行 |
-| Codex | `h:init --decision ... (--source ...|--entrypoint ...)` | 完整可信可见宿主可执行 |
+| Codex | 安装态 `h:init --decision ... --entrypoint ...`；源码态先从项目 checkout 执行 `dev execute`，再用 `h:local <别名> ...` | 完整可信可见宿主可执行 |
 | OpenCode | `/h:init <decision-file>` 或 `harness_init` | 当前缺完整原生合同，fail closed |
 | VS Code | `Agent Harness: Initialize Project` 或 `@harness /init <decision-file>` | 当前缺完整原生合同，fail closed |
 
