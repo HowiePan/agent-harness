@@ -3,6 +3,9 @@ import { AUTO_CONCURRENCY, AUTO_CONCURRENCY_LIMIT, resolveConcurrencyLimit } fro
 import { RunCoordinator } from '../platform/workflow/coordinator/run-coordinator.mjs';
 import { ProjectGateRunner, runPendingFeatureGates } from '../platform/workflow/gates/project-gate-runner.mjs';
 import { isVisibleHostAdapter } from '../platform/plugins/runtime/visible-host-adapter.mjs';
+import { canonicalize, sha256 } from '../common/canonical.mjs';
+import { assertInside } from '../common/paths.mjs';
+import { atomicWrite } from '../kernel/atomic-io.mjs';
 
 export const executeHeadlessLifecyclePlan = async (context, api, planInput, { commandId, preflightReport, maxConcurrency, maxRounds = 100, forceFreshGates = true, onGateProgress = null } = {}) => {
   const { authorityStore } = context;
@@ -85,6 +88,12 @@ export const executeVisibleLifecyclePlan = async (context, api, planInput, { com
       }
       for (const dispatch of requested.slice(0, physicalLimit)) {
         const compiled = await api.readDispatchPacket(plan.project.id, activeRunId, dispatch.dispatchId);
+        if (compiled.prompt.contractVersion === '1.4') {
+          const packetFile = assertInside(authorityStore.root, `${compiled.packet.outputRef}.dispatch-packet.json`, 'Dispatch packet transport');
+          const packetBytes = canonicalize(compiled.packet);
+          assert(sha256(packetBytes) === compiled.prompt.packetDigest, 'DISPATCH_PACKET_TRANSPORT_DIGEST_MISMATCH', 'Dispatch packet transport differs from the generated Prompt.');
+          await atomicWrite(packetFile, packetBytes, { root: authorityStore.root });
+        }
         let spawned = null;
         let runtimeReceipt = null;
         try {

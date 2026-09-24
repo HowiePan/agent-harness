@@ -32,11 +32,11 @@ agent-harness lifecycle preflight --plan <plan.json> --development-manifest <man
 `--development-manifest` 仅用于只读检查、计划和预检；控制根、数据根和源码摘要必须与 manifest 一致。预检会单独验证当前动作所需的可见宿主能力。缺少可信 Host Adapter 时，返回 `executionReady=false` 和 `VISIBLE_AGENT_HOST_COORDINATOR_UNAVAILABLE`，不会创建 Run。独立 CLI 不能用此参数启动 Agent；实际执行仍需满足 Operator Contract 的可信宿主回调。
 预检默认会在独立控制根内做原子写入探针；需要纯只读诊断时可加 `--no-write-probe`，但这样的报告不能用于启动 Run。
 
-本地调试的源码绑定、计划和合成闭环可以独立验收；真实 Codex 插件安装与 `PostToolUse` 投递属于另一个宿主验收关口。合成闭环不构成真实业务质量准出。
+本地调试的源码绑定、计划和合成闭环可以独立验收；真实 Codex 插件安装另行验收。原生 Agent 的 Host 回执属于本地执行准出条件，不能因跳过打包而省略。合成闭环不构成真实业务质量准出。
 
-## 项目级 Codex Hook：不打包插件的真实宿主路径
+## Codex 本地源码执行入口
 
-`source-link` 的计划命令不注入 Host Adapter；需要原生 Codex Agent 时，当前 Codex 项目必须加载受信的 `PostToolUse` 与 `UserPromptSubmit` Hook。Codex 支持可信项目的 `.codex/hooks.json`，所以本地开发可直接指向当前 Harness 源码，无需每次打包安装插件。项目 Hook 仍需由用户在 Codex `/hooks` 审核并信任；原生 collaboration 工具是否投递 `PostToolUse` 必须做真实短探针，不能由脚本模拟结果代替。
+`source-link` 的计划命令不注入 Host Adapter。真实 Codex Agent 执行由当前任务直接运行源码 Coordinator；不经过已安装插件的 `h:` 伪命令。开发态 Host 交换从当前 Codex session 的宿主 rollout 中读取原生 `function_call` 和 `function_call_output`，按 session、工作目录、工具名、参数摘要、调用 ID 与 Turn ID 绑定请求和结果。该路径不依赖项目 Hook 投递。rollout 与 `state_5.sqlite` 属于 Codex 当前宿主的内部格式；格式变更时交换层应拒绝执行，重新验证适配器后才能继续。
 
 先用 `dev execute` 的 `hostBinding` 回执和 development manifest 配置本地绑定。以下路径全部是绝对路径；`--plugin-root` 仅是控制根内的本地绑定目录，不是插件安装目录：
 
@@ -50,13 +50,29 @@ node <Harness源码根>/integrations/codex/agent-harness-codex/scripts/configure
   --project '<alias>|<projectId>|<profileId>|<extensionId>|<项目绝对根>' \
   --workflow '<alias>|<workflowId>|<version>|<artifactDigest>|<profileId>|<extensionId>'
 
-node <Harness源码根>/integrations/codex/agent-harness-codex/hooks/local-source-hook.mjs \
-  --print-config <Harness数据根>/development/local-codex/.plugin-data
+node <Harness源码根>/integrations/codex/agent-harness-codex/scripts/local-source-host-probe.mjs \
+  --bindings-dir <Harness数据根>/development/local-codex/.plugin-data
 ```
 
-第二条命令输出可供项目 `.codex/hooks.json` 使用的完整 JSON。它把 Hook 命令固定到当前源码入口及控制根内的绑定目录。只在明确选用本地开发接入的项目中放置该配置；不要把 Harness 源码、运行状态或绑定文件复制到业务仓。新建 Codex 任务后在 `/hooks` 检查并信任当前定义，输入 `h:probe`；本地 `UserPromptSubmit` Hook 会给出只读短探针命令及当前 session ID。短探针只请求一次原生 `collaboration.list_agents`，核对 `PostToolUse` 阶段和 Host 响应，不创建 Run。若没有投递，停止于 `attention-required`，不得启动质量 Run。
+短探针发出一次 `codex-visible-host-request`，由当前 Codex 任务调用其中指定的原生 `collaboration.list_agents`。Coordinator 自动读取宿主 rollout 中匹配的调用和输出，写入带摘要的 Host Receipt，探针返回 `ok: true` 才算通过。不要手写 Host response，也不要把终端输出转录成回执。短探针不创建 Run。
 
-本地入口每次先核验 source-link 绑定、源码/制品摘要、控制根和当前 Hook 所在源码一致；`UserPromptSubmit` 指向同一 checkout 的命令适配说明，`PostToolUse` 使用现有 Host 交换的 session、参数摘要和调用 ID 校验。它不会把模型转录的 JSON 当作原生 Host 结果。原生短探针通过后，还需在独立合成项目完成真实 Agent 的 review→repair→re-review→Gate→Closure 和重启恢复，才可宣布本地真实宿主路径准出。CardWorld 真实 Run 仍由单独授权和业务 Gate 控制。
+开发 Harness 本身时，可复用已经登记的 Harness 桌面项目做只读短探针，并在独立合成项目上验证生命周期。Harness 根任务不启动 Harness 对自身的 Run。业务项目只需保持已审核的 Project Descriptor 与源码绑定；不必为本地源码执行复制 Harness 文件到业务仓。
+
+探针通过后，用明确的别名、动作和目标生成当前 session 的执行意图：
+
+```text
+node <Harness源码根>/integrations/codex/agent-harness-codex/scripts/local-source-lifecycle-intent.mjs \
+  --bindings-dir <Harness数据根>/development/local-codex/.plugin-data \
+  --alias <项目别名> --action quality --target <版本>
+```
+
+入口核验绑定、Git 工作区身份、Workflow 与当前源码摘要，返回 `coordinatorEntrypoint` 和 `coordinationIntent`。在同一 Codex 任务中先调用 `node <coordinatorEntrypoint> --intent <coordinationIntent> --preflight-only` 可执行完整计划和动作预检，不创建 Run；需要按终端请求调用原生 collaboration 工具。确认预检通过并决定启动后，再用新生成的意图调用 `node <coordinatorEntrypoint> --intent <coordinationIntent>`，保持终端可观察，并依次执行 Coordinator 发出的原生 collaboration 请求。`spawn_agent` 的 `message` 必须逐字使用请求中的完整生成 Prompt；不要缩写或用路径引用代替。仅在动作预检返回 `executionReady: true` 后 Coordinator 才创建 Run。审查发现问题时，继续处理修复、复审和 Gate，直到 `closed` 或明确的 `attention-required`。
+
+可见 Agent Prompt 1.4 将完整的 Dispatch packet 写到控制根下的摘要绑定文件。Agent 必须读取该文件并校验精确字节的 SHA-256。读取 Coordinator 的终端请求时要给足输出预算；若输出出现截断标记，不能据此调用 `spawn_agent`。Codex 当前宿主会加密长 `spawn_agent.message`，父任务 rollout 只能证明原生调用、确定性的任务名及宿主截断元数据，不能独立复算实际传给 Agent 的完整 Prompt 字节；Host Receipt 将此标为 `host-redacted-message`，操作人仍须逐字传递生成 Prompt。
+
+源码 Coordinator 在创建 Run 前检查确定性进程 Gate 所需的带输出捕获子进程能力；若当前任务的进程权限返回 `LOCAL_PROCESS_GATE_HOST_UNAVAILABLE`，应在获准的进程权限下重新执行同一入口。不要绕过 Gate 或手写 Gate 结果。
+
+隔离合成项目已通过真实 Codex Agent 的审查、P1 修复、独立复审和固定最终 Gate，并由 Authority 关闭 Run。该证据证明当前本地源码路径可完成合成质量闭环；CardWorld 真实 Run 仍由用户审核实现后另行决定。Coordinator 重启后的真实宿主恢复与加密 Prompt 字节级证明仍是单独的可靠性跟踪项。
 
 ## 变化检测与应用
 

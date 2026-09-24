@@ -222,6 +222,7 @@ test('visible quality lifecycle completes review, verified repair, fresh re-revi
   const preflight = await fixture.harness.createExecutionReadinessReport(fixture.plan);
   assert.equal(preflight.executionReady, true);
   const completed = await fixture.harness.executeVisibleLifecyclePlan(fixture.plan, { commandId: 'quality-e2e', preflightReport: preflight, maxConcurrency: 10 });
+  for (const dispatch of completed.state.dispatches) assert.equal(sha256(await readFile(`${dispatch.outputRef}.dispatch-packet.json`, 'utf8')), dispatch.packetDigest);
   assert.equal(completed.rounds.every(round => round.physicalLimit === 1), true);
   assertClosedQualityLoop(completed.state);
 });

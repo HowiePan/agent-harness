@@ -5,13 +5,22 @@ import { fileURLToPath } from 'node:url';
 import { digestJson } from '../../../../src/common/canonical.mjs';
 import { loadLocalSourceBindings } from '../hooks/local-source-hook.mjs';
 import { createHookHostExchange } from '../lib/hook-host-exchange.mjs';
+import { createCodexRolloutHostExchange } from '../lib/codex-rollout-host-exchange.mjs';
 import { createHostExchangeDiagnosticWriter } from '../lib/host-exchange-diagnostics.mjs';
 
-export const runLocalSourceHostProbe = async ({ bindingsDir, sessionId, output = process.stdout, responseTimeoutMs = 60000 } = {}) => {
+export const resolveProbeSessionId = ({ explicitSessionId, environmentSessionId = process.env.CODEX_SESSION_ID } = {}) => {
+  if (explicitSessionId && environmentSessionId && explicitSessionId !== environmentSessionId) throw Object.assign(new Error('Explicit session ID does not match CODEX_SESSION_ID.'), { code: 'LOCAL_SOURCE_HOST_PROBE_SESSION_MISMATCH' });
+  const sessionId = environmentSessionId ?? explicitSessionId;
+  if (typeof sessionId !== 'string' || !sessionId.length) throw Object.assign(new Error('Local Host probe requires CODEX_SESSION_ID or an explicit session ID.'), { code: 'LOCAL_SOURCE_HOST_PROBE_SESSION_REQUIRED' });
+  return sessionId;
+};
+
+export const runLocalSourceHostProbe = async ({ bindingsDir, sessionId, output = process.stdout, responseTimeoutMs = 60000, transport = 'rollout' } = {}) => {
   if (typeof sessionId !== 'string' || !sessionId.length) throw Object.assign(new Error('Local Host probe requires the current Codex session ID.'), { code: 'LOCAL_SOURCE_HOST_PROBE_SESSION_REQUIRED' });
   const { bindings } = await loadLocalSourceBindings(bindingsDir);
   const { controlRoot, dataRoot } = bindings.harness;
-  const exchange = createHookHostExchange({ controlRoot, dataRoot, codexSessionId: sessionId, output, responseTimeoutMs, onRejected: createHostExchangeDiagnosticWriter({ controlRoot, dataRoot }) });
+  const options = { controlRoot, dataRoot, codexSessionId: sessionId, output, responseTimeoutMs, onRejected: createHostExchangeDiagnosticWriter({ controlRoot, dataRoot }) };
+  const exchange = transport === 'rollout' ? createCodexRolloutHostExchange(options) : transport === 'hook' ? createHookHostExchange(options) : (() => { throw Object.assign(new Error('Unsupported local Host probe transport.'), { code: 'LOCAL_SOURCE_HOST_PROBE_TRANSPORT_INVALID' }); })();
   const body = { protocolVersion: '1.0', kind: 'codex-visible-host-request', tool: 'collaboration.list_agents', arguments: {}, sessionId, requestId: `host_probe_${randomUUID()}`, operation: 'inspect', binding: null, createdAt: new Date().toISOString() };
   const request = { ...body, requestDigest: digestJson(body) };
   try {
@@ -22,8 +31,8 @@ export const runLocalSourceHostProbe = async ({ bindingsDir, sessionId, output =
 };
 
 const main = async () => {
-  if (process.argv.length !== 6 || process.argv[2] !== '--bindings-dir' || process.argv[4] !== '--session-id') throw Object.assign(new Error('Usage: local-source-host-probe.mjs --bindings-dir <absolute-dir> --session-id <current-session-id>'), { code: 'LOCAL_SOURCE_HOST_PROBE_ARGUMENTS_INVALID' });
-  process.stdout.write(`${JSON.stringify(await runLocalSourceHostProbe({ bindingsDir: process.argv[3], sessionId: process.argv[5] }))}\n`);
+  if (![4, 6].includes(process.argv.length) || process.argv[2] !== '--bindings-dir' || (process.argv.length === 6 && process.argv[4] !== '--session-id')) throw Object.assign(new Error('Usage: local-source-host-probe.mjs --bindings-dir <absolute-dir> [--session-id <current-session-id>]'), { code: 'LOCAL_SOURCE_HOST_PROBE_ARGUMENTS_INVALID' });
+  process.stdout.write(`${JSON.stringify(await runLocalSourceHostProbe({ bindingsDir: process.argv[3], sessionId: resolveProbeSessionId({ explicitSessionId: process.argv[5] }) }))}\n`);
 };
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

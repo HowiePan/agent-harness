@@ -66,6 +66,29 @@ test('Prompt Codec can still recompile an active 1.2 Dispatch without a Node Tas
   assert.match(compiled.text, /Result-Contract:/);
 });
 
+test('Prompt Codec preserves the full 1.3 Prompt for an active visible Dispatch', () => {
+  const old = packet();
+  old.execution.prompt.contractVersion = '1.3';
+  old.execution.runtime = { mode: 'conversation-visible', userVisible: true, hostOrchestrated: true };
+  old.execution.result = createDispatchResultContract(old.feature, { conversationVisible: true });
+  const compiled = compileAgentPrompt(old);
+  assert.equal(compiled.contractVersion, '1.3');
+  assert.match(compiled.text, /## Feature acceptance data/);
+  assert.match(compiled.text, /BEGIN_AGENT_HARNESS_DISPATCH_PACKET_JSON/);
+});
+
+test('visible 1.4 Prompt names the digest-bound packet file without duplicating the packet', () => {
+  const visible = packet();
+  visible.outputRef = '/tmp/dispatch-output.json';
+  visible.execution.runtime = { mode: 'conversation-visible', userVisible: true, hostOrchestrated: true };
+  visible.execution.result = createDispatchResultContract(visible.feature, { conversationVisible: true });
+  const compiled = compileAgentPrompt(visible);
+  assert.equal(compiled.contractVersion, '1.4');
+  assert.match(compiled.text, /dispatch-output\.json\.dispatch-packet\.json/);
+  assert.match(compiled.text, new RegExp(compiled.packetDigest));
+  assert.doesNotMatch(compiled.text, /BEGIN_AGENT_HARNESS_DISPATCH_PACKET_JSON/);
+});
+
 test('Prompt Codec renders the fixed-schema typed output dialect without weakening the business contract', () => {
   const fixed = packet();
   fixed.execution.runtime = { mode: 'headless', userVisible: false, hostOrchestrated: false, resultDialect: 'typed-output-envelope-v1' };

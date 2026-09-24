@@ -1,0 +1,18 @@
+{
+  "description": "Agent Harness source-link local development Host bridge.",
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "^(Agent|(collaboration\\.)?(spawn_agent|list_agents|wait_agent|interrupt_agent))$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"C:\\nvm4w\\nodejs\\node.exe\" \"F:\\agent-harness\\integrations\\codex\\agent-harness-codex\\hooks\\local-source-hook.mjs\" \"--bindings-dir\" \"F:\\agent-harness\\.agent-harness-data\\local-source-host\\2026-09-24\\data-probe\\development\\local-codex\\.plugin-data\"",
+            "commandWindows": "\"C:\\nvm4w\\nodejs\\node.exe\" \"F:\\agent-harness\\integrations\\codex\\agent-harness-codex\\hooks\\local-source-hook.mjs\" \"--bindings-dir\" \"F:\\agent-harness\\.agent-harness-data\\local-source-host\\2026-09-24\\data-probe\\development\\local-codex\\.plugin-data\"",
+            "timeout": 15
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -8,6 +8,8 @@ import { validateActiveReleaseBinding } from '../lib/active-release-binding.mjs'
 import { createCodexCollaborationHostAdapter } from '../lib/codex-collaboration-host-adapter.mjs';
 import { assertMachineBoundQualityTransport } from '../lib/stdio-host-exchange.mjs';
 import { createHookHostExchange } from '../lib/hook-host-exchange.mjs';
+import { createCodexRolloutHostExchange } from '../lib/codex-rollout-host-exchange.mjs';
+import { assertLocalProcessGateHost } from '../lib/local-process-gate-readiness.mjs';
 import { createHostExchangeDiagnosticWriter } from '../lib/host-exchange-diagnostics.mjs';
 import { decodeVisibleLifecycleIntent } from '../lib/visible-lifecycle-intent.mjs';
 import { createPlannedLifecycleEvent, createPreflightLifecycleEvent } from '../lib/visible-lifecycle-events.mjs';
@@ -27,7 +29,8 @@ const renderWorkflowInput = (value, intent) => {
 };
 
 const main = async () => {
-  if (process.argv.length !== 4 || process.argv[2] !== '--intent') throw Object.assign(new Error('Usage: visible-lifecycle-coordinator.mjs --intent <base64url-intent>'), { code: 'VISIBLE_LIFECYCLE_COORDINATOR_ARGUMENTS_INVALID' });
+  const preflightOnly = process.argv.length === 5 && process.argv[4] === '--preflight-only';
+  if (![4, 5].includes(process.argv.length) || process.argv[2] !== '--intent' || (process.argv.length === 5 && !preflightOnly)) throw Object.assign(new Error('Usage: visible-lifecycle-coordinator.mjs --intent <base64url-intent> [--preflight-only]'), { code: 'VISIBLE_LIFECYCLE_COORDINATOR_ARGUMENTS_INVALID' });
   const intent = decodeVisibleLifecycleIntent(process.argv[3]);
   const active = await validateActiveReleaseBinding({
     controlRoot: intent.harness.controlRoot,
@@ -41,12 +44,16 @@ const main = async () => {
   const releaseIdentity = developmentMode ? { version: active.version, artifactDigest: active.artifactDigest, verified: true, development: true } : await loadReleaseIdentity({ root: active.runtimeRoot, artifactDigest: active.artifactDigest });
   const extensionRegistry = new ExtensionRegistry({ dataRoot: intent.harness.dataRoot, controlRoot: intent.harness.controlRoot, developmentMode });
   const extensions = await extensionRegistry.loadInstalled();
-  const hostExchange = createHookHostExchange({ controlRoot: intent.harness.controlRoot, dataRoot: intent.harness.dataRoot, codexSessionId: intent.codexSessionId, onRejected: createHostExchangeDiagnosticWriter({ controlRoot: intent.harness.controlRoot, dataRoot: intent.harness.dataRoot }) });
+  if (developmentMode && intent.codexSessionId !== process.env.CODEX_SESSION_ID) throw Object.assign(new Error('Source-link Coordinator must run in the Codex session named by its intent.'), { code: 'CODEX_ROLLOUT_SESSION_MISMATCH' });
+  const hostOptions = { controlRoot: intent.harness.controlRoot, dataRoot: intent.harness.dataRoot, codexSessionId: intent.codexSessionId, onRejected: createHostExchangeDiagnosticWriter({ controlRoot: intent.harness.controlRoot, dataRoot: intent.harness.dataRoot }), ...(developmentMode ? { responseTimeoutMs: 600000 } : {}) };
+  const hostExchange = developmentMode ? createCodexRolloutHostExchange(hostOptions) : createHookHostExchange(hostOptions);
   try {
     const host = createCodexCollaborationHostAdapter({
       exchange: hostExchange.exchange,
       controlRoot: intent.harness.controlRoot,
       dataRoot: intent.harness.dataRoot,
+      ...(developmentMode ? { sessionId: intent.codexSessionId } : {}),
+      ...(developmentMode ? { waitTimeoutMs: 10000 } : {}),
       memoryRoot: intent.harness.memoryRoot ?? null,
     });
     const harness = await createHarness({
@@ -60,7 +67,7 @@ const main = async () => {
     });
     const descriptor = await harness.projectRegistry.get(intent.project.projectId);
     const workflowBinding = intent.project.workflowId ? descriptor.workflows?.find(workflow => workflow.id === intent.project.workflowId) : null;
-    if (intent.project.workflowId && (!workflowBinding || workflowBinding.version !== intent.project.workflowVersion || workflowBinding.artifactDigest !== intent.project.workflowDigest || workflowBinding.extensionId !== intent.project.extensionId)) throw Object.assign(new Error('Visible lifecycle Workflow binding differs from the approved Project Descriptor.'), { code: 'VISIBLE_LIFECYCLE_WORKFLOW_IDENTITY_MISMATCH' });
+    if (intent.project.workflowId && descriptor.workflows?.length && (!workflowBinding || workflowBinding.version !== intent.project.workflowVersion || workflowBinding.artifactDigest !== intent.project.workflowDigest || workflowBinding.extensionId !== intent.project.extensionId)) throw Object.assign(new Error('Visible lifecycle Workflow binding differs from the approved Project Descriptor.'), { code: 'VISIBLE_LIFECYCLE_WORKFLOW_IDENTITY_MISMATCH' });
     if (intent.project.workspaceId) {
       const workspace = await harness.workspaceRegistry.get(intent.project.workspaceId);
       const bound = workspace.workflows.find(workflow => workflow.id === intent.project.workflowId);
@@ -83,8 +90,10 @@ const main = async () => {
       arguments: intent.command.arguments,
       executionWorkspaceRoot: intent.executionWorkspaceRoot,
     });
+    if (intent.project.workflowId && (plan.workflow?.id !== intent.project.workflowId || plan.workflow.version !== intent.project.workflowVersion || plan.workflow.artifactDigest !== intent.project.workflowDigest)) throw Object.assign(new Error('Visible lifecycle Plan differs from the verified Workflow binding.'), { code: 'VISIBLE_LIFECYCLE_WORKFLOW_IDENTITY_MISMATCH' });
     emit(createPlannedLifecycleEvent({ commandId: intent.commandId, intentDigest: intent.intentDigest, plan }));
     assertMachineBoundQualityTransport(hostExchange, intent.command.action);
+    if (developmentMode) assertLocalProcessGateHost({ recipes: descriptor.gateRecipes });
     const onGateProgress = event => emit({ kind: 'codex-visible-lifecycle-event', phase: 'gate-progress', commandId: intent.commandId, planDigest: plan.planDigest, event });
     const preflight = await harness.createExecutionReadinessReport(plan, { onGateProgress });
     emit(createPreflightLifecycleEvent({ commandId: intent.commandId, intentDigest: intent.intentDigest, planDigest: plan.planDigest, report: preflight }));
@@ -92,6 +101,7 @@ const main = async () => {
       process.exitCode = 2;
       return;
     }
+    if (preflightOnly) return;
     const result = await harness.executeVisibleLifecyclePlan(plan, { commandId: intent.commandId, preflightReport: preflight, onGateProgress });
     emit({ kind: 'codex-visible-lifecycle-event', phase: 'complete', commandId: intent.commandId, intentDigest: intent.intentDigest, planDigest: plan.planDigest, status: result.status, result });
     if (!['closed', 'completed'].includes(result.status)) process.exitCode = 3;

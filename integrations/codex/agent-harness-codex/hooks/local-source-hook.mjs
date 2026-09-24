@@ -2,7 +2,7 @@
 import { dirname, isAbsolute, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { capturePostToolUse } from './post-tool-host-bridge.mjs';
-import { hookResponse, loadBindings } from './pseudo-command-router.mjs';
+import { loadBindings } from './pseudo-command-router.mjs';
 
 const fail = (code, message) => { throw Object.assign(new Error(message), { code }); };
 const samePath = (left, right) => process.platform === 'win32' ? resolve(left).toLowerCase() === resolve(right).toLowerCase() : resolve(left) === resolve(right);
@@ -27,32 +27,16 @@ export const renderLocalSourceHooks = async ({ bindingsDir } = {}) => {
   const handler = { type: 'command', command, ...(process.platform === 'win32' ? { commandWindows: command } : {}), timeout: 15 };
   return { description: 'Agent Harness source-link local development Host bridge.', hooks: {
     PostToolUse: [{ matcher: '^(Agent|(collaboration\\.)?(spawn_agent|list_agents|wait_agent|interrupt_agent))$', hooks: [handler] }],
-    UserPromptSubmit: [{ hooks: [{ ...handler, timeout: 5, additionalContextLimit: 1200 }] }],
   } };
 };
 
 export const handleLocalSourceHook = async (event, { bindingsDir } = {}) => {
-  const { bindings, bindingOptions, integrationRoot } = await loadLocalSourceBindings(bindingsDir);
   if (event?.hook_event_name === 'PostToolUse') {
+    const { bindings, bindingOptions } = await loadLocalSourceBindings(bindingsDir);
     await capturePostToolUse(event, { ...bindingOptions, bindings });
     return {};
   }
-  if (event?.hook_event_name === 'UserPromptSubmit') {
-    if (event?.prompt?.trim() === 'h:probe') {
-      if (typeof event.session_id !== 'string' || !event.session_id.length) fail('LOCAL_SOURCE_HOOK_SESSION_REQUIRED', 'Local Host probe requires the current Codex session ID from UserPromptSubmit.');
-      const probe = resolve(integrationRoot, 'scripts', 'local-source-host-probe.mjs');
-      return { hookSpecificOutput: { hookEventName: 'UserPromptSubmit', additionalContext: `这是本地源码 Host 只读短探针，不创建 Run。当前 Hook 已验证绑定。通过可观察的长驻终端进程运行 ${probe}，参数数组为 ${JSON.stringify(['--bindings-dir', resolve(bindingsDir), '--session-id', event.session_id])}。进程发出 codex-visible-host-request 后，只调用一次请求中的原生 collaboration.list_agents，使用精确 arguments；PostToolUse Hook 必须自动回传结果，不得手写响应。保持同一终端 session 并等待探针完成；报告 requestId、结果码和 Hook 阶段。若缺少原生工具或超时，停止于 attention-required，不启动质量 Run。` } };
-    }
-    const response = await hookResponse(event, bindingOptions);
-    if (!response?.hookSpecificOutput?.additionalContext) return response ?? {};
-    const commandSkill = resolve(integrationRoot, 'skills', 'agent-harness-command', 'SKILL.md');
-    const operatorSkill = resolve(integrationRoot, 'skills', 'agent-harness-operator', 'SKILL.md');
-    const additionalContext = response.hookSpecificOutput.additionalContext
-      .replaceAll('$agent-harness-command', `必须读取并遵循本地源码适配说明 ${commandSkill}`)
-      .replaceAll('$agent-harness-operator', `必须读取并遵循本地源码操作说明 ${operatorSkill}`);
-    return { ...response, hookSpecificOutput: { ...response.hookSpecificOutput, additionalContext } };
-  }
-  fail('LOCAL_SOURCE_HOOK_EVENT_UNSUPPORTED', 'Local source Hook accepts only PostToolUse and UserPromptSubmit.');
+  fail('LOCAL_SOURCE_HOOK_EVENT_UNSUPPORTED', 'Local source Hook accepts only PostToolUse.');
 };
 
 const main = async () => {
