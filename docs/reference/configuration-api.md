@@ -208,10 +208,13 @@ Project Descriptor 是 Registry 中的规范化结果，通常由生成器产生
 | `policy.batches` | 批次声明。 |
 | `policy.itemKey`、`policy.itemPaths` | 通用批处理项键与路径。 |
 | `policy.recovery` | 恢复策略。 |
+| `policy.qualityVerificationOutputs` | 质量修复时可写的工作区相对构建/测试产物目录；不授予源码修改权限。 |
 | `gateRecipes` | 可执行 Gate 声明。 |
 | `artifactProviders` | Artifact Provider ID 数组。 |
 
 `policy.recovery` 的字段是 `automaticLineageResolution`、`automaticOrdinaryResume`、`automaticVerifiedHardRecovery` 和固定为 `true` 的 `preserveSupersededRuns`。自动恢复仍需通过对应验证，不等于自动批准硬恢复。
+
+质量审查本身仍只读。交付 Profile 从已注册 Project Descriptor 读取 `qualityVerificationOutputs`，在修复派单中单独声明验证产物路径；源码仍只允许写入 Finding 的 `affectedPaths`。路径必须位于当前工作区内，不能穿过符号链接或与禁止路径重叠；缺少所需源码/测试路径或验证输出路径时，Agent 必须报告精确阻塞，不得自行扩权。
 
 ## 5. Workflow、Node、Feature 与循环
 

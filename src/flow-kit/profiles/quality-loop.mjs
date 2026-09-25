@@ -1,8 +1,16 @@
 import { sha256 } from '../../common/canonical.mjs';
 import { assert } from '../../common/errors.mjs';
 import { defineNodeTaskContract, taskFeatureProjection } from '../../common/task-contract.mjs';
+import { slash } from '../../common/paths.mjs';
 
 const unique = values => [...new Set(values ?? [])];
+const safeQualityPath = (value, code, label) => {
+  const path = slash(value).replace(/\/+$/, '');
+  assert(path && !path.startsWith('/') && !/^[A-Za-z]:/.test(path) && path.split('/').every(segment => segment && segment !== '.' && segment !== '..'), code, `${label} must be a workspace-relative path: ${value}`);
+  return path;
+};
+const verificationOutputPaths = feature => unique(feature.metadata?.qualityContext?.verificationOutputPaths ?? [])
+  .map(value => safeQualityPath(value, 'QUALITY_VERIFICATION_OUTPUT_PATH_INVALID', 'Quality verification output'));
 const cleanReviewSubmission = (state, feature) => {
   const submission = state.submissions.find(item => item.featureId === feature.id && !item.supersededAt);
   const inventory = feature.metadata?.knownFindingInventory;
@@ -22,10 +30,17 @@ export const validateQualityReviewPolicies = features => {
     if (policy === undefined) continue; // Existing versioned plans use sourcePolicy.
     assert(feature.metadata.qualityReview === true && ['repair-and-rereview', 'record-only'].includes(policy), 'QUALITY_FINDING_POLICY_INVALID', `Quality Feature ${feature.id} has an invalid Finding follow-up policy.`);
     assert(feature.metadata.sourcePolicy === 'read-only' && feature.allowedPaths.length === 0, 'QUALITY_REVIEW_WRITE_POLICY_INVALID', `Quality Feature ${feature.id} must remain read-only; repair belongs to a separate Feature.`);
+    for (const output of verificationOutputPaths(feature)) {
+      assert(!feature.forbiddenPaths.some(path => pathOverlaps([output], [slash(path)])), 'QUALITY_VERIFICATION_OUTPUT_FORBIDDEN', `Quality verification output overlaps a forbidden path: ${output}`);
+    }
   }
 };
 
-const pathOverlaps = (left, right) => left.some(a => right.some(b => a === b || a.startsWith(`${b}/`) || b.startsWith(`${a}/`)));
+const pathOverlaps = (left, right) => left.some(value => right.some(other => {
+  const a = slash(value).toLowerCase();
+  const b = slash(other).toLowerCase();
+  return a === b || a.startsWith(`${b}/`) || b.startsWith(`${a}/`);
+}));
 const repairGroups = findings => {
   const groups = [];
   for (const finding of findings) {
@@ -43,11 +58,19 @@ const repairsForFindings = ({ feature, findings }) => repairGroups(findings).map
   const qualityRoot = feature.metadata.qualityRoot ?? feature.logicalRoot;
   const reviewRound = Number(feature.metadata.reviewRound ?? 1);
   const suffix = sha256(`${qualityRoot}:${findingIds.join(',')}:${reviewRound}`).slice(0, 24);
-  const affectedPaths = unique(group.flatMap(item => item.affectedPaths ?? []));
+  const affectedPaths = unique(group.flatMap(item => item.affectedPaths ?? []))
+    .map(value => safeQualityPath(value, 'QUALITY_REPAIR_SOURCE_PATH_INVALID', 'Quality repair source path'));
+  const verificationOutputs = verificationOutputPaths(feature);
+  for (const path of affectedPaths) {
+    assert(!feature.forbiddenPaths.some(forbidden => pathOverlaps([path], [slash(forbidden)])), 'QUALITY_REPAIR_SOURCE_FORBIDDEN', `Quality repair source path overlaps a forbidden path: ${path}`);
+    assert(!verificationOutputs.some(output => pathOverlaps([path], [output])), 'QUALITY_REPAIR_SOURCE_OUTPUT_OVERLAP', `Quality repair source path overlaps a verification output: ${path}`);
+  }
+  const generatedOutputs = unique([...group.flatMap(item => item.generatedOutputs ?? []), ...verificationOutputs])
+    .map(value => safeQualityPath(value, 'QUALITY_GENERATED_OUTPUT_PATH_INVALID', 'Quality generated output'));
   const taskProjection = taskFeatureProjection(defineNodeTaskContract({
     role: { id: 'quality-repairer', description: 'Repairs compatible evidence-backed quality findings within their authorized paths.' },
     objective: `Resolve quality findings ${findingIds.join(', ')} within their shared affected paths.`,
-    instructions: ['Inspect the cited finding evidence and current source.', 'Apply the smallest complete repair.', 'Run focused checks that directly verify the repaired behavior.'],
+    instructions: ['Inspect the cited finding evidence and current source, including affected tests.', 'Apply the smallest complete repair.', 'Run focused checks that directly verify the repaired behavior. If a required source or test file is outside allowedPaths, report a scope blocker with that exact path.'],
     inputs: [{ id: 'finding', source: 'feature', path: 'findingId', required: true, description: 'The exact finding assigned to this repair Feature.' }],
     steps: [{ id: 'repair', instruction: `Repair findings ${findingIds.join(', ')}.` }, { id: 'verify', instruction: `Verify each finding with a passing checkpoint named verify:<findingId>.` }],
     constraints: ['Modify only affected authorized paths.', 'Do not mark the finding resolved without current verification evidence.'],
@@ -67,7 +90,7 @@ const repairsForFindings = ({ feature, findings }) => repairGroups(findings).map
     forbiddenPaths: feature.forbiddenPaths,
     symbols: finding.symbols,
     contracts: finding.contracts,
-    generatedOutputs: finding.generatedOutputs,
+    generatedOutputs,
     conflictKeys: finding.conflictKeys,
     gatePlan: feature.gatePlan,
     metadata: {
@@ -83,6 +106,7 @@ const repairsForFindings = ({ feature, findings }) => repairGroups(findings).map
       findingEvidence: finding.evidence,
       repairFindingId: finding.id,
       repairFindingIds: findingIds,
+      verificationOutputPaths: verificationOutputs,
       repairFindings: group.map(item => ({ id: item.id, severity: item.severity, summary: item.summary, evidence: item.evidence, affectedPaths: item.affectedPaths })),
     },
   };
@@ -155,7 +179,8 @@ export const createQualityFollowUpFeatures = ({ state, feature, findings, result
 };
 
 export const createQualityGateDiagnosticReview = ({ state, gateResults }) => {
-  const failed = gateResults.filter(gate => gate.status !== 'passed');
+  // Environment failures need host/toolchain repair, not a source-code Finding.
+  const failed = gateResults.filter(gate => gate.status === 'failed');
   if (!failed.length) return null;
   const prior = [...state.features].reverse().find(feature => feature.metadata?.qualityReview === true && feature.metadata?.qualityFindingPolicy === 'repair-and-rereview');
   if (!prior || !state.features.every(feature => feature.state === 'completed')) return null;

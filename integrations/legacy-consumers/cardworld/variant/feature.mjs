@@ -16,5 +16,5 @@ export const CARDWORLD_ACTION_PATHS = Object.freeze({
 export const engineTemplates = createDeliveryTemplates({
   actionPaths: CARDWORLD_ACTION_PATHS,
   qualityRootPrefix: 'engine',
-  forbiddenPaths: ['.git', '.agent-harness-data', '.cardworld-local'],
+  forbiddenPaths: ['.git', '.agent-harness-data'],
 });

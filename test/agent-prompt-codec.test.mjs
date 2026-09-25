@@ -89,6 +89,21 @@ test('visible 1.4 Prompt names the digest-bound packet file without duplicating 
   assert.doesNotMatch(compiled.text, /BEGIN_AGENT_HARNESS_DISPATCH_PACKET_JSON/);
 });
 
+test('quality repair Prompt separates source edits from declared verification artifacts', () => {
+  const repair = packet();
+  repair.feature.id = 'quality-repair';
+  repair.feature.allowedPaths = ['src/board.rs'];
+  repair.feature.metadata = { stage: 'quality-repair', repairFindingId: 'Q-1', verificationOutputPaths: ['.build-output'] };
+  repair.execution.runtime = { mode: 'conversation-visible', userVisible: true, hostOrchestrated: true };
+  repair.execution.result = createDispatchResultContract(repair.feature, { conversationVisible: true });
+  const compiled = compileAgentPrompt(repair);
+  assert.match(compiled.text, /Edit source only within allowedPaths/);
+  assert.match(compiled.text, /\.build-output/);
+  assert.match(compiled.text, /transient build and test artifacts/);
+  assert.match(compiled.text, /verification-path-prohibited/);
+  assert.match(compiled.text, /Never edit source there or include those artifacts in changedFiles/);
+});
+
 test('Prompt Codec renders the fixed-schema typed output dialect without weakening the business contract', () => {
   const fixed = packet();
   fixed.execution.runtime = { mode: 'headless', userVisible: false, hostOrchestrated: false, resultDialect: 'typed-output-envelope-v1' };

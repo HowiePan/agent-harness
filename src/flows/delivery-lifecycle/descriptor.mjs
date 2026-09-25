@@ -22,6 +22,7 @@ export const createDeliveryProjectDescriptor = ({
   actionExecution = {},
   knownFindingInventories,
   actionPaths,
+  qualityVerificationOutputs = [],
   excluded = ['.git', '.agent-harness-data', 'node_modules'],
 } = {}) => {
   assert(workspaceRoot && isAbsolute(workspaceRoot), 'DELIVERY_WORKSPACE_REQUIRED', 'Delivery project descriptor requires an absolute workspaceRoot.');
@@ -61,6 +62,7 @@ export const createDeliveryProjectDescriptor = ({
       runtimeConfigs,
       profileConfigs: { 'delivery-lifecycle': {} },
       ...(actionPaths ? { actionPaths: structuredClone(actionPaths) } : {}),
+      qualityVerificationOutputs: structuredClone(qualityVerificationOutputs),
       ...(Object.keys(actionExecution).length ? { actionExecution: structuredClone(actionExecution) } : {}),
       ...(knownFindingInventories && Object.keys(knownFindingInventories).length ? { knownFindingInventories: structuredClone(knownFindingInventories) } : {}),
       recovery: { automaticLineageResolution: true, automaticOrdinaryResume: true, automaticVerifiedHardRecovery: true, preserveSupersededRuns: true },

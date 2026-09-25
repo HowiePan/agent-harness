@@ -95,8 +95,17 @@ export const executeVisibleLifecyclePlan = async (context, api, planInput, { com
   let state = started.state;
   const activeRunId = state.runId;
   const rounds = [];
+  const blockedFeatures = current => current.features
+    .filter(feature => ['blocked', 'failed-budget'].includes(feature.state))
+    .map(feature => ({
+      id: feature.id,
+      state: feature.state,
+      blocker: structuredClone(feature.blocker ?? null),
+      allowedPaths: [...feature.allowedPaths],
+      verificationOutputPaths: [...(feature.metadata?.verificationOutputPaths ?? [])],
+    }));
   const retryFailedGates = async results => {
-    if (gateDiagnosticAttempts >= 5 || !results.some(gate => gate.status !== 'passed')) return null;
+    if (gateDiagnosticAttempts >= 5 || !results.some(gate => gate.status === 'failed')) return null;
     state = await authorityStore.read(plan.project.id, activeRunId);
     if (!api.profileRegistry.get(state.profile.id).createGateDiagnosticReview) return null;
     const scheduled = await api.kernel.scheduleGateDiagnosticReview(plan.project.id, activeRunId, { gateResults: results }, { expectedRevision: state.revision, commandId: `${commandId}.gate-diagnostic.${state.revision}` });
@@ -173,7 +182,7 @@ export const executeVisibleLifecyclePlan = async (context, api, planInput, { com
       if (state.features.every(feature => feature.state === 'completed')) break;
       if (featureGates && !featureGates.ok) return { status: 'attention-required', reason: 'feature-gates-not-passed', planDigest: plan.planDigest, rounds, gates: featureGates.results, state };
       rounds.push({ round, status: 'attention-required', reason: state.status });
-      return { status: 'attention-required', reason: state.status, planDigest: plan.planDigest, rounds, state };
+      return { status: 'attention-required', reason: state.status, planDigest: plan.planDigest, rounds, blockedFeatures: blockedFeatures(state), state };
     }
     for (const lease of leases) {
       const dispatch = state.dispatches.find(item => item.dispatchId === lease.dispatchId);

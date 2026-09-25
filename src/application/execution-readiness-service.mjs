@@ -3,6 +3,7 @@ import { resolve } from 'node:path';
 import { atomicWriteJson } from '../kernel/atomic-io.mjs';
 import { newId } from '../common/canonical.mjs';
 import { assert } from '../common/errors.mjs';
+import { assertNoLinkPath } from '../common/paths.mjs';
 import { assertHarnessWritePath, harnessProjectRoot } from '../common/write-boundary.mjs';
 import { captureWorkspace } from '../common/workspace-snapshot.mjs';
 import { leaseHealth } from '../kernel/kernel.mjs';
@@ -14,6 +15,7 @@ import { assertFreshVisibleObservation, isVisibleHostAdapter } from '../platform
 import { assertVisibleHostReceiptOwner } from '../platform/plugins/runtime/visible-host-bindings.mjs';
 import { inspectProjectGateCapabilities } from '../platform/workflow/gates/project-gate-runner.mjs';
 import { validateLifecycleCommandPlan } from './lifecycle-command-plan.mjs';
+import { validateQualityReviewPolicies } from '../flow-kit/profiles/quality-loop.mjs';
 
 export const createExecutionReadinessReport = async (context, planInput, { onGateProgress = null, probeWrite = true, ttlMs = 60000 } = {}) => {
   const {
@@ -62,6 +64,12 @@ export const createExecutionReadinessReport = async (context, planInput, { onGat
     } catch (error) { add('release', false, { active: Boolean(activeRelease), runtimeRoot: activeRuntimeRoot }, issues(error)); }
   }
   if (plan && project) {
+    try {
+      validateQualityReviewPolicies(plan.run.features);
+      const outputs = [...new Set(plan.run.features.flatMap(feature => feature.metadata?.qualityContext?.verificationOutputPaths ?? []))];
+      for (const output of outputs) assertNoLinkPath(plan.run.executionWorkspaceRoot, resolve(plan.run.executionWorkspaceRoot, output), 'quality verification output');
+      add('quality-verification-paths', true, { outputs });
+    } catch (error) { add('quality-verification-paths', false, {}, issues(error)); }
     const trustedAgentAdapter = resolveVisibleHostAdapter(plan.run.runtimePluginId);
     const states = await authorityStore.list(plan.project.id);
     const currentLineage = await lineageStore.read(plan.project.id, plan.logicalTaskKey);

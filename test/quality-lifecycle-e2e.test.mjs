@@ -8,8 +8,41 @@ import { loadExtensionPack } from '../src/platform/extensions/contract.mjs';
 import { createVisibleHostAdapter } from '../src/platform/plugins/runtime/visible-host-adapter.mjs';
 import { harnessTemporaryRoot } from '../src/common/write-boundary.mjs';
 import { digestJson, sha256 } from '../src/common/canonical.mjs';
+import { createQualityFollowUpFeatures, createQualityGateDiagnosticReview, validateQualityReviewPolicies } from '../src/flow-kit/profiles/quality-loop.mjs';
 
 const releaseIdentity = { version: '1.0.0', artifactDigest: 'a'.repeat(64), verified: true };
+
+test('quality verification outputs must stay within the workspace and outside forbidden paths', () => {
+  const feature = {
+    id: 'quality', allowedPaths: [], forbiddenPaths: ['.git'],
+    metadata: { qualityReview: true, qualityFindingPolicy: 'repair-and-rereview', sourcePolicy: 'read-only', qualityContext: { verificationOutputPaths: ['build'] } },
+  };
+  assert.doesNotThrow(() => validateQualityReviewPolicies([feature]));
+  for (const path of ['../outside', 'C:/outside', '/outside', '.git/objects']) {
+    const invalid = structuredClone(feature);
+    invalid.metadata.qualityContext.verificationOutputPaths = [path];
+    assert.throws(() => validateQualityReviewPolicies([invalid]), error => error.code === (path === '.git/objects' ? 'QUALITY_VERIFICATION_OUTPUT_FORBIDDEN' : 'QUALITY_VERIFICATION_OUTPUT_PATH_INVALID'));
+  }
+});
+
+test('environment Gate failures do not become source-repair Findings', () => {
+  const state = {
+    sourceDigest: 'a'.repeat(64),
+    features: [{ id: 'quality', state: 'completed', metadata: { qualityReview: true, qualityFindingPolicy: 'repair-and-rereview', qualityRoot: 'quality:fixture', reviewRound: 1 } }],
+  };
+  assert.equal(createQualityGateDiagnosticReview({ state, gateResults: [{ id: 'wasm', status: 'environment-failed', evidenceRefs: ['access-denied'] }] }), null);
+});
+
+test('a quality Finding cannot turn verification output into a source-edit allowance', () => {
+  const feature = {
+    id: 'quality', logicalRoot: 'quality:fixture', forbiddenPaths: ['.git'],
+    metadata: { qualityReview: true, qualityFindingPolicy: 'repair-and-rereview', qualityRoot: 'quality:fixture', qualityContext: { verificationOutputPaths: ['.cardworld-local'] } },
+  };
+  const findings = [{ id: 'Q-unsafe', severity: 'P1', summary: 'Unsafe repair scope', affectedPaths: ['.cardworld-local/cache'], generatedOutputs: [], evidence: ['fixture'] }];
+  assert.throws(() => createQualityFollowUpFeatures({ feature, findings }), error => error.code === 'QUALITY_REPAIR_SOURCE_OUTPUT_OVERLAP');
+  findings[0].affectedPaths = ['.GIT/objects'];
+  assert.throws(() => createQualityFollowUpFeatures({ feature, findings }), error => error.code === 'QUALITY_REPAIR_SOURCE_FORBIDDEN');
+});
 
 const result = ({ summary, findings = [], changedFiles = [], checkpoint = 'review', knownFindingDispositions = undefined, diagnosticDispositions = undefined, diagnostics = undefined, outputs = undefined }) => ({
   status: 'completed',
@@ -43,7 +76,7 @@ const finding = {
 const openDisposition = [{ id: finding.id, disposition: 'open', evidence: ['README.md:1'] }];
 const cleanDisposition = [{ id: finding.id, disposition: 'not-reproduced', evidence: ['fresh README.md check'] }];
 const externalFinding = { ...finding, id: 'Q-E2E-002', summary: 'Separate fixture file fails a full check.', evidence: ['OTHER.md:1'], affectedPaths: ['OTHER.md'], conflictKeys: ['fixture-other'] };
-const overlappingFinding = { ...finding, id: 'Q-E2E-003', summary: 'Second defect in the same file.', evidence: ['README.md:2'] };
+const overlappingFinding = { ...finding, id: 'Q-E2E-003', summary: 'Second defect in the same file.', evidence: ['README.md:2'], generatedOutputs: ['generated/second'] };
 const externalDiagnostic = { id: 'full-check-other', summary: 'Full check fails in OTHER.md.', evidence: ['host:full-check:OTHER.md:1'] };
 
 const createHost = ({ workspace, failFirstWait = false, failFirstInspect = false, failFirstConfirm = false, failFirstResult = false, repeatFindingOnce = false, rejectRepairResultWithEdit = false, invalidRepairCheckpointOnce = false, externalDiagnosticOnce = false, overlappingFindings = false, missingDiagnosticDispositionOnce = false }) => {
@@ -260,13 +293,20 @@ test('visible quality lifecycle completes review, verified repair, fresh re-revi
   t.after(() => rm(fixture.root, { recursive: true, force: true }));
   assert.equal(fixture.plan.run.features[0].metadata.sourcePolicy, 'read-only');
   assert.equal(fixture.plan.run.features[0].metadata.qualityFindingPolicy, 'repair-and-rereview');
+  assert.deepEqual(fixture.plan.run.features[0].metadata.qualityContext.verificationOutputPaths, ['.cardworld-local', 'tabletop-collection/.cardworld-local']);
   const preflight = await fixture.harness.createExecutionReadinessReport(fixture.plan);
   assert.equal(preflight.executionReady, true);
+  assert.deepEqual(preflight.checks.find(check => check.id === 'quality-verification-paths')?.details.outputs, ['.cardworld-local', 'tabletop-collection/.cardworld-local']);
   const completed = await fixture.harness.executeVisibleLifecyclePlan(fixture.plan, { commandId: 'quality-e2e', preflightReport: preflight, maxConcurrency: 10 });
   for (const dispatch of completed.state.dispatches) assert.equal(sha256(await readFile(`${dispatch.outputRef}.dispatch-packet.json`, 'utf8')), dispatch.packetDigest);
   assert.equal(completed.rounds.every(round => round.physicalLimit === 1), true);
   assert.equal(completed.rounds.every(round => round.elapsedMs >= 0 && ['spawnMs', 'waitMs', 'resultMs'].every(key => round.timing[key] >= 0)), true);
   assertClosedQualityLoop(completed.state);
+  const repair = completed.state.features.find(feature => feature.metadata.stage === 'quality-repair');
+  assert.deepEqual(repair.metadata.verificationOutputPaths, ['.cardworld-local', 'tabletop-collection/.cardworld-local']);
+  assert.deepEqual(repair.allowedPaths, ['README.md']);
+  assert.equal(repair.generatedOutputs.includes('.cardworld-local'), true);
+  assert.equal(repair.generatedOutputs.includes('tabletop-collection/.cardworld-local'), true);
 });
 
 test('out-of-scope check diagnostic is confirmed by review and repaired in the same Run', async t => {
@@ -300,6 +340,7 @@ test('overlapping findings share one repair dispatch with evidence per Finding',
   assert.equal(completed.status, 'closed');
   assert.equal(fixture.host.stats.spawnCount, 3);
   assert.deepEqual(completed.state.features.filter(feature => feature.metadata.stage === 'quality-repair').map(feature => feature.metadata.repairFindingIds), [[finding.id, overlappingFinding.id]]);
+  assert.equal(completed.state.features.find(feature => feature.metadata.stage === 'quality-repair').generatedOutputs.includes('generated/second'), true);
   assert.equal(completed.state.findings.every(item => item.status === 'resolved'), true);
 });
 
@@ -401,6 +442,9 @@ test('terminal Agent failure is committed and blocks the lifecycle before any ne
   const stopped = await fixture.harness.executeVisibleLifecyclePlan(fixture.plan, { commandId: 'quality-terminal-stop', preflightReport: preflight, maxConcurrency: 10 });
   assert.equal(stopped.status, 'attention-required');
   assert.equal(stopped.reason, 'all-remaining-blocked');
+  assert.equal(stopped.blockedFeatures.length, 1);
+  assert.equal(stopped.blockedFeatures[0].id, stopped.state.features[0].id);
+  assert.deepEqual(stopped.blockedFeatures[0].allowedPaths, []);
   assert.equal(fixture.host.stats.spawnCount, 1);
   assert.equal(fixture.host.stats.terminalCount, 1);
   assert.equal(fixture.host.stats.maxActive, 1);

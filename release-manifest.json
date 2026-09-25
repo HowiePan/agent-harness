@@ -317,8 +317,8 @@
     },
     {
       "path": "docs/reference/configuration-api.md",
-      "sha256": "7d110948e52d1f5aa1982b0e727bfbce037fa6a1de496a9581d79baeabb68ae0",
-      "size": 29534
+      "sha256": "4a1bdbca2e8891f14899193f4143d6845186fbb2cda250965b6308bf72382e50",
+      "size": 30099
     },
     {
       "path": "docs/reference/legacy-compatibility.md",
@@ -452,13 +452,13 @@
     },
     {
       "path": "integrations/legacy-consumers/cardworld/variant/descriptor.mjs",
-      "sha256": "e06f01a1ec7e078dcc4696570f024b801e1d27995021679cd3fec34ff122293d",
-      "size": 7158
+      "sha256": "0066b645b0a168eaa75434826ba73ce306ee22545be15336db7b1090f5ca90c6",
+      "size": 7348
     },
     {
       "path": "integrations/legacy-consumers/cardworld/variant/feature.mjs",
-      "sha256": "be2511a632c166f629af530df6eaaa798b3de7fd608a90d85e8f57967249417f",
-      "size": 982
+      "sha256": "fad46b268eb443c7de5b0fc96cbaadb45ef0a725f4a555553ffb6b513679c09d",
+      "size": 962
     },
     {
       "path": "integrations/legacy-consumers/collection/commands.mjs",
@@ -602,8 +602,8 @@
     },
     {
       "path": "schemas/delivery-project-input.schema.json",
-      "sha256": "bd511dc8b61f3690c6eebd3fa0f2c84b3c079c5dd5a68701ac82448621c16ea4",
-      "size": 2381
+      "sha256": "8aa994985a618ace79df88600026834c64bb176c6fd271547d0864f004d93fb3",
+      "size": 2504
     },
     {
       "path": "schemas/evidence-metadata.schema.json",
@@ -802,8 +802,8 @@
     },
     {
       "path": "src/application/execution-readiness-service.mjs",
-      "sha256": "ffc14fa23b9ddab777560a2028c4adbf0049b4d358382b6e37225fc796f875b0",
-      "size": 17489
+      "sha256": "dafb670c25a6e9337a25549d43fb45388ed1efb4c1421d82f224256c94028457",
+      "size": 18150
     },
     {
       "path": "src/application/execution-readiness.mjs",
@@ -827,8 +827,8 @@
     },
     {
       "path": "src/application/lifecycle-execution-service.mjs",
-      "sha256": "c83b74172e24bb2929cc015353089e929bb74566bea9a46505987057283f9567",
-      "size": 20127
+      "sha256": "e5a8d90cbe895f188c42daf5025162498e05dc368177af9a8680e6a60f975cb7",
+      "size": 20572
     },
     {
       "path": "src/application/lineage.mjs",
@@ -922,8 +922,8 @@
     },
     {
       "path": "src/flow-kit/profiles/quality-loop.mjs",
-      "sha256": "5b228c65806a9555cde3cb99ff54e39cd1a7125a5366bf666c06d629e146bfe5",
-      "size": 13515
+      "sha256": "1d52847b1769dc1dd72a0eb5d54222af9b5ac0ecbf566a277a9af2e831d97197",
+      "size": 15563
     },
     {
       "path": "src/flow-kit/reference-feature.mjs",
@@ -1032,8 +1032,8 @@
     },
     {
       "path": "src/flows/delivery-lifecycle/descriptor.mjs",
-      "sha256": "60afc8beaea08db80cfa5eca02e09f883e1cc861982e6731e061eb0d83aa79af",
-      "size": 5875
+      "sha256": "2eef820d5280970ba34d65c3fb1b2f6f0d2a5eececdad41820e34f52d0cd0190",
+      "size": 5989
     },
     {
       "path": "src/flows/delivery-lifecycle/extension.mjs",
@@ -1057,8 +1057,8 @@
     },
     {
       "path": "src/flows/delivery-lifecycle/nodes/delivery/feature.mjs",
-      "sha256": "a0b1f14793134acfcc336a740a22d6eba0191890892578c1bd2aa0c1876ca002",
-      "size": 3467
+      "sha256": "2c039725782019d3a8928b4249143ecd5bd90716a79f990bcebfc834e537db5e",
+      "size": 3853
     },
     {
       "path": "src/flows/delivery-lifecycle/nodes/docs/index.mjs",
@@ -1422,8 +1422,8 @@
     },
     {
       "path": "src/platform/plugins/codec/agent-prompt-codec.mjs",
-      "sha256": "6e6b3ce7e986223afb65542f49ff6e64be01ac9cf746fc253e7414af5ac44053",
-      "size": 16430
+      "sha256": "acad675c20594a3acb407a4052a7dd242b05667c356c264f52de93c3ec0461c0",
+      "size": 17237
     },
     {
       "path": "src/platform/plugins/codec/json-codec.mjs",
@@ -1661,7 +1661,7 @@
       "size": 19877
     }
   ],
-  "packageDigest": "e4c138e9dc429001e73da3d60bc9a3179b4fb466fe7ad65e7934c30a1553ba0b",
+  "packageDigest": "e1b63828851aab08563a6e4664c32b7be9ac1c7f8302e29a000018fd2808a0ad",
   "metadataFiles": [
     "release-manifest.json",
     "sbom.spdx.json"
