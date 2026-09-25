@@ -11,7 +11,7 @@ import { digestJson, sha256 } from '../src/common/canonical.mjs';
 
 const releaseIdentity = { version: '1.0.0', artifactDigest: 'a'.repeat(64), verified: true };
 
-const result = ({ summary, findings = [], changedFiles = [], checkpoint = 'review', knownFindingDispositions = undefined, outputs = undefined }) => ({
+const result = ({ summary, findings = [], changedFiles = [], checkpoint = 'review', knownFindingDispositions = undefined, diagnosticDispositions = undefined, diagnostics = undefined, outputs = undefined }) => ({
   status: 'completed',
   summary,
   checkpoints: [{ id: checkpoint, status: 'passed', summary, evidence: [`host:${checkpoint}`] }],
@@ -22,6 +22,8 @@ const result = ({ summary, findings = [], changedFiles = [], checkpoint = 'revie
   findings,
   ...(outputs ? { outputs } : {}),
   ...(knownFindingDispositions ? { knownFindingDispositions } : {}),
+  ...(diagnosticDispositions ? { diagnosticDispositions } : {}),
+  ...(diagnostics ? { diagnostics } : {}),
   followUpFeatures: [],
   failureClass: null,
   blocker: null,
@@ -40,8 +42,11 @@ const finding = {
 };
 const openDisposition = [{ id: finding.id, disposition: 'open', evidence: ['README.md:1'] }];
 const cleanDisposition = [{ id: finding.id, disposition: 'not-reproduced', evidence: ['fresh README.md check'] }];
+const externalFinding = { ...finding, id: 'Q-E2E-002', summary: 'Separate fixture file fails a full check.', evidence: ['OTHER.md:1'], affectedPaths: ['OTHER.md'], conflictKeys: ['fixture-other'] };
+const overlappingFinding = { ...finding, id: 'Q-E2E-003', summary: 'Second defect in the same file.', evidence: ['README.md:2'] };
+const externalDiagnostic = { id: 'full-check-other', summary: 'Full check fails in OTHER.md.', evidence: ['host:full-check:OTHER.md:1'] };
 
-const createHost = ({ workspace, failFirstWait = false, failFirstInspect = false, failFirstConfirm = false, failFirstResult = false, repeatFindingOnce = false, rejectRepairResultWithEdit = false }) => {
+const createHost = ({ workspace, failFirstWait = false, failFirstInspect = false, failFirstConfirm = false, failFirstResult = false, repeatFindingOnce = false, rejectRepairResultWithEdit = false, invalidRepairCheckpointOnce = false, externalDiagnosticOnce = false, overlappingFindings = false, missingDiagnosticDispositionOnce = false }) => {
   const agents = new Map();
   const stats = { spawnCount: 0, containCount: 0, terminalCount: 0, maxActive: 0, reconcileCount: 0 };
   let sequence = 0;
@@ -50,6 +55,10 @@ const createHost = ({ workspace, failFirstWait = false, failFirstInspect = false
   let shouldFailConfirm = failFirstConfirm;
   let shouldFailResult = failFirstResult;
   let shouldRepeatFinding = repeatFindingOnce;
+  let shouldRejectRepairCheckpoint = invalidRepairCheckpointOnce;
+  let shouldReportExternalDiagnostic = externalDiagnosticOnce;
+  let shouldConfirmExternalFinding = externalDiagnosticOnce;
+  let shouldOmitDiagnosticDisposition = missingDiagnosticDispositionOnce;
   const adapter = createVisibleHostAdapter({
     provider: 'quality-e2e-host',
     adapterVersion: '1.1.0',
@@ -138,13 +147,31 @@ const createHost = ({ workspace, failFirstWait = false, failFirstInspect = false
             receipt: { operation: 'result', stage },
           });
         }
-        return finish({ result: result({ summary: 'Initial full review found one defect.', findings: [finding], knownFindingDispositions: openDisposition, outputs: { quality: { schemaId: 'delivery-quality-v1', value: { findings: [finding] }, evidenceRefs: ['host:review'] } } }), receipt: { operation: 'result', stage } });
+        const found = overlappingFindings ? [finding, overlappingFinding] : [finding];
+        return finish({ result: result({ summary: 'Initial full review found defects.', findings: found, knownFindingDispositions: openDisposition, outputs: { quality: { schemaId: 'delivery-quality-v1', value: { findings: found }, evidenceRefs: ['host:review'] } } }), receipt: { operation: 'result', stage } });
       }
       if (stage === 'quality-repair') {
+        const repairPath = task.packet.feature.metadata.repairFindingId === externalFinding.id ? 'OTHER.md' : 'README.md';
         if (!task.repaired) {
-          const current = await readFile(resolve(workspace, 'README.md'), 'utf8');
-          await writeFile(resolve(workspace, 'README.md'), `${current.trimEnd()}\nverified repair\n`, 'utf8');
+          const current = await readFile(resolve(workspace, repairPath), 'utf8');
+          if (!current.includes('verified repair')) await writeFile(resolve(workspace, repairPath), `${current.trimEnd()}\nverified repair\n`, 'utf8');
+          task.changed = !current.includes('verified repair');
           task.repaired = true;
+        }
+        if (shouldReportExternalDiagnostic) {
+          shouldReportExternalDiagnostic = false;
+          return finish({ result: result({ summary: 'Focused repair passed; separate full check failed.', changedFiles: ['README.md'], checkpoint: 'focused-check', diagnostics: [externalDiagnostic] }), runtimeEvidence: { verificationReceipts: [{ id: 'focused-check', status: 'passed', evidence: ['README.md'] }] }, receipt: { operation: 'result', stage } });
+        }
+        if (shouldRejectRepairCheckpoint) {
+          shouldRejectRepairCheckpoint = false;
+          return finish({
+            result: { ...result({ summary: 'Focused repair passed; unrelated full check blocked.', changedFiles: ['README.md'], checkpoint: 'focused-check' }), checkpoints: [
+              { id: 'focused-check', status: 'passed', summary: 'Focused check passed.', evidence: ['host:focused-check'] },
+              { id: 'full-targets', status: 'blocked', summary: 'Unrelated test file is outside the repair scope.', evidence: ['host:full-targets'] },
+            ] },
+            runtimeEvidence: { verificationReceipts: [{ id: 'focused-check', status: 'passed', evidence: ['README.md'] }] },
+            receipt: { operation: 'result', stage, observationRequestDigest: 'b'.repeat(64) },
+          });
         }
         if (rejectRepairResultWithEdit) {
           const rejectionBody = {
@@ -161,24 +188,37 @@ const createHost = ({ workspace, failFirstWait = false, failFirstInspect = false
             receipt: { operation: 'result', stage, rejectionDigest: receiptDigest },
           });
         }
+        const groupedIds = task.packet.feature.metadata.repairFindingIds ?? [];
         return finish({
-          result: result({ summary: 'Finding repaired and verified.', changedFiles: ['README.md'], checkpoint: 'repair-verification' }),
-          runtimeEvidence: { verificationReceipts: [{ id: 'focused-check', status: 'passed', evidence: ['README.md'] }] },
+          result: { ...result({ summary: 'Finding repaired and verified.', changedFiles: task.changed ? [repairPath] : [], checkpoint: 'repair-verification' }), ...(groupedIds.length > 1 ? { checkpoints: groupedIds.map(id => ({ id: `verify:${id}`, status: 'passed', summary: `Verified ${id}`, evidence: [`host:verify:${id}`] })) } : {}) },
+          runtimeEvidence: { verificationReceipts: [{ id: 'focused-check', status: 'passed', evidence: [repairPath] }] },
           receipt: { operation: 'result', stage },
         });
       }
       assert.equal(stage, 'quality-recheck');
+      const gateDiagnostic = task.packet.feature.metadata.diagnostics?.find(item => item.id.startsWith('gate:'));
+      if (gateDiagnostic) {
+        return finish({ result: result({ summary: 'Gate failure confirms a separate source defect.', findings: [externalFinding], diagnosticDispositions: [{ id: gateDiagnostic.id, disposition: 'finding', findingId: externalFinding.id, evidence: ['fresh OTHER.md Gate reproduction'] }], knownFindingDispositions: cleanDisposition, checkpoint: 'gate-diagnostic' }), receipt: { operation: 'result', stage } });
+      }
+      if (shouldConfirmExternalFinding) {
+        if (shouldOmitDiagnosticDisposition) {
+          shouldOmitDiagnosticDisposition = false;
+          return finish({ result: result({ summary: 'Review omitted a required diagnostic disposition.', knownFindingDispositions: cleanDisposition, checkpoint: 'recheck' }), receipt: { operation: 'result', stage, observationRequestDigest: 'c'.repeat(64) } });
+        }
+        shouldConfirmExternalFinding = false;
+        return finish({ result: result({ summary: 'Independent review confirmed the separate diagnostic.', findings: [externalFinding], diagnosticDispositions: [{ id: externalDiagnostic.id, disposition: 'finding', findingId: externalFinding.id, evidence: ['fresh OTHER.md check'] }], knownFindingDispositions: cleanDisposition, checkpoint: 'recheck' }), receipt: { operation: 'result', stage } });
+      }
       if (shouldRepeatFinding) {
         shouldRepeatFinding = false;
         return finish({ result: result({ summary: 'First re-review found the same defect again.', findings: [finding], knownFindingDispositions: openDisposition, checkpoint: 'recheck' }), receipt: { operation: 'result', stage } });
       }
-      return finish({ result: result({ summary: 'Post-repair full re-review is clean.', knownFindingDispositions: cleanDisposition, checkpoint: 'recheck' }), receipt: { operation: 'result', stage } });
+      return finish({ result: result({ summary: 'Post-repair full re-review is clean.', knownFindingDispositions: cleanDisposition, diagnosticDispositions: task.packet.feature.metadata.diagnostics?.length ? [{ id: externalDiagnostic.id, disposition: 'not-reproduced', evidence: ['fresh OTHER.md check after repair'] }] : undefined, checkpoint: 'recheck' }), receipt: { operation: 'result', stage } });
     },
   });
   return { adapter, agents, stats };
 };
 
-const setup = async ({ failFirstWait = false, failFirstInspect = false, failFirstConfirm = false, failFirstResult = false, repeatFindingOnce = false, rejectRepairResultWithEdit = false, preset = 'full' } = {}) => {
+const setup = async ({ failFirstWait = false, failFirstInspect = false, failFirstConfirm = false, failFirstResult = false, repeatFindingOnce = false, rejectRepairResultWithEdit = false, invalidRepairCheckpointOnce = false, externalDiagnosticOnce = false, gateFailureUntilRepair = false, overlappingFindings = false, missingDiagnosticDispositionOnce = false, preset = 'full' } = {}) => {
   const controlRoot = resolve(process.cwd());
   const parent = resolve(harnessTemporaryRoot(), 'quality-lifecycle-e2e');
   await mkdir(parent, { recursive: true });
@@ -187,13 +227,14 @@ const setup = async ({ failFirstWait = false, failFirstInspect = false, failFirs
   const dataRoot = resolve(root, 'data');
   await mkdir(resolve(workspace, '.git'), { recursive: true });
   await writeFile(resolve(workspace, 'README.md'), '# Quality fixture\n', 'utf8');
+  await writeFile(resolve(workspace, 'OTHER.md'), '# Separate fixture\n', 'utf8');
   const engine = await loadExtensionPack('./integrations/legacy-consumers/cardworld/index.mjs', { cwd: controlRoot, controlRoot });
   const runtime = await loadExtensionPack('./integrations/codex/extensions/codex-runtime.mjs', { cwd: controlRoot, controlRoot });
-  const host = createHost({ workspace, failFirstWait, failFirstInspect, failFirstConfirm, failFirstResult, repeatFindingOnce, rejectRepairResultWithEdit });
+  const host = createHost({ workspace, failFirstWait, failFirstInspect, failFirstConfirm, failFirstResult, repeatFindingOnce, rejectRepairResultWithEdit, invalidRepairCheckpointOnce, externalDiagnosticOnce, overlappingFindings, missingDiagnosticDispositionOnce });
   const create = () => createHarness({ controlRoot, dataRoot, releaseIdentity, strictProjectIdentity: false, extensions: [engine, runtime], agentAdapter: host.adapter });
   const harness = await create();
   const descriptor = createCardWorldProjectDescriptor({ workspaceRoot: workspace, harness: releaseIdentity, knownFindingInventories: { 'V3.8.4': { version: '1.0', sources: [{ path: 'README.md', sha256: sha256('# Quality fixture\n') }], findings: [{ id: finding.id, severity: finding.severity, sourcePath: 'README.md' }] } } });
-  descriptor.gateRecipes = [];
+  descriptor.gateRecipes = gateFailureUntilRepair ? [{ id: 'fixture-gate', scope: 'final', required: true, executionClass: 'deterministic-process', command: [process.execPath, '-e', "process.exit(require('node:fs').readFileSync('OTHER.md','utf8').includes('verified repair') ? 0 : 1)"] }] : [];
   descriptor.extensions = descriptor.extensions.map(item => ({ ...item, digest: item.id === engine.id ? engine.digest : runtime.digest }));
   await harness.projectRegistry.register(descriptor, { expectedRevision: 0, commandId: 'quality-e2e-project' });
   const plan = await harness.createLifecyclePlan({ projectId: descriptor.id, action: 'quality', target: 'V3.8.4', arguments: [preset], extensionId: engine.id, executionWorkspaceRoot: workspace });
@@ -224,7 +265,55 @@ test('visible quality lifecycle completes review, verified repair, fresh re-revi
   const completed = await fixture.harness.executeVisibleLifecyclePlan(fixture.plan, { commandId: 'quality-e2e', preflightReport: preflight, maxConcurrency: 10 });
   for (const dispatch of completed.state.dispatches) assert.equal(sha256(await readFile(`${dispatch.outputRef}.dispatch-packet.json`, 'utf8')), dispatch.packetDigest);
   assert.equal(completed.rounds.every(round => round.physicalLimit === 1), true);
+  assert.equal(completed.rounds.every(round => round.elapsedMs >= 0 && ['spawnMs', 'waitMs', 'resultMs'].every(key => round.timing[key] >= 0)), true);
   assertClosedQualityLoop(completed.state);
+});
+
+test('out-of-scope check diagnostic is confirmed by review and repaired in the same Run', async t => {
+  const fixture = await setup({ externalDiagnosticOnce: true });
+  t.after(() => rm(fixture.root, { recursive: true, force: true }));
+  const preflight = await fixture.harness.createExecutionReadinessReport(fixture.plan);
+  const completed = await fixture.harness.executeVisibleLifecyclePlan(fixture.plan, { commandId: 'quality-external-diagnostic', preflightReport: preflight });
+  assert.equal(completed.status, 'closed');
+  assert.equal(fixture.host.stats.spawnCount, 5);
+  assert.equal(completed.state.findings.find(item => item.id === externalFinding.id)?.status, 'resolved');
+  assert.equal(completed.state.features.find(item => item.metadata?.repairFindingId === externalFinding.id)?.allowedPaths.includes('OTHER.md'), true);
+  assert.match(await readFile(resolve(fixture.workspace, 'OTHER.md'), 'utf8'), /verified repair/);
+});
+
+test('missing diagnostic disposition is rejected and reviewed again without stopping the Run', async t => {
+  const fixture = await setup({ externalDiagnosticOnce: true, missingDiagnosticDispositionOnce: true });
+  t.after(() => rm(fixture.root, { recursive: true, force: true }));
+  const preflight = await fixture.harness.createExecutionReadinessReport(fixture.plan);
+  const completed = await fixture.harness.executeVisibleLifecyclePlan(fixture.plan, { commandId: 'quality-diagnostic-retry', preflightReport: preflight });
+  assert.equal(completed.status, 'closed');
+  assert.equal(fixture.host.stats.spawnCount, 6);
+  assert.equal(completed.state.submissions.some(item => item.result.failureClass === 'runtime-contract' && item.result.blocker.code === 'QUALITY_DIAGNOSTIC_DISPOSITION_REQUIRED'), true);
+  assert.equal(completed.state.findings.find(item => item.id === externalFinding.id)?.status, 'resolved');
+});
+
+test('overlapping findings share one repair dispatch with evidence per Finding', async t => {
+  const fixture = await setup({ overlappingFindings: true });
+  t.after(() => rm(fixture.root, { recursive: true, force: true }));
+  const preflight = await fixture.harness.createExecutionReadinessReport(fixture.plan);
+  const completed = await fixture.harness.executeVisibleLifecyclePlan(fixture.plan, { commandId: 'quality-grouped-repair', preflightReport: preflight });
+  assert.equal(completed.status, 'closed');
+  assert.equal(fixture.host.stats.spawnCount, 3);
+  assert.deepEqual(completed.state.features.filter(feature => feature.metadata.stage === 'quality-repair').map(feature => feature.metadata.repairFindingIds), [[finding.id, overlappingFinding.id]]);
+  assert.equal(completed.state.findings.every(item => item.status === 'resolved'), true);
+});
+
+test('failed final Gate creates bounded diagnostic review and repair in the same Run', async t => {
+  const fixture = await setup({ gateFailureUntilRepair: true });
+  t.after(() => rm(fixture.root, { recursive: true, force: true }));
+  const onGateProgress = () => {};
+  const preflight = await fixture.harness.createExecutionReadinessReport(fixture.plan, { onGateProgress });
+  const completed = await fixture.harness.executeVisibleLifecyclePlan(fixture.plan, { commandId: 'quality-gate-diagnostic', preflightReport: preflight, onGateProgress });
+  assert.equal(completed.status, 'closed');
+  assert.equal(fixture.host.stats.spawnCount, 6);
+  assert.equal(completed.state.features.some(feature => feature.id.startsWith('quality-gate-diagnostic-')), true);
+  assert.equal(completed.state.findings.find(item => item.id === externalFinding.id)?.status, 'resolved');
+  assert.equal(completed.state.gates.find(gate => gate.id === 'fixture-gate')?.status, 'passed');
 });
 
 test('visible lifecycle refreshes expired readiness for the same Plan before opening its Run', async t => {
@@ -331,6 +420,21 @@ test('rejected native repair result records observed edits and closes its Lease'
   assert.deepEqual(stopped.state.submissions.at(-1).result.changedFiles, ['README.md']);
   assert.equal(stopped.state.leases.filter(lease => lease.status === 'active').length, 0);
   assert.equal(fixture.host.stats.spawnCount, 2);
+});
+
+test('invalid completed repair checkpoint is preserved and retried in the same visible lifecycle', async t => {
+  const fixture = await setup({ invalidRepairCheckpointOnce: true });
+  t.after(() => rm(fixture.root, { recursive: true, force: true }));
+  const preflight = await fixture.harness.createExecutionReadinessReport(fixture.plan);
+  const completed = await fixture.harness.executeVisibleLifecyclePlan(fixture.plan, { commandId: 'quality-checkpoint-retry', preflightReport: preflight, maxConcurrency: 1 });
+  assert.equal(completed.status, 'closed');
+  assert.equal(fixture.host.stats.spawnCount, 4);
+  const rejected = completed.state.submissions.find(item => item.result.blocker?.code === 'REPAIR_CHECKPOINT_EVIDENCE_REQUIRED');
+  assert(rejected);
+  assert.deepEqual(rejected.changedFiles, ['README.md']);
+  assert.equal(rejected.result.status, 'failed');
+  assert.equal(completed.state.features.find(item => item.metadata.stage === 'quality-repair').state, 'completed');
+  assert.equal(completed.state.findings[0].status, 'resolved');
 });
 
 test('post-bind confirmation failure preserves the active Lease for reattachment without interrupting its Agent', async t => {

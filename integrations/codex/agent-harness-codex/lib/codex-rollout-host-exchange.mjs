@@ -92,14 +92,14 @@ const parseNativeLine = (line, request, calls) => {
   return { result, callId: item.call_id, outputId: item.id, turnId: call.turnId, ordinal: record.ordinal, argumentAttestation: call.argumentAttestation, executedToolMetadata: executed === undefined ? 'absent' : 'present' };
 };
 
-export const createCodexRolloutHostExchange = ({ controlRoot, dataRoot, codexSessionId, codexHome, stateDbPath, expectedCwd = process.cwd(), output = process.stdout, onRejected = null, responseTimeoutMs = 120000, pollMs = 50, requestReminderMs = 5000, locate = locateCodexRollout } = {}) => {
+export const createCodexRolloutHostExchange = ({ controlRoot, dataRoot, codexSessionId, codexHome, stateDbPath, expectedCwd = process.cwd(), output = process.stdout, onRejected = null, responseTimeoutMs = 120000, pollMs = 250, requestReminderMs = 30000, locate = locateCodexRollout } = {}) => {
   if (!safeId(codexSessionId) || !Number.isSafeInteger(responseTimeoutMs) || responseTimeoutMs < 1 || !Number.isSafeInteger(pollMs) || pollMs < 1 || !Number.isSafeInteger(requestReminderMs) || requestReminderMs < 1) fail('CODEX_ROLLOUT_EXCHANGE_CONFIG_INVALID', 'Rollout Host exchange requires a session and positive timeouts.');
   const receiptRoot = assertHarnessWritePath(resolve(dataRoot, 'host-bridge', 'rollout-receipts'), 'Codex rollout Host receipts', controlRoot);
   const consumedCalls = new Set();
   let closed = false;
-  const reject = async (code, message, request) => {
+  const reject = async (code, message, request, progress = {}) => {
     closed = true;
-    const details = { requestId: request.requestId, requestDigest: request.requestDigest, operation: request.operation, tool: request.tool, rawFrameDigest: sha256(''), rawFrameBytes: 0, observedFields: [], mismatchedFields: [] };
+    const details = { requestId: request.requestId, requestDigest: request.requestDigest, operation: request.operation, tool: request.tool, rawFrameDigest: sha256(''), rawFrameBytes: 0, observedFields: [], mismatchedFields: [], ...progress };
     if (typeof onRejected === 'function') {
       try { details.diagnostic = await onRejected({ code, message, request, rawLine: '', ...details }); }
       catch (error) { details.diagnosticError = { code: error.code ?? 'CODEX_HOST_DIAGNOSTIC_WRITE_FAILED', message: error.message }; }
@@ -115,6 +115,8 @@ export const createCodexRolloutHostExchange = ({ controlRoot, dataRoot, codexSes
       const handle = await open(host.path, 'r');
       try {
         let cursor = (await handle.stat()).size;
+        const startCursor = cursor;
+        let reminders = 0;
         if (cursor > 0) {
           const last = Buffer.alloc(1);
           await handle.read(last, 0, 1, cursor - 1);
@@ -153,10 +155,10 @@ export const createCodexRolloutHostExchange = ({ controlRoot, dataRoot, codexSes
               return structuredClone(createHostResponseEnvelope(request, native.result).result);
             }
           }
-          if (Date.now() >= nextReminder) { output.write(`${JSON.stringify(request)}\n`); nextReminder = Date.now() + requestReminderMs; }
+          if (Date.now() >= nextReminder) { output.write(`${JSON.stringify(request)}\n`); reminders += 1; nextReminder = Date.now() + requestReminderMs; }
           await delay(pollMs);
         }
-        await reject('CODEX_ROLLOUT_RESPONSE_TIMEOUT', 'No bound native Codex result appeared in the current session rollout before timeout.', request);
+        await reject('CODEX_ROLLOUT_RESPONSE_TIMEOUT', 'No bound native Codex result appeared in the current session rollout before timeout.', request, { observedRolloutBytes: cursor - startCursor, matchingNativeCalls: calls.size, reminders });
       } finally { await handle.close(); }
     },
     close() { closed = true; },

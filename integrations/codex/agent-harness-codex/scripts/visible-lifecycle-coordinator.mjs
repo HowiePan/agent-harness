@@ -56,7 +56,7 @@ const main = async () => {
       controlRoot: intent.harness.controlRoot,
       dataRoot: intent.harness.dataRoot,
       ...(developmentMode ? { sessionId: intent.codexSessionId } : {}),
-      ...(developmentMode ? { waitTimeoutMs: 10000 } : {}),
+      ...(developmentMode ? { waitTimeoutMs: 30000 } : {}),
       memoryRoot: intent.harness.memoryRoot ?? null,
     });
     const harness = await createHarness({

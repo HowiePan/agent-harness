@@ -5,7 +5,7 @@ import { assertJsonSchema, assertSchemaDefinition } from '../../common/json-sche
 import { assertKnownFindingDispositions, assertKnownFindingInventory } from './known-finding-inventory.mjs';
 
 const businessResultSchema = JSON.parse(readFileSync(new URL('../../../schemas/result.schema.json', import.meta.url), 'utf8'));
-export const VISIBLE_AGENT_RESULT_CONTRACT_VERSION = '1.1';
+export const VISIBLE_AGENT_RESULT_CONTRACT_VERSION = '1.2';
 const visibleResultSchema = JSON.parse(readFileSync(new URL('../../../schemas/visible-agent-result.schema.json', import.meta.url), 'utf8'));
 
 export const createDispatchResultContract = (feature, { conversationVisible = false } = {}) => {
@@ -60,6 +60,13 @@ export const validateBusinessResult = (input, { conversationVisible = false, rep
   if (repair && result.status === 'completed') {
     assert(Array.isArray(result.checkpoints) && result.checkpoints.length > 0, 'REPAIR_CHECKPOINT_REQUIRED', 'A completed repair requires at least one verification checkpoint.');
     assert(result.checkpoints.every(checkpoint => ['passed', 'completed'].includes(checkpoint.status) && Array.isArray(checkpoint.evidence) && checkpoint.evidence.length > 0), 'REPAIR_CHECKPOINT_EVIDENCE_REQUIRED', 'Every completed repair checkpoint must pass and cite non-empty evidence.');
+    const groupedFindings = feature?.metadata?.repairFindingIds ?? [];
+    if (groupedFindings.length > 1) assert(groupedFindings.every(id => result.checkpoints.some(checkpoint => checkpoint.id === `verify:${id}`)), 'REPAIR_FINDING_CHECKPOINT_REQUIRED', 'A grouped repair requires a passing focused checkpoint for every Finding.');
+  }
+  if (feature?.metadata?.qualityReview === true && result.status === 'completed' && feature.metadata.diagnostics?.length) {
+    const expected = feature.metadata.diagnostics.map(item => item.id);
+    const dispositions = result.diagnosticDispositions ?? [];
+    assert(new Set(expected).size === expected.length && dispositions.length === expected.length && new Set(dispositions.map(item => item.id)).size === expected.length && dispositions.every(item => expected.includes(item.id) && (item.disposition !== 'finding' || (item.findingId && (result.findings ?? []).some(finding => finding.id === item.findingId)))), 'QUALITY_DIAGNOSTIC_DISPOSITION_REQUIRED', 'A diagnostic review must substantiate every carried check failure as a Finding or a fresh not-reproduced result.');
   }
   if (feature?.metadata?.qualityReview === true && feature.metadata.knownFindingInventory) assertKnownFindingDispositions(result, feature.metadata.knownFindingInventory);
   return result;

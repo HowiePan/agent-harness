@@ -50,10 +50,13 @@ export const compileAgentPrompt = (packetInput, manifest = REFERENCE_AGENT_PROMP
   const typedOutputDialect = packet.execution?.runtime?.resultDialect === 'typed-output-envelope-v1'
     ? '\n- This Runtime uses typed-output-envelope-v1: do not return the business outputs object directly. Return the provider-required typedOutputs array instead. Each entry must contain portId, schemaId, valueJson, and evidenceRefs; valueJson must be a JSON string encoding the exact output value object. Return typedOutputs: [] when successful typed outputs are not required. Harness decodes this envelope back into outputs before business validation.'
     : '';
-  const modernResultInstructions = `Return exactly one JSON object as the final answer, with no prose or Markdown. For this Dispatch, the result is validated against the following complete ${visible ? 'conversation-visible' : 'business'} transport shape:\n\n${json(visible ? visibleResultSchema : businessResultSchema)}\n\n- Always return status, a non-empty summary, and the exact changedFiles array.\n- If status is completed, return every declared output port in outputs.<portId> with its schemaId, JSON value, and evidenceRefs. Required ports: ${json(packet.execution?.result?.outputPorts ?? {})}. Value Schemas: ${json(packet.execution?.result?.outputValueSchemas ?? {})}.\n- If status is blocked or failed, provide a stable failureClass and blocker; successful output ports are not required.\n- A read-only Feature must report changedFiles: []. Quality findings require non-empty evidence and affectedPaths.\n- A completed repair must report passing verification checkpoints with non-empty evidence; report only checks actually observed.\n- Optional descriptive arrays need only be present when they contain observed information. Do not invent empty fields or evidence.${typedOutputDialect}\n\nThe selected Runtime may impose an additional provider output dialect. Follow its supplied schema exactly when present; Harness still validates the business result and workspace changes.\n`;
+  const modernResultInstructions = `Return exactly one JSON object as the final answer, with no prose or Markdown. For this Dispatch, the result is validated against the following complete ${visible ? 'conversation-visible' : 'business'} transport shape:\n\n${json(visible ? visibleResultSchema : businessResultSchema)}\n\n- Always return status, a non-empty summary, and the exact changedFiles array.\n- If status is completed, return every declared output port in outputs.<portId> with its schemaId, JSON value, and evidenceRefs. Required ports: ${json(packet.execution?.result?.outputPorts ?? {})}. Value Schemas: ${json(packet.execution?.result?.outputValueSchemas ?? {})}.\n- If status is blocked or failed, provide a stable failureClass and blocker; successful output ports are not required.\n- A read-only Feature must report changedFiles: []. Quality findings require non-empty evidence and affectedPaths.\n- A completed repair must report passing focused verification checkpoints with non-empty evidence. Report unrelated full-scope failures as diagnostics with exact observed evidence, never as passing checkpoints. The coordinator performs full-scope re-review and final Gates after repairs; report only checks actually observed.\n- Optional descriptive arrays need only be present when they contain observed information. Do not invent empty fields or evidence.${typedOutputDialect}\n\nThe selected Runtime may impose an additional provider output dialect. Follow its supplied schema exactly when present; Harness still validates the business result and workspace changes.\n`;
   const legacyResultInstructions = `Return exactly one structured JSON object as the final answer, with no prose before or after it. It must conform to the Runtime result schema supplied by the host and must include:\n\n- status: completed, blocked, or failed;\n- summary: concise factual outcome;\n- changedFiles: exact workspace-relative forward-slash paths, with no unchanged or out-of-scope files;\n- checks/evidence fields required by the supplied schema, populated only from observed results;\n- stable failureClass and blocker details when status is blocked or failed;\n- findings or followUpFeatures only when justified by concrete evidence and fully scoped.\n`;
   const inventoryInstructions = feature.metadata?.knownFindingInventory
     ? `For this completed quality review, return knownFindingDispositions for every canonical ID in the pinned inventory: ${json(packet.execution?.result?.knownFindingInventory)}. Use canonical IDs only. Mark open only with a matching evidence-backed finding; mark not-reproduced only after a fresh observed check with non-empty evidence. Never infer resolution from historical status.\n`
+    : '';
+  const diagnosticInstructions = feature.metadata?.diagnostics?.length
+    ? `Inspect each carried diagnostic on the current source and return diagnosticDispositions for every ID: ${json(feature.metadata.diagnostics)}. A finding disposition must name an evidence-backed finding in findings; not-reproduced requires fresh check evidence.\n`
     : '';
   const compactText = contractVersion === '1.4' && visible ? `# Agent Harness Dispatch Prompt
 
@@ -69,19 +72,21 @@ Complete only Feature ${JSON.stringify(feature.id)} in the workspace bound by th
 
 ## Required execution discipline
 
-Write only allowedPaths in the packet, never forbiddenPaths. Inspect current state before changes; make only necessary edits; run proportionate checks; verify changedFiles against both path lists; report only observed outcomes. Quality review must be read-only and report every current P0-P3 defect with evidence and precise affected paths. A completed repair requires passing verification checkpoints and a fresh full re-review. Use external sources only through the pinned Source Manifest and sourceIds; verify memory against current source dependencies.
+Write only allowedPaths in the packet, never forbiddenPaths. Inspect current state before changes; make only necessary edits; run proportionate checks; verify changedFiles against both path lists; report only observed outcomes. Quality review must be read-only and report every current P0-P3 defect with evidence and precise affected paths. A completed repair requires passing focused verification checkpoints. Report unrelated full-scope failures as diagnostics with exact observed evidence; an independent re-review determines Findings and the coordinator runs final Gates after repairs. Use external sources only through the pinned Source Manifest and sourceIds; verify memory against current source dependencies.
 
 ## Node Task Contract
 
 ${compactJson(task)}
 
 Resolved inputs: ${compactJson(packet.workflowContext.taskInputs)}
+${feature.reopenReason ? `\nPrevious attempt rejection: ${feature.reopenReason}\n` : ''}
+${diagnosticInstructions}
 
 ## Result contract
 
 Return exactly one JSON object as the final answer, with no prose or Markdown. It must match the following complete ${visible ? 'conversation-visible' : 'business'} schema: ${compactJson(visible ? visibleResultSchema : businessResultSchema)}
 
-For completed results, include every declared output port in outputs.<portId> with schemaId, JSON value, and evidenceRefs. Required ports: ${compactJson(packet.execution.result.outputPorts ?? {})}. Value Schemas: ${compactJson(packet.execution.result.outputValueSchemas ?? {})}. The changedFiles array must be exact. A read-only Feature must return changedFiles: []. Findings require non-empty evidence and affectedPaths. Return knownFindingDispositions for every canonical ID in the pinned inventory; mark open only with a matching finding, or not-reproduced only after a fresh observed check. If blocked or failed, include a stable failureClass and blocker; successful output ports are not required. Do not invent evidence.${typedOutputDialect}
+For completed results, include every declared output port in outputs.<portId> with schemaId, JSON value, and evidenceRefs. Required ports: ${compactJson(packet.execution.result.outputPorts ?? {})}. Value Schemas: ${compactJson(packet.execution.result.outputValueSchemas ?? {})}. The changedFiles array must be exact. A read-only Feature must return changedFiles: []. Findings require non-empty evidence and affectedPaths. Return diagnosticDispositions for every carried diagnostic. Return knownFindingDispositions for every canonical ID in the pinned inventory; mark open only with a matching finding, or not-reproduced only after a fresh observed check. If blocked or failed, include a stable failureClass and blocker; successful output ports are not required. Do not invent evidence.${typedOutputDialect}
 
 ## Immutable Dispatch packet
 
@@ -149,6 +154,7 @@ ${json(task.evidenceRequirements)}
 Feature ID: ${JSON.stringify(feature.id ?? null)}
 Owner role: ${JSON.stringify(feature.ownerRole ?? null)}
 Kind: ${JSON.stringify(feature.kind ?? null)}
+${feature.reopenReason ? `Previous attempt rejection: ${feature.reopenReason}\n` : ''}
 Acceptance criteria:
 ${json(feature.acceptance ?? [])}
 
@@ -163,7 +169,7 @@ ${json(feature.steps ?? [])}
 
 ## Result contract
 
-${contractVersion === '1.0' ? legacyResultInstructions.trimEnd() : `${modernResultInstructions.trimEnd()}\n${inventoryInstructions}`.trimEnd()}
+${contractVersion === '1.0' ? legacyResultInstructions.trimEnd() : `${modernResultInstructions.trimEnd()}\n${inventoryInstructions}${diagnosticInstructions}`.trimEnd()}
 
 Completion is invalid unless all acceptance criteria were checked and the reported changedFiles are accurate.
 

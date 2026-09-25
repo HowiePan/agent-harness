@@ -1,7 +1,7 @@
 import { assert } from '../../../common/errors.mjs';
 import { defineNodeTaskContract, taskFeatureProjection } from '../../../common/task-contract.mjs';
 import { approvalSatisfied } from '../../../flow-kit/primitives.mjs';
-import { createQualityFollowUpFeatures, hasCurrentCleanQualityReview, validateQualityReviewPolicies } from '../../../flow-kit/profiles/quality-loop.mjs';
+import { createQualityFollowUpFeatures, createQualityGateDiagnosticReview, hasCurrentCleanQualityReview, validateQualityReviewPolicies } from '../../../flow-kit/profiles/quality-loop.mjs';
 
 export const DELIVERY_STAGES = Object.freeze([
   'requirement-intake', 'requirement-expansion', 'canonical-requirement', 'version-planning', 'implementation',
@@ -93,6 +93,10 @@ export const createDeliveryLifecycleProfile = (id = 'delivery-lifecycle') => Obj
       };
     });
     return [...qualityRepairs, ...planned];
+  },
+
+  createGateDiagnosticReview(input) {
+    return createQualityGateDiagnosticReview(input);
   },
 
   canClose(state) {

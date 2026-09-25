@@ -39,7 +39,7 @@ test('visible host bindings reject ambiguous, untrusted, or unknown Runtime bind
 });
 
 test('portable visible result accepts provider-neutral fields while repair still requires verification', () => {
-  assert.equal(VISIBLE_AGENT_RESULT_CONTRACT_VERSION, '1.1');
+  assert.equal(VISIBLE_AGENT_RESULT_CONTRACT_VERSION, '1.2');
   const result = { status: 'completed', summary: 'Work completed.', changedFiles: [] };
   assert.deepEqual(validateBusinessResult(result, { conversationVisible: true }), result);
   assert.throws(() => validateBusinessResult(result, { conversationVisible: true, repair: true }), error => error.code === 'REPAIR_CHECKPOINT_REQUIRED');

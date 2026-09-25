@@ -309,21 +309,23 @@ export class HarnessKernel {
         feature.state = attempt.exhausted ? 'failed-budget' : 'blocked';
         feature.blocker = structuredClone(result.blocker ?? { kind: result.failureClass ?? 'execution', summary: result.summary ?? 'Feature blocked.' });
       }
-      const repairFindingId = feature.metadata?.repairFindingId;
-      if (result.status === 'completed' && repairFindingId) {
-        const finding = state.findings.find(item => item.id === repairFindingId);
-        assert(finding?.status === 'open', 'REPAIR_FINDING_NOT_OPEN', `Repair Feature is not bound to an open Finding: ${repairFindingId}`);
+      const repairFindingIds = feature.metadata?.repairFindingIds ?? (feature.metadata?.repairFindingId ? [feature.metadata.repairFindingId] : []);
+      if (result.status === 'completed' && repairFindingIds.length) {
         assert(submission.evidenceRefs.length > 0, 'FINDING_RESOLUTION_EVIDENCE_REQUIRED', 'A completed repair Feature requires resolution Evidence.');
         const hasVerificationReceipt = evidenceRecords.some(record => {
           try { return JSON.parse(record.bytes.toString('utf8'))?.runtimeEvidence?.verificationReceipts?.length > 0; }
           catch { return false; }
         });
         assert(hasVerificationReceipt, 'REPAIR_VERIFICATION_RECEIPT_REQUIRED', 'A completed repair requires host-preserved verification Receipts.');
-        finding.status = 'resolved';
-        finding.resolution = { status: 'fixed', summary: result.summary };
-        finding.resolutionEvidenceRefs = [...submission.evidenceRefs];
-        finding.resolvedAt = this.now();
-        event(state, 'finding.resolved', { id: finding.id, repairFeatureId: feature.id, evidenceRefs: submission.evidenceRefs }, this.now);
+        for (const repairFindingId of repairFindingIds) {
+          const finding = state.findings.find(item => item.id === repairFindingId);
+          assert(finding?.status === 'open', 'REPAIR_FINDING_NOT_OPEN', `Repair Feature is not bound to an open Finding: ${repairFindingId}`);
+          finding.status = 'resolved';
+          finding.resolution = { status: 'fixed', summary: result.summary };
+          finding.resolutionEvidenceRefs = [...submission.evidenceRefs];
+          finding.resolvedAt = this.now();
+          event(state, 'finding.resolved', { id: finding.id, repairFeatureId: feature.id, evidenceRefs: submission.evidenceRefs }, this.now);
+        }
       }
       const followUps = typeof profile.createFollowUpFeatures === 'function'
         ? profile.createFollowUpFeatures({ state: structuredClone(state), feature: structuredClone(feature), findings: structuredClone(findings), result: structuredClone(result) })
@@ -536,6 +538,24 @@ export class HarnessKernel {
       event(state, 'feature.reopened', { featureId: feature.id, reason: input.reason }, this.now);
       state.status = deriveStatus(state, this.profile(state.profile.id));
       return { featureId: feature.id, state: feature.state };
+    });
+  }
+
+  async scheduleGateDiagnosticReview(projectId, runId, input, command) {
+    return this.authorityStore.transact(projectId, runId, { expectedRevision: command.expectedRevision, commandId: command.commandId, payload: input }, state => {
+      const profile = this.profile(state.profile.id);
+      assert(typeof profile.createGateDiagnosticReview === 'function', 'GATE_DIAGNOSTIC_REVIEW_UNSUPPORTED', 'The Run profile does not support Gate diagnostic review.');
+      assert(state.features.every(feature => feature.state === 'completed') && !state.leases.some(activeLease), 'GATE_DIAGNOSTIC_REVIEW_NOT_READY', 'Gate diagnosis requires completed Features and no active Lease.');
+      const failed = input.gateResults.filter(gate => gate.status !== 'passed');
+      assert(failed.length > 0 && failed.every(gate => state.gates.some(record => record.id === gate.id && record.status === gate.status && record.sourceDigest === state.sourceDigest && gate.evidenceRefs?.every(ref => record.evidenceRefs.includes(ref)))), 'GATE_DIAGNOSTIC_EVIDENCE_STALE', 'Failed Gate evidence must bind the current source.');
+      const candidate = profile.createGateDiagnosticReview({ state: structuredClone(state), gateResults: structuredClone(input.gateResults) });
+      if (!candidate) return { scheduled: false, reason: 'gate-diagnostic-already-reviewed-or-unavailable' };
+      const normalized = validateWorkGraph([...state.features, candidate]);
+      const review = normalized.at(-1);
+      state.features.push(review);
+      event(state, 'feature.gate-diagnostic-created', { featureId: review.id, failedGateIds: failed.map(gate => gate.id) }, this.now);
+      state.status = deriveStatus(state, profile);
+      return { scheduled: true, featureId: review.id };
     });
   }
 

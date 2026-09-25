@@ -12,7 +12,7 @@ const hookToolName = (name, requested) => name === requested || name === request
 const safeId = value => typeof value === 'string' && /^[a-zA-Z0-9_-]{1,128}$/.test(value);
 const toolUseId = value => typeof value === 'string' && value.length > 0 && value.length <= 256;
 
-export const createHookHostExchange = ({ controlRoot, dataRoot, codexSessionId, output = process.stdout, onRejected = null, responseTimeoutMs = 120000, pollMs = 50, requestReminderMs = 5000, now = () => new Date().toISOString() }) => {
+export const createHookHostExchange = ({ controlRoot, dataRoot, codexSessionId, output = process.stdout, onRejected = null, responseTimeoutMs = 120000, pollMs = 250, requestReminderMs = 30000, now = () => new Date().toISOString() }) => {
   if (!Number.isSafeInteger(responseTimeoutMs) || responseTimeoutMs < 1 || !Number.isSafeInteger(pollMs) || pollMs < 1 || !Number.isSafeInteger(requestReminderMs) || requestReminderMs < 1) fail('CODEX_HOST_TIMEOUT_INVALID', 'Hook Host exchange requires positive timeout, poll, and request-reminder intervals.');
   if (typeof codexSessionId !== 'string' || !codexSessionId.length) fail('CODEX_HOST_SESSION_BINDING_REQUIRED', 'Hook Host exchange requires the parent Codex session ID.');
   const root = assertHarnessWritePath(resolve(dataRoot, 'host-bridge'), 'Codex Hook Host bridge', controlRoot);
