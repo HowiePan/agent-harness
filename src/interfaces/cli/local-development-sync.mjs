@@ -4,7 +4,6 @@ import { newId } from '../../common/canonical.mjs';
 import { applyDevelopmentPatchPlan, createDevelopmentPatchPlan, verifyDevelopmentPatchPlan } from '../../application/development-patch.mjs';
 import { createLocalDevelopmentInvocation } from '../../application/local-development-invocation.mjs';
 import { applyProjectInitializationPlan, createProjectInitializationPlan, loadProjectHarnessConfig } from '../../application/project-initialization.mjs';
-import { configureBindings } from '../../../integrations/codex/agent-harness-codex/scripts/configure-bindings.mjs';
 
 export const refreshLocalCodexBindings = async (manifestFile, manifest, initialization) => {
   if (!initialization) return null;
@@ -23,6 +22,7 @@ export const refreshLocalCodexBindings = async (manifestFile, manifest, initiali
   const workspaceSpecs = Object.entries(existing.workspaces ?? {}).map(([name, workspace]) => `${name}|${workspace.workspaceId}|${workspace.executionTargetId}|${workspace.workspaceRoot}`);
   const workflowSpecs = [...Object.entries(existing.projects), ...Object.entries(existing.workspaces ?? {})].flatMap(([name, binding]) =>
     (name === alias ? initialization.receipt.hostBinding.workflows : binding.workflows ?? []).map(workflow => `${name}|${workflow.id}|${workflow.version}|${workflow.artifactDigest}|${workflow.profileId}|${workflow.extensionId}`));
+  const { configureBindings } = await import('../../../integrations/codex/agent-harness-codex/scripts/configure-bindings.mjs');
   const refreshed = await configureBindings({ pluginRoot, controlRoot: manifest.controlRoot, entrypoint: existing.harness.entrypoint, dataRoot: manifest.dataRoot, memoryRoot: existing.harness.memoryRoot, projectSpecs, workspaceSpecs, workflowSpecs, developmentManifest: manifestFile });
   return refreshed.bindingFile;
 };

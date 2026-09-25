@@ -62,13 +62,13 @@
     },
     {
       "path": "docs/guides/host-plugins.md",
-      "sha256": "43ddd565f79fd3d6efa1baecbb1e87fbc52e098490afc965382adcf89b1ae741",
-      "size": 1345
+      "sha256": "bfe4988c220f1e19273c0f09ef5fef5d0b8ecdf2426f87518911e4bafc002277",
+      "size": 1426
     },
     {
       "path": "docs/guides/local-debugging.md",
-      "sha256": "479a20f39c809afe01b8711dd2a2ae0792a6570be2f3032cad08cb0f3dc8fe25",
-      "size": 7445
+      "sha256": "e65766c6565ba7464f715a09db8b9df106758daf9ecbb100fa11c4865f3b0d93",
+      "size": 13680
     },
     {
       "path": "docs/guides/project-configuration.md",
@@ -312,13 +312,13 @@
     },
     {
       "path": "docs/reference/commands.md",
-      "sha256": "d012a184c3c9c4f42db6633ed02a66915b97fbd283ce36cadf5c0faa1218b649",
-      "size": 3659
+      "sha256": "061599146553e1b9e5a7173f87f0eb5a8add62ac3020f8c817dc4b6a58bd57f6",
+      "size": 3559
     },
     {
       "path": "docs/reference/configuration-api.md",
-      "sha256": "39e64284d862cee20cfe788fc5320e8744e2258349579231f4d7f2eb896a1555",
-      "size": 29172
+      "sha256": "7d110948e52d1f5aa1982b0e727bfbce037fa6a1de496a9581d79baeabb68ae0",
+      "size": 29534
     },
     {
       "path": "docs/reference/legacy-compatibility.md",
@@ -722,8 +722,8 @@
     },
     {
       "path": "schemas/result.schema.json",
-      "sha256": "b4e188db50ab7a5e184c13b1a23d682935b34baee3953517205e72ca01b4e3fa",
-      "size": 4589
+      "sha256": "d27503183c0fb810142071e10ce84ef26136ecfae253c7ff7cf9816e9b08a945",
+      "size": 5450
     },
     {
       "path": "schemas/run-lineage-resolution.schema.json",
@@ -747,8 +747,8 @@
     },
     {
       "path": "schemas/visible-agent-result.schema.json",
-      "sha256": "15a9fdf5a6e206d26e4b61058fecdcb48011d6af8d371326b2e4f0b74dfaa2ef",
-      "size": 4611
+      "sha256": "9778cbb4d7cb422bd7d3f52f447e52bfcc77dd2ed22b6b92a35d6ec6a805205b",
+      "size": 5472
     },
     {
       "path": "schemas/workflow-definition.schema.json",
@@ -792,8 +792,8 @@
     },
     {
       "path": "src/application/development-patch.mjs",
-      "sha256": "b7aff037c8ef09e712d2d5e4a1e2167c30cfa6a0e98fca96b82471aaddc57db2",
-      "size": 12601
+      "sha256": "a6d3de40d9640ec55880ae1f91d5a065a52271124592bd4e8f027c568409602d",
+      "size": 13997
     },
     {
       "path": "src/application/development-source.mjs",
@@ -827,8 +827,8 @@
     },
     {
       "path": "src/application/lifecycle-execution-service.mjs",
-      "sha256": "7c1793bdbe4402a8c533e9b477e7d63671d6582e744245a259dc8ad2b9a892d7",
-      "size": 14820
+      "sha256": "c83b74172e24bb2929cc015353089e929bb74566bea9a46505987057283f9567",
+      "size": 20127
     },
     {
       "path": "src/application/lineage.mjs",
@@ -836,9 +836,19 @@
       "size": 11169
     },
     {
+      "path": "src/application/local-development-invocation.mjs",
+      "sha256": "d3742ee6d5d1805bce708f90c5f87d4ec48fe52a1c53789bd020c52f4cdaedaf",
+      "size": 2705
+    },
+    {
+      "path": "src/application/local-incident.mjs",
+      "sha256": "790474942a25a816fe616b1bdb0319f6ac9a9f9b0ac20af25e1f7e396e6f38b5",
+      "size": 4327
+    },
+    {
       "path": "src/application/project-initialization.mjs",
-      "sha256": "e410aa24da09e45eb7c9ab943b318c1c3bcd539ed00e65da34de2401fa622d1c",
-      "size": 7563
+      "sha256": "20d900922cdd46b91a3e766e603c15dafe772703d7b2ebc7dc0c85e914f8bfb7",
+      "size": 8545
     },
     {
       "path": "src/application/readiness.mjs",
@@ -912,8 +922,8 @@
     },
     {
       "path": "src/flow-kit/profiles/quality-loop.mjs",
-      "sha256": "01778963e746483f7789e57dd40f509589e0fc3ecfce7b666855de71894ed0e7",
-      "size": 8830
+      "sha256": "5b228c65806a9555cde3cb99ff54e39cd1a7125a5366bf666c06d629e146bfe5",
+      "size": 13515
     },
     {
       "path": "src/flow-kit/reference-feature.mjs",
@@ -1102,8 +1112,8 @@
     },
     {
       "path": "src/flows/delivery-lifecycle/policy/delivery-lifecycle.mjs",
-      "sha256": "7d02cbe60a504d3bcb83c93fb94326482b063f407781c2d6b3d84ef5fc167944",
-      "size": 7018
+      "sha256": "8e42f24cdecc83d2fa24fdb4439970d15818ff5dd853b3b54ffcef8da4eb17d0",
+      "size": 7150
     },
     {
       "path": "src/flows/delivery-lifecycle/policy/index.mjs",
@@ -1262,8 +1272,13 @@
     },
     {
       "path": "src/interfaces/cli/index.mjs",
-      "sha256": "59d779271f802d8fa2899d3922965783d3c7c30c99755a4d3f5327c524226376",
-      "size": 48449
+      "sha256": "7371f36cc139e9a96931327d0d5b510147eee0e0dd18d82aeb25736ae637a660",
+      "size": 49689
+    },
+    {
+      "path": "src/interfaces/cli/local-development-sync.mjs",
+      "sha256": "204ea67fbfcb6a2a72160a1bf8ab1dda82e5609479529ad61ad55935d28b4a23",
+      "size": 5543
     },
     {
       "path": "src/kernel/atomic-io.mjs",
@@ -1292,8 +1307,8 @@
     },
     {
       "path": "src/kernel/kernel.mjs",
-      "sha256": "342fc0b66547208736d53c06cca901b1fbbaa303dae689b5251b76e1f4ca7830",
-      "size": 54056
+      "sha256": "e70ae8ec41cdd68d899b6b766b1ceeb19ec56a0c5594d15bfbc7370d455a3c3b",
+      "size": 55991
     },
     {
       "path": "src/kernel/quality.mjs",
@@ -1332,8 +1347,8 @@
     },
     {
       "path": "src/platform/execution/result-contract.mjs",
-      "sha256": "b69e0faf30b4aa2de12a4bd05685a0b422d4050e415a340605743bed9468d2bb",
-      "size": 6066
+      "sha256": "5332d81885f63dba03ef2d392acc81b9c62a191c7121e47312f62c7542c2655d",
+      "size": 7177
     },
     {
       "path": "src/platform/extensions/command-contract.mjs",
@@ -1407,8 +1422,8 @@
     },
     {
       "path": "src/platform/plugins/codec/agent-prompt-codec.mjs",
-      "sha256": "f9ff44e60686cf5b11844c18bc2c163d1ee45b9d88926dddeb9bce4158f4a599",
-      "size": 12126
+      "sha256": "6e6b3ce7e986223afb65542f49ff6e64be01ac9cf746fc253e7414af5ac44053",
+      "size": 16430
     },
     {
       "path": "src/platform/plugins/codec/json-codec.mjs",
@@ -1646,7 +1661,7 @@
       "size": 19877
     }
   ],
-  "packageDigest": "f4c3c8b962ed8ea70668246228a4c7e9f3d920c4ae15e02eb30347f9d7debf83",
+  "packageDigest": "e4c138e9dc429001e73da3d60bc9a3179b4fb466fe7ad65e7934c30a1553ba0b",
   "metadataFiles": [
     "release-manifest.json",
     "sbom.spdx.json"
