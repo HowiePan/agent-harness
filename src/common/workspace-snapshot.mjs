@@ -7,12 +7,14 @@ const defaultExcluded = new Set(['.git', 'node_modules', 'target', 'dist', 'cove
 
 export const captureWorkspace = async (rootInput, { excluded = [] } = {}) => {
   const root = resolve(rootInput);
-  const excludedNames = new Set([...defaultExcluded, ...excluded]);
+  const excludedNames = new Set([...defaultExcluded, ...excluded.filter(path => !slash(path).includes('/'))]);
+  const excludedPaths = [...new Set(excluded.map(path => slash(path).replace(/^\.\//, '').replace(/\/$/, '')).filter(path => path.includes('/')))];
   const files = [];
   const visit = async directory => {
     for (const entry of await readdir(directory, { withFileTypes: true })) {
-      if (excludedNames.has(entry.name) || entry.name.endsWith('.tmp') || entry.name.endsWith('.log')) continue;
       const absolute = resolve(directory, entry.name);
+      const path = slash(relative(root, absolute));
+      if (excludedNames.has(entry.name) || excludedPaths.some(excludedPath => path === excludedPath || path.startsWith(`${excludedPath}/`)) || entry.name.endsWith('.tmp') || entry.name.endsWith('.log')) continue;
       const info = await lstat(absolute);
       if (info.isSymbolicLink()) continue;
       if (info.isDirectory()) await visit(absolute);

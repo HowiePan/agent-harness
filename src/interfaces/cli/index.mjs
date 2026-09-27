@@ -106,6 +106,8 @@ agent-harness memory export|import --input <json|-> [--command-id <id>] [--expec
 agent-harness features compile --extension <module> --input <json>
 agent-harness run start --project <id> --run <id> --profile <id> --features <json> [--config <json>] [--execution-workspace <absolute-path>]
 agent-harness run status --project <id> --run <id>
+agent-harness version-release status --project <id> --target <version>
+agent-harness version-release promote --project <id> --target <version> --candidate-digest <sha256> --expected-revision <n> --command-id <id> --approval <json>
 agent-harness run schedule --project <id> --run <id> [--max <n|auto>] [--runtime <plugin-id>]
 agent-harness run dispatch --project <id> --run <id> --dispatch <id>
 agent-harness run gates --project <id> --run <id> --scope <feature|stable|final> [--fresh] [--ids <id,id>] [--progress]
@@ -477,9 +479,16 @@ if (command === 'features' && subject === 'compile') {
   process.exit(0);
 }
 
-  const readOnlyHarness = command === 'recovery' && ['assess', 'plan'].includes(subject);
+  const readOnlyHarness = command === 'recovery' && ['assess', 'plan'].includes(subject) || command === 'version-release' && subject === 'status';
   const harness = await createHarness({ controlRoot, dataRoot, workspaceId: scopedWorkspaceId, memoryRoot: take('--memory-root'), extensions, releaseIdentity, strictProjectIdentity: !development, initializeStorage: !readOnlyHarness });
-  if (command === 'project' && subject === 'register') {
+  if (command === 'version-release' && subject === 'status') {
+    const output = await harness.readVersionRelease(take('--project'), take('--target'));
+    console.log(JSON.stringify({ ok: true, ...output }, null, 2));
+  } else if (command === 'version-release' && subject === 'promote') {
+    const output = await harness.promoteVersionRelease({ projectId: take('--project'), target: take('--target'), candidateDigest: take('--candidate-digest'),
+      expectedRevision: Number(take('--expected-revision')), commandId: take('--command-id'), approval: await jsonInput('--approval') });
+    console.log(JSON.stringify({ ok: true, ...output }, null, 2));
+  } else if (command === 'project' && subject === 'register') {
     const runtimePluginId = take('--runtime');
     const rawInput = take('--descriptor') ? await jsonFile(take('--descriptor')) : { id: take('--id'), workspace: { root: resolve(take('--workspace')) }, profiles: String(take('--profiles') ?? '').split(',').filter(Boolean), policy: { agentExecutionMode: take('--agent-execution-mode'), defaultRuntimePlugin: runtimePluginId, runtimePlugins: runtimePluginId ? [runtimePluginId] : [], promptCodecPlugin: take('--prompt-codec') } };
     const input = {

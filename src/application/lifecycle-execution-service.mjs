@@ -8,6 +8,7 @@ import { assertInside } from '../common/paths.mjs';
 import { atomicWrite } from '../kernel/atomic-io.mjs';
 import { validateBusinessResult } from '../platform/execution/result-contract.mjs';
 import { ensureVersionClearance } from './version-clearance.mjs';
+import { ensurePreReleaseCandidate } from './version-prerelease.mjs';
 import { performance } from 'node:perf_hooks';
 
 const recoverableResultCodes = new Set(['REPAIR_CHECKPOINT_REQUIRED', 'REPAIR_CHECKPOINT_EVIDENCE_REQUIRED', 'REPAIR_FINDING_CHECKPOINT_REQUIRED', 'QUALITY_DIAGNOSTIC_DISPOSITION_REQUIRED']);
@@ -15,6 +16,12 @@ const previousFreshGates = (state, scope, ids) => {
   const results = ids.map(id => [...state.gates].reverse().find(gate => gate.id === id && gate.scope === scope && gate.status === 'passed' && gate.forcedFresh && gate.sourceDigest === state.sourceDigest));
   return results.every(Boolean) ? { results, state } : null;
 };
+const completionReceipts = async (api, dataRoot, plan, state) => ({
+  versionClearance: await ensureVersionClearance(dataRoot, state),
+  prereleaseCandidate: state.metadata?.commandIntent?.action === 'prerelease'
+    ? await ensurePreReleaseCandidate({ dataRoot, project: await api.projectRegistry.get(plan.project.id), state, workspaceRoot: plan.run.executionWorkspaceRoot })
+    : null,
+});
 
 const rejectVisibleResult = ({ error, result, receipt, runtimeReceipt, agentId, dispatchId, packetDigest }) => {
   const summary = `Agent result rejected by ${error.code}: ${error.message}`;
@@ -49,7 +56,7 @@ export const executeHeadlessLifecyclePlan = async (context, api, planInput, { co
   if (started.status === 'attention-required') return started;
   const { plan, runtimePolicy } = started;
   let { state } = started;
-  if (state.status === 'closed') return { status: 'closed', planDigest: plan.planDigest, state, versionClearance: await ensureVersionClearance(authorityStore.root, state) };
+  if (state.status === 'closed') return { status: 'closed', planDigest: plan.planDigest, state, ...await completionReceipts(api, authorityStore.root, plan, state) };
   assert(state.status !== 'superseded', 'LIFECYCLE_PLAN_RUN_SUPERSEDED', 'Lifecycle execution cannot resume a superseded Run.');
   if (runtimePolicy.hostOrchestrated) return { status: 'attention-required', reason: 'user-visible-runtime-requires-host-orchestration', planDigest: plan.planDigest, state };
   const activeRunId = state.runId;
@@ -73,7 +80,7 @@ export const executeHeadlessLifecyclePlan = async (context, api, planInput, { co
   const closure = api.profileRegistry.get(state.profile.id).canClose(state);
   if (!closure.ok) return { status: 'attention-required', reason: closure.reason, planDigest: plan.planDigest, execution, gates, state };
   const closed = await api.kernel.closeRun(plan.project.id, activeRunId, {}, { expectedRevision: state.revision, commandId: `${commandId}.close` });
-  return { status: 'closed', planDigest: plan.planDigest, execution, gates, state: closed.state, versionClearance: await ensureVersionClearance(authorityStore.root, closed.state) };
+  return { status: 'closed', planDigest: plan.planDigest, execution, gates, state: closed.state, ...await completionReceipts(api, authorityStore.root, plan, closed.state) };
 };
 
 const continueVisibleLifecyclePlan = async (context, api, planInput, { commandId, preflightReport, maxConcurrency, maxRounds = 100, forceFreshGates = true, onGateProgress = null, gateDiagnosticAttempts = 0, continuedStart = null } = {}) => {
@@ -90,7 +97,7 @@ const continueVisibleLifecyclePlan = async (context, api, planInput, { commandId
     }
   }
   if (started.status === 'attention-required') return started;
-  if (started.status === 'closed') return { ...started, versionClearance: await ensureVersionClearance(authorityStore.root, started.state) };
+  if (started.status === 'closed') return { ...started, ...await completionReceipts(api, authorityStore.root, started.plan ?? planInput, started.state) };
   const { plan, runtimePolicy } = started;
   assert(runtimePolicy.hostOrchestrated, 'VISIBLE_LIFECYCLE_RUNTIME_REQUIRED', 'Visible lifecycle execution requires a host-orchestrated Runtime.');
   const trustedAgentAdapter = resolveVisibleHostAdapter(plan.run.runtimePluginId);
@@ -113,6 +120,7 @@ const continueVisibleLifecyclePlan = async (context, api, planInput, { commandId
       verificationOutputPaths: [...(feature.metadata?.verificationOutputPaths ?? [])],
     }));
   const retryFailedGates = async results => {
+    if (plan.intent.action === 'prerelease') return null;
     if (gateDiagnosticAttempts >= 5 || !results.some(gate => gate.status === 'failed')) return null;
     state = await authorityStore.read(plan.project.id, activeRunId);
     if (!api.profileRegistry.get(state.profile.id).createGateDiagnosticReview) return null;
@@ -126,7 +134,7 @@ const continueVisibleLifecyclePlan = async (context, api, planInput, { commandId
     const roundStarted = performance.now();
     const timing = { spawnMs: 0, waitMs: 0, resultMs: 0 };
     state = await authorityStore.read(plan.project.id, activeRunId);
-    if (state.status === 'closed') return { status: 'closed', planDigest: plan.planDigest, rounds, state, versionClearance: await ensureVersionClearance(authorityStore.root, state) };
+    if (state.status === 'closed') return { status: 'closed', planDigest: plan.planDigest, rounds, state, ...await completionReceipts(api, authorityStore.root, plan, state) };
     const activeLeases = state.leases.filter(lease => lease.status === 'active');
     let featureGates = null;
     if (!activeLeases.length) {
@@ -251,7 +259,7 @@ const continueVisibleLifecyclePlan = async (context, api, planInput, { commandId
   const closure = api.profileRegistry.get(state.profile.id).canClose(state);
   if (!closure.ok) return { status: 'attention-required', reason: closure.reason, planDigest: plan.planDigest, rounds, gates, state };
   const closed = await api.kernel.closeRun(plan.project.id, activeRunId, {}, { expectedRevision: state.revision, commandId: `${commandId}.close` });
-  return { status: 'closed', planDigest: plan.planDigest, rounds, gates, state: closed.state, versionClearance: await ensureVersionClearance(authorityStore.root, closed.state) };
+  return { status: 'closed', planDigest: plan.planDigest, rounds, gates, state: closed.state, ...await completionReceipts(api, authorityStore.root, plan, closed.state) };
 };
 
 export const executeVisibleLifecyclePlan = (context, api, planInput, options = {}) => continueVisibleLifecyclePlan(context, api, planInput, { ...options, continuedStart: null, gateDiagnosticAttempts: 0 });

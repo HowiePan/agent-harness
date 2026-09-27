@@ -78,6 +78,7 @@ export const createCardWorldProjectDescriptor = ({
       promptCodecPlugin: 'reference-agent-prompt-codec',
       runtimeConfigs,
       actionPaths: structuredClone(CARDWORLD_ACTION_PATHS),
+      release: { documentationScopePath: 'release/docs-scope.json', versionPaths: ['card_world_engine/Cargo.toml', 'card_world_engine/Cargo.lock'], packageGateId: 'wasm-release-package', artifactRoot: 'card_world_engine/pkg', artifactIdentity: { path: 'package.json', versionField: 'version' } },
       qualityVerificationOutputs: [...qualityVerificationOutputs],
       qualityReviewLimit: structuredClone(qualityReviewLimit),
       majorReleaseTargets: [...majorReleaseTargets],
@@ -92,6 +93,7 @@ export const createCardWorldProjectDescriptor = ({
       gate('rust-tests-all-targets', cardWorldTask('engine-test', '--all-targets'), '.'),
       gate('rust-clippy-deny-warnings', cardWorldTask('engine-clippy'), '.'),
       gate('wasm-release-boundary', cardWorldTask('engine-wasm-release-check'), '.'),
+      { ...gate('wasm-release-package', cardWorldTask('engine-wasm-release'), '.'), required: false, forceFresh: true },
     ],
     artifactProviders: [],
   };

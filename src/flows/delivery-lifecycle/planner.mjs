@@ -24,6 +24,7 @@ const defaultActionPaths = Object.freeze({
   implement: ['src', 'tests', 'docs'],
   scope: ['docs/versions', 'docs/requirements.md'],
   docs: ['docs/versions', 'docs/versions/INDEX.md', 'docs/integration_guide.md'],
+  'release-prepare': [], 'release-docs': [],
   review: [],
   deliver: [],
 });
@@ -43,6 +44,8 @@ export const createDeliveryLifecyclePlanner = ({
   const repairOnly = intent.action === 'quality' && intent.preset === 'repair-known';
   const closeoutOnly = intent.action === 'quality' && (intent.preset === 'closeout' || repairOnly && intent.qualityRepairInventory?.findings.length === 0);
   const exhaustive = intent.action === 'quality' && intent.preset === 'release-exhaustive';
+  const prerelease = intent.action === 'prerelease';
+  if (prerelease) assert(intent.developmentClearance?.status === 'development-complete' && intent.releaseDocumentation?.inventoryDigest && project.policy?.release?.packageGateId, 'PRERELEASE_PREREQUISITES_REQUIRED', 'Prerelease requires development clearance, project-owned documentation scope, and a package Gate.');
   if (['quality', 'full', 'deliver'].includes(intent.action) && !repairOnly && !closeoutOnly) assert(intent.knownFindingInventory, 'QUALITY_INVENTORY_SNAPSHOT_REQUIRED', 'Delivery quality planning requires an Authority-derived quality inventory snapshot.');
   if (repairOnly) {
     const inventory = assertQualityRepairInventorySnapshot(intent.qualityRepairInventory);
@@ -56,7 +59,7 @@ export const createDeliveryLifecyclePlanner = ({
   const priorQualityReviews = intent.qualityTarget.reviewHistory?.length ?? 0;
   if (!repairOnly && !closeoutOnly && ['quality', 'full', 'deliver'].includes(intent.action)) assert(qualityReviewLimit.mode === 'unbounded' || priorQualityReviews < 1 + qualityReviewLimit.maxRechecks, 'QUALITY_REVIEW_LIMIT_REACHED', 'The target has exhausted its configured quality review budget.');
   const finalGateIds = (project.gateRecipes ?? []).filter(recipe => recipe.scope === 'final' && recipe.required !== false).map(recipe => recipe.id);
-  const gateIds = ['full', 'quality', 'deliver'].includes(intent.action) ? finalGateIds : [];
+  const gateIds = ['full', 'quality', 'deliver'].includes(intent.action) ? finalGateIds : prerelease ? [...new Set([...finalGateIds, project.policy.release.packageGateId])] : [];
   const quality = intent.action === 'quality';
   const full = intent.action === 'full';
   const profileConfig = {
@@ -73,7 +76,9 @@ export const createDeliveryLifecyclePlanner = ({
   };
   if (repairOnly || closeoutOnly) profileConfig.requireFinalQualityReview = false;
   const routeId = resolveDeliveryRoute(intent);
-  const actionPaths = intent.actionPaths ?? project.policy?.actionPaths ?? defaultActionPaths;
+  const actionPaths = prerelease
+    ? { ...(project.policy?.actionPaths ?? defaultActionPaths), 'release-prepare': project.policy.release.versionPaths ?? [], 'release-docs': intent.releaseDocumentation.allowedPaths }
+    : intent.actionPaths ?? project.policy?.actionPaths ?? defaultActionPaths;
   const templates = createDeliveryTemplates({
     actionPaths,
     qualityRootPrefix: project.policy?.qualityRootPrefix ?? qualityRootPrefix,
@@ -84,12 +89,13 @@ export const createDeliveryLifecyclePlanner = ({
       feature: { id: 'authority-inventory', logicalRoot: `quality:${intent.target}`, forbiddenPaths: (project.workspace?.excluded ?? ['.git', '.agent-harness-data']).filter(path => !(project.policy?.qualityVerificationOutputs ?? []).includes(path)), gatePlan: [], metadata: { qualityRoot: `${project.policy?.qualityRootPrefix ?? qualityRootPrefix}:${intent.target}`, reviewRound: 0, qualityContext: { target: intent.target, version: intent.target, verificationOutputPaths: project.policy?.qualityVerificationOutputs ?? [] } } },
       findings: intent.qualityRepairInventory.findings, dependsOn: [], repairOnly: true,
     })
-    : compileWorkflowFeatures({ definition: workflowDefinition, routeId, templates, context: { intent, sourceDigest, project } });
+    : compileWorkflowFeatures({ definition: workflowDefinition, routeId, templates, context: { intent: prerelease ? { ...intent, actionPaths } : intent, sourceDigest, project } });
   const gateBindings = project.policy?.gateBindings ?? {};
   for (const feature of features) {
     const stageGates = resolveStageGates(gateBindings, feature.kind);
     feature.gatePlan = stageGates ? [...stageGates] : [...gateIds];
     feature.metadata.scope = intent.scope;
+    if (prerelease) feature.metadata.releaseDocumentationDigest = intent.releaseDocumentation.inventoryDigest;
   }
   return {
     run: { runId, profileId, profileConfig, features, metadata: { workflow: { id: workflowDefinition.id, version: workflowDefinition.version, artifactDigest: workflowDefinition.artifactDigest }, qualityTarget: structuredClone(intent.qualityTarget), ...(repairOnly ? { qualityRepairInventory: structuredClone(intent.qualityRepairInventory) } : {}), ...(closeoutOnly ? { qualityCloseout: structuredClone(intent.qualityCloseout) } : {}) } },

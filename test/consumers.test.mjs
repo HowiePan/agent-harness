@@ -22,10 +22,11 @@ const qualityTarget = deriveQualityTargetSnapshot({ projectId: 'cardworld-engine
 
 test('CardWorld consumer compiles one canonical requirement and project-owned delivery Features', () => {
   const descriptor = createCardWorldProjectDescriptor({ workspaceRoot: process.cwd(), remote: 'https://github.com/HowiePan/CardWorld.git' });
-  assert.deepEqual(descriptor.gateRecipes.map(gate => gate.id), CARDWORLD_FINAL_GATE_IDS);
+  assert.deepEqual(descriptor.gateRecipes.filter(gate => gate.required).map(gate => gate.id), CARDWORLD_FINAL_GATE_IDS);
+  assert.equal(descriptor.gateRecipes.find(gate => gate.id === 'wasm-release-package')?.required, false);
   assert(descriptor.workspace.excluded.includes('.cardworld-local'));
   assert.equal(descriptor.workspace.rootSelector, 'git-worktree');
-  assert.deepEqual(descriptor.gateRecipes.slice(1).map(gate => gate.command.slice(3, 6)), [
+  assert.deepEqual(descriptor.gateRecipes.filter(gate => gate.required).slice(1).map(gate => gate.command.slice(3, 6)), [
     ['scripts/cardworld.ps1', '-Task', 'engine-fmt'],
     ['scripts/cardworld.ps1', '-Task', 'engine-test'],
     ['scripts/cardworld.ps1', '-Task', 'engine-clippy'],

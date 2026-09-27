@@ -138,11 +138,14 @@ Extension 身份对象的字段是 `id`、`version`、可选或注册后必需�
 | `qualityReviewLimit` | `{mode:"bounded",maxRechecks:2}` | 质量目标跨 Run 的复审上限；初审不计入 `maxRechecks`。仅显式大版本准出可选无数值上限。 |
 | `majorReleaseTargets` | `[]` | 明确允许使用 `quality release-exhaustive` 的大版本目标清单。 |
 | `actionPaths` | 内置默认路径 | action 到允许写路径数组的映射。支持 `requirements`、`plan`、`implement`、`scope`、`docs`、`review`、`deliver` 等动作键。 |
+| `release` | 无 | 可选的预发布策略：`documentationScopePath` 指向业务仓声明，`versionPaths` 限定版本元数据，`packageGateId` 指向实际打包 Gate，`artifactRoot` 与 `artifactIdentity` 指定候选制品。 |
 | `excluded` | `.git`、`.agent-harness-data`、`node_modules` | 工作区排除/禁止路径。 |
 
-内置 action：`full`、`requirements`/`req`、`plan`、`implement`/`impl`、`scope`、`quality`/`qa`、`docs`、`review`、`deliver`、`status`、`resume`、`recover`。质量 preset 为 `full`、`review-only`、`recheck`、`repair-known`、`closeout`、`release-exhaustive`；需求 preset 为 `full`（默认，`intake → expansion → canonical`）、`expand-to-plan`（`intake → expansion → canonical → plan`）、`direct`（不扩展，`intake → canonical → plan`）、`plan-only`（`plan`）。
+内置 action：`full`、`requirements`/`req`、`plan`、`implement`/`impl`、`scope`、`quality`/`qa`、`docs`、`prerelease`、`review`、`deliver`、`status`、`resume`、`recover`。质量 preset 为 `full`、`review-only`、`recheck`、`repair-known`、`closeout`、`release-exhaustive`；需求 preset 为 `full`（默认，`intake → expansion → canonical`）、`expand-to-plan`（`intake → expansion → canonical → plan`）、`direct`（不扩展，`intake → canonical → plan`）、`plan-only`（`plan`）。
 
 `qualityReviewLimit.mode` 为 `bounded` 或 `unbounded`；`bounded` 时 `maxRechecks` 为非负整数，默认 2。一般流程达到上限即停在 `quality-review-limit-reached`，续接和新 Run 不重置目标累计次数。`unbounded` 只能用于已列入 `majorReleaseTargets` 的 `release-exhaustive`，同一大版本只允许一次启动，进程中断后须续接原 Run。`repair-known` 冻结当前权威台账的开放 Finding，只派发对应修复并运行最终 Gate；不做初审或复审，准出凭证注明 `fullReviewPerformed:false`，等待 `routine-version-exit` 人工决定后关闭。开放 Finding 为零时，它规划只读证据收口；相同命令已有未完成 Run 时，仍按单次启动规则继续原 Run。`closeout` 是独立收口入口：要求已有审查、全部 Finding 已解决且最新质量 Run 的源码摘要与当前源码一致；它不消耗复审预算，完成只读证据核对、fresh 最终 Gate 和必要的准出决定后，从不可变 `run-closure` 凭证派生可重复核验的 `version-clearance` 凭证，标记版本开发完成。该投影不修改 Kernel Authority；提交、发布和推送仍需单独授权。
+
+`prerelease` 独立消费现有 `development-complete` 准出凭证，不计入质量复审预算。项目必须在业务仓声明符合 `release-documentation-scope.schema.json` 的文档范围；`documents` 的 `main` 和可选 `directory`、独立 `directories` 允许修改这些文件及目录下全部文件。预发布文档节点审计整个现存范围，包括旧版遗漏，结果列出 `auditedFiles`、`updatedFiles`、`resolved`、`unresolved`；未覆盖文件或未解决问题阻断候选封存。项目的实际打包 Gate 应为 `scope:final,required:false,forceFresh:true`，只在预发布加入必需 Gate 清单。候选清单绑定最终源码、文档、制品摘要、开发准出及 Gate 回执；正式晋升只改发布状态，要求精确候选摘要和批准 Decision。
 
 初始化：
 

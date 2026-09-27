@@ -72,6 +72,8 @@ node <Harness源码根>/integrations/codex/agent-harness-codex/scripts/local-sou
 
 常规质量命令默认初审后最多复审两次。已有权威问题需要一次性修复时，使用 `h:local engine quality <版本> repair-known`；它只修复当前开放问题、跑最终 Gate，并在 `routine-version-exit` 决定后生成注明未做全面复审的常规准出凭证。已知问题解决但原 Run 在最终 Gate 或收口阶段中断时，使用 `h:local engine quality <版本> closeout` 独立接续。它要求当前源码与最新质量 Run 一致、所有 Finding 已解决且有审查证据，不新增全面复审，不消耗复审预算；同一命令已有未完成 Run 时应继续该 Run，不能重复启动。只有 Project Descriptor 将目标列入 `majorReleaseTargets` 时，才可显式使用 `h:local engine quality <大版本> release-exhaustive`。
 
+开发准出后使用 `h:local engine prerelease <版本>` 准备候选：版本元数据、CardWorld 自有 `release/docs-scope.json` 中全部主文档与目录的存量审计、fresh 最终 Gate 和真实 WASM 制品打包都在此阶段完成。`prerelease` 不消耗质量复审预算。候选封存后先用 `version-release status` 查看摘要和文档/制品清单，待用户审核并明确批准该摘要后才调用 `version-release promote`；晋升不改源码、文档或制品。当前 V3.8.4 的开发准出凭证可以直接被入口读取；新增的项目侧文档配置作为允许的发布元数据差异记录。正式预发布命令仍须从已绑定的 CardWorld checkout 发起。
+
 ### 本地故障的分级与接续
 
 所有 source-link Workflow 共用故障处置规则，先区分问题来源和 P0–P3 严重度，再根据**实际补丁文件**判定下表的 H0–H4 影响等级。Host 回执失配属于 Harness 宿主集成故障，初判 P1；涉及 `integrations/codex/` 的修复为 H3。未知错误标为来源未定，P1 只是待复核的保守初判；先核查证据，不能自动登记为 Harness 缺陷。Gate 失败属于项目结果，也不能自动登记为 Harness 缺陷。

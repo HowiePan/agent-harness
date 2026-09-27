@@ -14,6 +14,14 @@
 
 权限边界不变：质量审查只读，修复由独立 Feature 执行；Flow 和 Extension 只返回 Intent/Event/Receipt，不直接写 Kernel Authority。Target 投影可从 Run Authority 和 Receipt 重建，不依赖模型上下文或插件内部状态。
 
+## 开发准出后的预发布
+
+`prerelease` 是 `release-preparation → release-documentation` 独立路线，入口必须有同一目标的 `development-complete` 准出凭证和已批准的 `routine-version-exit` Decision。Harness 核验该准出 Run 的不可变源码快照；进入预发布前的改动只能属于项目声明的文档、版本元数据或文档范围声明。它不新开质量复审，也不消耗既有质量目标的复审预算。版本元数据和文档修订在本路线完成后，重新运行 fresh 最终 Gate 与项目声明的真实打包 Gate。Gate 失败会停止候选封存并保留诊断证据，不自动追加质量审查。
+
+预发布文档范围从业务仓声明文件读取，按完整目录递归展开，固定配置摘要和起始清单。文档节点逐一审计当前与历史文件，按源码和权威证据补齐旧遗漏；结果必须报告完整最终清单且无未解决问题。收口时 Harness 再次展开配置并与审计结果逐项核对，随后把最终源码摘要、文档逐文件摘要、实际制品逐文件摘要、开发准出和 Gate 回执封存成候选。制品复制至 Harness 数据根，以候选摘要定址，运行期构建目录不充当冻结候选。
+
+正式晋升是独立的 `version-release promote` 状态操作：外部批准 Decision、预发布状态、候选摘要和 expected revision 必须一致。晋升前只复核冻结源码及制品字节；操作不修改文档、版本号或制品，不执行新的 Gate 或复审。同目标的新候选会取代待审指针并提高修订号，旧批准不能用于新候选。该状态操作本身不执行 Git push 或外部分发；这些效果需另行配置并获得对应授权。
+
 ## Node Task Contract 与 Prompt
 
 十个节点分别发布完整 Task Contract，而不是共享“完成 action”式默认 Prompt：`intake` 负责来源化需求盘点，`expansion` 在采集后依据需求方向、已绑定文档与项目实际推导并补全需求（不臆造方向外范围），`canonical` 固化唯一需求合同，`plan` 生成覆盖/依赖/冲突图，`implement` 完成受限实现，`scope` 对账计划与实际范围，`docs` 同步外部合同，`quality` 执行只读 P0–P3 全量审查，`review` 独立评审，`deliver` 验证 Gate/Decision/Finding 后封存回执。`expansion` 阶段序号先于 `canonical`，因此不要求 `canonical-requirement-approved` 决策；用户批准的是补全后的 canonical 需求。每个合同包含角色、唯一目标、执行说明、输入、步骤、约束、验收和证据要求。

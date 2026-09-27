@@ -6,7 +6,7 @@ import { normalizeQualityReviewLimit, qualityReviewBudgetExhausted } from '../..
 
 export const DELIVERY_STAGES = Object.freeze([
   'requirement-intake', 'requirement-expansion', 'canonical-requirement', 'version-planning', 'implementation',
-  'scope-resolution', 'docs-closeout', 'quality', 'quality-repair', 'quality-recheck', 'quality-closeout', 'user-code-review', 'delivery-receipt',
+  'scope-resolution', 'docs-closeout', 'quality', 'quality-repair', 'quality-recheck', 'quality-closeout', 'release-preparation', 'release-documentation', 'user-code-review', 'delivery-receipt',
 ]);
 
 const stageIndex = stage => DELIVERY_STAGES.indexOf(stage);
@@ -40,6 +40,15 @@ export const createDeliveryLifecycleProfile = (id = 'delivery-lifecycle') => Obj
   },
 
   validateResult({ state, feature, result }) {
+    if (feature.metadata?.stage === 'release-preparation' && result.status === 'completed') {
+      const prepared = result.outputs?.['release-prepare']?.value;
+      return { ok: prepared?.version === state.metadata?.commandIntent?.target, reason: 'release-version-identity-mismatch' };
+    }
+    if (feature.metadata?.stage === 'release-documentation' && result.status === 'completed') {
+      const audit = result.outputs?.['release-docs']?.value;
+      const audited = audit?.auditedFiles;
+      return { ok: Array.isArray(audited) && new Set(audited).size === audited.length && Array.isArray(audit.unresolved) && audit.unresolved.length === 0, reason: 'release-documentation-audit-incomplete' };
+    }
     if (feature.metadata?.stage !== 'quality-closeout' || result.status !== 'completed') return { ok: true };
     const pinned = state.metadata?.qualityCloseout;
     const reported = result.outputs?.closeout?.value;

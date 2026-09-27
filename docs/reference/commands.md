@@ -13,6 +13,7 @@ agent-harness workspace register|list|show|rollback
 agent-harness workflow list --project <id>
 agent-harness lifecycle plan|preflight|start
 agent-harness run status|schedule|dispatch|submit|gates|decision|close|recover
+agent-harness version-release status|promote
 agent-harness source capture|read|search
 agent-harness memory query|propose|stage|promote|revoke|reject|recover|export|import
 agent-harness issue record|status|list|triage
@@ -25,3 +26,5 @@ agent-harness issue record|status|list|triage
 制品和本机插件命令按渠道命名：`npm run pack:core`、`npm run pack:codex`、`npm run pack:opencode`、`npm run pack:vscode`、`npm run check:opencode`、`npm run check:vscode`、`npm run check:codex-host-fast`、`npm run deploy:codex`、`npm run release:codex:check`、`npm run release:codex:prepare`、`npm run release:codex:local -- --prepared <receipt.json>`。OpenCode 与 VS Code 包当前是实验制品：初始化和只读状态可用，生命周期命令在没有完整原生宿主回调时返回 unsupported，不创建 Run 或伪造成功。具体产物和“先准备、后安装”的 Gate 见[渠道打包](./packaging.md)。
 
 升级中若已注册 Extension 的入口迁移，使用 `release activation-plan --extension-replacements <json>` 在激活方案中声明替换。JSON 是 `[{"id":"扩展ID","entry":"控制根内相对入口"}]`；入口须属于已验证的候选制品，并与原 ID、版本一致。`release activation-apply` 仍要求绑定方案摘要的批准 Decision，且会在提交前重新核验入口。
+
+Engine 的开发准出后运行 `h:local engine prerelease <版本>`：该命令读取已批准的 `version-clearance`，按项目仓中的文档范围清单盘点和修复所有现存文档，完成版本身份更新、fresh 最终 Gate 与实际制品构建，并封存候选摘要。`agent-harness version-release status --project cardworld-engine --target <版本>` 只读查看候选。用户审核候选后，`version-release promote --project ... --target ... --candidate-digest ... --expected-revision ... --command-id ... --approval <json>` 仅把该候选状态晋升为 `released`；`approval` 必须含 `id:"formal-version-release"`、`actor`、`decision:"approved"`、`projectId`、`target` 与精确 `candidateDigest`。此操作不修改源码、文档或制品，也不自动执行 Git push 或对外分发。这里的 `version-release` 是业务版本状态，区别于 Harness 自身的 `release activation-*`。

@@ -10,6 +10,7 @@ import { qualityNode } from '../nodes/quality/index.mjs';
 import { closeoutNode } from '../nodes/quality/closeout.mjs';
 import { reviewNode } from '../nodes/review/index.mjs';
 import { deliverNode } from '../nodes/deliver/index.mjs';
+import { releasePrepareNode, releaseDocsNode } from '../nodes/prerelease/index.mjs';
 
 export const createDeliveryWorkflowDefinition = ({ id = 'delivery-lifecycle', profileId = 'delivery-lifecycle' } = {}) => defineWorkflowDefinition({
   id,
@@ -32,6 +33,7 @@ export const createDeliveryWorkflowDefinition = ({ id = 'delivery-lifecycle', pr
     'expand-to-plan': [intakeNode, expansionNode, canonicalNode, planNode],
     direct: [withDeps(intakeNode, []), withDeps(canonicalNode, ['intake']), withDeps(planNode, ['canonical'])],
     deliver: [withDeps(qualityNode, []), withDeps(deliverNode, ['quality'])],
+    prerelease: [releasePrepareNode, releaseDocsNode],
     quality: [withDeps(qualityNode, [])],
     closeout: [closeoutNode],
     plan: [withDeps(planNode, [])],

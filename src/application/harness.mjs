@@ -26,6 +26,8 @@ import { createLifecycleCommandPlan, validateLifecycleCommandPlan } from './life
 import { createExecutionReadinessReport as buildExecutionReadinessReport } from './execution-readiness-service.mjs';
 import { executeHeadlessLifecyclePlan, executeVisibleLifecyclePlan as runVisibleLifecyclePlan } from './lifecycle-execution-service.mjs';
 import { loadReleaseIdentity } from './release-identity.mjs';
+import { loadReleaseDocumentationScope } from './release-documentation-scope.mjs';
+import { readDevelopmentClearance, readVersionRelease, promoteVersionRelease } from './version-prerelease.mjs';
 import { captureWorkspace, diffWorkspaceSnapshots } from '../common/workspace-snapshot.mjs';
 import { resolveProjectWorkspace } from '../common/workspace-identity.mjs';
 import { MemoryStore } from '../platform/resources/memory/memory-store.mjs';
@@ -244,6 +246,18 @@ export const createHarness = async ({ controlRoot: controlRootInput, dataRoot: d
     extensionSet: { installed: extensionSet.installed, digest: extensionSet.digest },
     releaseIdentity: Object.freeze(structuredClone(currentReleaseIdentity)),
 
+    async readVersionRelease(projectId, target) {
+      await projectRegistry.get(projectId);
+      return readVersionRelease({ dataRoot: authorityStore.root, projectId, target });
+    },
+
+    async promoteVersionRelease({ projectId, target, candidateDigest, expectedRevision, commandId, approval }) {
+      const project = await projectRegistry.get(projectId);
+      const workspace = await resolveProjectWorkspace(project);
+      return promoteVersionRelease({ dataRoot: authorityStore.root, project, target, workspaceRoot: workspace.root,
+        candidateDigest, expectedRevision, commandId, approval });
+    },
+
     async readPinnedSourceForDispatch(projectId, runId, dispatchId, sourceId, path) {
       const state = await authorityStore.read(projectId, runId);
       const dispatch = state.dispatches.find(item => item.dispatchId === dispatchId && ['requested', 'assigned'].includes(item.status));
@@ -298,6 +312,21 @@ export const createHarness = async ({ controlRoot: controlRootInput, dataRoot: d
       assert(required.version === extension.version && required.digest === extension.digest, 'PROJECT_EXTENSION_IDENTITY_MISMATCH', `Project ${project.id} does not bind the active Extension ${extension.id}.`);
       if (strictProjectIdentity) assert(project.harness?.version === currentReleaseIdentity.version && project.harness?.artifactDigest === currentReleaseIdentity.artifactDigest, 'PROJECT_HARNESS_IDENTITY_MISMATCH', `Project ${project.id} does not bind the active Harness release.`);
       const snapshot = await captureWorkspace(workspace.root, { excluded: project.workspace.excluded ?? [] });
+      if (intent.action === 'prerelease') {
+        const existingRelease = await readVersionRelease({ dataRoot: authorityStore.root, projectId: project.id, target: intent.target });
+        assert(existingRelease.state.status !== 'released', 'VERSION_ALREADY_RELEASED', 'A released version cannot start a new prerelease.');
+        assert(existingRelease.state.status !== 'prereleased' || existingRelease.candidate.sourceDigest !== snapshot.digest,
+          'PRERELEASE_ALREADY_FROZEN', 'The current source already has a frozen candidate; inspect it with version-release status.');
+        const release = project.policy?.release;
+        assert(release?.documentationScopePath && Array.isArray(release.versionPaths) && release.artifactRoot && release.packageGateId,
+          'PRERELEASE_POLICY_REQUIRED', 'Project must declare release documentation, version paths, artifact root, and package Gate.');
+        const documentation = await loadReleaseDocumentationScope({ workspaceRoot: workspace.root, configPath: release.documentationScopePath, excluded: project.workspace.excluded ?? [] });
+        const clearance = await readDevelopmentClearance({ dataRoot: authorityStore.root, projectId: project.id, target: intent.target,
+          runs: await authorityStore.list(project.id), evidenceStore, currentSnapshot: snapshot,
+          allowedPaths: [...documentation.allowedPaths, ...release.versionPaths, release.documentationScopePath], excluded: project.workspace.excluded ?? [] });
+        intent = { ...intent, releaseDocumentation: documentation, developmentClearance: clearance.receipt,
+          authorizedPreReleaseDelta: clearance.authorizedPreReleaseDelta };
+      }
       if (extension.planningCapabilities.includes('quality-target')) {
         const inventoryDeclaration = project.policy?.knownFindingInventories?.[intent.target];
         const legacyInventory = inventoryDeclaration

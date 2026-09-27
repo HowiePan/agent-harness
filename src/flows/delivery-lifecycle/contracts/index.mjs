@@ -15,6 +15,8 @@ export const deliveryPorts = Object.freeze({
   closeout: 'quality-closeout-evidence-v1',
   review: 'delivery-review-v1',
   deliver: 'delivery-receipt-v1',
+  'release-prepare': 'release-preparation-v1',
+  'release-docs': 'release-documentation-audit-v1',
 });
 
 export const deliveryValueSchemas = Object.freeze({
@@ -29,4 +31,6 @@ export const deliveryValueSchemas = Object.freeze({
   'quality-closeout-evidence-v1': { type: 'object', required: ['priorRunId', 'sourceDigest', 'ready'], properties: { priorRunId: string, sourceDigest: string, ready: { type: 'boolean' } }, additionalProperties: true },
   'delivery-review-v1': { type: 'object', required: ['approved'], properties: { approved: { type: 'boolean' } }, additionalProperties: true },
   'delivery-receipt-v1': { type: 'object', required: ['receiptId', 'status'], properties: { receiptId: string, status: string }, additionalProperties: true },
+  'release-preparation-v1': { type: 'object', required: ['version', 'changedFiles'], properties: { version: string, changedFiles: strings }, additionalProperties: true },
+  'release-documentation-audit-v1': { type: 'object', required: ['auditedFiles', 'updatedFiles', 'resolved', 'unresolved'], properties: { auditedFiles: strings, updatedFiles: strings, resolved: strings, unresolved: strings }, additionalProperties: true },
 });
