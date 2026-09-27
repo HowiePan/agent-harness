@@ -157,16 +157,37 @@ export const createQualityRepairInventorySnapshot = targetInput => {
     evidenceRefs: [...item.evidenceRefs], symbols: [...(item.symbols ?? [])], contracts: [...(item.contracts ?? [])],
     generatedOutputs: [...(item.generatedOutputs ?? [])], conflictKeys: [...(item.conflictKeys ?? [])],
   }));
-  assert(findings.length > 0, 'QUALITY_REPAIR_INVENTORY_EMPTY', 'Repair-only quality flow requires at least one open authoritative Finding.');
   for (const finding of findings) assert(finding.affectedPaths.length > 0 && finding.evidence.length > 0, 'QUALITY_REPAIR_FINDING_INCOMPLETE', `Finding ${finding.id} requires affected paths and evidence for repair-only execution.`);
   const body = { version: '1.0', kind: 'quality-repair-inventory', projectId: target.projectId, workflowId: target.workflowId, target: target.target, sourceDigest: target.sourceDigest, targetDigest: target.targetDigest, findings };
   return Object.freeze({ ...body, inventoryDigest: digestJson(body) });
 };
 
 export const assertQualityRepairInventorySnapshot = input => {
-  assert(input?.version === '1.0' && input.kind === 'quality-repair-inventory' && Array.isArray(input.findings) && input.findings.length > 0, 'QUALITY_REPAIR_INVENTORY_INVALID', 'Repair-only inventory is invalid.');
+  assert(input?.version === '1.0' && input.kind === 'quality-repair-inventory' && Array.isArray(input.findings), 'QUALITY_REPAIR_INVENTORY_INVALID', 'Repair-only inventory is invalid.');
   assert(input.inventoryDigest === digestJson(withoutKeys(input, ['inventoryDigest'])), 'QUALITY_REPAIR_INVENTORY_DIGEST_MISMATCH', 'Repair-only inventory digest does not match its contents.');
   for (const item of input.findings) assert(item?.id && ['P0', 'P1', 'P2', 'P3'].includes(item.severity) && Array.isArray(item.affectedPaths) && item.affectedPaths.length > 0 && Array.isArray(item.evidence) && item.evidence.length > 0, 'QUALITY_REPAIR_FINDING_INCOMPLETE', 'Repair-only Finding lacks evidence or paths.');
+  return structuredClone(input);
+};
+
+export const createQualityCloseoutSnapshot = targetInput => {
+  const target = assertQualityTargetSnapshot(targetInput);
+  const latest = target.runs.at(-1);
+  assert(latest && target.reviewHistory.length > 0, 'QUALITY_CLOSEOUT_EVIDENCE_REQUIRED', 'Closeout requires an authoritative prior quality review.');
+  assert(latest.status !== 'closed', 'QUALITY_CLOSEOUT_ALREADY_COMPLETE', 'The latest quality Run is already closed.');
+  assert(latest.sourceDigest === target.sourceDigest, 'QUALITY_CLOSEOUT_SOURCE_DRIFT', 'The latest quality Run does not match the current workspace source.');
+  assert(target.findings.every(item => item.status === 'resolved'), 'QUALITY_CLOSEOUT_FINDINGS_OPEN', 'Closeout requires every authoritative Finding to be resolved.');
+  assert(target.findings.every(item => item.resolutionEvidenceRefs.length > 0), 'QUALITY_CLOSEOUT_RESOLUTION_EVIDENCE_REQUIRED', 'Resolved Findings require authoritative resolution evidence.');
+  const body = {
+    version: '1.0', kind: 'quality-closeout-snapshot', projectId: target.projectId, workflowId: target.workflowId,
+    target: target.target, sourceDigest: target.sourceDigest, targetDigest: target.targetDigest,
+    priorRunId: latest.runId, resolvedFindingIds: target.findings.map(item => item.id),
+  };
+  return Object.freeze({ ...body, closeoutDigest: digestJson(body) });
+};
+
+export const assertQualityCloseoutSnapshot = input => {
+  assert(input?.version === '1.0' && input.kind === 'quality-closeout-snapshot' && typeof input.priorRunId === 'string' && Array.isArray(input.resolvedFindingIds), 'QUALITY_CLOSEOUT_SNAPSHOT_INVALID', 'Quality closeout snapshot is invalid.');
+  assert(input.closeoutDigest === digestJson(withoutKeys(input, ['closeoutDigest'])), 'QUALITY_CLOSEOUT_SNAPSHOT_DIGEST_MISMATCH', 'Quality closeout snapshot digest does not match its contents.');
   return structuredClone(input);
 };
 

@@ -40,7 +40,7 @@ import { assertFreshVisibleObservation, isVisibleHostAdapter } from '../platform
 import { assertVisibleHostReceiptOwner, createVisibleHostBindings } from '../platform/plugins/runtime/visible-host-bindings.mjs';
 import { assertDispatchResultContract, createDispatchResultContract, validateBusinessResult, validateProfileResult } from '../platform/execution/result-contract.mjs';
 import { sealLegacyFindingInventory } from '../platform/execution/known-finding-inventory.mjs';
-import { createQualityInventorySnapshot, createQualityRepairInventorySnapshot, deriveQualityTargetSnapshot } from '../platform/execution/quality-target.mjs';
+import { createQualityCloseoutSnapshot, createQualityInventorySnapshot, createQualityRepairInventorySnapshot, deriveQualityTargetSnapshot } from '../platform/execution/quality-target.mjs';
 import { sealExecutionReadinessReport, verifyExecutionReadinessReport } from './execution-readiness.mjs';
 import { readActiveRelease, resolveActiveRuntimeRoot } from '../platform/registry/active-generation.mjs';
 import { RunLineageStore, resolveRunLineage, verifyRunLineageResolution } from './lineage.mjs';
@@ -310,10 +310,13 @@ export const createHarness = async ({ controlRoot: controlRootInput, dataRoot: d
           sourceDigest: snapshot.digest,
           runs: await authorityStore.list(project.id),
           legacyInventory,
-          includeNonterminal: intent.action === 'quality' && intent.preset === 'repair-known',
+          includeNonterminal: intent.action === 'quality' && ['repair-known', 'closeout'].includes(intent.preset),
         });
         intent = { ...intent, qualityTarget };
-        if (intent.action === 'quality' && intent.preset === 'repair-known') intent.qualityRepairInventory = createQualityRepairInventorySnapshot(qualityTarget);
+        if (intent.action === 'quality' && intent.preset === 'repair-known') {
+          intent.qualityRepairInventory = createQualityRepairInventorySnapshot(qualityTarget);
+          if (intent.qualityRepairInventory.findings.length === 0) intent.qualityCloseout = createQualityCloseoutSnapshot(qualityTarget);
+        } else if (intent.action === 'quality' && intent.preset === 'closeout') intent.qualityCloseout = createQualityCloseoutSnapshot(qualityTarget);
         else if (['quality', 'full', 'deliver'].includes(intent.action)) intent.knownFindingInventory = createQualityInventorySnapshot(qualityTarget);
       }
       const sourceToolBinding = workflowInput ? { commandPrefix: [process.execPath, fileURLToPath(new URL('../interfaces/cli/index.mjs', import.meta.url)), 'source'], controlRoot, dataRoot: authorityStore.root } : null;
@@ -378,12 +381,12 @@ export const createHarness = async ({ controlRoot: controlRootInput, dataRoot: d
       }
       verifyExecutionReadinessReport(preflightReport, { plan, now: kernel.now });
       const states = await authorityStore.list(plan.project.id);
-      const replacedQualityRuns = plan.intent.action === 'quality' && plan.intent.preset === 'repair-known'
+      const replacedQualityRuns = plan.intent.action === 'quality' && ['repair-known', 'closeout'].includes(plan.intent.preset)
         ? states.filter(candidate => candidate.status !== 'closed' && candidate.status !== 'superseded'
           && candidate.metadata?.commandIntent?.action === 'quality'
           && candidate.metadata.commandIntent.target === plan.intent.target
           && (candidate.metadata?.workflow?.id ?? candidate.metadata.commandIntent.workflowId) === plan.intent.workflowId
-          && candidate.metadata.commandIntent.preset !== 'repair-known')
+          && candidate.metadata.commandIntent.preset !== plan.intent.preset)
         : [];
       for (const candidate of replacedQualityRuns) {
         assert(!candidate.leases.some(lease => lease.status === 'active'), 'QUALITY_MODE_SWITCH_LIVE_LEASE', 'Repair-only quality cannot replace a review Run with an active Agent Lease.', { runId: candidate.runId });

@@ -12,6 +12,7 @@ export const deliveryPorts = Object.freeze({
   scope: 'delivery-scope-v1',
   docs: 'delivery-docs-v1',
   quality: 'delivery-quality-v1',
+  closeout: 'quality-closeout-evidence-v1',
   review: 'delivery-review-v1',
   deliver: 'delivery-receipt-v1',
 });
@@ -25,6 +26,7 @@ export const deliveryValueSchemas = Object.freeze({
   'delivery-scope-v1': { type: 'object', required: ['resolved'], properties: { resolved: { type: 'boolean' } }, additionalProperties: true },
   'delivery-docs-v1': { type: 'object', required: ['documents'], properties: { documents: strings }, additionalProperties: true },
   'delivery-quality-v1': { type: 'object', required: ['findings'], properties: { findings: { type: 'array' } }, additionalProperties: true },
+  'quality-closeout-evidence-v1': { type: 'object', required: ['priorRunId', 'sourceDigest', 'ready'], properties: { priorRunId: string, sourceDigest: string, ready: { type: 'boolean' } }, additionalProperties: true },
   'delivery-review-v1': { type: 'object', required: ['approved'], properties: { approved: { type: 'boolean' } }, additionalProperties: true },
   'delivery-receipt-v1': { type: 'object', required: ['receiptId', 'status'], properties: { receiptId: string, status: string }, additionalProperties: true },
 });

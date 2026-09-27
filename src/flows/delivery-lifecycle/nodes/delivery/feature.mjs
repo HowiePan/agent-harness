@@ -25,11 +25,13 @@ export const createDeliveryTemplates = ({ actionPaths, forbiddenPaths = ['.git',
     const pathsSource = context.intent?.actionPaths ?? context.project?.policy?.actionPaths ?? actionPaths ?? {};
     const pathsForAction = ['requirements-intake', 'requirement-expansion', 'canonical-requirement'].includes(node.action) ? pathsSource.requirements : pathsSource[node.action];
     const resolvedPaths = Array.isArray(pathsForAction) ? pathsForAction : [];
-    return makeFeature({ action: node.action, target: context.intent.target, stage: node.stage, dependsOn,
+    const feature = makeFeature({ action: node.action, target: context.intent.target, stage: node.stage, dependsOn,
       allowedPaths: readOnly ? [] : resolvedPaths, sourcePolicy: readOnly ? 'read-only' : 'write',
       ownerRole: node.qualityReview || node.action === 'review' ? 'reviewer' : 'operator', qualityReview: Boolean(node.qualityReview),
       qualityFindingPolicy: context.intent.sourcePolicy === 'read-only' ? 'record-only' : 'repair-and-rereview', sourceDigest: context.sourceDigest, knownFindingInventory: context.intent.knownFindingInventory ?? null,
       verificationOutputPaths: context.intent.sourcePolicy === 'read-only' ? [] : context.project?.policy?.qualityVerificationOutputs ?? [] });
+    if (node.stage === 'quality-closeout') feature.metadata.qualityCloseout = structuredClone(context.intent.qualityCloseout);
+    return feature;
   };
 
   return {

@@ -6,7 +6,7 @@ import { normalizeQualityReviewLimit, qualityReviewBudgetExhausted } from '../..
 
 export const DELIVERY_STAGES = Object.freeze([
   'requirement-intake', 'requirement-expansion', 'canonical-requirement', 'version-planning', 'implementation',
-  'scope-resolution', 'docs-closeout', 'quality', 'quality-repair', 'quality-recheck', 'user-code-review', 'delivery-receipt',
+  'scope-resolution', 'docs-closeout', 'quality', 'quality-repair', 'quality-recheck', 'quality-closeout', 'user-code-review', 'delivery-receipt',
 ]);
 
 const stageIndex = stage => DELIVERY_STAGES.indexOf(stage);
@@ -25,6 +25,7 @@ export const createDeliveryLifecycleProfile = (id = 'delivery-lifecycle') => Obj
       qualityReviewLimit: normalizeQualityReviewLimit(config.qualityReviewLimit),
       priorQualityReviews: config.priorQualityReviews ?? 0,
       repairOnly: config.repairOnly === true,
+      closeoutOnly: config.closeoutOnly === true,
       requireRoutineExitDecision: config.requireRoutineExitDecision === true,
     };
   },
@@ -36,6 +37,13 @@ export const createDeliveryLifecycleProfile = (id = 'delivery-lifecycle') => Obj
       assert(DELIVERY_STAGES.includes(stage), 'DELIVERY_STAGE_INVALID', `Delivery Feature ${feature.id} has an invalid stage: ${stage}`);
     }
     return state;
+  },
+
+  validateResult({ state, feature, result }) {
+    if (feature.metadata?.stage !== 'quality-closeout' || result.status !== 'completed') return { ok: true };
+    const pinned = state.metadata?.qualityCloseout;
+    const reported = result.outputs?.closeout?.value;
+    return { ok: reported?.ready === true && reported.priorRunId === pinned?.priorRunId && reported.sourceDigest === state.sourceDigest && state.sourceDigest === pinned?.sourceDigest, reason: 'quality-closeout-evidence-mismatch' };
   },
 
   canDispatch(feature, state) {
@@ -107,6 +115,8 @@ export const createDeliveryLifecycleProfile = (id = 'delivery-lifecycle') => Obj
 
   canClose(state) {
     const config = state.profile.config;
+    if (config.closeoutOnly && state.sourceDigest !== state.metadata?.qualityCloseout?.sourceDigest) return { ok: false, reason: 'quality-closeout-source-drift' };
+    if (config.closeoutOnly && state.metadata?.qualityCloseout?.targetDigest !== state.metadata?.qualityTarget?.targetDigest) return { ok: false, reason: 'quality-closeout-evidence-mismatch' };
     if (config.requireFinalQualityReview && !hasCurrentCleanQualityReview(state)) {
       const qualityRoot = state.features.find(feature => feature.metadata?.qualityReview === true)?.metadata.qualityRoot ?? null;
       return { ok: false, reason: qualityReviewBudgetExhausted(state, qualityRoot) ? 'quality-review-limit-reached' : qualityReviewNoProgress(state, qualityRoot) ? 'quality-review-no-progress' : 'current-source-clean-quality-review-required' };

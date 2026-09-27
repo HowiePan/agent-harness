@@ -88,7 +88,7 @@ const externalFinding = { ...finding, id: 'Q-E2E-002', summary: 'Separate fixtur
 const overlappingFinding = { ...finding, id: 'Q-E2E-003', summary: 'Second defect in the same file.', evidence: ['README.md:2'], generatedOutputs: ['generated/second'] };
 const externalDiagnostic = { id: 'full-check-other', summary: 'Full check fails in OTHER.md.', evidence: ['host:full-check:OTHER.md:1'] };
 
-const createHost = ({ workspace, failFirstWait = false, failFirstInspect = false, failFirstConfirm = false, failFirstResult = false, repeatFindingOnce = false, repeatFindingCount = null, rejectRepairResultWithEdit = false, invalidRepairCheckpointOnce = false, externalDiagnosticOnce = false, overlappingFindings = false, missingDiagnosticDispositionOnce = false }) => {
+const createHost = ({ workspace, failFirstWait = false, failFirstInspect = false, failFirstConfirm = false, failFirstResult = false, repeatFindingOnce = false, repeatFindingCount = null, rejectRepairResultWithEdit = false, invalidRepairCheckpointOnce = false, externalDiagnosticOnce = false, overlappingFindings = false, missingDiagnosticDispositionOnce = false, cleanInitialReview = false }) => {
   const agents = new Map();
   const stats = { spawnCount: 0, containCount: 0, terminalCount: 0, maxActive: 0, reconcileCount: 0 };
   let sequence = 0;
@@ -189,6 +189,7 @@ const createHost = ({ workspace, failFirstWait = false, failFirstInspect = false
             receipt: { operation: 'result', stage },
           });
         }
+        if (cleanInitialReview) return finish({ result: result({ summary: 'Initial quality review is clean.', findings: [], knownFindingDispositions: cleanDisposition, outputs: { quality: { schemaId: 'delivery-quality-v1', value: { findings: [] }, evidenceRefs: ['host:review'] } } }), receipt: { operation: 'result', stage } });
         const found = overlappingFindings ? [finding, overlappingFinding] : [finding];
         return finish({ result: result({ summary: 'Initial full review found defects.', findings: found, knownFindingDispositions: openDisposition, outputs: { quality: { schemaId: 'delivery-quality-v1', value: { findings: found }, evidenceRefs: ['host:review'] } } }), receipt: { operation: 'result', stage } });
       }
@@ -237,6 +238,11 @@ const createHost = ({ workspace, failFirstWait = false, failFirstInspect = false
           receipt: { operation: 'result', stage },
         });
       }
+      if (stage === 'quality-closeout') {
+        assert(task.packet.feature.metadata.qualityCloseout?.priorRunId);
+        const pinned = task.packet.feature.metadata.qualityCloseout;
+        return finish({ result: result({ summary: 'Pinned quality evidence is ready for fresh final Gates.', checkpoint: 'closeout-evidence', outputs: { closeout: { schemaId: 'quality-closeout-evidence-v1', value: { priorRunId: pinned.priorRunId, sourceDigest: pinned.sourceDigest, ready: true }, evidenceRefs: ['host:closeout-evidence'] } } }), receipt: { operation: 'result', stage } });
+      }
       assert.equal(stage, 'quality-recheck');
       const gateDiagnostic = task.packet.feature.metadata.diagnostics?.find(item => item.id.startsWith('gate:'));
       if (gateDiagnostic) {
@@ -260,7 +266,7 @@ const createHost = ({ workspace, failFirstWait = false, failFirstInspect = false
   return { adapter, agents, stats };
 };
 
-const setup = async ({ failFirstWait = false, failFirstInspect = false, failFirstConfirm = false, failFirstResult = false, repeatFindingOnce = false, repeatFindingCount = null, rejectRepairResultWithEdit = false, invalidRepairCheckpointOnce = false, externalDiagnosticOnce = false, gateFailureUntilRepair = false, overlappingFindings = false, missingDiagnosticDispositionOnce = false, preset = 'full', qualityReviewLimit = { mode: 'bounded', maxRechecks: 2 }, majorReleaseTargets = [] } = {}) => {
+const setup = async ({ failFirstWait = false, failFirstInspect = false, failFirstConfirm = false, failFirstResult = false, repeatFindingOnce = false, repeatFindingCount = null, rejectRepairResultWithEdit = false, invalidRepairCheckpointOnce = false, externalDiagnosticOnce = false, gateFailureUntilRepair = false, overlappingFindings = false, missingDiagnosticDispositionOnce = false, cleanInitialReview = false, preset = 'full', qualityReviewLimit = { mode: 'bounded', maxRechecks: 2 }, majorReleaseTargets = [] } = {}) => {
   const controlRoot = resolve(process.cwd());
   const parent = resolve(harnessTemporaryRoot(), 'quality-lifecycle-e2e');
   await mkdir(parent, { recursive: true });
@@ -272,7 +278,7 @@ const setup = async ({ failFirstWait = false, failFirstInspect = false, failFirs
   await writeFile(resolve(workspace, 'OTHER.md'), '# Separate fixture\n', 'utf8');
   const engine = await loadExtensionPack('./integrations/legacy-consumers/cardworld/index.mjs', { cwd: controlRoot, controlRoot });
   const runtime = await loadExtensionPack('./integrations/codex/extensions/codex-runtime.mjs', { cwd: controlRoot, controlRoot });
-  const host = createHost({ workspace, failFirstWait, failFirstInspect, failFirstConfirm, failFirstResult, repeatFindingOnce, repeatFindingCount, rejectRepairResultWithEdit, invalidRepairCheckpointOnce, externalDiagnosticOnce, overlappingFindings, missingDiagnosticDispositionOnce });
+  const host = createHost({ workspace, failFirstWait, failFirstInspect, failFirstConfirm, failFirstResult, repeatFindingOnce, repeatFindingCount, rejectRepairResultWithEdit, invalidRepairCheckpointOnce, externalDiagnosticOnce, overlappingFindings, missingDiagnosticDispositionOnce, cleanInitialReview });
   const create = () => createHarness({ controlRoot, dataRoot, releaseIdentity, strictProjectIdentity: false, extensions: [engine, runtime], agentAdapter: host.adapter });
   const harness = await create();
   const descriptor = createCardWorldProjectDescriptor({ workspaceRoot: workspace, harness: releaseIdentity, qualityReviewLimit, majorReleaseTargets, knownFindingInventories: { 'V3.8.4': { version: '1.0', sources: [{ path: 'README.md', sha256: sha256('# Quality fixture\n') }], findings: [{ id: finding.id, severity: finding.severity, sourcePath: 'README.md' }] } } });
@@ -297,6 +303,17 @@ const assertClosedQualityLoop = state => {
   assert.equal(state.receipts.some(receipt => receipt.kind === 'run-closure'), true);
 };
 
+test('a clean initial quality review directly seals version clearance and development completion', async t => {
+  const fixture = await setup({ cleanInitialReview: true });
+  t.after(() => rm(fixture.root, { recursive: true, force: true }));
+  const completed = await fixture.harness.executeVisibleLifecyclePlan(fixture.plan, { commandId: 'clean-quality-closeout', preflightReport: await fixture.harness.createExecutionReadinessReport(fixture.plan) });
+  assert.equal(completed.status, 'closed');
+  assert.deepEqual(completed.state.features.map(feature => feature.metadata.stage), ['quality']);
+  assert.equal(completed.versionClearance.receipt.qualityConclusion.fullReviewPerformed, true);
+  assert.equal(completed.versionClearance.receipt.status, 'development-complete');
+  assert.equal(JSON.parse(await readFile(completed.versionClearance.file, 'utf8')).receiptDigest, completed.versionClearance.receipt.receiptDigest);
+});
+
 test('visible quality lifecycle completes review, verified repair, fresh re-review, and closure', async t => {
   const fixture = await setup();
   t.after(() => rm(fixture.root, { recursive: true, force: true }));
@@ -311,6 +328,7 @@ test('visible quality lifecycle completes review, verified repair, fresh re-revi
   assert.equal(completed.rounds.every(round => round.physicalLimit === 1), true);
   assert.equal(completed.rounds.every(round => round.elapsedMs >= 0 && ['spawnMs', 'waitMs', 'resultMs'].every(key => round.timing[key] >= 0)), true);
   assertClosedQualityLoop(completed.state);
+  assert.equal(completed.versionClearance.receipt.status, 'development-complete');
   const repair = completed.state.features.find(feature => feature.metadata.stage === 'quality-repair');
   assert.deepEqual(repair.metadata.verificationOutputPaths, ['.cardworld-local', 'tabletop-collection/.cardworld-local']);
   assert.deepEqual(repair.allowedPaths, ['README.md']);
@@ -566,6 +584,93 @@ test('repair-known fixes the frozen open ledger without dispatching a reviewer',
   assert.equal(receipt.qualityConclusion.fullReviewPerformed, false);
   assert.equal(receipt.versionExit.status, 'ready-for-next-version');
   assert.equal(receipt.lifecycleInvocation.startCount, 1);
+});
+
+test('independent closeout bypasses exhausted review budget and seals version clearance', async t => {
+  const fixture = await setup({ preset: 'review-only', qualityReviewLimit: { mode: 'bounded', maxRechecks: 0 } });
+  t.after(() => rm(fixture.root, { recursive: true, force: true }));
+  const reviewed = await fixture.harness.executeVisibleLifecyclePlan(fixture.plan, { commandId: 'closeout-prior-review', preflightReport: await fixture.harness.createExecutionReadinessReport(fixture.plan) });
+  const repairPlan = await fixture.harness.createLifecyclePlan({ projectId: reviewed.state.projectId, action: 'quality', target: 'V3.8.4', arguments: ['repair-known'], extensionId: 'cardworld-engine-profile', executionWorkspaceRoot: fixture.workspace });
+  const repaired = await fixture.harness.executeVisibleLifecyclePlan(repairPlan, { commandId: 'closeout-prior-repair', preflightReport: await fixture.harness.createExecutionReadinessReport(repairPlan) });
+  assert.equal(repaired.reason, 'routine-version-exit-decision-required');
+  assert.equal(repaired.state.findings[0].status, 'resolved');
+  const zeroRepair = await fixture.harness.createLifecyclePlan({ projectId: reviewed.state.projectId, action: 'quality', target: 'V3.8.4', arguments: ['repair-known'], extensionId: 'cardworld-engine-profile', executionWorkspaceRoot: fixture.workspace });
+  assert.deepEqual(zeroRepair.intent.qualityRepairInventory.findings, []);
+  assert.deepEqual(zeroRepair.run.features.map(feature => feature.metadata.stage), ['quality-closeout']);
+  const closeout = await fixture.harness.createLifecyclePlan({ projectId: reviewed.state.projectId, action: 'quality', target: 'V3.8.4', arguments: ['closeout'], extensionId: 'cardworld-engine-profile', executionWorkspaceRoot: fixture.workspace });
+  assert.equal(closeout.run.profileConfig.priorQualityReviews, 1);
+  assert.equal(closeout.run.profileConfig.closeoutOnly, true);
+  assert.deepEqual(closeout.run.features.map(feature => feature.metadata.stage), ['quality-closeout']);
+  const pending = await fixture.harness.executeVisibleLifecyclePlan(closeout, { commandId: 'quality-closeout', preflightReport: await fixture.harness.createExecutionReadinessReport(closeout) });
+  assert.equal(pending.reason, 'routine-version-exit-decision-required');
+  assert.equal(pending.state.features.some(feature => feature.metadata.qualityReview === true), false);
+  await fixture.harness.kernel.recordDecision(pending.state.projectId, pending.state.runId, { id: 'routine-version-exit', actor: 'test-user', decision: 'approved' }, { expectedRevision: pending.state.revision, commandId: 'quality-closeout-exit-decision' });
+  const closed = await fixture.harness.executeVisibleLifecyclePlan(closeout, { commandId: 'quality-closeout', preflightReport: await fixture.harness.createExecutionReadinessReport(closeout) });
+  assert.equal(closed.status, 'closed');
+  const receipt = JSON.parse(await readFile(closed.state.receipts.find(item => item.kind === 'run-closure').file, 'utf8'));
+  assert.equal(receipt.qualityConclusion.fullReviewPerformed, false);
+  assert.equal(closed.versionClearance.receipt.qualityConclusion.mode, 'evidence-backed-closeout');
+  assert.deepEqual(closed.versionClearance.receipt.qualityConclusion.verifiedFindingIds, [finding.id]);
+  assert.equal(closed.versionClearance.receipt.status, 'development-complete');
+  const repeated = await fixture.harness.executeVisibleLifecyclePlan(closeout, { commandId: 'quality-closeout', preflightReport: await fixture.harness.createExecutionReadinessReport(closeout) });
+  assert.equal(repeated.status, 'closed');
+  assert.equal(repeated.versionClearance.receipt.receiptDigest, closed.versionClearance.receipt.receiptDigest);
+  const closureFile = closed.state.receipts.find(item => item.kind === 'run-closure').file;
+  const altered = JSON.parse(await readFile(closureFile, 'utf8'));
+  altered.sourceDigest = '0'.repeat(64);
+  await writeFile(closureFile, JSON.stringify(altered), 'utf8');
+  await assert.rejects(
+    async () => fixture.harness.executeVisibleLifecyclePlan(closeout, { commandId: 'quality-closeout', preflightReport: await fixture.harness.createExecutionReadinessReport(closeout) }),
+    error => error.code === 'VERSION_CLOSURE_RECEIPT_MISMATCH',
+  );
+});
+
+test('repair-known with no open Findings plans closeout without granting a duplicate active Run', async t => {
+  const fixture = await setup({ preset: 'review-only' });
+  t.after(() => rm(fixture.root, { recursive: true, force: true }));
+  const reviewed = await fixture.harness.executeVisibleLifecyclePlan(fixture.plan, { commandId: 'zero-repair-review', preflightReport: await fixture.harness.createExecutionReadinessReport(fixture.plan) });
+  const first = await fixture.harness.createLifecyclePlan({ projectId: reviewed.state.projectId, action: 'quality', target: 'V3.8.4', arguments: ['repair-known'], extensionId: 'cardworld-engine-profile', executionWorkspaceRoot: fixture.workspace });
+  const repaired = await fixture.harness.executeVisibleLifecyclePlan(first, { commandId: 'zero-repair-first', preflightReport: await fixture.harness.createExecutionReadinessReport(first) });
+  assert.equal(repaired.reason, 'routine-version-exit-decision-required');
+  const followUp = await fixture.harness.createLifecyclePlan({ projectId: reviewed.state.projectId, action: 'quality', target: 'V3.8.4', arguments: ['repair-known'], extensionId: 'cardworld-engine-profile', executionWorkspaceRoot: fixture.workspace });
+  assert.equal(followUp.run.profileConfig.closeoutOnly, true);
+  assert.deepEqual(followUp.run.features.map(feature => feature.metadata.stage), ['quality-closeout']);
+  const readiness = await fixture.harness.createExecutionReadinessReport(followUp);
+  assert.equal(readiness.executionReady, false);
+  assert.equal(readiness.checks.find(check => check.id === 'run-lineage').issues[0].code, 'EXISTING_RUN_REQUIRES_INTERNAL_CONTINUATION');
+});
+
+test('independent closeout rejects open Findings and source drift before creating a Run', async t => {
+  const fixture = await setup({ preset: 'review-only' });
+  t.after(() => rm(fixture.root, { recursive: true, force: true }));
+  const reviewed = await fixture.harness.executeVisibleLifecyclePlan(fixture.plan, { commandId: 'closeout-guard-review', preflightReport: await fixture.harness.createExecutionReadinessReport(fixture.plan) });
+  await assert.rejects(
+    () => fixture.harness.createLifecyclePlan({ projectId: reviewed.state.projectId, action: 'quality', target: 'V3.8.4', arguments: ['closeout'], extensionId: 'cardworld-engine-profile', executionWorkspaceRoot: fixture.workspace }),
+    error => error.code === 'QUALITY_CLOSEOUT_FINDINGS_OPEN',
+  );
+  const repair = await fixture.harness.createLifecyclePlan({ projectId: reviewed.state.projectId, action: 'quality', target: 'V3.8.4', arguments: ['repair-known'], extensionId: 'cardworld-engine-profile', executionWorkspaceRoot: fixture.workspace });
+  await fixture.harness.executeVisibleLifecyclePlan(repair, { commandId: 'closeout-guard-repair', preflightReport: await fixture.harness.createExecutionReadinessReport(repair) });
+  await writeFile(resolve(fixture.workspace, 'README.md'), '# Source changed after repair\n', 'utf8');
+  await assert.rejects(
+    () => fixture.harness.createLifecyclePlan({ projectId: reviewed.state.projectId, action: 'quality', target: 'V3.8.4', arguments: ['closeout'], extensionId: 'cardworld-engine-profile', executionWorkspaceRoot: fixture.workspace }),
+    error => error.code === 'QUALITY_CLOSEOUT_SOURCE_DRIFT',
+  );
+});
+
+test('independent closeout never issues version clearance when a final Gate fails', async t => {
+  const fixture = await setup({ preset: 'review-only', gateFailureUntilRepair: true });
+  t.after(() => rm(fixture.root, { recursive: true, force: true }));
+  const onGateProgress = () => {};
+  const initialReadiness = await fixture.harness.createExecutionReadinessReport(fixture.plan, { onGateProgress });
+  assert.equal(initialReadiness.executionReady, true, JSON.stringify(initialReadiness.checks.filter(check => !check.ready)));
+  const reviewed = await fixture.harness.executeVisibleLifecyclePlan(fixture.plan, { commandId: 'closeout-gate-review', preflightReport: initialReadiness, onGateProgress });
+  const repair = await fixture.harness.createLifecyclePlan({ projectId: reviewed.state.projectId, action: 'quality', target: 'V3.8.4', arguments: ['repair-known'], extensionId: 'cardworld-engine-profile', executionWorkspaceRoot: fixture.workspace });
+  const repaired = await fixture.harness.executeVisibleLifecyclePlan(repair, { commandId: 'closeout-gate-repair', preflightReport: await fixture.harness.createExecutionReadinessReport(repair, { onGateProgress }), onGateProgress });
+  assert.equal(repaired.reason, 'final-gates-not-passed');
+  const closeout = await fixture.harness.createLifecyclePlan({ projectId: reviewed.state.projectId, action: 'quality', target: 'V3.8.4', arguments: ['closeout'], extensionId: 'cardworld-engine-profile', executionWorkspaceRoot: fixture.workspace });
+  const stopped = await fixture.harness.executeVisibleLifecyclePlan(closeout, { commandId: 'closeout-gate-fail', preflightReport: await fixture.harness.createExecutionReadinessReport(closeout, { onGateProgress }), onGateProgress });
+  assert.equal(stopped.reason, 'final-gates-not-passed');
+  assert.equal(stopped.state.receipts.some(item => item.kind === 'run-closure'), false);
 });
 
 test('declared major release can exceed the routine re-review limit in one invocation', async t => {

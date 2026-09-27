@@ -36,7 +36,7 @@ export {
 } from './platform/execution/authorization.mjs';
 export { validateBusinessResult, validateProfileResult, VISIBLE_AGENT_RESULT_CONTRACT_VERSION } from './platform/execution/result-contract.mjs';
 export { assertKnownFindingInventory, sealKnownFindingInventory, sealLegacyFindingInventory } from './platform/execution/known-finding-inventory.mjs';
-export { assertQualityInventorySnapshot, assertQualityRepairInventorySnapshot, assertQualityTargetSnapshot, createQualityInventorySnapshot, createQualityRepairInventorySnapshot, deriveQualityTargetSnapshot, qualityInventoryDigest, qualityTargetDigest } from './platform/execution/quality-target.mjs';
+export { assertQualityCloseoutSnapshot, assertQualityInventorySnapshot, assertQualityRepairInventorySnapshot, assertQualityTargetSnapshot, createQualityCloseoutSnapshot, createQualityInventorySnapshot, createQualityRepairInventorySnapshot, deriveQualityTargetSnapshot, qualityInventoryDigest, qualityTargetDigest } from './platform/execution/quality-target.mjs';
 export { readActiveRelease, resolveActiveRuntimeRoot } from './platform/registry/active-generation.mjs';
 export { applyReleaseActivationPlan, createReleaseActivationPlan, releaseActivationPlanDigest, verifyReleaseActivationPlan } from './platform/maintenance/release-activation.mjs';
 export { createRuntimeCompositionManifest, runtimeCompositionDigest, verifyRuntimeComposition } from './platform/maintenance/runtime-composition.mjs';

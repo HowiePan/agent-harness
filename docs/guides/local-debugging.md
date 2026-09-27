@@ -70,7 +70,7 @@ node <Harness源码根>/integrations/codex/agent-harness-codex/scripts/local-sou
 
 可见 Agent Prompt 1.4 将完整的 Dispatch packet 写到控制根下的摘要绑定文件。Agent 必须读取该文件并校验精确字节的 SHA-256。读取 Coordinator 的终端请求时要给足输出预算；若输出出现截断标记，不能据此调用 `spawn_agent`。Codex 当前宿主会加密长 `spawn_agent.message`；有些宿主版本也不会在工具输出附带 `executed_tool_calls`。本地 Host 通过确定性任务名、原生调用/输出的 `call_id` 与 `turn_id`、返回的任务名和后续 Agent 可见性核验派发；若宿主提供截断元数据，则额外严格核对。Host Receipt 将证明强度标为 `host-redacted-message`，不宣称能独立复算实际 Prompt 字节；操作人仍须逐字传递生成 Prompt。字段存在但冲突、任务名错配或 Agent 不可观察时，继续拒绝绑定。
 
-常规质量命令默认初审后最多复审两次。已有权威问题需要一次性收口时，使用 `h:local engine quality <版本> repair-known`；它只修复当前开放问题、跑最终 Gate，并在 `routine-version-exit` 决定后生成注明未做全面复审的常规准出凭证。只有 Project Descriptor 将目标列入 `majorReleaseTargets` 时，才可显式使用 `h:local engine quality <大版本> release-exhaustive`。同一流程内不要重复发送命令。
+常规质量命令默认初审后最多复审两次。已有权威问题需要一次性修复时，使用 `h:local engine quality <版本> repair-known`；它只修复当前开放问题、跑最终 Gate，并在 `routine-version-exit` 决定后生成注明未做全面复审的常规准出凭证。已知问题解决但原 Run 在最终 Gate 或收口阶段中断时，使用 `h:local engine quality <版本> closeout` 独立接续。它要求当前源码与最新质量 Run 一致、所有 Finding 已解决且有审查证据，不新增全面复审，不消耗复审预算；同一命令已有未完成 Run 时应继续该 Run，不能重复启动。只有 Project Descriptor 将目标列入 `majorReleaseTargets` 时，才可显式使用 `h:local engine quality <大版本> release-exhaustive`。
 
 ### 本地故障的分级与接续
 

@@ -23,6 +23,7 @@ export const createDeliveryCommandManifest = ({ id = 'delivery-lifecycle-command
         full: { scope: 'quality', stateChanging: true, sourcePolicy: 'review-and-repair' },
         'review-only': { scope: 'quality', stateChanging: true, sourcePolicy: 'read-only' },
         recheck: { scope: 'quality-recheck', stateChanging: true, sourcePolicy: 'read-only' },
+        closeout: { scope: 'quality-closeout', stateChanging: true, sourcePolicy: 'read-only' },
         'repair-known': { scope: 'quality-repair', stateChanging: true, sourcePolicy: 'repair' },
         'release-exhaustive': { scope: 'quality', stateChanging: true, sourcePolicy: 'review-and-repair' },
       },

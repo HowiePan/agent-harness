@@ -68,6 +68,7 @@ test('source-linked project hooks route native tool evidence without a packaged 
   assert.equal(resolveCommandIntent(deliveryLifecycleCommandManifest, qualityCommand).sourcePolicy, 'review-and-repair');
   for (const [preset, expectedPolicy] of [
     ['repair-known', 'repair'],
+    ['closeout', 'read-only'],
     ['release-exhaustive', 'review-and-repair'],
     ['review-only', 'read-only'],
     ['recheck', 'read-only'],

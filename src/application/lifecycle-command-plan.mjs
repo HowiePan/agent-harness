@@ -7,7 +7,7 @@ import { resolveLifecycleExecutionPolicy } from '../platform/plugins/runtime/exe
 import { validateLifecycleExecutionGrant } from '../platform/execution/authorization.mjs';
 import { validateWorkGraph } from '../kernel/work-graph.mjs';
 import { assertKnownFindingInventory } from '../platform/execution/known-finding-inventory.mjs';
-import { assertQualityTargetSnapshot } from '../platform/execution/quality-target.mjs';
+import { assertQualityCloseoutSnapshot, assertQualityTargetSnapshot, createQualityCloseoutSnapshot } from '../platform/execution/quality-target.mjs';
 import { assertQualityRepairInventorySnapshot, createQualityRepairInventorySnapshot } from '../platform/execution/quality-target.mjs';
 
 const schema = JSON.parse(readFileSync(new URL('../../schemas/lifecycle-command-plan.schema.json', import.meta.url), 'utf8'));
@@ -39,6 +39,16 @@ export const validateLifecycleCommandPlan = input => {
     assertQualityTargetSnapshot(input.intent.qualityTarget);
     assert(input.intent.qualityTarget.projectId === input.project.id && input.intent.qualityTarget.workflowId === input.intent.workflowId && input.intent.qualityTarget.target === input.intent.target && input.intent.qualityTarget.sourceDigest === input.run.sourceDigest, 'QUALITY_TARGET_BINDING_MISMATCH', 'Quality Target snapshot does not bind the planned Project, Workflow, target, and source.');
     assert(input.run.metadata?.qualityTarget?.targetDigest === input.intent.qualityTarget.targetDigest, 'QUALITY_TARGET_BINDING_MISMATCH', 'Run metadata does not bind the planned Quality Target snapshot.');
+  }
+  if (input.intent.action === 'quality' && input.intent.preset === 'closeout') assert(input.intent.qualityCloseout, 'QUALITY_CLOSEOUT_SNAPSHOT_REQUIRED', 'Independent closeout requires a pinned authoritative quality snapshot.');
+  if (input.intent.qualityCloseout) {
+    const closeout = assertQualityCloseoutSnapshot(input.intent.qualityCloseout);
+    assert(input.intent.action === 'quality' && (input.intent.preset === 'closeout' || input.intent.preset === 'repair-known' && input.intent.qualityRepairInventory?.findings.length === 0)
+      && closeout.projectId === input.project.id && closeout.workflowId === input.intent.workflowId && closeout.target === input.intent.target
+      && closeout.sourceDigest === input.run.sourceDigest && closeout.targetDigest === input.intent.qualityTarget?.targetDigest
+      && input.run.metadata?.qualityCloseout?.closeoutDigest === closeout.closeoutDigest
+      && createQualityCloseoutSnapshot(input.intent.qualityTarget).closeoutDigest === closeout.closeoutDigest,
+    'QUALITY_CLOSEOUT_SNAPSHOT_BINDING_MISMATCH', 'Independent closeout is not bound to the current authoritative quality target.');
   }
   if (input.intent.knownFindingInventory) {
     assertKnownFindingInventory(input.intent.knownFindingInventory);

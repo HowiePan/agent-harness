@@ -140,9 +140,9 @@ Extension 身份对象的字段是 `id`、`version`、可选或注册后必需�
 | `actionPaths` | 内置默认路径 | action 到允许写路径数组的映射。支持 `requirements`、`plan`、`implement`、`scope`、`docs`、`review`、`deliver` 等动作键。 |
 | `excluded` | `.git`、`.agent-harness-data`、`node_modules` | 工作区排除/禁止路径。 |
 
-内置 action：`full`、`requirements`/`req`、`plan`、`implement`/`impl`、`scope`、`quality`/`qa`、`docs`、`review`、`deliver`、`status`、`resume`、`recover`。质量 preset 为 `full`、`review-only`、`recheck`、`repair-known`、`release-exhaustive`；需求 preset 为 `full`（默认，`intake → expansion → canonical`）、`expand-to-plan`（`intake → expansion → canonical → plan`）、`direct`（不扩展，`intake → canonical → plan`）、`plan-only`（`plan`）。
+内置 action：`full`、`requirements`/`req`、`plan`、`implement`/`impl`、`scope`、`quality`/`qa`、`docs`、`review`、`deliver`、`status`、`resume`、`recover`。质量 preset 为 `full`、`review-only`、`recheck`、`repair-known`、`closeout`、`release-exhaustive`；需求 preset 为 `full`（默认，`intake → expansion → canonical`）、`expand-to-plan`（`intake → expansion → canonical → plan`）、`direct`（不扩展，`intake → canonical → plan`）、`plan-only`（`plan`）。
 
-`qualityReviewLimit.mode` 为 `bounded` 或 `unbounded`；`bounded` 时 `maxRechecks` 为非负整数，默认 2。一般流程达到上限即停在 `quality-review-limit-reached`，续接和新 Run 不重置目标累计次数。`unbounded` 只能用于已列入 `majorReleaseTargets` 的 `release-exhaustive`，同一大版本只允许一次启动，进程中断后须续接原 Run。`repair-known` 冻结当前权威台账的开放 Finding，只派发对应修复并运行最终 Gate；不做初审或复审，准出凭证注明 `fullReviewPerformed:false`，等待 `routine-version-exit` 人工决定后关闭。
+`qualityReviewLimit.mode` 为 `bounded` 或 `unbounded`；`bounded` 时 `maxRechecks` 为非负整数，默认 2。一般流程达到上限即停在 `quality-review-limit-reached`，续接和新 Run 不重置目标累计次数。`unbounded` 只能用于已列入 `majorReleaseTargets` 的 `release-exhaustive`，同一大版本只允许一次启动，进程中断后须续接原 Run。`repair-known` 冻结当前权威台账的开放 Finding，只派发对应修复并运行最终 Gate；不做初审或复审，准出凭证注明 `fullReviewPerformed:false`，等待 `routine-version-exit` 人工决定后关闭。开放 Finding 为零时，它规划只读证据收口；相同命令已有未完成 Run 时，仍按单次启动规则继续原 Run。`closeout` 是独立收口入口：要求已有审查、全部 Finding 已解决且最新质量 Run 的源码摘要与当前源码一致；它不消耗复审预算，完成只读证据核对、fresh 最终 Gate 和必要的准出决定后，从不可变 `run-closure` 凭证派生可重复核验的 `version-clearance` 凭证，标记版本开发完成。该投影不修改 Kernel Authority；提交、发布和推送仍需单独授权。
 
 初始化：
 

@@ -7,6 +7,7 @@ import { implementNode } from '../nodes/implement/index.mjs';
 import { scopeNode } from '../nodes/scope/index.mjs';
 import { docsNode } from '../nodes/docs/index.mjs';
 import { qualityNode } from '../nodes/quality/index.mjs';
+import { closeoutNode } from '../nodes/quality/closeout.mjs';
 import { reviewNode } from '../nodes/review/index.mjs';
 import { deliverNode } from '../nodes/deliver/index.mjs';
 
@@ -32,6 +33,7 @@ export const createDeliveryWorkflowDefinition = ({ id = 'delivery-lifecycle', pr
     direct: [withDeps(intakeNode, []), withDeps(canonicalNode, ['intake']), withDeps(planNode, ['canonical'])],
     deliver: [withDeps(qualityNode, []), withDeps(deliverNode, ['quality'])],
     quality: [withDeps(qualityNode, [])],
+    closeout: [closeoutNode],
     plan: [withDeps(planNode, [])],
     implement: [withDeps(implementNode, [])],
     scope: [withDeps(scopeNode, [])],
