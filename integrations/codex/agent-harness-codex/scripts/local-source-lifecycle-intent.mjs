@@ -27,10 +27,10 @@ const main = async () => {
   const values = {};
   while (args.length) {
     const flag = args.shift();
-    if (!['--bindings-dir', '--alias', '--action', '--target', '--workflow-id'].includes(flag) || !args.length || values[flag]) fail('LOCAL_SOURCE_LIFECYCLE_ARGUMENTS_INVALID', 'Usage: local-source-lifecycle-intent.mjs --bindings-dir <absolute-dir> --alias <bound-alias> --action <action> --target <target> [--workflow-id <id>]');
+    if (!['--bindings-dir', '--alias', '--action', '--target', '--workflow-id', '--preset'].includes(flag) || !args.length || values[flag]) fail('LOCAL_SOURCE_LIFECYCLE_ARGUMENTS_INVALID', 'Usage: local-source-lifecycle-intent.mjs --bindings-dir <absolute-dir> --alias <bound-alias> --action <action> --target <target> [--workflow-id <id>] [--preset <preset>]');
     values[flag] = args.shift();
   }
-  const result = await createLocalSourceLifecycleCommand({ bindingsDir: values['--bindings-dir'], alias: values['--alias'], action: values['--action'], target: values['--target'], workflowId: values['--workflow-id'] });
+  const result = await createLocalSourceLifecycleCommand({ bindingsDir: values['--bindings-dir'], alias: values['--alias'], action: values['--action'], target: values['--target'], workflowId: values['--workflow-id'], arguments: values['--preset'] ? [values['--preset']] : [] });
   process.stdout.write(`${JSON.stringify(result)}\n`);
 };
 

@@ -6,6 +6,7 @@ import { syncDevelopmentSource } from '../../../../src/interfaces/cli/local-deve
 import { classifyLocalIncident } from '../../../../src/application/local-incident.mjs';
 import { capturePostToolUse } from './post-tool-host-bridge.mjs';
 import { hookResponse, loadBindings, parsePseudoCommand } from './pseudo-command-router.mjs';
+import { decodeVisibleLifecycleIntent } from '../lib/visible-lifecycle-intent.mjs';
 
 const fail = (code, message) => { throw Object.assign(new Error(message), { code }); };
 const samePath = (left, right) => process.platform === 'win32' ? resolve(left).toLowerCase() === resolve(right).toLowerCase() : resolve(left) === resolve(right);
@@ -63,12 +64,18 @@ const verifiedCommandResponse = (response, parsed) => {
   let intent;
   try { intent = JSON.parse(context.slice(context.lastIndexOf(marker) + marker.length)); }
   catch { return false; }
+  let lifecycle;
+  try { lifecycle = decodeVisibleLifecycleIntent(intent?.coordinationIntent); }
+  catch { return false; }
   return context.includes(marker)
     && intent?.projectAlias === parsed.projectAlias
     && intent?.action === parsed.action
     && intent?.target === parsed.target
-    && typeof intent.coordinationIntent === 'string'
-    && typeof intent.coordinationIntentDigest === 'string';
+    && JSON.stringify(intent.arguments ?? []) === JSON.stringify(parsed.arguments ?? [])
+    && intent.coordinationIntentDigest === lifecycle.intentDigest
+    && lifecycle.command.action === parsed.action
+    && lifecycle.command.target === parsed.target
+    && JSON.stringify(lifecycle.command.arguments) === JSON.stringify(parsed.arguments ?? []);
 };
 
 export const loadLocalSourceBindings = async bindingsDir => {
@@ -86,7 +93,7 @@ export const renderLocalSourceHooks = async ({ bindingsDir } = {}) => {
   const paths = [process.execPath, fileURLToPath(import.meta.url), '--bindings-dir', resolve(bindingsDir)];
   const quote = value => process.platform === 'win32' ? `"${value}"` : `'${value.replaceAll("'", "'\\''")}'`;
   const command = paths.map(quote).join(' ');
-  const handler = { type: 'command', command, ...(process.platform === 'win32' ? { commandWindows: command } : {}), timeout: 120 };
+  const handler = { type: 'command', command, ...(process.platform === 'win32' ? { commandWindows: command } : {}), timeout: 120, additionalContextLimit: 8000 };
   return { description: 'Agent Harness source-link local command router.', hooks: {
     UserPromptSubmit: [{ hooks: [handler] }],
   } };

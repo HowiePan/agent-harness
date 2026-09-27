@@ -19,6 +19,7 @@
     "gateRecipes": { "type": "array", "items": { "$ref": "project-descriptor-input.schema.json#/$defs/gateRecipe" } },
     "maxConcurrency": { "type": "integer", "minimum": 1 },
     "maxLogicalItems": { "type": "integer", "minimum": 1, "maximum": 100 },
+    "qualityReviewLimit": { "$ref": "delivery-project-input.schema.json#/properties/qualityReviewLimit" },
     "batches": { "type": "array", "items": { "$ref": "#/$defs/batch" } },
     "itemKey": { "type": "string", "minLength": 1 },
     "itemPaths": { "type": "object", "additionalProperties": { "type": "array", "items": { "type": "string" } } },

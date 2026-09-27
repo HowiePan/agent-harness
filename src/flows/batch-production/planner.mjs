@@ -44,6 +44,7 @@ export const createBatchProductionLifecyclePlanner = ({
     requireBatchCloseDecision: ['full', 'close'].includes(intent.action),
     requireBatchLaunchDecision: ['full', 'produce'].includes(intent.action),
     requireFinalQualityReview: ['full', 'quality'].includes(intent.action),
+    qualityReviewLimit: project.policy?.qualityReviewLimit ?? { mode: 'bounded', maxRechecks: 2 },
   };
   const itemPaths = project.policy?.itemPaths ?? (id => [`items/${id}`, 'packages', 'apps', 'docs']);
   const forbiddenPaths = project.workspace?.excluded ?? ['.git', '.agent-harness-data', 'runs'];

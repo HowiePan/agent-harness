@@ -10,6 +10,10 @@ import { validateBusinessResult } from '../platform/execution/result-contract.mj
 import { performance } from 'node:perf_hooks';
 
 const recoverableResultCodes = new Set(['REPAIR_CHECKPOINT_REQUIRED', 'REPAIR_CHECKPOINT_EVIDENCE_REQUIRED', 'REPAIR_FINDING_CHECKPOINT_REQUIRED', 'QUALITY_DIAGNOSTIC_DISPOSITION_REQUIRED']);
+const previousFreshGates = (state, scope, ids) => {
+  const results = ids.map(id => [...state.gates].reverse().find(gate => gate.id === id && gate.scope === scope && gate.status === 'passed' && gate.forcedFresh && gate.sourceDigest === state.sourceDigest));
+  return results.every(Boolean) ? { results, state } : null;
+};
 
 const rejectVisibleResult = ({ error, result, receipt, runtimeReceipt, agentId, dispatchId, packetDigest }) => {
   const summary = `Agent result rejected by ${error.code}: ${error.message}`;
@@ -49,7 +53,7 @@ export const executeHeadlessLifecyclePlan = async (context, api, planInput, { co
   if (runtimePolicy.hostOrchestrated) return { status: 'attention-required', reason: 'user-visible-runtime-requires-host-orchestration', planDigest: plan.planDigest, state };
   const activeRunId = state.runId;
   const coordinator = new RunCoordinator({ harness: api, onGateProgress });
-  const execution = await coordinator.run({ projectId: plan.project.id, runId: activeRunId, runtimePluginId: plan.run.runtimePluginId, maxConcurrency, maxRounds });
+  const execution = await coordinator.run({ projectId: plan.project.id, runId: activeRunId, runtimePluginId: plan.run.runtimePluginId, maxConcurrency, maxRounds: plan.intent.preset === 'release-exhaustive' ? Infinity : maxRounds });
   state = await authorityStore.read(plan.project.id, activeRunId);
   if (!state.features.every(feature => feature.state === 'completed')) return { status: execution.status, planDigest: plan.planDigest, execution, state };
   const gateRunner = new ProjectGateRunner({ harness: api, onProgress: onGateProgress });
@@ -57,11 +61,11 @@ export const executeHeadlessLifecyclePlan = async (context, api, planInput, { co
   if (!featureGates.ok) return { status: 'attention-required', reason: 'feature-gates-not-passed', planDigest: plan.planDigest, execution, gates: featureGates.results, state: featureGates.state };
   const stableGateIds = (featureGates.state.metadata?.gateRecipes ?? []).filter(recipe => recipe.scope === 'stable' && recipe.required !== false).map(recipe => recipe.id);
   if (stableGateIds.length) {
-    const stable = await gateRunner.run({ projectId: plan.project.id, runId: activeRunId, scope: 'stable', forceFresh: true, gateIds: stableGateIds });
+    const stable = (state.profile.config.repairOnly ? previousFreshGates(featureGates.state, 'stable', stableGateIds) : null) ?? await gateRunner.run({ projectId: plan.project.id, runId: activeRunId, scope: 'stable', forceFresh: true, gateIds: stableGateIds });
     if (!stable.results.every(gate => gate.status === 'passed')) return { status: 'attention-required', reason: 'stable-gates-not-passed', planDigest: plan.planDigest, execution, gates: stable, state: stable.state };
   }
   const gates = plan.stopCondition.requiredFinalGates?.length
-    ? await gateRunner.run({ projectId: plan.project.id, runId: activeRunId, scope: 'final', forceFresh: forceFreshGates, gateIds: plan.stopCondition.requiredFinalGates })
+    ? (state.profile.config.repairOnly ? previousFreshGates(state, 'final', plan.stopCondition.requiredFinalGates) : null) ?? await gateRunner.run({ projectId: plan.project.id, runId: activeRunId, scope: 'final', forceFresh: forceFreshGates, gateIds: plan.stopCondition.requiredFinalGates })
     : { results: [], state };
   state = await authorityStore.read(plan.project.id, activeRunId);
   if (!gates.results.every(gate => gate.status === 'passed')) return { status: 'attention-required', reason: 'final-gates-not-passed', planDigest: plan.planDigest, execution, gates, state };
@@ -71,16 +75,18 @@ export const executeHeadlessLifecyclePlan = async (context, api, planInput, { co
   return { status: 'closed', planDigest: plan.planDigest, execution, gates, state: closed.state };
 };
 
-export const executeVisibleLifecyclePlan = async (context, api, planInput, { commandId, preflightReport, maxConcurrency, maxRounds = 100, forceFreshGates = true, onGateProgress = null, gateDiagnosticAttempts = 0 } = {}) => {
+const continueVisibleLifecyclePlan = async (context, api, planInput, { commandId, preflightReport, maxConcurrency, maxRounds = 100, forceFreshGates = true, onGateProgress = null, gateDiagnosticAttempts = 0, continuedStart = null } = {}) => {
   const { authorityStore, projectRegistry, pluginHost, resolveVisibleHostAdapter } = context;
   assert(commandId, 'COMMAND_ID_REQUIRED', 'Visible lifecycle execution requires a command ID.');
-  let started;
-  try { started = await api.startLifecyclePlan(planInput, { commandId, preflightReport }); }
-  catch (error) {
-    if (error.code !== 'EXECUTION_READINESS_EXPIRED') throw error;
-    const refreshed = await api.createExecutionReadinessReport(planInput, { onGateProgress });
-    if (!refreshed.executionReady) return { status: 'attention-required', reason: 'refreshed-execution-readiness-not-ready', preflightReport: refreshed };
-    started = await api.startLifecyclePlan(planInput, { commandId, preflightReport: refreshed });
+  let started = continuedStart;
+  if (!started) {
+    try { started = await api.startLifecyclePlan(planInput, { commandId, preflightReport }); }
+    catch (error) {
+      if (error.code !== 'EXECUTION_READINESS_EXPIRED') throw error;
+      const refreshed = await api.createExecutionReadinessReport(planInput, { onGateProgress });
+      if (!refreshed.executionReady) return { status: 'attention-required', reason: 'refreshed-execution-readiness-not-ready', preflightReport: refreshed };
+      started = await api.startLifecyclePlan(planInput, { commandId, preflightReport: refreshed });
+    }
   }
   if (started.status === 'attention-required' || started.status === 'closed') return started;
   const { plan, runtimePolicy } = started;
@@ -110,10 +116,11 @@ export const executeVisibleLifecyclePlan = async (context, api, planInput, { com
     if (!api.profileRegistry.get(state.profile.id).createGateDiagnosticReview) return null;
     const scheduled = await api.kernel.scheduleGateDiagnosticReview(plan.project.id, activeRunId, { gateResults: results }, { expectedRevision: state.revision, commandId: `${commandId}.gate-diagnostic.${state.revision}` });
     if (!scheduled.result.scheduled) return null;
-    const resumed = await executeVisibleLifecyclePlan(context, api, planInput, { commandId, preflightReport, maxConcurrency, maxRounds, forceFreshGates, onGateProgress, gateDiagnosticAttempts: gateDiagnosticAttempts + 1 });
+    const resumed = await continueVisibleLifecyclePlan(context, api, planInput, { commandId, preflightReport, maxConcurrency, maxRounds, forceFreshGates, onGateProgress, gateDiagnosticAttempts: gateDiagnosticAttempts + 1, continuedStart: started });
     return { ...resumed, rounds: [...rounds, ...(resumed.rounds ?? [])] };
   };
-  for (let round = 1; round <= maxRounds; round += 1) {
+  const coordinatorRoundLimit = plan.intent.preset === 'release-exhaustive' ? Infinity : maxRounds;
+  for (let round = 1; round <= coordinatorRoundLimit; round += 1) {
     const roundStarted = performance.now();
     const timing = { spawnMs: 0, waitMs: 0, resultMs: 0 };
     state = await authorityStore.read(plan.project.id, activeRunId);
@@ -231,11 +238,11 @@ export const executeVisibleLifecyclePlan = async (context, api, planInput, { com
   if (!featureGates.ok) return { status: 'attention-required', reason: 'feature-gates-not-passed', planDigest: plan.planDigest, rounds, gates: featureGates.results, state: featureGates.state };
   const stableGateIds = (featureGates.state.metadata?.gateRecipes ?? []).filter(recipe => recipe.scope === 'stable' && recipe.required !== false).map(recipe => recipe.id);
   if (stableGateIds.length) {
-    const stable = await gateRunner.run({ projectId: plan.project.id, runId: activeRunId, scope: 'stable', forceFresh: true, gateIds: stableGateIds });
+    const stable = (state.profile.config.repairOnly ? previousFreshGates(featureGates.state, 'stable', stableGateIds) : null) ?? await gateRunner.run({ projectId: plan.project.id, runId: activeRunId, scope: 'stable', forceFresh: true, gateIds: stableGateIds });
     if (!stable.results.every(gate => gate.status === 'passed')) return await retryFailedGates(stable.results) ?? { status: 'attention-required', reason: 'stable-gates-not-passed', planDigest: plan.planDigest, rounds, gates: stable, state: stable.state };
   }
   const gates = plan.stopCondition.requiredFinalGates?.length
-    ? await gateRunner.run({ projectId: plan.project.id, runId: activeRunId, scope: 'final', forceFresh: forceFreshGates, gateIds: plan.stopCondition.requiredFinalGates })
+    ? (state.profile.config.repairOnly ? previousFreshGates(state, 'final', plan.stopCondition.requiredFinalGates) : null) ?? await gateRunner.run({ projectId: plan.project.id, runId: activeRunId, scope: 'final', forceFresh: forceFreshGates, gateIds: plan.stopCondition.requiredFinalGates })
     : { results: [], state };
   state = await authorityStore.read(plan.project.id, activeRunId);
   if (!gates.results.every(gate => gate.status === 'passed')) return await retryFailedGates(gates.results) ?? { status: 'attention-required', reason: 'final-gates-not-passed', planDigest: plan.planDigest, rounds, gates, state };
@@ -244,3 +251,5 @@ export const executeVisibleLifecyclePlan = async (context, api, planInput, { com
   const closed = await api.kernel.closeRun(plan.project.id, activeRunId, {}, { expectedRevision: state.revision, commandId: `${commandId}.close` });
   return { status: 'closed', planDigest: plan.planDigest, rounds, gates, state: closed.state };
 };
+
+export const executeVisibleLifecyclePlan = (context, api, planInput, options = {}) => continueVisibleLifecyclePlan(context, api, planInput, { ...options, continuedStart: null, gateDiagnosticAttempts: 0 });

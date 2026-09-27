@@ -33,6 +33,7 @@ export const createTabletopCollectionProjectDescriptor = ({
   model,
   maxConcurrency = 10,
   maxLogicalGames = 10,
+  qualityReviewLimit = { mode: 'bounded', maxRechecks: 2 },
   batches = [],
 } = {}) => {
   assert(workspaceRoot && isAbsolute(workspaceRoot), 'COLLECTION_WORKSPACE_REQUIRED', 'Collection descriptor requires an absolute workspaceRoot.');
@@ -71,6 +72,7 @@ export const createTabletopCollectionProjectDescriptor = ({
       recovery: { automaticLineageResolution: true, automaticOrdinaryResume: true, automaticVerifiedHardRecovery: true, preserveSupersededRuns: true },
       maxConcurrency,
       maxLogicalGames,
+      qualityReviewLimit: structuredClone(qualityReviewLimit),
       collectionBatches: structuredClone(batches),
       profileConfigs: { 'collection-batch': { maxLogicalGames } },
     },

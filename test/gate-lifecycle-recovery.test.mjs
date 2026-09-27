@@ -11,7 +11,7 @@ import { createTestExecutionAuthorizationAdapter } from './test-support.mjs';
 import { projectExecutionPolicyDecisionContext } from '../src/platform/registry/project-registry.mjs';
 import { sha256 } from '../src/common/canonical.mjs';
 
-test('a failed final Gate returns attention and a fresh retry closes the same quality Run', async t => {
+test('a failed final Gate returns attention and an internal same-invocation retry closes the Run', async t => {
   const controlRoot = resolve(process.cwd());
   const parent = resolve(harnessTemporaryRoot(), 'gate-lifecycle-recovery');
   await mkdir(parent, { recursive: true });
@@ -60,7 +60,7 @@ test('a failed final Gate returns attention and a fresh retry closes the same qu
   await writeFile(passFlag, 'pass\n', 'utf8');
   const retryPreflight = await harness.createExecutionReadinessReport(plan, { onGateProgress: progress });
   assert.equal(retryPreflight.executionReady, true);
-  const completed = await harness.executeLifecyclePlan(plan, { commandId: 'quality-gate-retry', preflightReport: retryPreflight, onGateProgress: progress });
+  const completed = await harness.executeLifecyclePlan(plan, { commandId: 'quality-gate-first', preflightReport: retryPreflight, onGateProgress: progress });
   assert.equal(completed.status, 'closed');
   assert.equal(completed.gates.results[0].status, 'passed');
   assert.equal(completed.state.runId, failed.state.runId);

@@ -106,6 +106,9 @@ export class HarnessKernel {
     const profile = this.profile(input.profileId);
     const features = validateWorkGraph(input.features);
     const profileConfig = profile.validateConfig(structuredClone(input.profileConfig ?? {}), features);
+    if (input.initialFindings?.length) {
+      assert(profileConfig.repairOnly === true && input.metadata?.qualityRepairInventory?.findings && digestJson(input.initialFindings) === digestJson(input.metadata.qualityRepairInventory.findings), 'INITIAL_FINDINGS_AUTHORITY_REQUIRED', 'Initial Findings require an exact pinned repair-only Authority inventory.');
+    }
     const at = this.now();
     const state = {
       protocolVersion: '1.0',
@@ -127,7 +130,7 @@ export class HarnessKernel {
       submissions: [],
       evidenceRefs: [],
       gates: [],
-      findings: [],
+      findings: (input.initialFindings ?? []).map(finding => validateFinding({ ...finding, source: 'authority-snapshot', status: 'open', openedAt: at })),
       decisions: [],
       receipts: [],
       recoveryArchives: [],
@@ -243,6 +246,7 @@ export class HarnessKernel {
       const changedFiles = [...new Set(result.changedFiles)].map(path => String(path).replaceAll('\\', '/'));
       const findingIntents = result.findings ?? [];
       assert(Array.isArray(findingIntents), 'RESULT_FINDINGS_INVALID', 'Result findings must be an array.');
+      assert(!state.profile.config.repairOnly || findingIntents.length === 0, 'REPAIR_ONLY_NEW_FINDINGS_FORBIDDEN', 'Repair-only results must report incidental issues as diagnostics, not add new Findings to this frozen inventory.');
       const findingIds = new Set();
       const reopenedFindingIds = new Set();
       const confirmedFindingIds = new Set();

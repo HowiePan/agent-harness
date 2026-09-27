@@ -40,7 +40,7 @@ import { assertFreshVisibleObservation, isVisibleHostAdapter } from '../platform
 import { assertVisibleHostReceiptOwner, createVisibleHostBindings } from '../platform/plugins/runtime/visible-host-bindings.mjs';
 import { assertDispatchResultContract, createDispatchResultContract, validateBusinessResult, validateProfileResult } from '../platform/execution/result-contract.mjs';
 import { sealLegacyFindingInventory } from '../platform/execution/known-finding-inventory.mjs';
-import { createQualityInventorySnapshot, deriveQualityTargetSnapshot } from '../platform/execution/quality-target.mjs';
+import { createQualityInventorySnapshot, createQualityRepairInventorySnapshot, deriveQualityTargetSnapshot } from '../platform/execution/quality-target.mjs';
 import { sealExecutionReadinessReport, verifyExecutionReadinessReport } from './execution-readiness.mjs';
 import { readActiveRelease, resolveActiveRuntimeRoot } from '../platform/registry/active-generation.mjs';
 import { RunLineageStore, resolveRunLineage, verifyRunLineageResolution } from './lineage.mjs';
@@ -310,9 +310,11 @@ export const createHarness = async ({ controlRoot: controlRootInput, dataRoot: d
           sourceDigest: snapshot.digest,
           runs: await authorityStore.list(project.id),
           legacyInventory,
+          includeNonterminal: intent.action === 'quality' && intent.preset === 'repair-known',
         });
         intent = { ...intent, qualityTarget };
-        if (['quality', 'full', 'deliver'].includes(intent.action)) intent.knownFindingInventory = createQualityInventorySnapshot(qualityTarget);
+        if (intent.action === 'quality' && intent.preset === 'repair-known') intent.qualityRepairInventory = createQualityRepairInventorySnapshot(qualityTarget);
+        else if (['quality', 'full', 'deliver'].includes(intent.action)) intent.knownFindingInventory = createQualityInventorySnapshot(qualityTarget);
       }
       const sourceToolBinding = workflowInput ? { commandPrefix: [process.execPath, fileURLToPath(new URL('../interfaces/cli/index.mjs', import.meta.url)), 'source'], controlRoot, dataRoot: authorityStore.root } : null;
       const executionPolicy = resolveLifecycleExecutionPolicy({ project, action: intent.action, workflowId: intent.workflowId });
@@ -362,9 +364,16 @@ export const createHarness = async ({ controlRoot: controlRootInput, dataRoot: d
       const activationCommandId = `${commandId}.lineage.activate`;
       const priorActivation = observedLineage?.commands?.[activationCommandId];
       if (priorActivation) {
-        assert(priorActivation.result.planDigest === plan.planDigest && priorActivation.result.resolutionDigest === preflightReport.lineageResolution.resolutionDigest, 'COMMAND_ID_REUSED', 'The lifecycle command ID was reused with different input.');
-        const state = await authorityStore.read(plan.project.id, priorActivation.result.activeRunId);
+        assert(priorActivation.result.planDigest === plan.planDigest, 'COMMAND_ID_REUSED', 'The lifecycle command ID was reused with a different Lifecycle Plan.');
+        let state = await authorityStore.read(plan.project.id, priorActivation.result.activeRunId);
         assert(state.metadata?.lifecyclePlanDigest === plan.planDigest, 'LIFECYCLE_COMMAND_RECEIPT_INVALID', 'The lifecycle command receipt points to a Run bound to another Command Plan.');
+        if (state.status !== 'closed') {
+          const current = resolveRunLineage({ plan, states: await authorityStore.list(plan.project.id), currentLineage: observedLineage, policy: project.policy?.recovery ?? {}, now: kernel.now });
+          if (current.action === 'ordinary-resume' && current.selectedRunId === state.runId) {
+            const resumed = await kernel.recover(plan.project.id, state.runId, { mode: 'ordinary-resume' }, { expectedRevision: state.revision, commandId: `${commandId}.lineage.resume.${current.resolutionDigest}` });
+            state = resumed.state;
+          }
+        }
         return { status: state.status === 'closed' ? 'closed' : 'started', planDigest: plan.planDigest, plan, runtimePolicy, state, reused: true };
       }
       verifyExecutionReadinessReport(preflightReport, { plan, now: kernel.now });
@@ -379,6 +388,9 @@ export const createHarness = async ({ controlRoot: controlRootInput, dataRoot: d
       assert(lineageResolution.action !== 'block', 'RUN_LINEAGE_BLOCKED', 'Lifecycle Plan has no safe automatic Run lineage action.', { blockers: lineageResolution.blockers ?? [] });
       const selectedRunId = lineageResolution.selectedRunId ?? plan.run.runId;
       const existing = await authorityStore.read(plan.project.id, selectedRunId, { required: false });
+      if (existing && existing.status !== 'closed' && existing.metadata?.lifecycleInvocationId && existing.metadata.lifecycleInvocationId !== commandId) {
+        return { status: 'attention-required', reason: 'lifecycle-invocation-already-started', planDigest: plan.planDigest, state: existing };
+      }
       if (runtimePolicy.hostOrchestrated && !isVisibleHostAdapter(trustedAgentAdapter)) {
         return { status: 'attention-required', reason: 'visible-agent-host-adapter-unavailable', planDigest: plan.planDigest, plan, runtimePolicy, state: existing };
       }
@@ -394,11 +406,12 @@ export const createHarness = async ({ controlRoot: controlRootInput, dataRoot: d
           runId: plan.run.runId,
           profileId: plan.run.profileId,
           features: plan.run.features,
+          ...(plan.run.metadata?.qualityRepairInventory ? { initialFindings: plan.run.metadata.qualityRepairInventory.findings } : {}),
           profileConfig: plan.run.profileConfig,
           artifactDigest: plan.run.artifactDigest,
           sourceDigest: plan.run.sourceDigest,
           executionWorkspaceRoot: plan.run.executionWorkspaceRoot,
-          metadata: { ...(plan.run.metadata ?? {}), logicalTaskKey: plan.logicalTaskKey, lifecyclePlanDigest: plan.planDigest, commandIntent: plan.intent, lifecycleExecution: { runtimePluginId: plan.run.runtimePluginId, agentExecutionMode: plan.run.agentExecutionMode, executionConstraintDigest: plan.run.executionConstraintDigest, executionGrant: plan.run.executionGrant, authorizationSourceDigest: plan.run.sourceDigest, harnessArtifactDigest: plan.harness.artifactDigest, extensionDigest: plan.extension.digest }, stopCondition: plan.stopCondition },
+          metadata: { ...(plan.run.metadata ?? {}), logicalTaskKey: plan.logicalTaskKey, lifecyclePlanDigest: plan.planDigest, lifecycleInvocationId: commandId, commandIntent: plan.intent, lifecycleExecution: { runtimePluginId: plan.run.runtimePluginId, agentExecutionMode: plan.run.agentExecutionMode, executionConstraintDigest: plan.run.executionConstraintDigest, executionGrant: plan.run.executionGrant, authorizationSourceDigest: plan.run.sourceDigest, harnessArtifactDigest: plan.harness.artifactDigest, extensionDigest: plan.extension.digest }, stopCondition: plan.stopCondition },
         }, { commandId: `${commandId}.start` });
         state = started.state;
       } else if (lineageResolution.action !== 'return-closed') {

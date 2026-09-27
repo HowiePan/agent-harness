@@ -1,7 +1,8 @@
 import { assert } from '../../../common/errors.mjs';
 import { defineNodeTaskContract, taskFeatureProjection } from '../../../common/task-contract.mjs';
 import { approvalSatisfied } from '../../../flow-kit/primitives.mjs';
-import { createQualityFollowUpFeatures, createQualityGateDiagnosticReview, hasCurrentCleanQualityReview, validateQualityReviewPolicies } from '../../../flow-kit/profiles/quality-loop.mjs';
+import { createQualityFollowUpFeatures, createQualityGateDiagnosticReview, hasCurrentCleanQualityReview, qualityReviewNoProgress, validateQualityReviewPolicies } from '../../../flow-kit/profiles/quality-loop.mjs';
+import { normalizeQualityReviewLimit, qualityReviewBudgetExhausted } from '../../../flow-kit/profiles/quality-budget.mjs';
 
 export const DELIVERY_STAGES = Object.freeze([
   'requirement-intake', 'requirement-expansion', 'canonical-requirement', 'version-planning', 'implementation',
@@ -15,11 +16,16 @@ export const createDeliveryLifecycleProfile = (id = 'delivery-lifecycle') => Obj
   version: '1.0.0',
 
   validateConfig(config) {
+    assert(config.priorQualityReviews === undefined || (Number.isInteger(config.priorQualityReviews) && config.priorQualityReviews >= 0), 'QUALITY_REVIEW_HISTORY_INVALID', 'Prior quality review count must be a non-negative integer.');
     return {
       requireCanonicalDecision: config.requireCanonicalDecision !== false,
       requireUserCodeReview: config.requireUserCodeReview !== false,
       requiredFinalGates: [...new Set(config.requiredFinalGates ?? [])],
       requireFinalQualityReview: config.requireFinalQualityReview === true,
+      qualityReviewLimit: normalizeQualityReviewLimit(config.qualityReviewLimit),
+      priorQualityReviews: config.priorQualityReviews ?? 0,
+      repairOnly: config.repairOnly === true,
+      requireRoutineExitDecision: config.requireRoutineExitDecision === true,
     };
   },
 
@@ -101,10 +107,14 @@ export const createDeliveryLifecycleProfile = (id = 'delivery-lifecycle') => Obj
 
   canClose(state) {
     const config = state.profile.config;
-    if (config.requireFinalQualityReview && !hasCurrentCleanQualityReview(state)) return { ok: false, reason: 'current-source-clean-quality-review-required' };
+    if (config.requireFinalQualityReview && !hasCurrentCleanQualityReview(state)) {
+      const qualityRoot = state.features.find(feature => feature.metadata?.qualityReview === true)?.metadata.qualityRoot ?? null;
+      return { ok: false, reason: qualityReviewBudgetExhausted(state, qualityRoot) ? 'quality-review-limit-reached' : qualityReviewNoProgress(state, qualityRoot) ? 'quality-review-no-progress' : 'current-source-clean-quality-review-required' };
+    }
     const missingGate = config.requiredFinalGates.find(id => !state.gates.some(gate => gate.id === id && gate.status === 'passed' && gate.forcedFresh));
     if (missingGate) return { ok: false, reason: `required-final-gate-missing:${missingGate}` };
     if (config.requireUserCodeReview && !approvalSatisfied(state, 'user-code-review')) return { ok: false, reason: 'user-code-review-required' };
+    if (config.requireRoutineExitDecision && !approvalSatisfied(state, 'routine-version-exit')) return { ok: false, reason: 'routine-version-exit-decision-required' };
     return { ok: true };
   },
 

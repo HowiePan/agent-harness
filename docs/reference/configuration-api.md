@@ -135,10 +135,14 @@ Extension 身份对象的字段是 `id`、`version`、可选或注册后必需�
 | `maxConcurrency` | `auto` | 正整数或 `auto`；是物理并发上限，不绕过依赖/冲突。 |
 | `actionExecution` | `{}` | 按 action 绑定 `{agentExecutionMode,runtimePluginId}`；Runtime 必须在 `runtimePluginIds`。 |
 | `knownFindingInventories` | 无 | 以质量目标为键的权威 Finding inventory 快照。 |
+| `qualityReviewLimit` | `{mode:"bounded",maxRechecks:2}` | 质量目标跨 Run 的复审上限；初审不计入 `maxRechecks`。仅显式大版本准出可选无数值上限。 |
+| `majorReleaseTargets` | `[]` | 明确允许使用 `quality release-exhaustive` 的大版本目标清单。 |
 | `actionPaths` | 内置默认路径 | action 到允许写路径数组的映射。支持 `requirements`、`plan`、`implement`、`scope`、`docs`、`review`、`deliver` 等动作键。 |
 | `excluded` | `.git`、`.agent-harness-data`、`node_modules` | 工作区排除/禁止路径。 |
 
-内置 action：`full`、`requirements`/`req`、`plan`、`implement`/`impl`、`scope`、`quality`/`qa`、`docs`、`review`、`deliver`、`status`、`resume`、`recover`。质量 preset 为 `full`、`review-only`、`recheck`；需求 preset 为 `full`（默认，`intake → expansion → canonical`）、`expand-to-plan`（`intake → expansion → canonical → plan`）、`direct`（不扩展，`intake → canonical → plan`）、`plan-only`（`plan`）。
+内置 action：`full`、`requirements`/`req`、`plan`、`implement`/`impl`、`scope`、`quality`/`qa`、`docs`、`review`、`deliver`、`status`、`resume`、`recover`。质量 preset 为 `full`、`review-only`、`recheck`、`repair-known`、`release-exhaustive`；需求 preset 为 `full`（默认，`intake → expansion → canonical`）、`expand-to-plan`（`intake → expansion → canonical → plan`）、`direct`（不扩展，`intake → canonical → plan`）、`plan-only`（`plan`）。
+
+`qualityReviewLimit.mode` 为 `bounded` 或 `unbounded`；`bounded` 时 `maxRechecks` 为非负整数，默认 2。一般流程达到上限即停在 `quality-review-limit-reached`，续接和新 Run 不重置目标累计次数。`unbounded` 只能用于已列入 `majorReleaseTargets` 的 `release-exhaustive`，同一大版本只允许一次启动，进程中断后须续接原 Run。`repair-known` 冻结当前权威台账的开放 Finding，只派发对应修复并运行最终 Gate；不做初审或复审，准出凭证注明 `fullReviewPerformed:false`，等待 `routine-version-exit` 人工决定后关闭。
 
 初始化：
 
@@ -155,6 +159,7 @@ agent-harness init execute --config ./harness.json --project-root . --command-id
 | `gateRecipes` | `[]` | Gate Recipe 数组。 |
 | `maxConcurrency` | `10` | 正整数。实际派发还受 Feature 依赖、路径和冲突键限制。 |
 | `maxLogicalItems` | `10` | 1–100；每批逻辑项上限。 |
+| `qualityReviewLimit` | `{mode:"bounded",maxRechecks:2}` | 每个条目各自最多复审两次；批量流程不开放 `unbounded`。 |
 | `batches` | `[]` | 每项含 `id`、可选 `ruleStatus`、可选 `itemIds`；兼容键 `items` 也是字符串 ID 数组。 |
 | `itemKey` | `itemId` | 写入 Feature metadata 的业务项键名。 |
 | `itemPaths` | 按项回退到 `items/<id>` | item ID 到允许写路径数组的映射。 |
@@ -203,6 +208,8 @@ Project Descriptor 是 Registry 中的规范化结果，通常由生成器产生
 | `policy.actionPaths` | action 级路径范围。 |
 | `policy.gateBindings` | action 到 Gate ID 数组，或 `{pre,post,final}` 的映射。 |
 | `policy.knownFindingInventories` | 质量 Finding inventory。 |
+| `policy.qualityReviewLimit` | `mode` 与 `maxRechecks` 定义复审次数，默认两次。 |
+| `policy.majorReleaseTargets` | 允许无限复审的大版本目标。 |
 | `policy.maxConcurrency` | 物理并发上限。 |
 | `policy.maxLogicalItems` | 批次逻辑项上限。 |
 | `policy.batches` | 批次声明。 |
@@ -341,7 +348,7 @@ Composable Profile 的每条分支包含：
 
 通用 Composable Profile 支持 `requiredFinalGates`、`requiredDecisions`、`branches`、`repeats`。
 
-Delivery Profile 还使用 `requireCanonicalDecision`、`requireUserCodeReview`、`requireFinalQualityReview`。Batch Profile 使用 `activeBatch`、`batches`（含 `id`、`order`、`status`）、`maxLogicalItems`、`requireRuleReady`、`requireHarnessAcceptance`、`requireIndependentReview`、`requireUserItemAcceptance`、`requireBatchCloseDecision`、`requireBatchLaunchDecision`、`requireFinalQualityReview`。这些值通常由 Lifecycle Planner 根据 action 生成，不建议项目配置直接伪造关闭条件。
+Delivery Profile 还使用 `requireCanonicalDecision`、`requireUserCodeReview`、`requireFinalQualityReview`、`qualityReviewLimit`、`priorQualityReviews`、`repairOnly` 和 `requireRoutineExitDecision`。Batch Profile 使用 `activeBatch`、`batches`（含 `id`、`order`、`status`）、`maxLogicalItems`、`qualityReviewLimit`、`requireRuleReady`、`requireHarnessAcceptance`、`requireIndependentReview`、`requireUserItemAcceptance`、`requireBatchCloseDecision`、`requireBatchLaunchDecision`、`requireFinalQualityReview`。这些值通常由 Lifecycle Planner 根据 action 生成，不建议项目配置直接伪造关闭条件。
 
 ## 6. Gate Recipe API
 
@@ -411,8 +418,8 @@ agent-harness dev watch --manifest <manifest.json>
 |---|---|---|---|
 | `H0` | `docs/`、`examples/`、`test/`、根 README | 立即继续 | 无 Runtime rebind；记录新 manifest/receipt。 |
 | `H1` | Flow `graph/`、`nodes/`，只影响未来编译出的 Plan/Feature | 当前已冻结 Run 继续 | 批准后 rebind；当前进程保持原已加载代码，新 Run 使用新摘要。 |
-| `H2` | Profile、Planner、Workflow 平台、Gate 脚本、业务变体 | 不复用 | 重启协调器并新建 Run。 |
-| `H3` | Application、CLI、Runtime/插件宿主、集成入口、`package.json` | 不复用 | 重启协调器并新建 Run。 |
+| `H2` | Profile、Planner、Workflow 平台、Gate 脚本、业务变体 | 不复用 | 原 Run 停在 `attention-required`；由内部恢复操作处理，不重发生命周期命令。 |
+| `H3` | Application、CLI、Runtime/插件宿主、集成入口、`package.json` | 不复用 | 原 Run 停在 `attention-required`；由内部恢复操作处理，不重发生命周期命令。 |
 | `H4` | Kernel、Authority、持久化、关键 command/result schema、Registry/Recovery | 禁止热应用 | 显式状态迁移方案或新 Release、新 Run。 |
 
 应用 H0/H1/H2/H3 补丁：

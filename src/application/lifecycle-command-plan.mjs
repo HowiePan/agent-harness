@@ -8,6 +8,7 @@ import { validateLifecycleExecutionGrant } from '../platform/execution/authoriza
 import { validateWorkGraph } from '../kernel/work-graph.mjs';
 import { assertKnownFindingInventory } from '../platform/execution/known-finding-inventory.mjs';
 import { assertQualityTargetSnapshot } from '../platform/execution/quality-target.mjs';
+import { assertQualityRepairInventorySnapshot, createQualityRepairInventorySnapshot } from '../platform/execution/quality-target.mjs';
 
 const schema = JSON.parse(readFileSync(new URL('../../schemas/lifecycle-command-plan.schema.json', import.meta.url), 'utf8'));
 const featureSchema = JSON.parse(readFileSync(new URL('../../schemas/feature.schema.json', import.meta.url), 'utf8'));
@@ -43,6 +44,12 @@ export const validateLifecycleCommandPlan = input => {
     assertKnownFindingInventory(input.intent.knownFindingInventory);
     assert(input.intent.knownFindingInventory.projectId === input.project.id && input.intent.knownFindingInventory.target === input.intent.target && input.intent.knownFindingInventory.sourceDigest === input.run.sourceDigest, 'QUALITY_FINDING_INVENTORY_BINDING_MISMATCH', 'Known Finding inventory does not bind the planned Project, target, and source.');
     if (input.intent.knownFindingInventory.version === '2.0') assert(input.intent.qualityTarget?.targetDigest === input.intent.knownFindingInventory.targetDigest && input.intent.qualityTarget?.revision === input.intent.knownFindingInventory.targetRevision, 'QUALITY_FINDING_INVENTORY_BINDING_MISMATCH', 'Quality inventory snapshot does not bind the planned Quality Target revision.');
+  }
+  if (input.intent.action === 'quality' && input.intent.preset === 'repair-known') assert(input.intent.qualityRepairInventory, 'QUALITY_REPAIR_INVENTORY_REQUIRED', 'Repair-only quality requires a pinned authoritative Finding inventory.');
+  if (input.intent.qualityRepairInventory) {
+    const inventory = assertQualityRepairInventorySnapshot(input.intent.qualityRepairInventory);
+    assert(input.intent.action === 'quality' && input.intent.preset === 'repair-known' && inventory.projectId === input.project.id && inventory.workflowId === input.intent.workflowId && inventory.target === input.intent.target && inventory.sourceDigest === input.run.sourceDigest && inventory.targetDigest === input.intent.qualityTarget?.targetDigest && input.run.metadata?.qualityRepairInventory?.inventoryDigest === inventory.inventoryDigest, 'QUALITY_REPAIR_INVENTORY_BINDING_MISMATCH', 'Repair-only inventory is not bound to the planned Authority target and source.');
+    assert(inventory.inventoryDigest === createQualityRepairInventorySnapshot(input.intent.qualityTarget).inventoryDigest, 'QUALITY_REPAIR_INVENTORY_BINDING_MISMATCH', 'Repair-only inventory differs from the authoritative Quality Target.');
   }
   if (input.workflow) assert(input.intent.workflowId === input.workflow.id && input.run.metadata?.workflow?.artifactDigest === input.workflow.artifactDigest, 'LIFECYCLE_PLAN_WORKFLOW_MISMATCH', 'Lifecycle Plan workflow identity is inconsistent.');
   if (input.workspaceRef) {

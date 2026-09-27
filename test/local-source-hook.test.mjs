@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { once } from 'node:events';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { PassThrough } from 'node:stream';
@@ -43,6 +45,7 @@ test('source-linked project hooks route native tool evidence without a packaged 
   assert.equal(hooks.hooks.PostToolUse, undefined);
   assert.match(hooks.hooks.UserPromptSubmit[0].hooks[0].command, /local-source-hook\.mjs/);
   assert.equal(hooks.hooks.UserPromptSubmit[0].hooks[0].timeout, 120);
+  assert.equal(hooks.hooks.UserPromptSubmit[0].hooks[0].additionalContextLimit, 8000);
   assert.equal(JSON.parse(await readFile(configured.bindingFile, 'utf8')).harness.release.mode, 'source-link');
   assert.equal(resolveProbeSessionId({ environmentSessionId: 'local-source-session' }), 'local-source-session');
   assert.throws(() => resolveProbeSessionId({ explicitSessionId: 'other-session', environmentSessionId: 'local-source-session' }), { code: 'LOCAL_SOURCE_HOST_PROBE_SESSION_MISMATCH' });
@@ -52,6 +55,10 @@ test('source-linked project hooks route native tool evidence without a packaged 
   assert.equal(localIntent.command.target, 'fixture-v1');
   assert.equal(localIntent.codexSessionId, 'local-source-session');
   assert.equal(localIntent.project.projectId, 'local-debug-fixture');
+  const repairCommand = await createLocalSourceLifecycleCommand({ bindingsDir, alias: 'local-debug', action: 'quality', target: 'fixture-v1', arguments: ['repair-known'], sessionId: 'local-source-session' });
+  assert.deepEqual(decodeVisibleLifecycleIntent(repairCommand.coordinationIntent).command.arguments, ['repair-known']);
+  const { stdout: cliOutput } = await promisify(execFile)(process.execPath, [resolve(controlRoot, 'integrations', 'codex', 'agent-harness-codex', 'scripts', 'local-source-lifecycle-intent.mjs'), '--bindings-dir', bindingsDir, '--alias', 'local-debug', '--action', 'quality', '--target', 'fixture-v1', '--preset', 'repair-known'], { cwd: projectRoot, env: { ...process.env, CODEX_SESSION_ID: 'local-source-session' } });
+  assert.deepEqual(decodeVisibleLifecycleIntent(JSON.parse(cliOutput).coordinationIntent).command.arguments, ['repair-known']);
   await assert.rejects(() => createLocalSourceLifecycleCommand({ bindingsDir, alias: 'unknown', action: 'quality', target: 'fixture-v1', sessionId: 'local-source-session' }), { code: 'LOCAL_SOURCE_PROJECT_ALIAS_UNKNOWN' });
   const routed = await handleLocalSourceHook({ hook_event_name: 'UserPromptSubmit', prompt: 'h:local local-debug quality fixture-v1', cwd: projectRoot, session_id: 'local-source-session' }, { bindingsDir });
   assert.match(routed.hookSpecificOutput.additionalContext, /本地源码 Coordinator/);
@@ -59,6 +66,21 @@ test('source-linked project hooks route native tool evidence without a packaged 
   const qualityCommand = decodeVisibleLifecycleIntent(routedIntent.coordinationIntent).command;
   assert.equal(qualityCommand.target, 'fixture-v1');
   assert.equal(resolveCommandIntent(deliveryLifecycleCommandManifest, qualityCommand).sourcePolicy, 'review-and-repair');
+  for (const [preset, expectedPolicy] of [
+    ['repair-known', 'repair'],
+    ['release-exhaustive', 'review-and-repair'],
+    ['review-only', 'read-only'],
+    ['recheck', 'read-only'],
+  ]) {
+    const response = await handleLocalSourceHook({ hook_event_name: 'UserPromptSubmit', prompt: `h:local local-debug quality fixture-v1 ${preset}`, cwd: projectRoot, session_id: 'local-source-session' }, { bindingsDir });
+    assert.equal(response.decision, undefined, `${preset} must produce a trusted intent`);
+    const envelope = JSON.parse(response.hookSpecificOutput.additionalContext.split('解析结果：').at(-1));
+    const command = decodeVisibleLifecycleIntent(envelope.coordinationIntent).command;
+    assert.deepEqual(command.arguments, [preset]);
+    const resolved = resolveCommandIntent(deliveryLifecycleCommandManifest, command);
+    assert.equal(resolved.preset, preset);
+    assert.equal(resolved.sourcePolicy, expectedPolicy);
+  }
   const unknownAlias = await handleLocalSourceHook({ hook_event_name: 'UserPromptSubmit', prompt: 'h:local unknown quality fixture-v1', cwd: projectRoot, session_id: 'local-source-session' }, { bindingsDir });
   assert.equal(unknownAlias.decision, 'block');
   assert.match(unknownAlias.reason, /LOCAL_SOURCE_COMMAND_INTENT_MISSING/);

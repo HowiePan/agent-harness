@@ -9,6 +9,7 @@ import { createVisibleHostAdapter } from '../src/platform/plugins/runtime/visibl
 import { harnessTemporaryRoot } from '../src/common/write-boundary.mjs';
 import { digestJson, sha256 } from '../src/common/canonical.mjs';
 import { createQualityFollowUpFeatures, createQualityGateDiagnosticReview, validateQualityReviewPolicies } from '../src/flow-kit/profiles/quality-loop.mjs';
+import { qualityReviewBudgetExhausted } from '../src/flow-kit/profiles/quality-budget.mjs';
 
 const releaseIdentity = { version: '1.0.0', artifactDigest: 'a'.repeat(64), verified: true };
 
@@ -42,6 +43,14 @@ test('a quality Finding cannot turn verification output into a source-edit allow
   assert.throws(() => createQualityFollowUpFeatures({ feature, findings }), error => error.code === 'QUALITY_REPAIR_SOURCE_OUTPUT_OVERLAP');
   findings[0].affectedPaths = ['.GIT/objects'];
   assert.throws(() => createQualityFollowUpFeatures({ feature, findings }), error => error.code === 'QUALITY_REPAIR_SOURCE_FORBIDDEN');
+});
+
+test('batch quality budgets count reviews separately for each quality root', () => {
+  const state = { profile: { config: { qualityReviewLimit: { mode: 'bounded', maxRechecks: 2 } } }, features: Array.from({ length: 10 }, (_, index) => ({ metadata: { qualityReview: true, qualityRoot: `item:${index}` } })) };
+  assert.equal(qualityReviewBudgetExhausted(state, 'item:0'), false);
+  state.features.push({ metadata: { qualityReview: true, qualityRoot: 'item:0' } }, { metadata: { qualityReview: true, qualityRoot: 'item:0' } });
+  assert.equal(qualityReviewBudgetExhausted(state, 'item:0'), true);
+  assert.equal(qualityReviewBudgetExhausted(state, 'item:1'), false);
 });
 
 const result = ({ summary, findings = [], changedFiles = [], checkpoint = 'review', knownFindingDispositions = undefined, diagnosticDispositions = undefined, diagnostics = undefined, outputs = undefined }) => ({
@@ -79,7 +88,7 @@ const externalFinding = { ...finding, id: 'Q-E2E-002', summary: 'Separate fixtur
 const overlappingFinding = { ...finding, id: 'Q-E2E-003', summary: 'Second defect in the same file.', evidence: ['README.md:2'], generatedOutputs: ['generated/second'] };
 const externalDiagnostic = { id: 'full-check-other', summary: 'Full check fails in OTHER.md.', evidence: ['host:full-check:OTHER.md:1'] };
 
-const createHost = ({ workspace, failFirstWait = false, failFirstInspect = false, failFirstConfirm = false, failFirstResult = false, repeatFindingOnce = false, rejectRepairResultWithEdit = false, invalidRepairCheckpointOnce = false, externalDiagnosticOnce = false, overlappingFindings = false, missingDiagnosticDispositionOnce = false }) => {
+const createHost = ({ workspace, failFirstWait = false, failFirstInspect = false, failFirstConfirm = false, failFirstResult = false, repeatFindingOnce = false, repeatFindingCount = null, rejectRepairResultWithEdit = false, invalidRepairCheckpointOnce = false, externalDiagnosticOnce = false, overlappingFindings = false, missingDiagnosticDispositionOnce = false }) => {
   const agents = new Map();
   const stats = { spawnCount: 0, containCount: 0, terminalCount: 0, maxActive: 0, reconcileCount: 0 };
   let sequence = 0;
@@ -87,7 +96,7 @@ const createHost = ({ workspace, failFirstWait = false, failFirstInspect = false
   let shouldFailInspect = failFirstInspect;
   let shouldFailConfirm = failFirstConfirm;
   let shouldFailResult = failFirstResult;
-  let shouldRepeatFinding = repeatFindingOnce;
+  let remainingRepeatedFindings = repeatFindingCount ?? (repeatFindingOnce ? 1 : 0);
   let shouldRejectRepairCheckpoint = invalidRepairCheckpointOnce;
   let shouldReportExternalDiagnostic = externalDiagnosticOnce;
   let shouldConfirmExternalFinding = externalDiagnosticOnce;
@@ -187,8 +196,8 @@ const createHost = ({ workspace, failFirstWait = false, failFirstInspect = false
         const repairPath = task.packet.feature.metadata.repairFindingId === externalFinding.id ? 'OTHER.md' : 'README.md';
         if (!task.repaired) {
           const current = await readFile(resolve(workspace, repairPath), 'utf8');
-          if (!current.includes('verified repair')) await writeFile(resolve(workspace, repairPath), `${current.trimEnd()}\nverified repair\n`, 'utf8');
-          task.changed = !current.includes('verified repair');
+          task.changed = repeatFindingCount !== null || !current.includes('verified repair');
+          if (task.changed) await writeFile(resolve(workspace, repairPath), `${current.trimEnd()}\nverified repair\n`, 'utf8');
           task.repaired = true;
         }
         if (shouldReportExternalDiagnostic) {
@@ -241,8 +250,8 @@ const createHost = ({ workspace, failFirstWait = false, failFirstInspect = false
         shouldConfirmExternalFinding = false;
         return finish({ result: result({ summary: 'Independent review confirmed the separate diagnostic.', findings: [externalFinding], diagnosticDispositions: [{ id: externalDiagnostic.id, disposition: 'finding', findingId: externalFinding.id, evidence: ['fresh OTHER.md check'] }], knownFindingDispositions: cleanDisposition, checkpoint: 'recheck' }), receipt: { operation: 'result', stage } });
       }
-      if (shouldRepeatFinding) {
-        shouldRepeatFinding = false;
+      if (remainingRepeatedFindings > 0) {
+        remainingRepeatedFindings -= 1;
         return finish({ result: result({ summary: 'First re-review found the same defect again.', findings: [finding], knownFindingDispositions: openDisposition, checkpoint: 'recheck' }), receipt: { operation: 'result', stage } });
       }
       return finish({ result: result({ summary: 'Post-repair full re-review is clean.', knownFindingDispositions: cleanDisposition, diagnosticDispositions: task.packet.feature.metadata.diagnostics?.length ? [{ id: externalDiagnostic.id, disposition: 'not-reproduced', evidence: ['fresh OTHER.md check after repair'] }] : undefined, checkpoint: 'recheck' }), receipt: { operation: 'result', stage } });
@@ -251,7 +260,7 @@ const createHost = ({ workspace, failFirstWait = false, failFirstInspect = false
   return { adapter, agents, stats };
 };
 
-const setup = async ({ failFirstWait = false, failFirstInspect = false, failFirstConfirm = false, failFirstResult = false, repeatFindingOnce = false, rejectRepairResultWithEdit = false, invalidRepairCheckpointOnce = false, externalDiagnosticOnce = false, gateFailureUntilRepair = false, overlappingFindings = false, missingDiagnosticDispositionOnce = false, preset = 'full' } = {}) => {
+const setup = async ({ failFirstWait = false, failFirstInspect = false, failFirstConfirm = false, failFirstResult = false, repeatFindingOnce = false, repeatFindingCount = null, rejectRepairResultWithEdit = false, invalidRepairCheckpointOnce = false, externalDiagnosticOnce = false, gateFailureUntilRepair = false, overlappingFindings = false, missingDiagnosticDispositionOnce = false, preset = 'full', qualityReviewLimit = { mode: 'bounded', maxRechecks: 2 }, majorReleaseTargets = [] } = {}) => {
   const controlRoot = resolve(process.cwd());
   const parent = resolve(harnessTemporaryRoot(), 'quality-lifecycle-e2e');
   await mkdir(parent, { recursive: true });
@@ -263,10 +272,10 @@ const setup = async ({ failFirstWait = false, failFirstInspect = false, failFirs
   await writeFile(resolve(workspace, 'OTHER.md'), '# Separate fixture\n', 'utf8');
   const engine = await loadExtensionPack('./integrations/legacy-consumers/cardworld/index.mjs', { cwd: controlRoot, controlRoot });
   const runtime = await loadExtensionPack('./integrations/codex/extensions/codex-runtime.mjs', { cwd: controlRoot, controlRoot });
-  const host = createHost({ workspace, failFirstWait, failFirstInspect, failFirstConfirm, failFirstResult, repeatFindingOnce, rejectRepairResultWithEdit, invalidRepairCheckpointOnce, externalDiagnosticOnce, overlappingFindings, missingDiagnosticDispositionOnce });
+  const host = createHost({ workspace, failFirstWait, failFirstInspect, failFirstConfirm, failFirstResult, repeatFindingOnce, repeatFindingCount, rejectRepairResultWithEdit, invalidRepairCheckpointOnce, externalDiagnosticOnce, overlappingFindings, missingDiagnosticDispositionOnce });
   const create = () => createHarness({ controlRoot, dataRoot, releaseIdentity, strictProjectIdentity: false, extensions: [engine, runtime], agentAdapter: host.adapter });
   const harness = await create();
-  const descriptor = createCardWorldProjectDescriptor({ workspaceRoot: workspace, harness: releaseIdentity, knownFindingInventories: { 'V3.8.4': { version: '1.0', sources: [{ path: 'README.md', sha256: sha256('# Quality fixture\n') }], findings: [{ id: finding.id, severity: finding.severity, sourcePath: 'README.md' }] } } });
+  const descriptor = createCardWorldProjectDescriptor({ workspaceRoot: workspace, harness: releaseIdentity, qualityReviewLimit, majorReleaseTargets, knownFindingInventories: { 'V3.8.4': { version: '1.0', sources: [{ path: 'README.md', sha256: sha256('# Quality fixture\n') }], findings: [{ id: finding.id, severity: finding.severity, sourcePath: 'README.md' }] } } });
   descriptor.gateRecipes = gateFailureUntilRepair ? [{ id: 'fixture-gate', scope: 'final', required: true, executionClass: 'deterministic-process', command: [process.execPath, '-e', "process.exit(require('node:fs').readFileSync('OTHER.md','utf8').includes('verified repair') ? 0 : 1)"] }] : [];
   descriptor.extensions = descriptor.extensions.map(item => ({ ...item, digest: item.id === engine.id ? engine.digest : runtime.digest }));
   await harness.projectRegistry.register(descriptor, { expectedRevision: 0, commandId: 'quality-e2e-project' });
@@ -345,12 +354,16 @@ test('overlapping findings share one repair dispatch with evidence per Finding',
 });
 
 test('failed final Gate creates bounded diagnostic review and repair in the same Run', async t => {
-  const fixture = await setup({ gateFailureUntilRepair: true });
+  const fixture = await setup({ gateFailureUntilRepair: true, qualityReviewLimit: { mode: 'bounded', maxRechecks: 3 } });
   t.after(() => rm(fixture.root, { recursive: true, force: true }));
+  let startCalls = 0;
+  const start = fixture.harness.startLifecyclePlan.bind(fixture.harness);
+  fixture.harness.startLifecyclePlan = (...args) => { startCalls += 1; return start(...args); };
   const onGateProgress = () => {};
   const preflight = await fixture.harness.createExecutionReadinessReport(fixture.plan, { onGateProgress });
   const completed = await fixture.harness.executeVisibleLifecyclePlan(fixture.plan, { commandId: 'quality-gate-diagnostic', preflightReport: preflight, onGateProgress });
   assert.equal(completed.status, 'closed');
+  assert.equal(startCalls, 1);
   assert.equal(fixture.host.stats.spawnCount, 6);
   assert.equal(completed.state.features.some(feature => feature.id.startsWith('quality-gate-diagnostic-')), true);
   assert.equal(completed.state.findings.find(item => item.id === externalFinding.id)?.status, 'resolved');
@@ -398,7 +411,7 @@ test('visible quality lifecycle resumes an attested active Lease after coordinat
   const resumedPreflight = await restartedHarness.createExecutionReadinessReport(fixture.plan);
   assert.equal(resumedPreflight.executionReady, true);
   assert.equal(resumedPreflight.checks.find(check => check.id === 'active-leases').details.observations.length, 1);
-  const completed = await restartedHarness.executeVisibleLifecyclePlan(fixture.plan, { commandId: 'quality-after-restart', preflightReport: resumedPreflight, maxConcurrency: 1 });
+  const completed = await restartedHarness.executeVisibleLifecyclePlan(fixture.plan, { commandId: 'quality-before-restart', preflightReport: resumedPreflight, maxConcurrency: 1 });
   assertClosedQualityLoop(completed.state);
 });
 
@@ -507,4 +520,75 @@ test('a finding repeated by re-review is reopened, repaired in a new round, and 
   assert.deepEqual(completed.state.features.map(feature => feature.metadata.stage), ['quality', 'quality-repair', 'quality-recheck', 'quality-repair', 'quality-recheck']);
   assert.equal(completed.state.findings[0].status, 'resolved');
   assert.equal(completed.state.findings[0].history.length, 1);
+});
+
+test('default quality budget stops after two re-reviews and survives a new plan', async t => {
+  const fixture = await setup({ repeatFindingCount: 2 });
+  t.after(() => rm(fixture.root, { recursive: true, force: true }));
+  const preflight = await fixture.harness.createExecutionReadinessReport(fixture.plan);
+  const stopped = await fixture.harness.executeVisibleLifecyclePlan(fixture.plan, { commandId: 'quality-budget-default', preflightReport: preflight });
+  assert.equal(stopped.status, 'attention-required');
+  assert.equal(stopped.reason, 'quality-review-limit-reached');
+  assert.equal(stopped.state.features.filter(feature => feature.metadata?.qualityReview === true).length, 3);
+  assert.equal(fixture.host.stats.spawnCount, 6);
+  await assert.rejects(
+    () => fixture.harness.createLifecyclePlan({ projectId: stopped.state.projectId, action: 'quality', target: 'V3.8.4', arguments: ['full'], extensionId: 'cardworld-engine-profile', executionWorkspaceRoot: fixture.workspace }),
+    error => error.code === 'QUALITY_REVIEW_LIMIT_REACHED',
+  );
+});
+
+test('repair-known fixes the frozen open ledger without dispatching a reviewer', async t => {
+  const fixture = await setup({ preset: 'review-only' });
+  t.after(() => rm(fixture.root, { recursive: true, force: true }));
+  const firstPreflight = await fixture.harness.createExecutionReadinessReport(fixture.plan);
+  const reviewed = await fixture.harness.executeVisibleLifecyclePlan(fixture.plan, { commandId: 'quality-known-review', preflightReport: firstPreflight });
+  assert.equal(reviewed.state.findings[0].status, 'open');
+  const plan = await fixture.harness.createLifecyclePlan({ projectId: reviewed.state.projectId, action: 'quality', target: 'V3.8.4', arguments: ['repair-known'], extensionId: 'cardworld-engine-profile', executionWorkspaceRoot: fixture.workspace });
+  assert.equal(plan.stopCondition.type, 'routine-version-exit');
+  assert.equal(plan.run.features.every(feature => feature.metadata.stage === 'quality-repair' && feature.metadata.repairOnly === true), true);
+  assert.equal(plan.run.features.every(feature => feature.metadata.qualityReview !== true), true);
+  const preflight = await fixture.harness.createExecutionReadinessReport(plan);
+  const repaired = await fixture.harness.executeVisibleLifecyclePlan(plan, { commandId: 'quality-known-repair', preflightReport: preflight });
+  assert.equal(repaired.status, 'attention-required');
+  assert.equal(repaired.reason, 'routine-version-exit-decision-required');
+  assert.equal(repaired.state.findings.every(item => item.status === 'resolved'), true);
+  assert.equal(repaired.state.features.some(feature => feature.metadata?.qualityReview === true), false);
+  const decided = await fixture.harness.kernel.recordDecision(repaired.state.projectId, repaired.state.runId, { id: 'routine-version-exit', actor: 'test-user', decision: 'approved' }, { expectedRevision: repaired.state.revision, commandId: 'quality-known-exit-decision' });
+  const resumedPreflight = await fixture.harness.createExecutionReadinessReport(plan);
+  const closed = await fixture.harness.executeVisibleLifecyclePlan(plan, { commandId: 'quality-known-repair', preflightReport: resumedPreflight });
+  assert.equal(closed.status, 'closed');
+  assert.equal(closed.state.revision > decided.state.revision, true);
+  const receipt = JSON.parse(await readFile(closed.state.receipts.find(item => item.kind === 'run-closure').file, 'utf8'));
+  assert.equal(receipt.qualityConclusion.mode, 'known-findings-repair');
+  assert.equal(receipt.qualityConclusion.fullReviewPerformed, false);
+  assert.equal(receipt.versionExit.status, 'ready-for-next-version');
+  assert.equal(receipt.lifecycleInvocation.startCount, 1);
+});
+
+test('declared major release can exceed the routine re-review limit in one invocation', async t => {
+  const fixture = await setup({ preset: 'release-exhaustive', repeatFindingCount: 2, qualityReviewLimit: { mode: 'bounded', maxRechecks: 0 }, majorReleaseTargets: ['V3.8.4'] });
+  t.after(() => rm(fixture.root, { recursive: true, force: true }));
+  assert.deepEqual(fixture.plan.run.profileConfig.qualityReviewLimit, { mode: 'unbounded' });
+  const preflight = await fixture.harness.createExecutionReadinessReport(fixture.plan);
+  const reviewed = await fixture.harness.executeVisibleLifecyclePlan(fixture.plan, { commandId: 'major-release-once', preflightReport: preflight });
+  assert.equal(reviewed.status, 'attention-required');
+  assert.equal(reviewed.reason, 'user-code-review-required');
+  await fixture.harness.kernel.recordDecision(reviewed.state.projectId, reviewed.state.runId, { id: 'user-code-review', actor: 'test-user', decision: 'approved' }, { expectedRevision: reviewed.state.revision, commandId: 'major-release-user-review' });
+  const resumedPreflight = await fixture.harness.createExecutionReadinessReport(fixture.plan);
+  const completed = await fixture.harness.executeVisibleLifecyclePlan(fixture.plan, { commandId: 'major-release-once', preflightReport: resumedPreflight });
+  assert.equal(completed.status, 'closed');
+  assert.equal(completed.state.features.filter(feature => feature.metadata?.qualityReview === true).length, 4);
+  const receipt = JSON.parse(await readFile(completed.state.receipts.find(item => item.kind === 'run-closure').file, 'utf8'));
+  assert.equal(receipt.qualityConclusion.mode, 'major-release-exhaustive');
+  assert.equal(receipt.lifecycleInvocation.startCount, 1);
+});
+
+test('unbounded major release stops when a repair makes no source progress', async t => {
+  const fixture = await setup({ preset: 'release-exhaustive', repeatFindingOnce: true, majorReleaseTargets: ['V3.8.4'] });
+  t.after(() => rm(fixture.root, { recursive: true, force: true }));
+  const preflight = await fixture.harness.createExecutionReadinessReport(fixture.plan);
+  const stopped = await fixture.harness.executeVisibleLifecyclePlan(fixture.plan, { commandId: 'major-release-stalled', preflightReport: preflight });
+  assert.equal(stopped.status, 'attention-required');
+  assert.equal(stopped.reason, 'quality-review-no-progress');
+  assert.equal(stopped.state.features.filter(feature => feature.metadata?.qualityReview === true).length, 2);
 });

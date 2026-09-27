@@ -39,6 +39,8 @@ export const createCardWorldProjectDescriptor = ({
   maxConcurrency = AUTO_CONCURRENCY,
   actionExecution = {},
   knownFindingInventories,
+  qualityReviewLimit = { mode: 'bounded', maxRechecks: 2 },
+  majorReleaseTargets = [],
 } = {}) => {
   assert(workspaceRoot && isAbsolute(workspaceRoot), 'CARDWORLD_WORKSPACE_REQUIRED', 'CardWorld descriptor requires an absolute workspaceRoot.');
   assert(actionExecution && typeof actionExecution === 'object' && !Array.isArray(actionExecution), 'CARDWORLD_ACTION_EXECUTION_INVALID', 'CardWorld actionExecution must be an object.');
@@ -77,6 +79,8 @@ export const createCardWorldProjectDescriptor = ({
       runtimeConfigs,
       actionPaths: structuredClone(CARDWORLD_ACTION_PATHS),
       qualityVerificationOutputs: [...qualityVerificationOutputs],
+      qualityReviewLimit: structuredClone(qualityReviewLimit),
+      majorReleaseTargets: [...majorReleaseTargets],
       ...(Object.keys(actionExecution).length ? { actionExecution: structuredClone(actionExecution) } : {}),
       ...(knownFindingInventories && Object.keys(knownFindingInventories).length ? { knownFindingInventories: structuredClone(knownFindingInventories) } : {}),
       recovery: { automaticLineageResolution: true, automaticOrdinaryResume: true, automaticVerifiedHardRecovery: true, preserveSupersededRuns: true },

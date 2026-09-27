@@ -61,14 +61,16 @@ node <Harness源码根>/integrations/codex/agent-harness-codex/scripts/local-sou
 ```text
 node <Harness源码根>/integrations/codex/agent-harness-codex/scripts/local-source-lifecycle-intent.mjs \
   --bindings-dir <Harness数据根>/development/local-codex/.plugin-data \
-  --alias <项目别名> --action quality --target <版本>
+  --alias <项目别名> --action quality --target <版本> [--preset repair-known]
 ```
 
-入口核验绑定、Git 工作区身份、Workflow 与当前源码摘要，返回 `coordinatorEntrypoint` 和 `coordinationIntent`。在同一 Codex 任务中先调用 `node <coordinatorEntrypoint> --intent <coordinationIntent> --preflight-only` 可执行完整计划和动作预检，不创建 Run；需要按终端请求调用原生 collaboration 工具。确认预检通过并决定启动后，再用新生成的意图调用 `node <coordinatorEntrypoint> --intent <coordinationIntent>`，保持终端可观察，并依次执行 Coordinator 发出的原生 collaboration 请求。`spawn_agent` 的 `message` 必须逐字使用请求中的完整生成 Prompt；不要缩写或用路径引用代替。仅在动作预检返回 `executionReady: true` 后 Coordinator 才创建 Run。审查发现问题时，继续处理修复、复审和 Gate，直到 `closed` 或明确的 `attention-required`。
+入口核验绑定、Git 工作区身份、Workflow 与当前源码摘要，返回 `coordinatorEntrypoint` 和 `coordinationIntent`。在同一 Codex 任务中先调用 `node <coordinatorEntrypoint> --intent <coordinationIntent> --preflight-only` 可执行完整计划和动作预检，不创建 Run；需要按终端请求调用原生 collaboration 工具。确认预检通过并决定启动后，再用新生成的意图调用 `node <coordinatorEntrypoint> --intent <coordinationIntent>` 一次，保持终端可观察，并依次执行 Coordinator 发出的原生 collaboration 请求。流程切换、复审和恢复通过当前 Coordinator 与 Run Authority 推进，不重复发送 `h:...` 或再次启动生命周期 Coordinator。`spawn_agent` 的 `message` 必须逐字使用请求中的完整生成 Prompt；不要缩写或用路径引用代替。仅在动作预检返回 `executionReady: true` 后 Coordinator 才创建 Run。审查发现问题时，按配置的复审预算处理修复、复审和 Gate，直到 `closed` 或明确的 `attention-required`。
 
 也可以在业务项目的 `.codex/hooks.json` 中配置由 `local-source-hook.mjs --print-config --bindings-dir <绑定目录>` 生成的 `UserPromptSubmit` Hook。项目 Hook 只保存指向 Harness 源码和外部数据根的命令，项目仓库不保存 Harness 实现或运行状态。经 Codex 审核并信任该项目 Hook 后，在绑定的项目任务中发送 `h:local engine quality V3.8.4`。Hook 校验到 source-link 源码或绑定摘要过期时，只在进程实际工作目录与已绑定项目 checkout 一致的情况下自动执行 `dev sync`，重新验证绑定后继续解析原命令；H4 或同步失败时返回 Codex `decision:block`，不生成执行意图。已识别的本地质量命令若无法生成可信 Coordinator 意图，也会被阻断，不得用手动构建命令代替。`h:local where engine` 平时只读，但绑定过期时也会触发这次同步。安装态 Hook 忽略 `h:local`，本地 Hook 忽略安装态的 `h:engine`，安装态命令不自动同步。源码模式的原生工具回执由当前 Codex session rollout 核验，不依赖安装态 `PostToolUse` Hook。新建任务或变更 Hook 定义后需重新核对信任状态；旧 Hook 配置的 `timeout: 15` 应使用 `--print-config` 生成的 `timeout: 120` 更新。
 
 可见 Agent Prompt 1.4 将完整的 Dispatch packet 写到控制根下的摘要绑定文件。Agent 必须读取该文件并校验精确字节的 SHA-256。读取 Coordinator 的终端请求时要给足输出预算；若输出出现截断标记，不能据此调用 `spawn_agent`。Codex 当前宿主会加密长 `spawn_agent.message`；有些宿主版本也不会在工具输出附带 `executed_tool_calls`。本地 Host 通过确定性任务名、原生调用/输出的 `call_id` 与 `turn_id`、返回的任务名和后续 Agent 可见性核验派发；若宿主提供截断元数据，则额外严格核对。Host Receipt 将证明强度标为 `host-redacted-message`，不宣称能独立复算实际 Prompt 字节；操作人仍须逐字传递生成 Prompt。字段存在但冲突、任务名错配或 Agent 不可观察时，继续拒绝绑定。
+
+常规质量命令默认初审后最多复审两次。已有权威问题需要一次性收口时，使用 `h:local engine quality <版本> repair-known`；它只修复当前开放问题、跑最终 Gate，并在 `routine-version-exit` 决定后生成注明未做全面复审的常规准出凭证。只有 Project Descriptor 将目标列入 `majorReleaseTargets` 时，才可显式使用 `h:local engine quality <大版本> release-exhaustive`。同一流程内不要重复发送命令。
 
 ### 本地故障的分级与接续
 

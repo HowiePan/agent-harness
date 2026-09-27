@@ -1,6 +1,7 @@
 import { assert } from '../../../common/errors.mjs';
 import { approvalSatisfied, orderedBarrier } from '../../../flow-kit/primitives.mjs';
 import { createQualityFollowUpFeatures, hasCurrentCleanQualityReview, validateQualityReviewPolicies } from '../../../flow-kit/profiles/quality-loop.mjs';
+import { normalizeQualityReviewLimit, qualityReviewBudgetExhausted } from '../../../flow-kit/profiles/quality-budget.mjs';
 
 const defaultResolveItemId = feature => feature.metadata.itemId;
 
@@ -17,6 +18,8 @@ export const createBatchProductionProfile = ({
 
   validateConfig(inputConfig, features) {
     const config = normalizeConfig(structuredClone(inputConfig));
+    const qualityReviewLimit = normalizeQualityReviewLimit(config.qualityReviewLimit);
+    assert(qualityReviewLimit.mode === 'bounded', 'QUALITY_UNBOUNDED_MODE_DENIED', 'Batch quality review requires a bounded review limit.');
     assert(config.activeBatch, 'ACTIVE_BATCH_REQUIRED', 'Batch Profile requires an active batch.');
     const batches = Array.isArray(config.batches) ? config.batches.map(batch => ({ id: String(batch.id), order: Number(batch.order), status: batch.status ?? 'planned' })) : [{ id: String(config.activeBatch), order: 1, status: 'active' }];
     assert(batches.some(batch => batch.id === config.activeBatch), 'ACTIVE_BATCH_UNKNOWN', 'The active batch must exist in the batch list.');
@@ -35,6 +38,7 @@ export const createBatchProductionProfile = ({
       requireBatchCloseDecision: config.requireBatchCloseDecision !== false,
       requireBatchLaunchDecision: config.requireBatchLaunchDecision !== false,
       requireFinalQualityReview: config.requireFinalQualityReview === true,
+      qualityReviewLimit,
     };
   },
 
@@ -79,7 +83,7 @@ export const createBatchProductionProfile = ({
     if (config.requireFinalQualityReview) {
       const qualityRoots = [...new Set(state.features.filter(feature => feature.metadata?.qualityReview).map(feature => feature.metadata.qualityRoot))];
       const missingQualityRoot = qualityRoots.find(root => !hasCurrentCleanQualityReview(state, root));
-      if (!qualityRoots.length || missingQualityRoot) return { ok: false, reason: `current-source-clean-quality-review-required${missingQualityRoot ? `:${missingQualityRoot}` : ''}` };
+      if (!qualityRoots.length || missingQualityRoot) return { ok: false, reason: missingQualityRoot && qualityReviewBudgetExhausted(state, missingQualityRoot) ? `quality-review-limit-reached:${missingQualityRoot}` : `current-source-clean-quality-review-required${missingQualityRoot ? `:${missingQualityRoot}` : ''}` };
     }
     const items = [...new Set(state.features.filter(feature => !feature.metadata.capabilityOwner).map(resolveItemId).filter(Boolean))];
     const approved = (state, itemId, suffix) => decisionKeys(itemId, suffix).some(decisionId => approvalSatisfied(state, decisionId));

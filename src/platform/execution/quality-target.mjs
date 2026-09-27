@@ -6,10 +6,10 @@ const terminalRun = run => run?.status === 'closed'
   || run?.status === 'superseded'
   || (Array.isArray(run?.features) && run.features.length > 0 && run.features.every(feature => feature.state === 'completed'));
 const workflowIdOf = run => run?.metadata?.workflow?.id ?? run?.metadata?.commandIntent?.workflowId ?? null;
-const matchesTarget = ({ run, projectId, workflowId, target }) => run?.projectId === projectId
+const matchesTarget = ({ run, projectId, workflowId, target, includeNonterminal = false }) => run?.projectId === projectId
   && run?.metadata?.commandIntent?.target === target
   && workflowIdOf(run) === workflowId
-  && terminalRun(run);
+  && (includeNonterminal || terminalRun(run));
 const chronological = (left, right) => String(left.createdAt ?? '').localeCompare(String(right.createdAt ?? '')) || String(left.runId).localeCompare(String(right.runId));
 const findingStatus = value => ['open', 'resolved', 'rejected', 'superseded'].includes(value) ? value : 'open';
 
@@ -36,6 +36,12 @@ const mergeFinding = (ledger, finding, provenance) => {
     evidenceRefs: [...new Set([...(prior?.evidenceRefs ?? []), ...observation.evidenceRefs])].sort(),
     resolutionEvidenceRefs: observation.resolutionEvidenceRefs,
     observations: [...(prior?.observations ?? []), observation],
+    affectedPaths: [...new Set(finding.affectedPaths ?? prior?.affectedPaths ?? (finding.sourcePath ? [finding.sourcePath] : []))],
+    evidence: [...new Set([...(prior?.evidence ?? []), ...(finding.evidence ?? [])])],
+    symbols: [...new Set(finding.symbols ?? prior?.symbols ?? [])],
+    contracts: [...new Set(finding.contracts ?? prior?.contracts ?? [])],
+    generatedOutputs: [...new Set(finding.generatedOutputs ?? prior?.generatedOutputs ?? [])],
+    conflictKeys: [...new Set(finding.conflictKeys ?? prior?.conflictKeys ?? [])],
     ...(finding.sourcePath ? { sourcePath: finding.sourcePath } : prior?.sourcePath ? { sourcePath: prior.sourcePath } : {}),
   });
 };
@@ -73,7 +79,7 @@ export const assertQualityTargetSnapshot = input => {
   return structuredClone(input);
 };
 
-export const deriveQualityTargetSnapshot = ({ projectId, workflowId, target, sourceDigest, runs = [], legacyInventory = null } = {}) => {
+export const deriveQualityTargetSnapshot = ({ projectId, workflowId, target, sourceDigest, runs = [], legacyInventory = null, includeNonterminal = false } = {}) => {
   assert(typeof projectId === 'string' && projectId.length > 0 && typeof workflowId === 'string' && workflowId.length > 0 && typeof target === 'string' && target.length > 0 && digestPattern.test(sourceDigest ?? ''), 'QUALITY_TARGET_INPUT_INVALID', 'Quality Target derivation requires Project, Workflow, target, and source identities.');
   assert(Array.isArray(runs), 'QUALITY_TARGET_RUNS_INVALID', 'Quality Target derivation requires an array of Run Authority states.');
   const ledger = new Map();
@@ -90,7 +96,14 @@ export const deriveQualityTargetSnapshot = ({ projectId, workflowId, target, sou
       observedAt: null,
     });
   }
-  const selected = runs.filter(run => matchesTarget({ run, projectId, workflowId, target })).sort(chronological);
+  const selected = runs.filter(run => matchesTarget({ run, projectId, workflowId, target, includeNonterminal })).sort(chronological);
+  const reviewHistory = runs.filter(run => matchesTarget({ run, projectId, workflowId, target, includeNonterminal: true }))
+    .flatMap(run => (run.features ?? []).filter(feature => feature.metadata?.qualityReview === true && feature.state === 'completed')
+      .map(feature => ({ runId: run.runId, featureId: feature.id, sourceDigest: run.submissions?.find(item => item.featureId === feature.id)?.outputSourceDigest ?? run.sourceDigest })))
+    .sort((left, right) => `${left.runId}:${left.featureId}`.localeCompare(`${right.runId}:${right.featureId}`));
+  const exhaustiveRunIds = runs.filter(run => matchesTarget({ run, projectId, workflowId, target, includeNonterminal: true })
+    && run.metadata?.commandIntent?.action === 'quality' && run.metadata.commandIntent.preset === 'release-exhaustive')
+    .map(run => run.runId).sort();
   for (const run of selected) {
     for (const finding of run.findings ?? []) mergeFinding(ledger, finding, {
       runId: run.runId,
@@ -120,9 +133,33 @@ export const deriveQualityTargetSnapshot = ({ projectId, workflowId, target, sou
     sourceDigest,
     runs: runRefs,
     findings,
+    reviewHistory,
+    exhaustiveRunIds,
     migration: legacyInventory ? { source: 'project-descriptor', inventoryDigest: legacyInventory.inventoryDigest } : null,
   };
   return Object.freeze({ ...body, targetDigest: qualityTargetDigest(body) });
+};
+
+export const createQualityRepairInventorySnapshot = targetInput => {
+  const target = assertQualityTargetSnapshot(targetInput);
+  const findings = target.findings.filter(item => item.status === 'open').map(item => ({
+    id: item.id, severity: item.severity, summary: item.summary,
+    affectedPaths: [...new Set(item.affectedPaths?.length ? item.affectedPaths : item.sourcePath ? [item.sourcePath] : [])],
+    evidence: [...new Set([...(item.evidence ?? []), ...item.evidenceRefs])],
+    evidenceRefs: [...item.evidenceRefs], symbols: [...(item.symbols ?? [])], contracts: [...(item.contracts ?? [])],
+    generatedOutputs: [...(item.generatedOutputs ?? [])], conflictKeys: [...(item.conflictKeys ?? [])],
+  }));
+  assert(findings.length > 0, 'QUALITY_REPAIR_INVENTORY_EMPTY', 'Repair-only quality flow requires at least one open authoritative Finding.');
+  for (const finding of findings) assert(finding.affectedPaths.length > 0 && finding.evidence.length > 0, 'QUALITY_REPAIR_FINDING_INCOMPLETE', `Finding ${finding.id} requires affected paths and evidence for repair-only execution.`);
+  const body = { version: '1.0', kind: 'quality-repair-inventory', projectId: target.projectId, workflowId: target.workflowId, target: target.target, sourceDigest: target.sourceDigest, targetDigest: target.targetDigest, findings };
+  return Object.freeze({ ...body, inventoryDigest: digestJson(body) });
+};
+
+export const assertQualityRepairInventorySnapshot = input => {
+  assert(input?.version === '1.0' && input.kind === 'quality-repair-inventory' && Array.isArray(input.findings) && input.findings.length > 0, 'QUALITY_REPAIR_INVENTORY_INVALID', 'Repair-only inventory is invalid.');
+  assert(input.inventoryDigest === digestJson(withoutKeys(input, ['inventoryDigest'])), 'QUALITY_REPAIR_INVENTORY_DIGEST_MISMATCH', 'Repair-only inventory digest does not match its contents.');
+  for (const item of input.findings) assert(item?.id && ['P0', 'P1', 'P2', 'P3'].includes(item.severity) && Array.isArray(item.affectedPaths) && item.affectedPaths.length > 0 && Array.isArray(item.evidence) && item.evidence.length > 0, 'QUALITY_REPAIR_FINDING_INCOMPLETE', 'Repair-only Finding lacks evidence or paths.');
+  return structuredClone(input);
 };
 
 export const qualityInventoryDigest = inventory => digestJson(withoutKeys(inventory, ['inventoryDigest']));

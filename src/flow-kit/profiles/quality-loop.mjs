@@ -2,6 +2,7 @@ import { sha256 } from '../../common/canonical.mjs';
 import { assert } from '../../common/errors.mjs';
 import { defineNodeTaskContract, taskFeatureProjection } from '../../common/task-contract.mjs';
 import { slash } from '../../common/paths.mjs';
+import { qualityReviewBudgetExhausted } from './quality-budget.mjs';
 
 const unique = values => [...new Set(values ?? [])];
 const safeQualityPath = (value, code, label) => {
@@ -23,6 +24,15 @@ const cleanReviewSubmission = (state, feature) => {
 export const hasCurrentCleanQualityReview = (state, qualityRoot = null) => state.features
   .filter(feature => feature.metadata?.qualityReview === true && (!qualityRoot || feature.metadata.qualityRoot === qualityRoot))
   .some(feature => feature.state === 'completed' && cleanReviewSubmission(state, feature));
+
+export const qualityReviewNoProgress = (state, qualityRoot = null) => {
+  if (state.profile?.config?.qualityReviewLimit?.mode !== 'unbounded') return false;
+  const latestReview = [...state.features].reverse().find(feature => feature.metadata?.qualityReview === true && feature.state === 'completed' && (!qualityRoot || feature.metadata.qualityRoot === qualityRoot));
+  if (!latestReview) return false;
+  const submission = state.submissions.find(item => item.featureId === latestReview.id && !item.supersededAt);
+  return submission?.outputSourceDigest === state.sourceDigest
+    && state.features.some(feature => feature.metadata?.repairFindingId && feature.metadata?.qualityRoot === latestReview.metadata.qualityRoot && Number(feature.metadata.reviewRound ?? 0) >= Number(latestReview.metadata.reviewRound ?? 0) && feature.state === 'completed');
+};
 
 export const validateQualityReviewPolicies = features => {
   for (const feature of features) {
@@ -52,7 +62,7 @@ const repairGroups = findings => {
   return groups;
 };
 
-const repairsForFindings = ({ feature, findings }) => repairGroups(findings).map(group => {
+export const repairsForFindings = ({ feature, findings, dependsOn = [feature.id], repairOnly = false }) => repairGroups(findings).map(group => {
   const finding = group[0];
   const findingIds = group.map(item => item.id);
   const qualityRoot = feature.metadata.qualityRoot ?? feature.logicalRoot;
@@ -85,7 +95,7 @@ const repairsForFindings = ({ feature, findings }) => repairGroups(findings).map
     logicalRoot: `finding:${finding.id}`,
     laneId: `finding:${finding.id}`,
     ...taskProjection,
-    dependsOn: [feature.id],
+    dependsOn,
     allowedPaths: affectedPaths,
     forbiddenPaths: feature.forbiddenPaths,
     symbols: finding.symbols,
@@ -106,6 +116,7 @@ const repairsForFindings = ({ feature, findings }) => repairGroups(findings).map
       findingEvidence: finding.evidence,
       repairFindingId: finding.id,
       repairFindingIds: findingIds,
+      ...(repairOnly ? { repairOnly: true } : {}),
       verificationOutputPaths: verificationOutputs,
       repairFindings: group.map(item => ({ id: item.id, severity: item.severity, summary: item.summary, evidence: item.evidence, affectedPaths: item.affectedPaths })),
     },
@@ -114,7 +125,9 @@ const repairsForFindings = ({ feature, findings }) => repairGroups(findings).map
 
 const nextRecheck = ({ state, feature }) => {
   const root = feature.metadata.qualityRoot;
+  if (state.profile?.config?.repairOnly || qualityReviewBudgetExhausted(state, root)) return [];
   const rootFeatures = state.features.filter(item => item.metadata?.qualityRoot === root);
+  if (qualityReviewNoProgress(state, root)) return [];
   const repairs = rootFeatures.filter(item => item.metadata?.repairFindingId);
   const open = state.findings.some(finding => finding.status !== 'resolved' && repairs.some(item => (item.metadata.repairFindingIds ?? [item.metadata.repairFindingId]).includes(finding.id)));
   if (open || repairs.some(item => item.state !== 'completed') || hasCurrentCleanQualityReview(state, root)) return [];
@@ -179,12 +192,14 @@ export const createQualityFollowUpFeatures = ({ state, feature, findings, result
 };
 
 export const createQualityGateDiagnosticReview = ({ state, gateResults }) => {
+  if (state?.profile?.config?.repairOnly) return null;
   // Environment failures need host/toolchain repair, not a source-code Finding.
   const failed = gateResults.filter(gate => gate.status === 'failed');
   if (!failed.length) return null;
   const prior = [...state.features].reverse().find(feature => feature.metadata?.qualityReview === true && feature.metadata?.qualityFindingPolicy === 'repair-and-rereview');
   if (!prior || !state.features.every(feature => feature.state === 'completed')) return null;
   const qualityRoot = prior.metadata.qualityRoot ?? prior.logicalRoot;
+  if (qualityReviewBudgetExhausted(state, qualityRoot)) return null;
   const signature = sha256(`${qualityRoot}:${state.sourceDigest}:${failed.map(gate => gate.id).sort().join(',')}`);
   const id = `quality-gate-diagnostic-${signature.slice(0, 24)}`;
   if (state.features.some(feature => feature.id === id)) return null;

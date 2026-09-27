@@ -35,7 +35,7 @@ test('lineage resolver selects every safe lifecycle continuation without user ch
   const expiredLease = { ...healthyLease, lastHeartbeatAt: '2026-09-15T11:55:00.000Z' };
   assert.equal(resolveRunLineage({ plan, states: [state({ status: 'running', leases: [expiredLease] })], now: () => now }).action, 'ordinary-resume');
   const incompatible = state({ runId: 'old', planDigest: 'd'.repeat(64) });
-  assert.equal(resolveRunLineage({ plan, states: [incompatible], now: () => now }).action, 'supersede-and-start');
+  assert.equal(resolveRunLineage({ plan, states: [incompatible], now: () => now }).reasonCode, 'EXISTING_RUN_REQUIRES_INTERNAL_CONTINUATION');
   const incompatibleLive = state({ runId: 'old-live', planDigest: 'd'.repeat(64), status: 'running', leases: [healthyLease] });
   const blocked = resolveRunLineage({ plan, states: [incompatibleLive], now: () => now });
   assert.equal(blocked.action, 'block');
@@ -46,7 +46,7 @@ test('legacy visible Leases without a stored timeout expire under the visible he
   const oldLease = { leaseId: 'legacy-visible', dispatchId: 'dispatch-visible', featureId: 'feature', status: 'active', lastHeartbeatAt: '2026-09-15T11:55:00.000Z' };
   const oldRun = state({ runId: 'old-visible', planDigest: 'd'.repeat(64), status: 'running', leases: [oldLease], dispatches: [{ dispatchId: 'dispatch-visible', status: 'assigned', execution: { runtime: { mode: 'conversation-visible' } } }] });
   assert.equal(leaseHealth(oldRun, Date.parse(now))[0].hardExpired, true);
-  assert.equal(resolveRunLineage({ plan, states: [oldRun], now: () => now }).action, 'supersede-and-start');
+  assert.equal(resolveRunLineage({ plan, states: [oldRun], now: () => now }).reasonCode, 'EXISTING_RUN_REQUIRES_INTERNAL_CONTINUATION');
 });
 
 test('lineage resolution is short-lived and invalidated by any candidate-set or Authority change', () => {

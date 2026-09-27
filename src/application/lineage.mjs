@@ -69,8 +69,17 @@ export const resolveRunLineage = ({ plan, states, currentLineage = null, policy 
   let selectedRunId = plan.run.runId;
   let blockers = [];
 
+  const priorExhaustiveRunIds = plan.intent.preset === 'release-exhaustive'
+    ? (plan.intent.qualityTarget?.exhaustiveRunIds ?? []).filter(runId => runId !== plan.run.runId)
+    : [];
+
   const liveIncompatible = candidates.filter(candidate => candidate.runId !== exact?.runId && candidate.activeLeaseCount > candidate.expiredLeaseCount);
-  if (liveIncompatible.length) {
+  if (priorExhaustiveRunIds.length) {
+    action = 'block';
+    selectedRunId = null;
+    reasonCode = 'EXHAUSTIVE_RELEASE_ALREADY_STARTED';
+    blockers = priorExhaustiveRunIds.map(runId => ({ code: reasonCode, message: 'The major-release exhaustive review must continue its original Run.', runId }));
+  } else if (liveIncompatible.length) {
     action = 'block';
     selectedRunId = null;
     reasonCode = 'INCOMPATIBLE_LIVE_LEASE';
@@ -92,8 +101,20 @@ export const resolveRunLineage = ({ plan, states, currentLineage = null, policy 
     }
   } else {
     if (candidates.length) {
-      action = 'supersede-and-start';
-      reasonCode = 'INCOMPATIBLE_RUNS_SAFE_TO_SUPERSEDE';
+      if (plan.intent.action === 'quality' && plan.intent.preset === 'release-exhaustive') {
+        action = 'block';
+        selectedRunId = null;
+        reasonCode = 'EXHAUSTIVE_RELEASE_ALREADY_STARTED';
+        blockers = [{ code: reasonCode, message: 'The major-release exhaustive review must continue its original Run and cannot start a second invocation.' }];
+      } else if (candidates.some(candidate => candidate.status !== 'closed')) {
+        action = 'block';
+        selectedRunId = null;
+        reasonCode = 'EXISTING_RUN_REQUIRES_INTERNAL_CONTINUATION';
+        blockers = candidates.filter(candidate => candidate.status !== 'closed').map(candidate => ({ code: reasonCode, message: 'An unfinished Run must be continued internally; a new lifecycle command cannot replace it.', runId: candidate.runId }));
+      } else {
+        action = 'supersede-and-start';
+        reasonCode = 'INCOMPATIBLE_RUNS_SAFE_TO_SUPERSEDE';
+      }
     }
   }
 

@@ -22,6 +22,8 @@
     "knownFindingInventories": { "type": "object", "additionalProperties": { "type": "object" } },
     "actionPaths": { "type": "object", "additionalProperties": { "type": "array", "items": { "type": "string" } } },
     "qualityVerificationOutputs": { "type": "array", "uniqueItems": true, "items": { "type": "string", "minLength": 1 } },
+    "qualityReviewLimit": { "oneOf": [{ "type": "object", "required": ["mode", "maxRechecks"], "properties": { "mode": { "const": "bounded" }, "maxRechecks": { "type": "integer", "minimum": 0 } }, "additionalProperties": false }, { "type": "object", "required": ["mode"], "properties": { "mode": { "const": "unbounded" } }, "additionalProperties": false }] },
+    "majorReleaseTargets": { "type": "array", "uniqueItems": true, "items": { "type": "string", "minLength": 1 } },
     "excluded": { "type": "array", "uniqueItems": true, "items": { "type": "string" } }
   },
   "additionalProperties": false,
