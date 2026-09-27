@@ -549,6 +549,9 @@ test('repair-known fixes the frozen open ledger without dispatching a reviewer',
   assert.equal(plan.run.features.every(feature => feature.metadata.qualityReview !== true), true);
   const preflight = await fixture.harness.createExecutionReadinessReport(plan);
   const repaired = await fixture.harness.executeVisibleLifecyclePlan(plan, { commandId: 'quality-known-repair', preflightReport: preflight });
+  const priorReview = await fixture.harness.authorityStore.read(reviewed.state.projectId, reviewed.state.runId);
+  assert.equal(priorReview.status, 'superseded');
+  assert.equal(priorReview.metadata.supersededByRunId, repaired.state.runId);
   assert.equal(repaired.status, 'attention-required');
   assert.equal(repaired.reason, 'routine-version-exit-decision-required');
   assert.equal(repaired.state.findings.every(item => item.status === 'resolved'), true);

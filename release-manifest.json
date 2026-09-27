@@ -812,8 +812,8 @@
     },
     {
       "path": "src/application/harness.mjs",
-      "sha256": "ea9090752fc349a9ca6184b55838e48076f78b47e25c6236d51ae3df0ac28970",
-      "size": 73722
+      "sha256": "53a45612ac7df396cc5c7d68edc90b6f2d34c49659f4c59eb11703cd4d51f854",
+      "size": 75348
     },
     {
       "path": "src/application/installation.mjs",
@@ -1347,8 +1347,8 @@
     },
     {
       "path": "src/platform/execution/quality-target.mjs",
-      "sha256": "369928581daa8695d063ec918a4c469ec6f7945b5ddcefbaf01559102c3c3053",
-      "size": 13396
+      "sha256": "41227f5d34b9530b52d0fd17caf67de864bf7df06cd1bb5ad8ead54d69116763",
+      "size": 13955
     },
     {
       "path": "src/platform/execution/result-contract.mjs",
@@ -1607,8 +1607,8 @@
     },
     {
       "path": "src/platform/workflow/gates/project-gate-runner.mjs",
-      "sha256": "0472f4ca0984f5a48dbb40f1ff1861d762be4895f0959385d983d4608bd0d4f1",
-      "size": 19606
+      "sha256": "7489a884aba62a8464090204eaf7f5649d87df30edb73f03fbeae7f4556fec16",
+      "size": 19753
     },
     {
       "path": "src/platform/workflow/index.mjs",
@@ -1666,7 +1666,7 @@
       "size": 19877
     }
   ],
-  "packageDigest": "4c9edd33825961ca94186a967d26707e51d2ccb77f2b9a3e49f40ac4008b304d",
+  "packageDigest": "9d7df81a133a48f5ad947ae847d7c26057f83f430f00eb50271d36b153529ecd",
   "metadataFiles": [
     "release-manifest.json",
     "sbom.spdx.json"

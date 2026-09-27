@@ -162,7 +162,9 @@ export class ProjectGateRunner {
     let state = await this.harness.authorityStore.read(projectId, runId);
     const currentPluginSetDigest = digestJson({ plugins: this.harness.pluginHost.snapshot().manifests, extensions: this.harness.extensionSet.installed });
     assert(currentPluginSetDigest === state.pluginSetDigest, 'GATE_PLUGIN_SET_DRIFT', 'Installed Gate plugins differ from the Run plugin composition.');
+    if (state.metadata?.projectDescriptorDigest) assert(project.descriptorDigest === state.metadata.projectDescriptorDigest, 'GATE_PROJECT_DESCRIPTOR_DRIFT', 'Project Descriptor differs from the Run-bound Gate policy.');
     const workspaceRoot = state.metadata?.workspace?.root ?? project.workspace.root;
+    const excluded = project.workspace.excluded ?? [];
     const recipes = (state.metadata?.gateRecipes ?? []).map(validateRecipe).filter(recipe => recipe.scope === scope && (!gateIds.length || gateIds.includes(recipe.id)));
     assert(recipes.length > 0, 'GATE_RECIPE_NOT_FOUND', `Project ${projectId} has no Gate Recipes for scope ${scope}.`);
     for (const gateId of gateIds) assert(recipes.some(recipe => recipe.id === gateId), 'GATE_RECIPE_NOT_FOUND', `Project ${projectId} does not declare Gate ${gateId} for scope ${scope}.`);
@@ -180,7 +182,7 @@ export class ProjectGateRunner {
     const results = [];
     for (const recipe of recipes) {
       state = await this.harness.authorityStore.read(projectId, runId);
-      const before = await captureWorkspace(workspaceRoot, { excluded: state.metadata?.workspace?.excluded ?? [] });
+      const before = await captureWorkspace(workspaceRoot, { excluded });
       assert(before.digest === state.sourceDigest, 'WORKSPACE_SOURCE_DRIFT', 'Workspace changed before Gate execution.', { authoritySourceDigest: state.sourceDigest, workspaceSourceDigest: before.digest });
       const spec = { id: recipe.id, commandId: recipe.id, args: [], recipe: structuredClone(recipe), projectId, runId, epoch: state.epoch, generation: state.generation, sourceDigest: state.sourceDigest, featureId };
       if (recipe.cwd !== undefined) spec.cwd = recipe.cwd;
@@ -203,7 +205,7 @@ export class ProjectGateRunner {
         const originBody = JSON.parse(origin.bytes.toString('utf8'));
         assert(origin.metadata.sourceDigest === state.sourceDigest && origin.metadata.gateSpecDigest === specDigest && origin.metadata.toolchainDigest === toolchainDigest && originBody.status === 'passed' && originBody.executorReceipt?.payload?.status === 'passed', 'GATE_CACHE_EVIDENCE_INVALID', 'Cached Gate Evidence is not reusable.');
         executorReceipt = originBody.executorReceipt;
-        after = await captureWorkspace(workspaceRoot, { excluded: state.metadata?.workspace?.excluded ?? [] });
+        after = await captureWorkspace(workspaceRoot, { excluded });
         status = after.digest === before.digest ? 'passed' : 'failed';
         this.onProgress({ gateId: recipe.id, phase: 'cache-hit', status });
       } else {
@@ -211,7 +213,7 @@ export class ProjectGateRunner {
         executorReceipt = recipe.executorPluginId ? await this.harness.invokeGateExecutor(recipe.executorPluginId, spec, { onProgress: this.onProgress }) : await host.invoke(manifest.id, 'execute', spec);
         assert(executorReceipt.type === 'receipt' && executorReceipt.pluginId === executorPlugin.id && executorReceipt.pluginVersion === executorPlugin.version && executorReceipt.payload?.operation === 'gate' && executorReceipt.payload?.gateId === recipe.id && executorReceipt.payload?.specDigest === digestJson(spec) && ['passed', 'failed', 'environment-failed', 'budget-exceeded'].includes(executorReceipt.payload?.status), 'GATE_EXECUTOR_RECEIPT_INVALID', 'Gate Executor returned a mismatched Receipt.');
         if (recipe.sandboxMode === 'required') assert(executorReceipt.payload.sandboxReceipt?.applied === true, 'GATE_SANDBOX_RECEIPT_REQUIRED', 'Required Gate sandbox was not applied.');
-        after = await captureWorkspace(workspaceRoot, { excluded: state.metadata?.workspace?.excluded ?? [] });
+        after = await captureWorkspace(workspaceRoot, { excluded });
         status = after.digest === before.digest ? executorReceipt.payload.status : 'failed';
       }
       assert(after.digest === before.digest || status === 'failed', 'GATE_SOURCE_DRIFT', 'Gate changed its source workspace.');

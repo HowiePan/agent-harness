@@ -378,6 +378,16 @@ export const createHarness = async ({ controlRoot: controlRootInput, dataRoot: d
       }
       verifyExecutionReadinessReport(preflightReport, { plan, now: kernel.now });
       const states = await authorityStore.list(plan.project.id);
+      const replacedQualityRuns = plan.intent.action === 'quality' && plan.intent.preset === 'repair-known'
+        ? states.filter(candidate => candidate.status !== 'closed' && candidate.status !== 'superseded'
+          && candidate.metadata?.commandIntent?.action === 'quality'
+          && candidate.metadata.commandIntent.target === plan.intent.target
+          && (candidate.metadata?.workflow?.id ?? candidate.metadata.commandIntent.workflowId) === plan.intent.workflowId
+          && candidate.metadata.commandIntent.preset !== 'repair-known')
+        : [];
+      for (const candidate of replacedQualityRuns) {
+        assert(!candidate.leases.some(lease => lease.status === 'active'), 'QUALITY_MODE_SWITCH_LIVE_LEASE', 'Repair-only quality cannot replace a review Run with an active Agent Lease.', { runId: candidate.runId });
+      }
       let lineageResolution;
       try {
         lineageResolution = verifyRunLineageResolution(preflightReport.lineageResolution, { plan, states, currentLineage: observedLineage, now: kernel.now });
@@ -422,6 +432,13 @@ export const createHarness = async ({ controlRoot: controlRootInput, dataRoot: d
         const current = await authorityStore.read(plan.project.id, candidate.runId);
         if (current.status === 'superseded') continue;
         await kernel.supersedeRun(plan.project.id, candidate.runId, { replacementRunId: state.runId, planDigest: plan.planDigest, reason: lineageResolution.reasonCode }, { expectedRevision: current.revision, commandId: `${commandId}.lineage.supersede.${candidate.runId}.${lineageResolution.resolutionDigest}` });
+      }
+      for (const candidate of replacedQualityRuns) {
+        if (candidate.runId === state.runId) continue;
+        const current = await authorityStore.read(plan.project.id, candidate.runId);
+        if (current.status === 'closed' || current.status === 'superseded') continue;
+        assert(!current.leases.some(lease => lease.status === 'active'), 'QUALITY_MODE_SWITCH_LIVE_LEASE', 'Repair-only quality cannot replace a review Run with an active Agent Lease.', { runId: current.runId });
+        await kernel.supersedeRun(plan.project.id, current.runId, { replacementRunId: state.runId, planDigest: plan.planDigest, reason: 'quality-mode-switch-to-repair-known' }, { expectedRevision: current.revision, commandId: `${commandId}.quality-mode-switch.${current.runId}` });
       }
       const currentLineage = await lineageStore.read(plan.project.id, plan.logicalTaskKey);
       await lineageStore.activate({ projectId: plan.project.id, logicalTaskKey: plan.logicalTaskKey, activeRunId: state.runId, planDigest: plan.planDigest, resolutionDigest: lineageResolution.resolutionDigest }, { expectedRevision: currentLineage?.revision ?? 0, commandId: activationCommandId });

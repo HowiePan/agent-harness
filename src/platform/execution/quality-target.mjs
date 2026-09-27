@@ -105,6 +105,7 @@ export const deriveQualityTargetSnapshot = ({ projectId, workflowId, target, sou
     && run.metadata?.commandIntent?.action === 'quality' && run.metadata.commandIntent.preset === 'release-exhaustive')
     .map(run => run.runId).sort();
   for (const run of selected) {
+    const authoritativeFindingIds = new Set((run.findings ?? []).map(finding => finding.id));
     for (const finding of run.findings ?? []) mergeFinding(ledger, finding, {
       runId: run.runId,
       authorityDigest: run.authorityDigest,
@@ -112,7 +113,14 @@ export const deriveQualityTargetSnapshot = ({ projectId, workflowId, target, sou
       observedAt: run.updatedAt ?? null,
     });
     for (const submission of run.submissions ?? []) {
-      for (const disposition of submission.result?.knownFindingDispositions ?? []) applyDisposition(ledger, disposition, submission, run);
+      if (submission.supersededAt || submission.result?.status !== 'completed') continue;
+      const feature = run.features?.find(item => item.id === submission.featureId);
+      if (feature?.metadata?.qualityReview !== true) continue;
+      for (const disposition of submission.result?.knownFindingDispositions ?? []) {
+        // The Run finding ledger already includes later repairs and rechecks.
+        // A historical review disposition must not overwrite that final status.
+        if (!authoritativeFindingIds.has(disposition.id)) applyDisposition(ledger, disposition, submission, run);
+      }
     }
   }
   const runRefs = selected.map(run => ({

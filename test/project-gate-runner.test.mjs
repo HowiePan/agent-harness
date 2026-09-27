@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { writeFile } from 'node:fs/promises';
+import { mkdir, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
-import { ProjectGateRunner } from '../src/index.mjs';
+import { ProjectGateRunner, projectExecutionPolicyDecisionContext } from '../src/index.mjs';
 import { makeFixture, startRun, feature } from './test-support.mjs';
 import { RunCoordinator } from '../src/platform/workflow/coordinator/run-coordinator.mjs';
 import { digestJson } from '../src/common/canonical.mjs';
@@ -27,6 +27,34 @@ test('Project Gate Runner executes Descriptor recipes, records Evidence, and reu
   assert.equal(fresh.results[0].cacheHit, false);
   assert.equal(fresh.state.gates[0].forcedFresh, true);
   assert(progress.some(event => event.phase === 'process-started'));
+});
+
+test('Gate snapshots honor Project exclusions without hiding source drift', async t => {
+  const fixture = await makeFixture({ gateRecipes: [{ id: 'excluded-output-gate', executionClass: 'deterministic-process', scope: 'final', command: [process.execPath, resolve('test/fixtures/gate-probe.mjs')] }] });
+  t.after(() => fixture.cleanup());
+  const project = await fixture.harness.projectRegistry.get(fixture.projectId);
+  const descriptor = { id: project.id, workspace: { ...project.workspace, excluded: ['.cardworld-local'] }, profiles: project.profiles, policy: project.policy, gateRecipes: project.gateRecipes, artifactProviders: project.artifactProviders };
+  await fixture.harness.projectRegistry.register(descriptor, {
+    expectedRevision: project.revision,
+    commandId: 'register-excluded-output',
+    authorityDecision: { actor: 'test-user', decision: 'approved', action: 'project-execution-policy-change', expiresAt: '2099-09-15T00:00:00.000Z', context: projectExecutionPolicyDecisionContext({ input: descriptor, expectedRevision: project.revision }) },
+  });
+  const started = await startRun(fixture);
+  assert.equal(started.metadata.workspace.excluded, undefined);
+  const output = resolve(fixture.workspace, '.cardworld-local', 'gate-cache.json');
+  await mkdir(resolve(fixture.workspace, '.cardworld-local'));
+  await writeFile(output, 'first', 'utf8');
+  const runner = new ProjectGateRunner({ harness: fixture.harness, onProgress: () => {} });
+  const first = await runner.run({ projectId: fixture.projectId, runId: 'run', scope: 'final' });
+  assert.equal(first.results[0].status, 'passed');
+  await writeFile(output, 'second', 'utf8');
+  const cached = await runner.run({ projectId: fixture.projectId, runId: 'run', scope: 'final' });
+  assert.equal(cached.results[0].status, 'passed');
+  assert.equal(cached.results[0].cacheHit, true);
+  const fresh = await runner.run({ projectId: fixture.projectId, runId: 'run', scope: 'final', forceFresh: true });
+  assert.equal(fresh.results[0].status, 'passed');
+  await writeFile(resolve(fixture.workspace, 'README.md'), '# Changed source\n', 'utf8');
+  await assert.rejects(() => runner.run({ projectId: fixture.projectId, runId: 'run', scope: 'final' }), error => error.code === 'WORKSPACE_SOURCE_DRIFT');
 });
 
 test('cached Gate success gets current Run Evidence and raw Gate submissions are denied', async t => {

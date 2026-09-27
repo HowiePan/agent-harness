@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { digestJson } from '../src/common/canonical.mjs';
-import { assertQualityInventorySnapshot, createQualityInventorySnapshot, deriveQualityTargetSnapshot } from '../src/platform/execution/quality-target.mjs';
+import { assertQualityInventorySnapshot, createQualityInventorySnapshot, createQualityRepairInventorySnapshot, deriveQualityTargetSnapshot } from '../src/platform/execution/quality-target.mjs';
 
 const digest = value => value.repeat(64).slice(0, 64);
 const run = ({ runId, revision, sourceDigest, findings = [], submissions = [], status = 'closed', target = 'V3.8.5', updatedAt = `2026-09-21T00:00:0${revision}.000Z` }) => {
@@ -52,6 +52,29 @@ test('active incomplete Runs do not make a lifecycle plan drift while completed 
   assert.equal(before.revision, 0);
   assert.equal(after.revision, 4);
   assert.deepEqual(after.findings.map(item => item.id), ['V385-Q02']);
+});
+
+test('repair inventory follows final Run findings after an interrupted recheck', () => {
+  const prior = run({
+    runId: 'interrupted-quality', revision: 15, sourceDigest: digest('a'), status: 'superseded',
+    findings: [
+      { id: 'REOPENED', severity: 'P2', summary: 'Recheck confirmed the defect', status: 'open', affectedPaths: ['src/replay.rs'], evidence: ['fresh recheck'], evidenceRefs: ['sha256:review'], resolutionEvidenceRefs: [] },
+      { id: 'FIXED', severity: 'P1', summary: 'Repair verified', status: 'resolved', affectedPaths: ['src/table.rs'], evidence: ['original review'], evidenceRefs: ['sha256:review'], resolutionEvidenceRefs: ['sha256:repair'] },
+    ],
+    submissions: [
+      { featureId: 'review', result: { status: 'completed', knownFindingDispositions: [{ id: 'REOPENED', disposition: 'not-reproduced', evidence: ['earlier check'] }, { id: 'FIXED', disposition: 'open', evidence: ['earlier check'] }] }, evidenceRefs: ['sha256:earlier'], submittedAt: '2026-09-20T00:00:00.000Z' },
+      { featureId: 'recheck', result: { status: 'blocked', knownFindingDispositions: [{ id: 'REOPENED', disposition: 'not-reproduced', evidence: ['incomplete check'] }] }, evidenceRefs: ['sha256:blocked'], submittedAt: '2026-09-21T00:00:00.000Z' },
+    ],
+  });
+  prior.features = [
+    { id: 'review', state: 'completed', metadata: { qualityReview: true } },
+    { id: 'recheck', state: 'blocked', metadata: { qualityReview: true } },
+  ];
+  const current = run({ runId: 'new-abandoned-run', revision: 2, sourceDigest: digest('b'), status: 'running' });
+  current.features[0].state = 'dispatched';
+  const target = deriveQualityTargetSnapshot({ projectId: 'cardworld-engine', workflowId: 'engine-delivery', target: 'V3.8.5', sourceDigest: digest('c'), runs: [prior, current], includeNonterminal: true });
+  assert.deepEqual(target.findings.map(item => [item.id, item.status]), [['FIXED', 'resolved'], ['REOPENED', 'open']]);
+  assert.deepEqual(createQualityRepairInventorySnapshot(target).findings.map(item => item.id), ['REOPENED']);
 });
 
 test('legacy Project inventory is an auditable migration seed, not runtime configuration truth', () => {
