@@ -110,6 +110,8 @@ agent-harness run start --project <id> --run <id> --profile <id> --features <jso
 agent-harness run status --project <id> --run <id>
 agent-harness version-release status --project <id> --target <version>
 agent-harness version-release promote --project <id> --target <version> --candidate-digest <sha256> --expected-revision <n> --command-id <id> --approval <json>
+ agent-harness release-candidate status --kind <version|scoped> --project <id> --target <id>
+ agent-harness release-candidate promote --kind <version|scoped> --project <id> --target <id> --candidate-digest <sha256> --expected-revision <n> --command-id <id> --approval <json>
 agent-harness run schedule --project <id> --run <id> [--max <n|auto>] [--runtime <plugin-id>]
 agent-harness run dispatch --project <id> --run <id> --dispatch <id>
 agent-harness run gates --project <id> --run <id> --scope <feature|stable|final> [--fresh] [--ids <id,id>] [--progress]
@@ -320,9 +322,9 @@ const dataRoot = resolve(take('--data-root') ?? development?.manifest.dataRoot ?
 if (development) {
   if (!samePath(controlRoot, development.manifest.controlRoot) || !samePath(dataRoot, development.manifest.dataRoot)) throw Object.assign(new Error('Development manifest does not match the selected control and data roots.'), { code: 'DEVELOPMENT_MANIFEST_ROOT_MISMATCH' });
   if (take('--harness-digest') && take('--harness-digest') !== development.releaseIdentity.artifactDigest) throw Object.assign(new Error('Development manifest does not match --harness-digest.'), { code: 'DEVELOPMENT_MANIFEST_RELEASE_MISMATCH' });
-  const developmentCommandAllowed = (command === 'workflow' && subject === 'list') || (command === 'lifecycle' && ['plan', 'preflight'].includes(subject)) || (command === 'project' && subject === 'list') || (command === 'extension' && subject === 'list') || (command === 'version-release' && ['status', 'promote'].includes(subject)) || command === 'doctor';
+  const developmentCommandAllowed = (command === 'workflow' && subject === 'list') || (command === 'lifecycle' && ['plan', 'preflight'].includes(subject)) || (command === 'project' && subject === 'list') || (command === 'extension' && subject === 'list') || (['version-release', 'release-candidate'].includes(command) && ['status', 'promote'].includes(subject)) || command === 'doctor';
   if (!developmentCommandAllowed) throw Object.assign(new Error('Development manifest is limited to inspection, planning, preflight, and frozen version release status/promotion. Use the dev commands for source binding changes.'), { code: 'DEVELOPMENT_MANIFEST_COMMAND_UNSUPPORTED' });
-  if (command === 'version-release' && subject === 'promote') await createLocalDevelopmentInvocation({
+  if (['version-release', 'release-candidate'].includes(command) && subject === 'promote') await createLocalDevelopmentInvocation({
     projectRoot: development.manifest.projectRoot,
     configPath: development.manifest.configPath,
     controlRoot,
@@ -492,13 +494,24 @@ if (command === 'features' && subject === 'compile') {
   process.exit(0);
 }
 
-  const readOnlyHarness = command === 'recovery' && ['assess', 'plan'].includes(subject) || command === 'version-release' && subject === 'status';
+  const readOnlyHarness = command === 'recovery' && ['assess', 'plan'].includes(subject) || ['version-release', 'release-candidate'].includes(command) && subject === 'status';
   const harness = await createHarness({ controlRoot, dataRoot, workspaceId: scopedWorkspaceId, memoryRoot: take('--memory-root'), extensions, releaseIdentity, strictProjectIdentity: !development, initializeStorage: !readOnlyHarness });
   if (command === 'version-release' && subject === 'status') {
     const output = await harness.readVersionRelease(take('--project'), take('--target'));
     console.log(JSON.stringify({ ok: true, ...output }, null, 2));
   } else if (command === 'version-release' && subject === 'promote') {
     const output = await harness.promoteVersionRelease({ projectId: take('--project'), target: take('--target'), candidateDigest: take('--candidate-digest'),
+      expectedRevision: Number(take('--expected-revision')), commandId: take('--command-id'), approval: await jsonInput('--approval') });
+    console.log(JSON.stringify({ ok: true, ...output }, null, 2));
+  } else if (command === 'release-candidate' && subject === 'status') {
+    const kind = take('--kind');
+    if (!['version', 'scoped'].includes(kind)) throw Object.assign(new Error('Release candidate kind must be version or scoped.'), { code: 'RELEASE_KIND_INVALID' });
+    const output = kind === 'version' ? await harness.readVersionRelease(take('--project'), take('--target')) : await harness.readScopedRelease(take('--project'), take('--target'));
+    console.log(JSON.stringify({ ok: true, ...output }, null, 2));
+  } else if (command === 'release-candidate' && subject === 'promote') {
+    const kind = take('--kind');
+    if (!['version', 'scoped'].includes(kind)) throw Object.assign(new Error('Release candidate kind must be version or scoped.'), { code: 'RELEASE_KIND_INVALID' });
+    const output = await (kind === 'version' ? harness.promoteVersionRelease : harness.promoteScopedRelease)({ projectId: take('--project'), target: take('--target'), candidateDigest: take('--candidate-digest'),
       expectedRevision: Number(take('--expected-revision')), commandId: take('--command-id'), approval: await jsonInput('--approval') });
     console.log(JSON.stringify({ ok: true, ...output }, null, 2));
   } else if (command === 'project' && subject === 'register') {

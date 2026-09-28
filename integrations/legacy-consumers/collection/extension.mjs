@@ -37,6 +37,7 @@ export const extensionPack = defineExtensionPack({
   profiles: [collectionBatchProfile],
   workflows: [collectionWorkflowDefinition],
   commandManifest: tabletopCollectionCommandManifest,
+  planningCapabilities: ['quality-target', 'batch-release'],
   projectConfiguration: {
     schema: projectInputSchema,
     schemas: { 'delivery-project-input.schema.json': deliveryProjectInputSchema },
@@ -46,11 +47,13 @@ export const extensionPack = defineExtensionPack({
     createProjectDescriptor: { executionClass: 'pure-planner' },
     compileFeatureGraph: { executionClass: 'pure-planner' },
     createLifecyclePlan: { executionClass: 'pure-planner' },
+    resolveQualityScopes: { executionClass: 'pure-planner' },
   },
   operations: {
     createProjectDescriptor: createTabletopCollectionProjectDescriptor,
     compileFeatureGraph: compileTabletopCollectionFeatureGraph,
     createLifecyclePlan: createTabletopCollectionLifecyclePlan,
+    resolveQualityScopes: ({ project, target }) => (project.policy?.collectionBatches ?? []).find(batch => batch.id === target)?.gameIds?.map(gameId => ({ id: gameId, root: `collection:${target}:${gameId}` })) ?? [],
   },
 });
 

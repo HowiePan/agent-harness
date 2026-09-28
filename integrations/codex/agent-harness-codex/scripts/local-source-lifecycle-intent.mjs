@@ -14,7 +14,7 @@ export const createLocalSourceLifecycleCommand = async ({ bindingsDir, alias, ac
   const project = bindings.projects[alias];
   if (!project) fail('LOCAL_SOURCE_PROJECT_ALIAS_UNKNOWN', `Local source project alias is not bound: ${alias}`);
   const identity = await resolveGitWorkspaceIdentity(project.workspaceRoot);
-  if (!samePath(identity.commonDir, project.workspaceIdentity?.commonDir)) fail('LOCAL_SOURCE_WORKSPACE_IDENTITY_MISMATCH', 'Bound project Git identity changed.');
+  if (!samePath(identity.commonDir, project.workspaceIdentity?.commonDir) || identity.subpath !== (project.workspaceIdentity?.subpath ?? '')) fail('LOCAL_SOURCE_WORKSPACE_IDENTITY_MISMATCH', 'Bound project Git identity changed.');
   const selectedWorkflow = workflowId ? project.workflows.find(item => item.id === workflowId) : project.workflows.length === 1 ? project.workflows[0] : null;
   if (!selectedWorkflow) fail('LOCAL_SOURCE_WORKFLOW_REQUIRED', 'Select an exact workflow bound to this project.');
   const selectedProject = { ...project, profileId: selectedWorkflow.profileId, extensionId: selectedWorkflow.extensionId, workflowId: selectedWorkflow.id, workflowVersion: selectedWorkflow.version, workflowDigest: selectedWorkflow.artifactDigest };

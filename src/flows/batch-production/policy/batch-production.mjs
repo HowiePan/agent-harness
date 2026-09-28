@@ -1,6 +1,6 @@
 import { assert } from '../../../common/errors.mjs';
 import { approvalSatisfied, orderedBarrier } from '../../../flow-kit/primitives.mjs';
-import { createQualityFollowUpFeatures, hasCurrentCleanQualityReview, validateQualityReviewPolicies } from '../../../flow-kit/profiles/quality-loop.mjs';
+import { createQualityFollowUpFeatures, createQualityGateDiagnosticReview, hasCurrentCleanQualityReview, validateQualityReviewPolicies } from '../../../flow-kit/profiles/quality-loop.mjs';
 import { normalizeQualityReviewLimit, qualityReviewBudgetExhausted } from '../../../flow-kit/profiles/quality-budget.mjs';
 
 const defaultResolveItemId = feature => feature.metadata.itemId;
@@ -39,11 +39,42 @@ export const createBatchProductionProfile = ({
       requireBatchLaunchDecision: config.requireBatchLaunchDecision !== false,
       requireFinalQualityReview: config.requireFinalQualityReview === true,
       qualityReviewLimit,
+      priorQualityReviews: structuredClone(config.priorQualityReviews ?? {}),
+      repairOnly: config.repairOnly === true,
+      closeoutOnly: config.closeoutOnly === true,
+      requireQualityExitDecision: config.requireQualityExitDecision === true,
     };
   },
 
   createFollowUpFeatures(input) {
     return createQualityFollowUpFeatures(input);
+  },
+
+  createGateDiagnosticReview({ state, gateResults }) {
+    const batchId = state.profile.config.activeBatch;
+    return createQualityGateDiagnosticReview({ state, gateResults, qualityRoot: `batch:${batchId}:gate-diagnostic`,
+      metadata: { batchId, itemId: null, gameId: null, capabilityOwner: true, ruleStatus: 'rule-ready', qualityContext: { batchId, capabilityOwner: true, ruleStatus: 'rule-ready' } } });
+  },
+
+  validateResult({ state, feature, result }) {
+    if (feature.metadata?.qualityReview && Array.isArray(result.findings)) {
+      const collision = result.findings.find(finding => state.findings.some(prior => prior.id === finding.id
+        && state.features.find(item => item.id === prior.featureId)?.metadata?.qualityRoot !== feature.metadata.qualityRoot));
+      if (collision) return { ok: false, reason: `finding-id-crosses-quality-scopes:${collision.id}` };
+    }
+    if (feature.metadata?.stage === 'release-prepare' && result.status === 'completed') {
+      const clearance = state.metadata?.batchClearance;
+      const prepared = result.outputs?.['release-prepare']?.value;
+      return { ok: prepared?.ready === true && prepared.itemId === resolveItemId(feature)
+        && clearance?.itemIds?.includes(prepared.itemId) && clearance.sourceDigest === state.sourceDigest,
+      reason: 'batch-release-preparation-mismatch' };
+    }
+    if (feature.metadata?.stage !== 'closeout' || result.status !== 'completed') return { ok: true };
+    const pinned = state.metadata?.qualityCloseouts?.[resolveItemId(feature)];
+    const reported = result.outputs?.closeout?.value;
+    return { ok: reported?.ready === true && reported.priorRunId === pinned?.priorRunId
+      && reported.sourceDigest === state.sourceDigest && pinned?.sourceDigest === state.sourceDigest,
+    reason: 'quality-closeout-evidence-mismatch' };
   },
 
   validateRun(state) {
@@ -80,6 +111,10 @@ export const createBatchProductionProfile = ({
   canClose(state) {
     const batch = state.profile.config.activeBatch;
     const config = state.profile.config;
+    if (state.metadata?.commandIntent?.action === 'prerelease' && (state.metadata?.batchClearance?.sourceDigest !== state.sourceDigest
+      || state.metadata.batchClearance.target !== batch)) return { ok: false, reason: 'batch-prerelease-clearance-drift' };
+    if (config.closeoutOnly && Object.entries(state.metadata?.qualityCloseouts ?? {}).some(([id, snapshot]) => snapshot.sourceDigest !== state.sourceDigest
+      || snapshot.targetDigest !== state.metadata?.qualityTargets?.[id]?.targetDigest)) return { ok: false, reason: 'quality-closeout-evidence-mismatch' };
     if (config.requireFinalQualityReview) {
       const qualityRoots = [...new Set(state.features.filter(feature => feature.metadata?.qualityReview).map(feature => feature.metadata.qualityRoot))];
       const missingQualityRoot = qualityRoots.find(root => !hasCurrentCleanQualityReview(state, root));
@@ -102,6 +137,7 @@ export const createBatchProductionProfile = ({
     const missingGate = state.profile.config.requiredFinalGates.find(gateId => !state.gates.some(gate => gate.id === gateId && gate.status === 'passed' && gate.forcedFresh));
     if (missingGate) return { ok: false, reason: `required-final-gate-missing:${missingGate}` };
     if (config.requireBatchCloseDecision && !approvalSatisfied(state, `batch:${batch}:closed`)) return { ok: false, reason: 'batch-close-decision-required' };
+    if (config.requireQualityExitDecision && !approvalSatisfied(state, `batch:${batch}:quality-exit`)) return { ok: false, reason: 'batch-quality-exit-decision-required' };
     return { ok: true };
   },
 

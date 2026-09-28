@@ -11,6 +11,8 @@ export const batchPorts = Object.freeze({
   accept: 'batch-accept-v1',
   launch: 'batch-launch-v1',
   close: 'batch-close-v1',
+  closeout: 'quality-closeout-evidence-v1',
+  'release-prepare': 'batch-release-preparation-v1',
 });
 
 export const batchValueSchemas = Object.freeze({
@@ -21,4 +23,6 @@ export const batchValueSchemas = Object.freeze({
   'batch-accept-v1': { type: 'object', required: ['accepted'], properties: { accepted: { type: 'boolean' } }, additionalProperties: true },
   'batch-launch-v1': { type: 'object', required: ['launched'], properties: { launched: { type: 'boolean' } }, additionalProperties: true },
   'batch-close-v1': { type: 'object', required: ['closed'], properties: { closed: { type: 'boolean' } }, additionalProperties: true },
+  'quality-closeout-evidence-v1': { type: 'object', required: ['priorRunId', 'sourceDigest', 'ready'], properties: { priorRunId: string, sourceDigest: string, ready: { type: 'boolean' } }, additionalProperties: true },
+  'batch-release-preparation-v1': { type: 'object', required: ['ready', 'itemId'], properties: { ready: { type: 'boolean' }, itemId: string }, additionalProperties: true },
 });

@@ -6,6 +6,8 @@ import { qualityNode } from '../nodes/quality/index.mjs';
 import { reviewNode } from '../nodes/review/index.mjs';
 import { acceptNode } from '../nodes/accept/index.mjs';
 import { launchNode, closeNode } from '../nodes/lifecycle/index.mjs';
+import { closeoutNode } from '../nodes/quality/closeout.mjs';
+import { releasePrepareNode } from '../nodes/release/index.mjs';
 
 export const createBatchProductionWorkflowDefinition = ({ id = 'batch-production', profileId = 'batch-production' } = {}) => defineWorkflowDefinition({
   id,
@@ -17,9 +19,11 @@ export const createBatchProductionWorkflowDefinition = ({ id = 'batch-production
     launch: [launchNode],
     produce: [withDeps(produceNode, [])],
     quality: [withDeps(qualityNode, [])],
+    closeout: [closeoutNode],
     review: [withDeps(reviewNode, [])],
     accept: [withDeps(acceptNode, [])],
     close: [closeNode],
+    prerelease: [releasePrepareNode],
   },
 });
 

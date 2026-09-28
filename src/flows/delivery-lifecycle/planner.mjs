@@ -4,8 +4,7 @@ import { resolveStageGates } from '../../flow-kit/primitives.mjs';
 import { deliveryLifecycleWorkflowDefinition } from './graph/definition.mjs';
 import { createDeliveryTemplates } from './nodes/delivery/feature.mjs';
 import { repairsForFindings } from '../../flow-kit/profiles/quality-loop.mjs';
-import { normalizeQualityReviewLimit } from '../../flow-kit/profiles/quality-budget.mjs';
-import { assertQualityRepairInventorySnapshot } from '../../platform/execution/quality-target.mjs';
+import { prepareQualityPlanning } from '../../flow-kit/profiles/quality-planning.mjs';
 
 const resolveDeliveryRoute = intent => {
   if (intent.action === 'quality' && (intent.preset === 'closeout' || intent.preset === 'repair-known' && intent.qualityRepairInventory?.findings.length === 0)) return 'closeout';
@@ -41,23 +40,11 @@ export const createDeliveryLifecyclePlanner = ({
   stopConditionPrefix = 'delivery',
 } = {}) => ({ intent, project, runId, sourceDigest }) => {
   assert(intent.qualityTarget, 'QUALITY_TARGET_SNAPSHOT_REQUIRED', 'Delivery lifecycle planning requires an Authority-derived Quality Target snapshot.');
-  const repairOnly = intent.action === 'quality' && intent.preset === 'repair-known';
-  const closeoutOnly = intent.action === 'quality' && (intent.preset === 'closeout' || repairOnly && intent.qualityRepairInventory?.findings.length === 0);
-  const exhaustive = intent.action === 'quality' && intent.preset === 'release-exhaustive';
   const prerelease = intent.action === 'prerelease';
   if (prerelease) assert(intent.developmentClearance?.status === 'development-complete' && intent.releaseDocumentation?.inventoryDigest && project.policy?.release?.packageGateId, 'PRERELEASE_PREREQUISITES_REQUIRED', 'Prerelease requires development clearance, project-owned documentation scope, and a package Gate.');
-  if (['quality', 'full', 'deliver'].includes(intent.action) && !repairOnly && !closeoutOnly) assert(intent.knownFindingInventory, 'QUALITY_INVENTORY_SNAPSHOT_REQUIRED', 'Delivery quality planning requires an Authority-derived quality inventory snapshot.');
-  if (repairOnly) {
-    const inventory = assertQualityRepairInventorySnapshot(intent.qualityRepairInventory);
-    assert(inventory.targetDigest === intent.qualityTarget.targetDigest && inventory.sourceDigest === sourceDigest, 'QUALITY_REPAIR_INVENTORY_BINDING_MISMATCH', 'Repair inventory must bind the current Authority target and source.');
-  }
-  if (closeoutOnly) assert(intent.qualityCloseout?.targetDigest === intent.qualityTarget.targetDigest && intent.qualityCloseout.sourceDigest === sourceDigest, 'QUALITY_CLOSEOUT_SNAPSHOT_REQUIRED', 'Independent closeout requires current authoritative evidence.');
-  assert(!exhaustive || (project.policy?.majorReleaseTargets ?? []).includes(intent.target), 'QUALITY_EXHAUSTIVE_MAJOR_RELEASE_REQUIRED', 'Unbounded exhaustive review requires an explicitly declared major release target.');
-  const configuredLimit = normalizeQualityReviewLimit(project.policy?.qualityReviewLimit ?? Object.assign({}, ...profileConfigKeys.map(key => project.policy?.profileConfigs?.[key] ?? {})).qualityReviewLimit);
-  if (['quality', 'full', 'deliver'].includes(intent.action) && !repairOnly && !closeoutOnly) assert(configuredLimit.mode !== 'unbounded' || exhaustive, 'QUALITY_UNBOUNDED_MODE_DENIED', 'Unbounded quality review is available only to the explicit major-release exhaustive preset.');
-  const qualityReviewLimit = exhaustive ? { mode: 'unbounded' } : configuredLimit;
-  const priorQualityReviews = intent.qualityTarget.reviewHistory?.length ?? 0;
-  if (!repairOnly && !closeoutOnly && ['quality', 'full', 'deliver'].includes(intent.action)) assert(qualityReviewLimit.mode === 'unbounded' || priorQualityReviews < 1 + qualityReviewLimit.maxRechecks, 'QUALITY_REVIEW_LIMIT_REACHED', 'The target has exhausted its configured quality review budget.');
+  const { repairOnly, closeoutOnly, exhaustive, qualityReviewLimit, priorQualityReviews } = prepareQualityPlanning({ intent, project, sourceDigest, profileConfigKeys,
+    missingTargetMessage: 'Delivery lifecycle planning requires an Authority-derived Quality Target snapshot.',
+    missingInventoryMessage: 'Delivery quality planning requires an Authority-derived quality inventory snapshot.' });
   const finalGateIds = (project.gateRecipes ?? []).filter(recipe => recipe.scope === 'final' && recipe.required !== false).map(recipe => recipe.id);
   const gateIds = ['full', 'quality', 'deliver'].includes(intent.action) ? finalGateIds : prerelease ? [...new Set([...finalGateIds, project.policy.release.packageGateId])] : [];
   const quality = intent.action === 'quality';

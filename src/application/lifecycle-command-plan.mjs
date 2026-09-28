@@ -40,6 +40,48 @@ export const validateLifecycleCommandPlan = input => {
     assert(input.intent.qualityTarget.projectId === input.project.id && input.intent.qualityTarget.workflowId === input.intent.workflowId && input.intent.qualityTarget.target === input.intent.target && input.intent.qualityTarget.sourceDigest === input.run.sourceDigest, 'QUALITY_TARGET_BINDING_MISMATCH', 'Quality Target snapshot does not bind the planned Project, Workflow, target, and source.');
     assert(input.run.metadata?.qualityTarget?.targetDigest === input.intent.qualityTarget.targetDigest, 'QUALITY_TARGET_BINDING_MISMATCH', 'Run metadata does not bind the planned Quality Target snapshot.');
   }
+  if (input.intent.qualityTargets) {
+    const targets = input.intent.qualityTargets;
+    assert(targets && typeof targets === 'object' && !Array.isArray(targets) && Object.keys(targets).length > 0, 'QUALITY_SCOPES_INVALID', 'Scoped quality targets are invalid.');
+    for (const [scopeId, target] of Object.entries(targets)) {
+      assertQualityTargetSnapshot(target);
+      assert(target.projectId === input.project.id && target.workflowId === input.intent.workflowId && target.target === input.intent.target
+        && target.sourceDigest === input.run.sourceDigest && target.scopeRoot
+        && input.run.metadata?.qualityTargets?.[scopeId]?.targetDigest === target.targetDigest,
+      'QUALITY_TARGET_BINDING_MISMATCH', 'Scoped Quality Target does not bind the planned Project, Workflow, target, scope, and source.');
+      const inventory = input.intent.knownFindingInventories?.[scopeId];
+      if (inventory) {
+        assertKnownFindingInventory(inventory);
+        assert(inventory.targetDigest === target.targetDigest && inventory.scopeRoot === target.scopeRoot && inventory.sourceDigest === input.run.sourceDigest,
+          'QUALITY_FINDING_INVENTORY_BINDING_MISMATCH', 'Scoped quality inventory differs from its Authority target.');
+      }
+      const repair = input.intent.qualityRepairInventories?.[scopeId];
+      if (repair) {
+        assertQualityRepairInventorySnapshot(repair);
+        assert(repair.targetDigest === target.targetDigest && repair.scopeRoot === target.scopeRoot
+          && input.run.metadata?.qualityRepairInventories?.[scopeId]?.inventoryDigest === repair.inventoryDigest
+          && createQualityRepairInventorySnapshot(target).inventoryDigest === repair.inventoryDigest,
+        'QUALITY_REPAIR_INVENTORY_BINDING_MISMATCH', 'Scoped repair inventory differs from its Authority target.');
+      }
+      const closeout = input.intent.qualityCloseouts?.[scopeId];
+      if (closeout) {
+        assertQualityCloseoutSnapshot(closeout);
+        assert(closeout.targetDigest === target.targetDigest && closeout.scopeRoot === target.scopeRoot
+          && input.run.metadata?.qualityCloseouts?.[scopeId]?.closeoutDigest === closeout.closeoutDigest
+          && createQualityCloseoutSnapshot(target).closeoutDigest === closeout.closeoutDigest,
+        'QUALITY_CLOSEOUT_SNAPSHOT_BINDING_MISMATCH', 'Scoped closeout differs from its Authority target.');
+      }
+    }
+  }
+  if (input.intent.batchClearance) {
+    const clearance = input.intent.batchClearance;
+    assert(input.intent.action === 'prerelease' && clearance.receiptDigest === digestJson(withoutKeys(clearance, ['receiptDigest']))
+      && clearance.projectId === input.project.id && clearance.workflowId === input.intent.workflowId
+      && clearance.workflowDigest === input.workflow?.artifactDigest && clearance.target === input.intent.target
+      && clearance.sourceDigest === input.run.sourceDigest && clearance.descriptorDigest === input.project.descriptorDigest
+      && input.run.metadata?.batchClearance?.receiptDigest === clearance.receiptDigest,
+    'BATCH_CLEARANCE_BINDING_MISMATCH', 'Prerelease clearance is not bound to the planned Project, Workflow, target, and source.');
+  }
   if (input.intent.action === 'quality' && input.intent.preset === 'closeout') assert(input.intent.qualityCloseout, 'QUALITY_CLOSEOUT_SNAPSHOT_REQUIRED', 'Independent closeout requires a pinned authoritative quality snapshot.');
   if (input.intent.qualityCloseout) {
     const closeout = assertQualityCloseoutSnapshot(input.intent.qualityCloseout);

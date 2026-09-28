@@ -14,6 +14,9 @@ export const batchProductionCommandManifest = defineCommandManifest({
       aliases: ['qa'], targetKind: 'batch-id', defaultPreset: 'all', presets: {
         all: { scope: 'item-harness-acceptance', stateChanging: true },
         item: { scope: 'single-item-harness-acceptance', stateChanging: true, argumentPrefix: 'item:' },
+        'review-only': { scope: 'item-harness-acceptance', stateChanging: true, sourcePolicy: 'read-only' },
+        'repair-known': { scope: 'item-quality-repair', stateChanging: true, sourcePolicy: 'repair' },
+        closeout: { scope: 'item-quality-closeout', stateChanging: true, sourcePolicy: 'read-only' },
       },
     },
     review: {
@@ -29,6 +32,8 @@ export const batchProductionCommandManifest = defineCommandManifest({
       },
     },
     close: { targetKind: 'batch-id', presets: { default: { scope: 'batch-close..release-receipt', stateChanging: true } } },
+    prerelease: { targetKind: 'batch-id', presets: { default: { scope: 'batch-release-preparation', stateChanging: true } } },
+    release: { targetKind: 'batch-id', presets: { default: { scope: 'batch-release-promotion', stateChanging: true, effectClasses: ['formal-batch-release'] } } },
     status: { targetKind: 'batch-id-or-run-id', presets: { default: { scope: 'status', stateChanging: false } } },
     resume: { targetKind: 'batch-id-or-run-id', presets: { default: { scope: 'ordinary-resume', stateChanging: true } } },
     recover: {

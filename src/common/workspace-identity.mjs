@@ -1,5 +1,5 @@
 import { lstat, readFile, realpath } from 'node:fs/promises';
-import { isAbsolute, resolve } from 'node:path';
+import { dirname, isAbsolute, relative, resolve, sep } from 'node:path';
 import { assert } from './errors.mjs';
 
 const optionalLstat = async path => {
@@ -14,8 +14,14 @@ const samePath = (left, right) => process.platform === 'win32'
 export const resolveGitWorkspaceIdentity = async workspaceRoot => {
   assert(workspaceRoot && isAbsolute(workspaceRoot), 'WORKSPACE_ROOT_INVALID', 'Git workspace identity requires an absolute workspace root.');
   const root = resolve(workspaceRoot);
-  const marker = resolve(root, '.git');
-  const markerInfo = await optionalLstat(marker);
+  let repositoryRoot = root;
+  let marker = resolve(repositoryRoot, '.git');
+  let markerInfo = await optionalLstat(marker);
+  while (!markerInfo && dirname(repositoryRoot) !== repositoryRoot) {
+    repositoryRoot = dirname(repositoryRoot);
+    marker = resolve(repositoryRoot, '.git');
+    markerInfo = await optionalLstat(marker);
+  }
   assert(markerInfo, 'WORKSPACE_GIT_METADATA_REQUIRED', `Workspace does not expose .git metadata: ${root}`);
 
   let gitDirectory;
@@ -24,7 +30,7 @@ export const resolveGitWorkspaceIdentity = async workspaceRoot => {
     assert(markerInfo.isFile(), 'WORKSPACE_GIT_METADATA_INVALID', `Workspace .git metadata is not a file or directory: ${marker}`);
     const match = (await readFile(marker, 'utf8')).trim().match(/^gitdir:\s*(.+)$/i);
     assert(match?.[1], 'WORKSPACE_GITDIR_INVALID', `Workspace .git file does not declare gitdir: ${marker}`);
-    gitDirectory = resolve(root, match[1]);
+    gitDirectory = resolve(repositoryRoot, match[1]);
     const directoryInfo = await optionalLstat(gitDirectory);
     assert(directoryInfo?.isDirectory(), 'WORKSPACE_GITDIR_INVALID', `Workspace gitdir does not exist: ${gitDirectory}`);
   }
@@ -38,7 +44,7 @@ export const resolveGitWorkspaceIdentity = async workspaceRoot => {
     if (error.code !== 'ENOENT') throw error;
   }
   commonDirectory = await realpath(commonDirectory);
-  return Object.freeze({ type: 'git-common-dir', commonDir: commonDirectory });
+  return Object.freeze({ type: 'git-common-dir', commonDir: commonDirectory, subpath: relative(repositoryRoot, root).split(sep).join('/') });
 };
 
 export const resolveProjectWorkspace = async (project, requestedRoot = undefined) => {
@@ -58,6 +64,6 @@ export const resolveProjectWorkspace = async (project, requestedRoot = undefined
     resolveGitWorkspaceIdentity(declaredRoot),
     resolveGitWorkspaceIdentity(root),
   ]);
-  assert(samePath(declaredIdentity.commonDir, identity.commonDir), 'PROJECT_EXECUTION_WORKSPACE_MISMATCH', 'Execution workspace is not a linked worktree of the registered Project repository.', { declaredRoot, requestedRoot: root, declaredIdentity, requestedIdentity: identity });
+  assert(samePath(declaredIdentity.commonDir, identity.commonDir) && declaredIdentity.subpath === identity.subpath, 'PROJECT_EXECUTION_WORKSPACE_MISMATCH', 'Execution workspace is not the same Project directory in a linked worktree.', { declaredRoot, requestedRoot: root, declaredIdentity, requestedIdentity: identity });
   return Object.freeze({ root, selector, identity });
 };

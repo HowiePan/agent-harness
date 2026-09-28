@@ -1,23 +1,15 @@
-import { mkdir, readFile, readdir, lstat } from 'node:fs/promises';
-import { resolve, relative } from 'node:path';
+import { readFile, readdir } from 'node:fs/promises';
+import { resolve } from 'node:path';
 import { assert } from '../common/errors.mjs';
-import { digestJson, sha256, withoutKeys } from '../common/canonical.mjs';
+import { digestJson, withoutKeys } from '../common/canonical.mjs';
 import { assertInside, assertNoLinkPath, safeSegment, slash } from '../common/paths.mjs';
 import { captureWorkspace, diffWorkspaceSnapshots } from '../common/workspace-snapshot.mjs';
 import { currentFeatureSubmission } from '../common/feature-submission.mjs';
-import { atomicWrite, atomicWriteJson, readJson, withDirectoryLock } from '../kernel/atomic-io.mjs';
 import { loadReleaseDocumentationScope } from './release-documentation-scope.mjs';
+import { freezeReleaseCandidate, promoteReleaseCandidate, readReleaseCandidate } from '../platform/release/candidate-store.mjs';
+import { inventoryReleaseArtifacts, safeReleaseRelativePath } from '../platform/release/artifacts.mjs';
 
-const releaseRoot = (dataRoot, projectId, target) => resolve(dataRoot, 'version-releases', safeSegment(projectId), safeSegment(target));
-const statePath = root => resolve(root, 'state.json');
-const receiptPath = (root, digest) => resolve(root, 'candidates', safeSegment(digest), 'candidate.json');
 const digestPattern = /^[a-f0-9]{64}$/;
-const safeRelativePath = (value, label) => {
-  assert(typeof value === 'string' && value.length > 0 && value === slash(value) && !value.startsWith('/') && !value.endsWith('/')
-    && !value.includes(':') && !value.split('/').some(segment => !segment || segment === '.' || segment === '..'),
-  'RELEASE_PATH_INVALID', `${label} must be a safe project-relative path.`);
-  return value;
-};
 
 export const readDevelopmentClearance = async ({ dataRoot, projectId, target, runs, evidenceStore, currentSnapshot, allowedPaths, excluded = [] }) => {
   const closed = runs.filter(run => run.status === 'closed' && run.metadata?.commandIntent?.target === target
@@ -56,29 +48,6 @@ export const readDevelopmentClearance = async ({ dataRoot, projectId, target, ru
   assert(false, 'DEVELOPMENT_CLEARANCE_REQUIRED', `No approved development clearance was found for ${target}.`);
 };
 
-const inventoryArtifacts = async (root, relativeRoot) => {
-  safeRelativePath(relativeRoot, 'release artifact root');
-  const absoluteRoot = assertNoLinkPath(root, resolve(root, relativeRoot), 'release artifact root');
-  assert((await lstat(absoluteRoot)).isDirectory(), 'RELEASE_ARTIFACT_ROOT_INVALID', 'Release artifact root must be a directory.');
-  const files = [];
-  const visit = async directory => {
-    for (const entry of await readdir(directory, { withFileTypes: true })) {
-      const file = resolve(directory, entry.name);
-      const info = await lstat(file);
-      assert(!info.isSymbolicLink(), 'RELEASE_ARTIFACT_LINK_FORBIDDEN', `Release artifact contains a link: ${file}`);
-      if (info.isDirectory()) await visit(file);
-      else if (info.isFile()) {
-        const bytes = await readFile(file);
-        files.push({ path: slash(relative(absoluteRoot, file)), sha256: sha256(bytes), size: bytes.length });
-      } else assert(false, 'RELEASE_ARTIFACT_FILE_INVALID', `Unsupported release artifact entry: ${file}`);
-    }
-  };
-  await visit(absoluteRoot);
-  files.sort((a, b) => a.path.localeCompare(b.path));
-  assert(files.length > 0, 'RELEASE_ARTIFACT_EMPTY', 'Release artifact package is empty.');
-  return { absoluteRoot, files };
-};
-
 export const ensurePreReleaseCandidate = async ({ dataRoot, project, state, workspaceRoot }) => {
   if (state.status !== 'closed' || state.metadata?.commandIntent?.action !== 'prerelease') return null;
   const intent = state.metadata.commandIntent;
@@ -103,10 +72,10 @@ export const ensurePreReleaseCandidate = async ({ dataRoot, project, state, work
   'PRERELEASE_DOCUMENT_AUDIT_INCOMPLETE', 'Documentation audit must cover every configured file with no unresolved issue.');
   const required = state.profile.config.requiredFinalGates ?? [];
   assert(required.includes(release.packageGateId) && required.every(id => state.gates.some(gate => gate.id === id && gate.scope === 'final' && gate.status === 'passed' && gate.forcedFresh && gate.sourceDigest === state.sourceDigest)), 'PRERELEASE_FINAL_GATES_REQUIRED', 'Prerelease requires fresh final Gates including the real package build.');
-  const artifacts = await inventoryArtifacts(workspaceRoot, release.artifactRoot);
+  const artifacts = await inventoryReleaseArtifacts(workspaceRoot, release.artifactRoot);
   const identity = release.artifactIdentity;
   assert(identity?.path && identity.versionField && artifacts.files.some(file => file.path === identity.path), 'PRERELEASE_PACKAGE_IDENTITY_REQUIRED', 'Release package identity file is missing.');
-  safeRelativePath(identity.path, 'release artifact identity');
+  safeReleaseRelativePath(identity.path, 'release artifact identity');
   const packageIdentity = JSON.parse(await readFile(assertNoLinkPath(artifacts.absoluteRoot, resolve(artifacts.absoluteRoot, identity.path), 'release artifact identity'), 'utf8'));
   assert(packageIdentity[identity.versionField] === intent.target.replace(/^v/i, ''), 'PRERELEASE_PACKAGE_VERSION_MISMATCH', 'Release package version differs from the target.');
   const closure = state.receipts.find(item => item.kind === 'run-closure');
@@ -120,80 +89,17 @@ export const ensurePreReleaseCandidate = async ({ dataRoot, project, state, work
     finalGates: required.map(id => { const gate = [...state.gates].reverse().find(item => item.id === id && item.scope === 'final'); return { id, evidenceRefs: gate.evidenceRefs }; }),
   };
   const candidate = { ...body, candidateDigest: digestJson(body) };
-  const root = releaseRoot(dataRoot, project.id, intent.target);
-  await mkdir(root, { recursive: true });
-  return withDirectoryLock(resolve(root, '.lock'), async () => {
-    const previous = await readJson(statePath(root), { revision: 0, status: 'none', candidates: [], commands: {} });
-    assert(previous.status !== 'released' || previous.candidateDigest === candidate.candidateDigest, 'RELEASE_ALREADY_FINAL', 'A different candidate cannot replace a released version.');
-    const destination = resolve(root, 'candidates', candidate.candidateDigest);
-    await mkdir(destination, { recursive: true });
-    for (const artifact of artifacts.files) {
-      const source = assertNoLinkPath(artifacts.absoluteRoot, resolve(artifacts.absoluteRoot, artifact.path), 'release package file');
-      const target = assertNoLinkPath(root, resolve(destination, 'artifacts', artifact.path), 'staged release artifact');
-      let existing = null;
-      try { existing = await readFile(target); } catch (error) { if (error.code !== 'ENOENT') throw error; }
-      if (existing) assert(sha256(existing) === artifact.sha256, 'RELEASE_STAGED_ARTIFACT_DRIFT', `Staged artifact changed: ${artifact.path}`);
-      else {
-        const bytes = await readFile(source);
-        assert(sha256(bytes) === artifact.sha256, 'RELEASE_ARTIFACT_CHANGED_DURING_STAGE', `Release artifact changed while staging: ${artifact.path}`);
-        await atomicWrite(target, bytes, { root });
-      }
-    }
-    const manifestFile = receiptPath(root, candidate.candidateDigest);
-    let existingCandidate = null;
-    try { existingCandidate = await readJson(manifestFile); } catch (error) { if (error.code !== 'ENOENT') throw error; }
-    if (existingCandidate) assert(digestJson(existingCandidate) === digestJson(candidate), 'RELEASE_CANDIDATE_DRIFT', 'Frozen candidate manifest changed.');
-    else await atomicWriteJson(manifestFile, candidate, { root });
-    if (previous.candidateDigest !== candidate.candidateDigest) {
-      const next = { ...previous, revision: previous.revision + 1, status: 'prereleased', candidateDigest: candidate.candidateDigest, candidates: [...previous.candidates, candidate.candidateDigest] };
-      await atomicWriteJson(statePath(root), next, { root });
-    }
-    return { candidate, file: manifestFile, state: await readJson(statePath(root)) };
-  }, { root });
+  return freezeReleaseCandidate({ dataRoot, namespace: 'version-releases', projectId: project.id, target: intent.target,
+    candidate, artifactRoot: artifacts.absoluteRoot });
 };
 
-export const readVersionRelease = async ({ dataRoot, projectId, target }) => {
-  const root = releaseRoot(dataRoot, projectId, target);
-  const state = await readJson(statePath(root), { revision: 0, status: 'none', candidates: [], commands: {} });
-  if (!state.candidateDigest) return { state, candidate: null };
-  const candidate = await readJson(receiptPath(root, state.candidateDigest));
-  assert(candidate.candidateDigest === digestJson(withoutKeys(candidate, ['candidateDigest'])), 'RELEASE_CANDIDATE_DIGEST_MISMATCH', 'Release candidate digest is invalid.');
-  assert(candidate.projectId === projectId && candidate.target === target, 'RELEASE_CANDIDATE_SCOPE_MISMATCH', 'Release candidate belongs to another Project or target.');
-  return { state, candidate };
-};
+export const readVersionRelease = async ({ dataRoot, projectId, target }) => readReleaseCandidate({ dataRoot, namespace: 'version-releases', projectId, target });
 
 export const promoteVersionRelease = async ({ dataRoot, project, target, workspaceRoot, candidateDigest, expectedRevision, commandId, approval }) => {
   assert(digestPattern.test(candidateDigest ?? '') && commandId && Number.isInteger(expectedRevision), 'RELEASE_PROMOTION_INPUT_INVALID', 'Promotion requires a candidate digest, command ID, and expected revision.');
   assert(approval?.id === 'formal-version-release' && approval.actor && approval.actor !== 'project-local-invocation'
     && approval.decision === 'approved' && approval.projectId === project.id && approval.target === target && approval.candidateDigest === candidateDigest,
     'RELEASE_PROMOTION_DECISION_REQUIRED', 'Formal release approval must bind the exact candidate.');
-  const root = releaseRoot(dataRoot, project.id, target);
-  return withDirectoryLock(resolve(root, '.lock'), async () => {
-    const { state, candidate } = await readVersionRelease({ dataRoot, projectId: project.id, target });
-    const previousCommand = state.commands?.[commandId];
-    if (previousCommand) {
-      assert(previousCommand.candidateDigest === candidateDigest, 'COMMAND_ID_REUSED', 'Promotion command ID was reused for another candidate.');
-      return { state, candidate, receipt: previousCommand };
-    }
-    assert(state.status === 'prereleased' && state.candidateDigest === candidateDigest && state.revision === expectedRevision, 'RELEASE_PROMOTION_STATE_MISMATCH', 'Promotion must target the current frozen prerelease revision.');
-    // Promotion commits only the already frozen candidate. A source-link Harness
-    // update may rebind the Project Descriptor without changing candidate bytes.
-    // The workspace snapshot and staged artifacts below remain the authority for
-    // what the user approved.
-    const snapshot = await captureWorkspace(workspaceRoot, { excluded: project.workspace.excluded ?? [] });
-    assert(snapshot.digest === candidate.sourceDigest, 'RELEASE_PROMOTION_SOURCE_DRIFT', 'Promotion cannot change or rebuild the frozen source.');
-    for (const artifact of candidate.artifacts) {
-      const file = assertNoLinkPath(root, resolve(root, 'candidates', candidateDigest, 'artifacts', artifact.path), 'frozen release artifact');
-      assert(sha256(await readFile(file)) === artifact.sha256, 'RELEASE_PROMOTION_ARTIFACT_DRIFT', `Frozen artifact changed: ${artifact.path}`);
-    }
-    const receiptBody = { protocolVersion: '1.0', kind: 'version-release-promotion', projectId: project.id, target,
-      candidateDigest, commandId, fromRevision: state.revision, toRevision: state.revision + 1,
-      approval: structuredClone(approval), releasedAt: new Date().toISOString() };
-    const receipt = { ...receiptBody, receiptDigest: digestJson(receiptBody) };
-    const next = { ...state, revision: state.revision + 1, status: 'released', releasedAt: receipt.releasedAt,
-      commands: { ...state.commands, [commandId]: receipt } };
-    await atomicWriteJson(resolve(root, 'promotions', `${safeSegment(receipt.receiptDigest)}.json`), receipt, { root });
-    await atomicWriteJson(statePath(root), next, { root });
-    return { state: next, candidate, receipt };
-  }, { root });
+  return promoteReleaseCandidate({ dataRoot, namespace: 'version-releases', project, target, workspaceRoot,
+    candidateDigest, expectedRevision, commandId, approval, promotionKind: 'version-release-promotion' });
 };

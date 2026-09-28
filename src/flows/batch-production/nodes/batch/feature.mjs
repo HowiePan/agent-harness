@@ -2,6 +2,8 @@
 export const createBatchFeatureFactory = ({ intent, batch, gateIds, sourceDigest, itemKey, itemPaths, forbiddenPaths, conflictPrefix, qualityRootPrefix }) =>
   ({ action, itemId, dependsOn = [], readOnly = false, qualityReview = false }) => {
     const ruleStatus = batch.ruleStatus ?? 'rule-ready';
+    const knownFindingInventory = intent.knownFindingInventories?.[itemId] ?? null;
+    const qualityCloseout = intent.qualityCloseouts?.[itemId] ?? null;
     return {
       id: `${action}/${intent.target}/${itemId}`,
       executionClass: 'agent-reasoning', kind: action,
@@ -17,7 +19,11 @@ export const createBatchFeatureFactory = ({ intent, batch, gateIds, sourceDigest
       conflictKeys: [`${conflictPrefix}:${itemId}`, `${action}:${intent.target}:${itemId}`], gatePlan: gateIds,
       metadata: { scope: intent.scope, sourcePolicy: qualityReview || readOnly ? 'read-only' : 'write', stage: action,
         batchId: intent.target, itemId, [itemKey]: itemId, ruleStatus,
-        ...(qualityReview ? { qualityReview: true, qualityFindingPolicy: 'repair-and-rereview', qualityRoot: `${qualityRootPrefix}:${intent.target}:${itemId}`, reviewRound: 1, reviewSourceDigest: sourceDigest, qualityContext: { batchId: intent.target, [itemKey]: itemId, ruleStatus } } : {}),
+        ...(qualityReview ? { qualityReview: true, qualityFindingPolicy: intent.sourcePolicy === 'read-only' ? 'record-only' : 'repair-and-rereview', qualityRoot: `${qualityRootPrefix}:${intent.target}:${itemId}`, reviewRound: 1, reviewSourceDigest: sourceDigest,
+          ...(knownFindingInventory ? { knownFindingInventory: structuredClone(knownFindingInventory) } : {}),
+          qualityContext: { batchId: intent.target, [itemKey]: itemId, ruleStatus, ...(knownFindingInventory ? { knownFindingInventory: structuredClone(knownFindingInventory) } : {}) } } : {}),
+        ...(action === 'closeout' && qualityCloseout ? { qualityRoot: `${qualityRootPrefix}:${intent.target}:${itemId}`, qualityCloseout: structuredClone(qualityCloseout) } : {}),
+        ...(action === 'release-prepare' && intent.batchClearance ? { batchClearance: structuredClone(intent.batchClearance) } : {}),
       },
     };
   };

@@ -53,7 +53,8 @@ export const createVisibleLifecycleIntent = ({ harness, project, command, execut
       target: nonEmpty(command?.target, 'VISIBLE_LIFECYCLE_TARGET_REQUIRED', 'Visible lifecycle intent requires a target.'),
       arguments: [...(command?.arguments ?? [])].map(String),
     },
-    ...(releaseCandidate ? { releaseCandidate: { candidateDigest: releaseCandidate.candidateDigest, revision: releaseCandidate.revision } } : {}),
+    ...(releaseCandidate ? { releaseCandidate: { candidateDigest: releaseCandidate.candidateDigest, revision: releaseCandidate.revision,
+      ...(releaseCandidate.namespace ? { namespace: releaseCandidate.namespace } : {}) } } : {}),
     executionWorkspaceRoot: nonEmpty(executionWorkspaceRoot, 'VISIBLE_LIFECYCLE_WORKSPACE_REQUIRED', 'Visible lifecycle intent requires a verified execution workspace.'),
     createdAt,
     expiresAt: new Date(Date.parse(createdAt) + ttlMs).toISOString(),
@@ -91,7 +92,8 @@ export const validateVisibleLifecycleIntent = (input, { now = () => new Date().t
   nonEmpty(intent.command.action, 'VISIBLE_LIFECYCLE_COMMAND_INVALID', 'Visible lifecycle command requires an action.');
   nonEmpty(intent.command.target, 'VISIBLE_LIFECYCLE_COMMAND_INVALID', 'Visible lifecycle command requires a target.');
   if (intent.command.action === 'release') {
-    if (!intent.releaseCandidate || !sha256Pattern.test(intent.releaseCandidate.candidateDigest ?? '') || !Number.isInteger(intent.releaseCandidate.revision) || intent.releaseCandidate.revision < 1 || Object.keys(intent.releaseCandidate).some(key => !['candidateDigest', 'revision'].includes(key))) throw Object.assign(new Error('Formal release intent must pin an exact candidate digest and revision.'), { code: 'VISIBLE_RELEASE_CANDIDATE_REQUIRED' });
+    if (!intent.releaseCandidate || !sha256Pattern.test(intent.releaseCandidate.candidateDigest ?? '') || !Number.isInteger(intent.releaseCandidate.revision) || intent.releaseCandidate.revision < 1 || Object.keys(intent.releaseCandidate).some(key => !['candidateDigest', 'revision', 'namespace'].includes(key))
+      || intent.releaseCandidate.namespace !== undefined && intent.releaseCandidate.namespace !== 'batch-releases') throw Object.assign(new Error('Formal release intent must pin an exact candidate digest, revision, and supported namespace.'), { code: 'VISIBLE_RELEASE_CANDIDATE_REQUIRED' });
     if (intent.command.arguments.length) throw Object.assign(new Error('Formal release command does not accept a preset.'), { code: 'VISIBLE_RELEASE_ARGUMENTS_INVALID' });
   } else if (intent.releaseCandidate !== undefined) throw Object.assign(new Error('Only formal release may pin a release candidate.'), { code: 'VISIBLE_RELEASE_CANDIDATE_UNEXPECTED' });
   nonEmpty(intent.executionWorkspaceRoot, 'VISIBLE_LIFECYCLE_WORKSPACE_REQUIRED', 'Visible lifecycle intent requires an execution workspace.');

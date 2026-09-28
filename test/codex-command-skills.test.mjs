@@ -103,7 +103,8 @@ test('Codex plugin exposes one explicit-project pseudo-command router', async ()
   assert.match(skill, /`yield_time_ms` no greater than 1000/);
   assert.match(skill, /stop with `CODEX_VISIBLE_COORDINATOR_SESSION_REQUIRED`/);
   assert.match(skill, /deduplicate by the exact `requestId` plus `requestDigest`/);
-  assert.match(skill, /single-start rule, not a ban on internal continuation/);
+  assert.match(skill, /retry\.mode=same-intent-once/);
+  assert.match(skill, /exact same intent once under narrowly scoped sandbox escalation/);
   assert.match(skill, /original authorization covers H0–H3 `dev sync`/);
   assert.match(skill, /Never inspect the pending directory as a substitute/);
   assert.match(operatorSkill, /所有面向用户的控制对话必须使用中文/);
@@ -195,6 +196,15 @@ test('binding configuration makes project selection and Harness location determi
     assert.deepEqual(releaseIntent.command, { action: 'release', target: 'V3.8.4', arguments: [] });
     await writeFile(resolve(releaseDirectory, 'state.json'), JSON.stringify({ status: 'prereleased', revision: 2, candidateDigest: 'c'.repeat(64) }));
     assert.notDeepEqual(decodeVisibleLifecycleIntent(releaseRoute.coordinationIntent).releaseCandidate, { candidateDigest: 'c'.repeat(64), revision: 2 });
+
+    const batchReleaseDirectory = resolve(active.dataRoot, 'batch-releases', 'tabletop-collection', 'B1');
+    await mkdir(batchReleaseDirectory, { recursive: true });
+    await writeFile(resolve(batchReleaseDirectory, 'state.json'), JSON.stringify({ status: 'prereleased', revision: 1, candidateDigest: 'd'.repeat(64) }));
+    const batchReleaseResponse = await hookResponse({ prompt: 'h:collection release B1', cwd: workspaceRoot }, options);
+    const batchReleaseContext = batchReleaseResponse.hookSpecificOutput.additionalContext;
+    const batchReleaseRoute = JSON.parse(batchReleaseContext.slice(batchReleaseContext.indexOf('解析结果：') + '解析结果：'.length));
+    assert.deepEqual(decodeVisibleLifecycleIntent(batchReleaseRoute.coordinationIntent).releaseCandidate,
+      { candidateDigest: 'd'.repeat(64), revision: 1, namespace: 'batch-releases' });
 
     const where = await hookResponse({ prompt: 'h:where', cwd: workspaceRoot }, options);
     assert.match(where.hookSpecificOutput.additionalContext, /只读结果/);
@@ -402,6 +412,24 @@ test('each project alias can bind and validate an independent workspace', async 
   const collection = await hookResponse({ prompt: 'h:collection quality B1 all', cwd: collectionRoot }, { pluginRoot });
   assert.match(collection.hookSpecificOutput.additionalContext, /"projectAlias":"collection"/);
   const denied = await hookResponse({ prompt: 'h:collection quality B1 all', cwd: engineRoot }, { pluginRoot });
+  assert.match(denied.hookSpecificOutput.additionalContext, /不是该仓库经验证的 linked worktree/);
+});
+
+test('a Collection alias in the Engine repository is confined to its nested project directory', async t => {
+  const fixture = await createTemporaryFixture('agent-harness-nested-collection-binding-');
+  t.after(() => rm(fixture, { recursive: true, force: true }));
+  const pluginRoot = resolve(fixture, 'plugin');
+  const controlRoot = resolve(fixture, 'control');
+  const repositoryRoot = resolve(fixture, 'CardWorld');
+  const collectionRoot = resolve(repositoryRoot, 'tabletop-collection');
+  await Promise.all([mkdir(pluginRoot, { recursive: true }), mkdir(controlRoot, { recursive: true }), mkdir(resolve(repositoryRoot, '.git'), { recursive: true }), mkdir(collectionRoot, { recursive: true })]);
+  await createActiveReleaseFixture(controlRoot);
+  const configured = await configureBindings({ pluginRoot, controlRoot, entrypoint: 'runtime/bin/agent-harness.mjs', dataRoot: 'data',
+    projectSpecs: [`collection|tabletop-collection|collection-batch|tabletop-collection-profile|${collectionRoot}`] });
+  assert.equal(configured.projects.collection.workspaceIdentity.subpath, 'tabletop-collection');
+  const allowed = await hookResponse({ prompt: 'h:collection produce B1', cwd: collectionRoot }, { pluginRoot });
+  assert.match(allowed.hookSpecificOutput.additionalContext, /"projectAlias":"collection"/);
+  const denied = await hookResponse({ prompt: 'h:collection produce B1', cwd: repositoryRoot }, { pluginRoot });
   assert.match(denied.hookSpecificOutput.additionalContext, /不是该仓库经验证的 linked worktree/);
 });
 

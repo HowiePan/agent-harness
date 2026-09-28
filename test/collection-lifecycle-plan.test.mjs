@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { resolve } from 'node:path';
 import { createTabletopCollectionLifecyclePlan, createTabletopCollectionProjectDescriptor, collectionBatchProfile } from '../integrations/legacy-consumers/collection/index.mjs';
+import { createQualityInventorySnapshot, deriveQualityTargetSnapshot } from '../src/platform/execution/quality-target.mjs';
 
 const games = ['doudizhu', 'gomoku', 'texas-holdem', 'chess', 'tycoon', 'liars-dice', 'junqi', 'bind-and-die', 'go', 'riichi'];
 const sourceDigest = 'a'.repeat(64);
@@ -14,7 +15,12 @@ const project = () => {
   return descriptor;
 };
 
-const intent = (action, selector = null) => ({ action, target: 'B1', selector, scope: action === 'quality' ? 'game-harness-acceptance' : action, sourcePolicy: action === 'quality' ? 'review-and-repair' : null });
+const intent = (action, selector = null) => {
+  const ids = selector && games.includes(selector) ? [selector] : games;
+  const qualityTargets = Object.fromEntries(ids.map(id => [id, deriveQualityTargetSnapshot({ projectId: 'tabletop-collection', workflowId: 'collection-batch-production', target: 'B1', sourceDigest, scopeRoot: `collection:B1:${id}` })]));
+  return { action, target: 'B1', selector, scope: action === 'quality' ? 'game-harness-acceptance' : action, sourcePolicy: action === 'quality' ? 'review-and-repair' : null,
+    qualityTargets, knownFindingInventories: Object.fromEntries(Object.entries(qualityTargets).map(([id, target]) => [id, createQualityInventorySnapshot(target)])) };
+};
 
 test('Collection quality plan expands B1 into ten independent read-only game reviews', () => {
   const plan = createTabletopCollectionLifecyclePlan({ intent: intent('quality'), project: project(), runId: 'quality-b1', sourceDigest });

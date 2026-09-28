@@ -71,7 +71,7 @@ test('project initialization plan is invalidated when harness.json changes', asy
   await assert.rejects(() => applyProjectInitializationPlan(plan, { controlRoot, dataRoot: resolve(root, 'data'), releaseIdentity: { version: '1.0.0', artifactDigest: 'e'.repeat(64), verified: true }, commandId: 'changed', authorityDecision: { actor: 'owner', decision: 'approved' } }), error => error.code === 'PROJECT_INIT_CONFIG_CHANGED');
 });
 
-test('source-link initialization checks Git workspace identity before writing Registry state', async t => {
+test('source-link initialization rejects invalid Git workspace metadata before writing Registry state', async t => {
   const controlRoot = harnessProjectRoot();
   const parent = resolve(harnessTemporaryRoot(), 'project-initialization-tests');
   await mkdir(parent, { recursive: true });
@@ -80,6 +80,7 @@ test('source-link initialization checks Git workspace identity before writing Re
   const projectRoot = resolve(root, 'consumer');
   const dataRoot = resolve(root, 'data');
   await mkdir(projectRoot, { recursive: true });
+  await writeFile(resolve(projectRoot, '.git'), 'not a gitdir marker\n');
   const configPath = resolve(projectRoot, 'harness.json');
   await writeFile(configPath, JSON.stringify({
     schemaVersion: '1.0', kind: 'agent-harness-project',
@@ -92,7 +93,7 @@ test('source-link initialization checks Git workspace identity before writing Re
   }));
   await assert.rejects(
     () => createProjectInitializationPlan(configPath, { projectRoot, controlRoot, dataRoot, releaseIdentity: { version: '1.0.0', artifactDigest: 'e'.repeat(64), verified: true }, mode: 'source-link' }),
-    error => error.code === 'WORKSPACE_GIT_METADATA_REQUIRED',
+    error => error.code === 'WORKSPACE_GITDIR_INVALID',
   );
   assert.equal(existsSync(dataRoot), false);
 });

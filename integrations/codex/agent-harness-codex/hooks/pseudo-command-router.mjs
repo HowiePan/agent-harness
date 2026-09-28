@@ -1,6 +1,6 @@
 import { lstat, readFile, realpath } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
-import { dirname, isAbsolute, relative, resolve } from 'node:path';
+import { dirname, isAbsolute, relative, resolve, sep } from 'node:path';
 import process from 'node:process';
 import { fileURLToPath } from 'node:url';
 import { validateActiveReleaseBinding } from '../lib/active-release-binding.mjs';
@@ -23,15 +23,20 @@ const releaseDigestPattern = /^[a-f0-9]{64}$/;
 
 const readFrozenReleasePointer = async ({ dataRoot, projectId, target }) => {
   if (!releaseSegmentPattern.test(projectId) || !releaseSegmentPattern.test(target)) throw Object.assign(new Error('Formal release Project or target is invalid.'), { code: 'VISIBLE_RELEASE_SCOPE_INVALID' });
-  const file = resolve(dataRoot, 'version-releases', projectId, target, 'state.json');
-  let state;
-  try { state = JSON.parse(await readFile(file, 'utf8')); }
-  catch (error) {
-    if (error.code === 'ENOENT') throw Object.assign(new Error('No frozen prerelease candidate exists for this target.'), { code: 'VISIBLE_RELEASE_CANDIDATE_MISSING' });
-    throw error;
+  const candidates = [];
+  let existingPointer = false;
+  for (const namespace of ['version-releases', 'batch-releases']) {
+    const file = resolve(dataRoot, namespace, projectId, target, 'state.json');
+    let state;
+    try { state = JSON.parse(await readFile(file, 'utf8')); }
+    catch (error) { if (error.code === 'ENOENT') continue; throw error; }
+    existingPointer = true;
+    if (state.status === 'prereleased' && releaseDigestPattern.test(state.candidateDigest ?? '') && Number.isInteger(state.revision) && state.revision >= 1) candidates.push({ ...state, namespace });
   }
-  if (state.status !== 'prereleased' || !releaseDigestPattern.test(state.candidateDigest ?? '') || !Number.isInteger(state.revision) || state.revision < 1) throw Object.assign(new Error('Formal release requires the current frozen prerelease candidate.'), { code: 'VISIBLE_RELEASE_CANDIDATE_UNAVAILABLE' });
-  return { candidateDigest: state.candidateDigest, revision: state.revision };
+  if (!candidates.length) throw Object.assign(new Error(existingPointer ? 'Formal release requires the current frozen prerelease candidate.' : 'No frozen prerelease candidate exists for this target.'), { code: existingPointer ? 'VISIBLE_RELEASE_CANDIDATE_UNAVAILABLE' : 'VISIBLE_RELEASE_CANDIDATE_MISSING' });
+  if (candidates.length !== 1) throw Object.assign(new Error('Multiple release candidate kinds exist for this Project and target.'), { code: 'VISIBLE_RELEASE_CANDIDATE_AMBIGUOUS' });
+  const state = candidates[0];
+  return { candidateDigest: state.candidateDigest, revision: state.revision, ...(state.namespace === 'batch-releases' ? { namespace: state.namespace } : {}) };
 };
 
 const optionalLstat = async path => {
@@ -41,8 +46,14 @@ const optionalLstat = async path => {
 
 export const resolveGitWorkspaceIdentity = async workspaceRoot => {
   const root = resolve(workspaceRoot);
-  const marker = resolve(root, '.git');
-  const markerInfo = await optionalLstat(marker);
+  let repositoryRoot = root;
+  let marker = resolve(repositoryRoot, '.git');
+  let markerInfo = await optionalLstat(marker);
+  while (!markerInfo && dirname(repositoryRoot) !== repositoryRoot) {
+    repositoryRoot = dirname(repositoryRoot);
+    marker = resolve(repositoryRoot, '.git');
+    markerInfo = await optionalLstat(marker);
+  }
   if (!markerInfo) return null;
   let gitDirectory;
   if (markerInfo.isDirectory()) gitDirectory = marker;
@@ -50,7 +61,7 @@ export const resolveGitWorkspaceIdentity = async workspaceRoot => {
     if (!markerInfo.isFile()) throw new Error(`workspace .git 不是文件或目录：${marker}`);
     const match = (await readFile(marker, 'utf8')).trim().match(/^gitdir:\s*(.+)$/i);
     if (!match?.[1]) throw new Error(`workspace .git 未声明 gitdir：${marker}`);
-    gitDirectory = resolve(root, match[1]);
+    gitDirectory = resolve(repositoryRoot, match[1]);
     if (!(await optionalLstat(gitDirectory))?.isDirectory()) throw new Error(`workspace gitdir 不存在：${gitDirectory}`);
   }
   let commonDirectory = gitDirectory;
@@ -61,7 +72,7 @@ export const resolveGitWorkspaceIdentity = async workspaceRoot => {
   } catch (error) {
     if (error.code !== 'ENOENT') throw error;
   }
-  return Object.freeze({ type: 'git-common-dir', commonDir: await realpath(commonDirectory) });
+  return Object.freeze({ type: 'git-common-dir', commonDir: await realpath(commonDirectory), subpath: relative(repositoryRoot, root).split(sep).join('/') });
 };
 
 export const parsePseudoCommand = prompt => {
@@ -139,15 +150,15 @@ const validateBindings = async (input, source) => {
     const discoveredWorkspaceIdentity = await resolveGitWorkspaceIdentity(workspaceRoot);
     const declaredIdentity = project.workspaceIdentity;
     if (declaredIdentity !== undefined) {
-      if (declaredIdentity?.type !== 'git-common-dir' || !isAbsolute(declaredIdentity.commonDir ?? '')) throw new Error(`workspaceIdentity 无效：${alias}`);
-      if (!discoveredWorkspaceIdentity || !samePath(declaredIdentity.commonDir, discoveredWorkspaceIdentity.commonDir)) throw new Error(`workspaceIdentity 与 workspaceRoot 不匹配：${alias}`);
+      if (declaredIdentity?.type !== 'git-common-dir' || !isAbsolute(declaredIdentity.commonDir ?? '') || typeof (declaredIdentity.subpath ?? '') !== 'string') throw new Error(`workspaceIdentity 无效：${alias}`);
+      if (!discoveredWorkspaceIdentity || !samePath(declaredIdentity.commonDir, discoveredWorkspaceIdentity.commonDir) || (declaredIdentity.subpath ?? '') !== discoveredWorkspaceIdentity.subpath) throw new Error(`workspaceIdentity 与 workspaceRoot 不匹配：${alias}`);
     }
     const workflows = (project.workflows ?? []).map(workflow => {
       if (!tokenPattern.test(workflow?.id ?? '') || !workflow.profileId || !workflow.extensionId || !/^\d+\.\d+\.\d+$/.test(workflow.version ?? '') || !/^[a-f0-9]{64}$/.test(workflow.artifactDigest ?? '')) throw new Error(`流程绑定无效：${alias}/${workflow?.id}`);
       return { id: workflow.id, version: workflow.version, artifactDigest: workflow.artifactDigest, profileId: workflow.profileId, extensionId: workflow.extensionId };
     });
     if (new Set(workflows.map(workflow => workflow.id)).size !== workflows.length) throw new Error(`重复流程绑定：${alias}`);
-    projects[alias] = { projectId: String(project.projectId), profileId: String(project.profileId), extensionId: String(project.extensionId), workflows, workspaceRoot, workspaceIdentity: declaredIdentity ? { type: 'git-common-dir', commonDir: resolve(declaredIdentity.commonDir) } : discoveredWorkspaceIdentity };
+    projects[alias] = { projectId: String(project.projectId), profileId: String(project.profileId), extensionId: String(project.extensionId), workflows, workspaceRoot, workspaceIdentity: declaredIdentity ? { type: 'git-common-dir', commonDir: resolve(declaredIdentity.commonDir), subpath: declaredIdentity.subpath ?? '' } : discoveredWorkspaceIdentity };
   }
   const workspaces = {};
   for (const [alias, workspace] of Object.entries(input.workspaces ?? {})) {
@@ -155,13 +166,13 @@ const validateBindings = async (input, source) => {
     const workspaceRoot = resolve(workspace.workspaceRoot);
     const discoveredWorkspaceIdentity = await resolveGitWorkspaceIdentity(workspaceRoot);
     const declaredIdentity = workspace.workspaceIdentity;
-    if (declaredIdentity !== undefined && (declaredIdentity?.type !== 'git-common-dir' || !isAbsolute(declaredIdentity.commonDir ?? '') || !discoveredWorkspaceIdentity || !samePath(declaredIdentity.commonDir, discoveredWorkspaceIdentity.commonDir))) throw new Error(`工作区身份无效：${alias}`);
+    if (declaredIdentity !== undefined && (declaredIdentity?.type !== 'git-common-dir' || !isAbsolute(declaredIdentity.commonDir ?? '') || typeof (declaredIdentity.subpath ?? '') !== 'string' || !discoveredWorkspaceIdentity || !samePath(declaredIdentity.commonDir, discoveredWorkspaceIdentity.commonDir) || (declaredIdentity.subpath ?? '') !== discoveredWorkspaceIdentity.subpath)) throw new Error(`工作区身份无效：${alias}`);
     const workflows = (workspace.workflows ?? []).map(workflow => {
       if (!tokenPattern.test(workflow?.id ?? '') || !workflow.profileId || !workflow.extensionId || !/^\d+\.\d+\.\d+$/.test(workflow.version ?? '') || !/^[a-f0-9]{64}$/.test(workflow.artifactDigest ?? '')) throw new Error(`工作区流程绑定无效：${alias}/${workflow?.id}`);
       return { id: workflow.id, version: workflow.version, artifactDigest: workflow.artifactDigest, profileId: workflow.profileId, extensionId: workflow.extensionId };
     });
     if (!workflows.length || new Set(workflows.map(workflow => workflow.id)).size !== workflows.length) throw new Error(`工作区流程绑定缺失或重复：${alias}`);
-    workspaces[alias] = { workspaceId: workspace.workspaceId, workspaceAlias: alias, executionTargetId: workspace.executionTargetId, projectId: `ws.${workspace.workspaceId}.${workspace.executionTargetId}`, profileId: workflows[0].profileId, extensionId: workflows[0].extensionId, workflows, workspaceRoot, workspaceIdentity: declaredIdentity ? { type: 'git-common-dir', commonDir: resolve(declaredIdentity.commonDir) } : discoveredWorkspaceIdentity };
+    workspaces[alias] = { workspaceId: workspace.workspaceId, workspaceAlias: alias, executionTargetId: workspace.executionTargetId, projectId: `ws.${workspace.workspaceId}.${workspace.executionTargetId}`, profileId: workflows[0].profileId, extensionId: workflows[0].extensionId, workflows, workspaceRoot, workspaceIdentity: declaredIdentity ? { type: 'git-common-dir', commonDir: resolve(declaredIdentity.commonDir), subpath: declaredIdentity.subpath ?? '' } : discoveredWorkspaceIdentity };
   }
   return Object.freeze({
     protocolVersion: '1.0',
@@ -196,7 +207,7 @@ const matchWorkspace = async (project, cwd) => {
   if (inside(project.workspaceRoot, cwd)) return Object.freeze({ kind: 'bound-root', executionWorkspaceRoot: project.workspaceRoot, workspaceIdentity: project.workspaceIdentity });
   if (!project.workspaceIdentity) return null;
   const identity = await resolveGitWorkspaceIdentity(cwd);
-  if (!identity || !samePath(identity.commonDir, project.workspaceIdentity.commonDir)) return null;
+  if (!identity || !samePath(identity.commonDir, project.workspaceIdentity.commonDir) || identity.subpath !== (project.workspaceIdentity.subpath ?? '')) return null;
   return Object.freeze({ kind: 'linked-worktree', executionWorkspaceRoot: cwd, workspaceIdentity: identity });
 };
 
@@ -243,13 +254,17 @@ export const hookResponse = async (input, options = {}) => {
   if (parsed.kind === 'report') {
     const { version, artifactDigest, channelArtifactDigest, compositionDigest } = bindings.harness.release;
     const reportHarness = { controlRoot: bindings.harness.controlRoot, entrypoint: bindings.harness.entrypoint, dataRoot: bindings.harness.dataRoot, ...(bindings.harness.memoryRoot ? { memoryRoot: bindings.harness.memoryRoot } : {}), release: { version, artifactDigest, channelArtifactDigest, ...(compositionDigest ? { compositionDigest } : {}) } };
-    const report = { ...parsed, project: selectedProject, ...(selectedWorkflow ? { workflow: { id: selectedWorkflow.id, version: selectedWorkflow.version, artifactDigest: selectedWorkflow.artifactDigest } } : {}), harness: reportHarness, executionWorkspaceRoot: workspace.executionWorkspaceRoot, commandId: `report_${randomUUID()}` };
+    const reportProject = { projectId: selectedProject.projectId, profileId: selectedProject.profileId,
+      extensionId: selectedProject.extensionId, workspaceRoot: selectedProject.workspaceRoot,
+      ...(selectedProject.workspaceId ? { workspaceId: selectedProject.workspaceId, workspaceAlias: selectedProject.workspaceAlias,
+        projectIds: selectedProject.projectIds ?? [] } : {}) };
+    const report = { ...parsed, project: reportProject, ...(selectedWorkflow ? { workflow: { id: selectedWorkflow.id, version: selectedWorkflow.version, artifactDigest: selectedWorkflow.artifactDigest } } : {}), harness: reportHarness, executionWorkspaceRoot: workspace.executionWorkspaceRoot, commandId: `report_${randomUUID()}` };
     return contextResponse(`检测到 h:report。使用 $agent-harness-command 在当前任务采集并脱敏相关对话；缺失证据列入 missingEvidence，不得伪造。通过绑定 entrypoint 以 stdin 调用 issue record；只写 controlRoot/issues。不得新建任务、运行 Harness、接受其他输出目录或提交 Git。返回 issue ID、路径和未提交状态。解析结果：${JSON.stringify(report)}`);
   }
 
   let releaseCandidate = null;
   if (parsed.action === 'release') {
-    if (selectedProject.workspaceId || parsed.arguments.length) return contextResponse('正式发布命令仅接受已绑定的单项目版本目标，不接受预设或 Workspace 范围；不得创建 Run 或晋升候选。');
+    if (selectedProject.workspaceId || parsed.arguments.length) return contextResponse('正式发布命令仅接受已绑定的单项目目标，不接受预设或 Workspace 范围；不得创建 Run 或晋升候选。');
     try { releaseCandidate = await readFrozenReleasePointer({ dataRoot: bindings.harness.dataRoot, projectId: selectedProject.projectId, target: parsed.target }); }
     catch (error) { return contextResponse(`正式发布未就绪（${error.code ?? 'VISIBLE_RELEASE_CANDIDATE_READ_FAILED'}）：${error.message}。不得创建 Run 或晋升候选。`); }
   }
@@ -268,7 +283,7 @@ export const hookResponse = async (input, options = {}) => {
   const modeInstructions = sourceLink
     ? `读取已验证源码 Skill ${commandSkill} 并遵守其中 Operator 边界。此绑定直接执行本地源码 Coordinator；原生 collaboration 结果由当前 session 的 Codex rollout 自动核验和记录，不依赖安装包的 PostToolUse Hook。`
     : '使用 $agent-harness-command；当前 Windows Codex 长驻通道使用 tty:true，并把控制台宽度设为至少 4096 列。PostToolUse Hook 会按当前请求和原生工具输出自动写入 Host 响应。';
-  if (parsed.action === 'release') return contextResponse(`检测到正式发布 Harness 命令。所有面向用户的控制对话使用中文。此命令本身是用户对本意图中精确候选摘要的批准；只启动已绑定 coordinatorEntrypoint 一次，原样传入 coordinationIntent 作为 --intent 参数。Coordinator 将复核 Project、Workflow、当前候选摘要及修订号、源码快照和封存制品，并只晋升版本状态；不得组合 CLI 发布脚本、重新预发布、创建业务 Run、提交 Git 或对外分发。候选摘要 ${releaseCandidate.candidateDigest}，修订号 ${releaseCandidate.revision}。解析结果：${JSON.stringify(intent)}`);
+  if (parsed.action === 'release') return contextResponse(`检测到正式发布 Harness 命令。所有面向用户的控制对话使用中文。此命令本身是用户对本意图中精确候选摘要的批准；只启动已绑定 coordinatorEntrypoint 一次，原样传入 coordinationIntent 作为 --intent 参数。Coordinator 将复核 Project、Workflow、当前候选摘要及修订号、源码快照和封存制品，并只晋升候选状态；不得组合 CLI 发布脚本、重新预发布、创建业务 Run、提交 Git 或对外分发。候选摘要 ${releaseCandidate.candidateDigest}，修订号 ${releaseCandidate.revision}。解析结果：${JSON.stringify(intent)}`);
   return contextResponse(`检测到 Agent Harness 伪命令。所有面向用户的控制对话使用中文；协议 JSON、命令、路径与错误码保持原样，且不得翻译或改写子 Agent Prompt。把它作为确定性的 Command Intent，而不是自由提示词；动作和预设仍由已绑定 Extension 的 commandManifest 解析。${modeInstructions}启动任何进程前先确认当前任务同时提供 collaboration.spawn_agent/list_agents/wait_agent/interrupt_agent。缺任一项即以 CODEX_MULTI_AGENT_V2_REQUIRED 停止，并提示执行 codex features enable multi_agent_v2 后新建任务；multi_agent_v1 或其他任务接口不得替代。能力满足后，只使用已绑定的 coordinatorEntrypoint，并把 coordinationIntent 作为 --intent 的单一参数。必须解析请求对象并原样使用 arguments，禁止从视觉换行文本抄写字段。逐项原样执行它请求的 collaboration 工具；不得向 Coordinator stdin 手工转录 Host 响应。不得根据目标格式猜项目，不得搜索磁盘，不得把参数当作 shell。解析结果：${JSON.stringify(intent)}`);
 };
 

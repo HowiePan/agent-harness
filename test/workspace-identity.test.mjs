@@ -64,3 +64,19 @@ test('git-worktree selection rejects a different repository', async t => {
     error => error.code === 'PROJECT_EXECUTION_WORKSPACE_MISMATCH',
   );
 });
+
+test('a nested Project keeps its relative directory across linked worktrees', async t => {
+  const parent = resolve(harnessTemporaryRoot(), 'workspace-identity-tests');
+  await mkdir(parent, { recursive: true });
+  const root = await mkdtemp(resolve(parent, 'nested-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const repository = await createRepositoryFixture(root);
+  const project = resolve(repository.repositoryRoot, 'tabletop-collection');
+  const linkedProject = resolve(repository.worktreeRoot, 'tabletop-collection');
+  await Promise.all([mkdir(project), mkdir(linkedProject), mkdir(resolve(repository.worktreeRoot, 'other'))]);
+  const descriptor = { workspace: { root: project, rootSelector: 'git-worktree' } };
+  const selected = await resolveProjectWorkspace(descriptor, linkedProject);
+  assert.equal(selected.identity.subpath, 'tabletop-collection');
+  await assert.rejects(() => resolveProjectWorkspace(descriptor, repository.worktreeRoot), error => error.code === 'PROJECT_EXECUTION_WORKSPACE_MISMATCH');
+  await assert.rejects(() => resolveProjectWorkspace(descriptor, resolve(repository.worktreeRoot, 'other')), error => error.code === 'PROJECT_EXECUTION_WORKSPACE_MISMATCH');
+});

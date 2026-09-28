@@ -34,12 +34,13 @@ export const createTabletopCollectionProjectDescriptor = ({
   maxConcurrency = 10,
   maxLogicalGames = 10,
   qualityReviewLimit = { mode: 'bounded', maxRechecks: 2 },
+  release = null,
   batches = [],
 } = {}) => {
   assert(workspaceRoot && isAbsolute(workspaceRoot), 'COLLECTION_WORKSPACE_REQUIRED', 'Collection descriptor requires an absolute workspaceRoot.');
   if (runtimePluginId !== 'codex-conversation-runtime') assert(agentExecutionMode, 'HEADLESS_EXECUTION_MODE_EXPLICIT_REQUIRED', 'Selecting a non-default Runtime requires an explicit agentExecutionMode; headless execution is never inferred from a Runtime ID.');
   const resolvedAgentExecutionMode = agentExecutionMode ?? 'conversation-visible';
-  const workspace = { root: workspaceRoot, rootSelector: 'git-worktree', excluded: ['.git', 'node_modules', 'dist', 'build', 'coverage', 'runs'] };
+  const workspace = { root: workspaceRoot, rootSelector: 'git-worktree', excluded: [...new Set(['.git', 'node_modules', 'dist', 'build', 'coverage', 'runs', ...(release?.artifactRoot ? [release.artifactRoot] : [])])] };
   if (remote) workspace.remote = remote;
   const runtimePlugins = [...new Set(runtimePluginIds)];
   assert(runtimePlugins.includes(runtimePluginId), 'PROJECT_RUNTIME_ALLOWLIST_INVALID', 'runtimePluginIds must include the default Runtime.');
@@ -73,6 +74,7 @@ export const createTabletopCollectionProjectDescriptor = ({
       maxConcurrency,
       maxLogicalGames,
       qualityReviewLimit: structuredClone(qualityReviewLimit),
+      ...(release ? { release: structuredClone({ ...release, manifestItemsKey: release.manifestItemsKey ?? 'gameIds' }) } : {}),
       collectionBatches: structuredClone(batches),
       profileConfigs: { 'collection-batch': { maxLogicalGames } },
     },

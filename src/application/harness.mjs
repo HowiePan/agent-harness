@@ -26,8 +26,7 @@ import { createLifecycleCommandPlan, validateLifecycleCommandPlan } from './life
 import { createExecutionReadinessReport as buildExecutionReadinessReport } from './execution-readiness-service.mjs';
 import { executeHeadlessLifecyclePlan, executeVisibleLifecyclePlan as runVisibleLifecyclePlan } from './lifecycle-execution-service.mjs';
 import { loadReleaseIdentity } from './release-identity.mjs';
-import { loadReleaseDocumentationScope } from './release-documentation-scope.mjs';
-import { readDevelopmentClearance, readVersionRelease, promoteVersionRelease } from './version-prerelease.mjs';
+import { preparePrereleaseIntent, readReleaseForKind, promoteReleaseForKind } from './release-variant.mjs';
 import { captureWorkspace, diffWorkspaceSnapshots } from '../common/workspace-snapshot.mjs';
 import { resolveProjectWorkspace } from '../common/workspace-identity.mjs';
 import { MemoryStore } from '../platform/resources/memory/memory-store.mjs';
@@ -248,13 +247,25 @@ export const createHarness = async ({ controlRoot: controlRootInput, dataRoot: d
 
     async readVersionRelease(projectId, target) {
       await projectRegistry.get(projectId);
-      return readVersionRelease({ dataRoot: authorityStore.root, projectId, target });
+      return readReleaseForKind({ kind: 'version', dataRoot: authorityStore.root, projectId, target });
     },
 
     async promoteVersionRelease({ projectId, target, candidateDigest, expectedRevision, commandId, approval }) {
       const project = await projectRegistry.get(projectId);
       const workspace = await resolveProjectWorkspace(project);
-      return promoteVersionRelease({ dataRoot: authorityStore.root, project, target, workspaceRoot: workspace.root,
+      return promoteReleaseForKind({ kind: 'version', dataRoot: authorityStore.root, project, target, workspaceRoot: workspace.root,
+        candidateDigest, expectedRevision, commandId, approval });
+    },
+
+    async readScopedRelease(projectId, target) {
+      await projectRegistry.get(projectId);
+      return readReleaseForKind({ kind: 'scoped', dataRoot: authorityStore.root, projectId, target });
+    },
+
+    async promoteScopedRelease({ projectId, target, candidateDigest, expectedRevision, commandId, approval }) {
+      const project = await projectRegistry.get(projectId);
+      const workspace = await resolveProjectWorkspace(project);
+      return promoteReleaseForKind({ kind: 'scoped', dataRoot: authorityStore.root, project, target, workspaceRoot: workspace.root,
         candidateDigest, expectedRevision, commandId, approval });
     },
 
@@ -313,21 +324,39 @@ export const createHarness = async ({ controlRoot: controlRootInput, dataRoot: d
       if (strictProjectIdentity) assert(project.harness?.version === currentReleaseIdentity.version && project.harness?.artifactDigest === currentReleaseIdentity.artifactDigest, 'PROJECT_HARNESS_IDENTITY_MISMATCH', `Project ${project.id} does not bind the active Harness release.`);
       const snapshot = await captureWorkspace(workspace.root, { excluded: project.workspace.excluded ?? [] });
       if (intent.action === 'prerelease') {
-        const existingRelease = await readVersionRelease({ dataRoot: authorityStore.root, projectId: project.id, target: intent.target });
-        assert(existingRelease.state.status !== 'released', 'VERSION_ALREADY_RELEASED', 'A released version cannot start a new prerelease.');
-        assert(existingRelease.state.status !== 'prereleased' || existingRelease.candidate.sourceDigest !== snapshot.digest,
-          'PRERELEASE_ALREADY_FROZEN', 'The current source already has a frozen candidate; inspect it with version-release status.');
-        const release = project.policy?.release;
-        assert(release?.documentationScopePath && Array.isArray(release.versionPaths) && release.artifactRoot && release.packageGateId,
-          'PRERELEASE_POLICY_REQUIRED', 'Project must declare release documentation, version paths, artifact root, and package Gate.');
-        const documentation = await loadReleaseDocumentationScope({ workspaceRoot: workspace.root, configPath: release.documentationScopePath, excluded: project.workspace.excluded ?? [] });
-        const clearance = await readDevelopmentClearance({ dataRoot: authorityStore.root, projectId: project.id, target: intent.target,
-          runs: await authorityStore.list(project.id), evidenceStore, currentSnapshot: snapshot,
-          allowedPaths: [...documentation.allowedPaths, ...release.versionPaths, release.documentationScopePath], excluded: project.workspace.excluded ?? [] });
-        intent = { ...intent, releaseDocumentation: documentation, developmentClearance: clearance.receipt,
-          authorizedPreReleaseDelta: clearance.authorizedPreReleaseDelta };
+        intent = await preparePrereleaseIntent({ intent, extension, project, snapshot, workspace, authorityStore, evidenceStore });
       }
       if (extension.planningCapabilities.includes('quality-target')) {
+        if (extension.operations.resolveQualityScopes && ['quality', 'full'].includes(intent.action)) {
+          const declaredScopes = extension.operations.resolveQualityScopes({ project: structuredClone(project), target: intent.target });
+          const scopes = intent.selector ? declaredScopes?.filter(scope => scope.id === intent.selector) : declaredScopes;
+          assert(Array.isArray(scopes) && scopes.length > 0 && new Set(scopes.map(scope => scope.id)).size === scopes.length
+            && scopes.every(scope => typeof scope.id === 'string' && scope.id.length > 0 && typeof scope.root === 'string' && scope.root.length > 0),
+          'QUALITY_SCOPES_INVALID', 'The bound Extension must declare unique quality scopes for the target.');
+          const runs = await authorityStore.list(project.id);
+          const qualityTargets = {};
+          const qualityRepairInventories = {};
+          const qualityCloseouts = {};
+          const knownFindingInventories = {};
+          for (const scope of scopes) {
+            const target = deriveQualityTargetSnapshot({ projectId: project.id, workflowId: intent.workflowId, target: intent.target,
+              sourceDigest: snapshot.digest, runs, scopeRoot: scope.root,
+              includeNonterminal: intent.action === 'quality' && ['repair-known', 'closeout'].includes(intent.preset) });
+            qualityTargets[scope.id] = target;
+            if (intent.action === 'quality' && intent.preset === 'repair-known') {
+              const inventory = createQualityRepairInventorySnapshot(target);
+              qualityRepairInventories[scope.id] = inventory;
+            } else if (intent.action === 'quality' && intent.preset === 'closeout') qualityCloseouts[scope.id] = createQualityCloseoutSnapshot(target);
+            else if (['quality', 'full'].includes(intent.action)) knownFindingInventories[scope.id] = createQualityInventorySnapshot(target);
+          }
+          if (intent.action === 'quality' && intent.preset === 'repair-known'
+            && Object.values(qualityRepairInventories).every(inventory => inventory.findings.length === 0)) {
+            for (const scope of scopes) qualityCloseouts[scope.id] = createQualityCloseoutSnapshot(qualityTargets[scope.id]);
+          }
+          intent = { ...intent, qualityTargets, ...(Object.keys(qualityRepairInventories).length ? { qualityRepairInventories } : {}),
+            ...(Object.keys(qualityCloseouts).length ? { qualityCloseouts } : {}),
+            ...(Object.keys(knownFindingInventories).length ? { knownFindingInventories } : {}) };
+        } else if (!extension.operations.resolveQualityScopes) {
         const inventoryDeclaration = project.policy?.knownFindingInventories?.[intent.target];
         const legacyInventory = inventoryDeclaration
           ? sealLegacyFindingInventory({ projectId: project.id, target: intent.target, declaration: inventoryDeclaration })
@@ -347,6 +376,7 @@ export const createHarness = async ({ controlRoot: controlRootInput, dataRoot: d
           if (intent.qualityRepairInventory.findings.length === 0) intent.qualityCloseout = createQualityCloseoutSnapshot(qualityTarget);
         } else if (intent.action === 'quality' && intent.preset === 'closeout') intent.qualityCloseout = createQualityCloseoutSnapshot(qualityTarget);
         else if (['quality', 'full', 'deliver'].includes(intent.action)) intent.knownFindingInventory = createQualityInventorySnapshot(qualityTarget);
+        }
       }
       const sourceToolBinding = workflowInput ? { commandPrefix: [process.execPath, fileURLToPath(new URL('../interfaces/cli/index.mjs', import.meta.url)), 'source'], controlRoot, dataRoot: authorityStore.root } : null;
       const executionPolicy = resolveLifecycleExecutionPolicy({ project, action: intent.action, workflowId: intent.workflowId });
@@ -448,7 +478,8 @@ export const createHarness = async ({ controlRoot: controlRootInput, dataRoot: d
           runId: plan.run.runId,
           profileId: plan.run.profileId,
           features: plan.run.features,
-          ...(plan.run.metadata?.qualityRepairInventory ? { initialFindings: plan.run.metadata.qualityRepairInventory.findings } : {}),
+           ...(plan.run.metadata?.qualityRepairInventory ? { initialFindings: plan.run.metadata.qualityRepairInventory.findings }
+             : plan.run.metadata?.qualityRepairInventories ? { initialFindings: Object.values(plan.run.metadata.qualityRepairInventories).flatMap(inventory => inventory.findings) } : {}),
           profileConfig: plan.run.profileConfig,
           artifactDigest: plan.run.artifactDigest,
           sourceDigest: plan.run.sourceDigest,

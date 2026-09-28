@@ -9,7 +9,7 @@ import { assertQualityCloseoutSnapshot, assertQualityTargetSnapshot, createQuali
 // A deterministic projection of the immutable Kernel closure, not a second
 // Authority transition. Recreating it after a crash yields the same file.
 export const ensureVersionClearance = async (dataRoot, state) => {
-  if (state.status !== 'closed' || !['quality', 'full', 'deliver'].includes(state.metadata?.commandIntent?.action)) return null;
+  if (state.status !== 'closed' || !state.metadata?.qualityTarget || !['quality', 'full', 'deliver'].includes(state.metadata?.commandIntent?.action)) return null;
   const closureRef = state.receipts.find(item => item.kind === 'run-closure');
   assert(closureRef?.file && closureRef.digest, 'VERSION_CLOSURE_RECEIPT_REQUIRED', 'Version clearance requires the sealed Run closure receipt.');
   assertInside(dataRoot, closureRef.file, 'Run closure receipt');

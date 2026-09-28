@@ -19,6 +19,7 @@ export const createBatchProductionProjectDescriptor = ({
   maxConcurrency = 10,
   maxLogicalItems = 10,
   qualityReviewLimit = { mode: 'bounded', maxRechecks: 2 },
+  release = null,
   batches = [],
   itemKey = 'itemId',
   itemPaths,
@@ -27,7 +28,7 @@ export const createBatchProductionProjectDescriptor = ({
   assert(workspaceRoot && isAbsolute(workspaceRoot), 'BATCH_WORKSPACE_REQUIRED', 'Batch project descriptor requires an absolute workspaceRoot.');
   if (runtimePluginId !== 'codex-conversation-runtime') assert(agentExecutionMode, 'HEADLESS_EXECUTION_MODE_EXPLICIT_REQUIRED', 'Selecting a non-default Runtime requires an explicit agentExecutionMode; headless execution is never inferred from a Runtime ID.');
   const resolvedAgentExecutionMode = agentExecutionMode ?? 'conversation-visible';
-  const workspace = { root: workspaceRoot, rootSelector: 'git-worktree', excluded };
+  const workspace = { root: workspaceRoot, rootSelector: 'git-worktree', excluded: [...new Set([...excluded, ...(release?.artifactRoot ? [release.artifactRoot] : [])])] };
   if (remote) workspace.remote = remote;
   const runtimePlugins = [...new Set(runtimePluginIds)];
   assert(runtimePlugins.includes(runtimePluginId), 'PROJECT_RUNTIME_ALLOWLIST_INVALID', 'runtimePluginIds must include the default Runtime.');
@@ -60,6 +61,7 @@ export const createBatchProductionProjectDescriptor = ({
       maxConcurrency,
       maxLogicalItems,
       qualityReviewLimit: structuredClone(qualityReviewLimit),
+      ...(release ? { release: structuredClone({ ...release, manifestItemsKey: release.manifestItemsKey ?? 'itemIds' }) } : {}),
       batches: structuredClone(batches),
       itemKey,
       ...(itemPaths ? { itemPaths } : {}),

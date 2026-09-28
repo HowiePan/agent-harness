@@ -70,3 +70,9 @@ export const createPreflightLifecycleEvent = ({ commandId, intentDigest, planDig
     reasonCode: report.lineageResolution.reasonCode ?? null,
   },
 });
+
+export const preRunProcessGateRetry = ({ error, phase, runCreationAttempted = false } = {}) =>
+  error?.code === 'LOCAL_PROCESS_GATE_HOST_UNAVAILABLE' && error?.details?.processCode === 'EPERM'
+    && phase === 'planned' && !runCreationAttempted
+    ? { mode: 'same-intent-once', reason: 'captured-child-process-permission', runCreated: false, hostEffectStarted: false }
+    : null;

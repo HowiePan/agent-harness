@@ -14,6 +14,10 @@
 
 权限边界不变：质量审查只读，修复由独立 Feature 执行；Flow 和 Extension 只返回 Intent/Event/Receipt，不直接写 Kernel Authority。Target 投影可从 Run Authority 和 Receipt 重建，不依赖模型上下文或插件内部状态。
 
+## 公共质量机制
+
+质量 Target 投影、Finding inventory、已知问题修复、独立 closeout、复审预算和 Gate 失败诊断由公共机制提供。版本流程保留原有单 Target 路由、准出 Decision 与 Gate 语义；批次流程按 item 作用域复用相同机制。抽取后的 Engine Plan、Run 与候选状态仍按原合同验证，等价性是准出条件。
+
 ## 开发准出后的预发布
 
 `prerelease` 是 `release-preparation → release-documentation` 独立路线，入口必须有同一目标的 `development-complete` 准出凭证和已批准的 `routine-version-exit` Decision。Harness 核验该准出 Run 的不可变源码快照；进入预发布前的改动只能属于项目声明的文档、版本元数据或文档范围声明。它不新开质量复审，也不消耗既有质量目标的复审预算。版本元数据和文档修订在本路线完成后，重新运行 fresh 最终 Gate 与项目声明的真实打包 Gate。Gate 失败会停止候选封存并保留诊断证据，不自动追加质量审查。
@@ -21,6 +25,8 @@
 预发布文档范围从业务仓声明文件读取，按完整目录递归展开，固定配置摘要和起始清单。文档节点逐一审计当前与历史文件，按源码和权威证据补齐旧遗漏；结果必须报告完整最终清单且无未解决问题。收口时 Harness 再次展开配置并与审计结果逐项核对，随后把最终源码摘要、文档逐文件摘要、实际制品逐文件摘要、开发准出和 Gate 回执封存成候选。制品复制至 Harness 数据根，以候选摘要定址，运行期构建目录不充当冻结候选。
 
 正式晋升使用独立的 `h:<项目别名> release <版本>` Harness 命令。用户提交命令时，Hook 将当前候选摘要和修订号固定到短期 Coordinator 意图；Coordinator 核验绑定 Workflow、项目 checkout、预发布状态、候选摘要、修订号、冻结源码与制品字节，再将这次显式用户命令记录为精确候选的批准并晋升状态。底层 `version-release promote` 保留为状态 API，不要求用户组合查询与晋升脚本。操作不修改文档、版本号或制品，不执行新的 Gate 或复审；候选变化后旧命令不能晋升新候选。Git push 和外部分发仍为独立效果。
+
+版本与批次的候选冻结、不可变制品清单、期望修订晋升和幂等命令共用发布存储机制；开发准出、文档范围、候选内容及正式批准规则由各流程单独实现。
 
 ## Node Task Contract 与 Prompt
 

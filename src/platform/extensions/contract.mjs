@@ -18,7 +18,7 @@ export const defineExtensionPack = input => {
   assert(semanticVersion.test(input.version ?? ''), 'EXTENSION_VERSION_INVALID', `Extension Pack ${input.id} requires a semantic version.`);
   const operations = { ...(input.operations ?? {}) };
   const planningCapabilities = [...new Set(input.planningCapabilities ?? [])].sort();
-  for (const capability of planningCapabilities) assert(['quality-target'].includes(capability), 'EXTENSION_PLANNING_CAPABILITY_INVALID', `Extension Pack ${input.id} declares an unsupported planning capability: ${capability}`);
+  for (const capability of planningCapabilities) assert(['quality-target', 'batch-release'].includes(capability), 'EXTENSION_PLANNING_CAPABILITY_INVALID', `Extension Pack ${input.id} declares an unsupported planning capability: ${capability}`);
   const operationManifest = Object.fromEntries(Object.entries(input.operationManifest ?? {}).map(([name, declaration]) => [name, Object.freeze(structuredClone(declaration))]));
   const operationNames = Object.keys(operations).sort();
   const declaredOperationNames = Object.keys(operationManifest).sort();

@@ -16,6 +16,7 @@ export const extensionPack = defineExtensionPack({
   profiles: [batchProductionProfile],
   workflows: [batchProductionWorkflowDefinition],
   commandManifest: batchProductionCommandManifest,
+  planningCapabilities: ['quality-target', 'batch-release'],
   projectConfiguration: {
     schema: projectInputSchema,
     schemas: { 'delivery-project-input.schema.json': deliveryProjectInputSchema, 'project-descriptor-input.schema.json': projectDescriptorInputSchema },
@@ -25,11 +26,16 @@ export const extensionPack = defineExtensionPack({
     createProjectDescriptor: { executionClass: 'pure-planner' },
     compileFeatureGraph: { executionClass: 'pure-planner' },
     createLifecyclePlan: { executionClass: 'pure-planner' },
+    resolveQualityScopes: { executionClass: 'pure-planner' },
   },
   operations: {
     createProjectDescriptor: createBatchProductionProjectDescriptor,
     compileFeatureGraph: compileBatchProductionFeatureGraph,
     createLifecyclePlan: createBatchProductionLifecyclePlan,
+    resolveQualityScopes: ({ project, target }) => {
+      const batch = (project.policy?.batches ?? []).find(item => item.id === target);
+      return (batch?.items ?? batch?.itemIds ?? []).map(itemId => ({ id: itemId, root: `batch:${target}:${itemId}` }));
+    },
   },
 });
 

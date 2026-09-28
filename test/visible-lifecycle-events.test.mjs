@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { createPlannedLifecycleEvent, createPreflightLifecycleEvent } from '../integrations/codex/agent-harness-codex/lib/visible-lifecycle-events.mjs';
+import { createPlannedLifecycleEvent, createPreflightLifecycleEvent, preRunProcessGateRetry } from '../integrations/codex/agent-harness-codex/lib/visible-lifecycle-events.mjs';
 
 test('visible lifecycle progress stays bounded before native Host requests', () => {
   const plan = {
@@ -49,4 +49,15 @@ test('visible lifecycle preflight exposes blocker identities without dumping rep
   assert.equal(event.checks[0].issues[0].code, 'CODEX_HOST_HOOK_RESPONSE_TIMEOUT');
   assert(!rendered.includes('must-not-be-rendered'));
   assert(!rendered.includes('candidate-99'));
+});
+
+test('captured-process denial permits one same-intent retry only before Run creation', () => {
+  const error = { code: 'LOCAL_PROCESS_GATE_HOST_UNAVAILABLE', details: { processCode: 'EPERM' } };
+  assert.deepEqual(preRunProcessGateRetry({ error, phase: 'planned' }), {
+    mode: 'same-intent-once', reason: 'captured-child-process-permission', runCreated: false, hostEffectStarted: false,
+  });
+  assert.equal(preRunProcessGateRetry({ error, phase: 'execution', runCreationAttempted: true }), null);
+  assert.equal(preRunProcessGateRetry({ error, phase: 'planned', runCreationAttempted: true }), null);
+  assert.equal(preRunProcessGateRetry({ error: { ...error, details: { processCode: 'ENOENT' } }, phase: 'planned' }), null);
+  assert.equal(preRunProcessGateRetry({ error: { code: 'CODEX_HOST_EFFECT_UNCERTAIN' }, phase: 'planned' }), null);
 });

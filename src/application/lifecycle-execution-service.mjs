@@ -9,6 +9,7 @@ import { atomicWrite } from '../kernel/atomic-io.mjs';
 import { validateBusinessResult, validateProfileResult } from '../platform/execution/result-contract.mjs';
 import { ensureVersionClearance } from './version-clearance.mjs';
 import { ensurePreReleaseCandidate } from './version-prerelease.mjs';
+import { ensureBatchPreReleaseCandidate } from './batch-prerelease.mjs';
 import { performance } from 'node:perf_hooks';
 
 const recoverableResultCodes = new Set(['REPAIR_CHECKPOINT_REQUIRED', 'REPAIR_CHECKPOINT_EVIDENCE_REQUIRED', 'REPAIR_FINDING_CHECKPOINT_REQUIRED', 'QUALITY_DIAGNOSTIC_DISPOSITION_REQUIRED', 'PROFILE_RESULT_REJECTED']);
@@ -18,9 +19,12 @@ const previousFreshGates = (state, scope, ids) => {
 };
 const completionReceipts = async (api, dataRoot, plan, state) => ({
   versionClearance: await ensureVersionClearance(dataRoot, state),
-  prereleaseCandidate: state.metadata?.commandIntent?.action === 'prerelease'
+  prereleaseCandidate: state.metadata?.commandIntent?.action === 'prerelease' && !state.metadata.commandIntent.batchClearance
     ? await ensurePreReleaseCandidate({ dataRoot, project: await api.projectRegistry.get(plan.project.id), state, workspaceRoot: plan.run.executionWorkspaceRoot })
     : null,
+  ...(state.metadata?.commandIntent?.action === 'prerelease' && state.metadata.commandIntent.batchClearance
+    ? { batchPrereleaseCandidate: await ensureBatchPreReleaseCandidate({ dataRoot, project: await api.projectRegistry.get(plan.project.id), state, workspaceRoot: plan.run.executionWorkspaceRoot }) }
+    : {}),
 });
 
 const rejectVisibleResult = ({ error, result, receipt, runtimeReceipt, agentId, dispatchId, packetDigest }) => {

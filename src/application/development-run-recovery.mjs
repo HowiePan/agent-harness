@@ -9,7 +9,7 @@ import { createLocalDevelopmentInvocation } from './local-development-invocation
 import { loadProjectHarnessConfig } from './project-initialization.mjs';
 import { createHarness } from './harness.mjs';
 import { ExtensionRegistry } from '../platform/extensions/registry.mjs';
-import { CodexHostEffectJournal } from '../../integrations/codex/agent-harness-codex/lib/codex-host-effect-journal.mjs';
+import { CodexHostEffectJournal } from './codex-host-effect-journal.mjs';
 
 const activeLeaseIds = state => state.leases.filter(lease => lease.status === 'active').map(lease => lease.leaseId).sort();
 const activeDispatchIds = state => state.dispatches.filter(dispatch => ['requested', 'assigned'].includes(dispatch.status)).map(dispatch => dispatch.dispatchId).sort();

@@ -12,7 +12,7 @@ import { createCodexRolloutHostExchange } from '../lib/codex-rollout-host-exchan
 import { assertLocalProcessGateHost } from '../lib/local-process-gate-readiness.mjs';
 import { createHostExchangeDiagnosticWriter } from '../lib/host-exchange-diagnostics.mjs';
 import { decodeVisibleLifecycleIntent } from '../lib/visible-lifecycle-intent.mjs';
-import { createPlannedLifecycleEvent, createPreflightLifecycleEvent } from '../lib/visible-lifecycle-events.mjs';
+import { createPlannedLifecycleEvent, createPreflightLifecycleEvent, preRunProcessGateRetry } from '../lib/visible-lifecycle-events.mjs';
 import { captureSourceManifest } from '../../../../src/platform/workflow/source-manifest.mjs';
 import { classifyLocalIncident } from '../../../../src/application/local-incident.mjs';
 import { resolveCommandIntent } from '../../../../src/platform/extensions/command-contract.mjs';
@@ -23,6 +23,7 @@ const samePath = (left, right) => process.platform === 'win32'
 
 const emit = value => process.stdout.write(`${JSON.stringify({ protocolVersion: '1.0', ...value })}\n`);
 let localIncidentContext = null;
+let runCreationAttempted = false;
 const renderWorkflowInput = (value, intent) => {
   if (value === '{command-timestamp}') return Date.parse(intent.createdAt);
   if (typeof value === 'string') return value.replaceAll('{target}', intent.command.target);
@@ -35,7 +36,7 @@ const main = async () => {
   const preflightOnly = process.argv.length === 5 && process.argv[4] === '--preflight-only';
   if (![4, 5].includes(process.argv.length) || process.argv[2] !== '--intent' || (process.argv.length === 5 && !preflightOnly)) throw Object.assign(new Error('Usage: visible-lifecycle-coordinator.mjs --intent <base64url-intent> [--preflight-only]'), { code: 'VISIBLE_LIFECYCLE_COORDINATOR_ARGUMENTS_INVALID' });
   const intent = decodeVisibleLifecycleIntent(process.argv[3]);
-  if (intent.harness.release.mode === 'source-link') localIncidentContext = { phase: 'binding', projectId: intent.project.projectId, workflowId: intent.project.workflowId, action: intent.command.action, target: intent.command.target };
+  if (intent.harness.release.mode === 'source-link') localIncidentContext = { phase: 'binding', projectId: intent.project.projectId, workflowId: intent.project.workflowId, action: intent.command.action, target: intent.command.target, commandId: intent.commandId, intentDigest: intent.intentDigest };
   const active = await validateActiveReleaseBinding({
     controlRoot: intent.harness.controlRoot,
     dataRoot: intent.harness.dataRoot,
@@ -61,18 +62,21 @@ const main = async () => {
     const extension = extensions.find(item => item.id === intent.project.extensionId);
     if (!extension?.commandManifest) throw Object.assign(new Error('Formal release requires the bound Extension command manifest.'), { code: 'VISIBLE_RELEASE_MANIFEST_REQUIRED' });
     const resolved = resolveCommandIntent(extension.commandManifest, intent.command);
+    const batchRelease = resolved.scope === 'batch-release-promotion';
     if (resolved.action !== 'release' || resolved.profileId !== intent.project.profileId || resolved.workflowId !== intent.project.workflowId
-      || resolved.scope !== 'version-release-promotion' || resolved.stateChanging !== true) throw Object.assign(new Error('Formal release action is not declared by the bound Workflow.'), { code: 'VISIBLE_RELEASE_ACTION_MISMATCH' });
-    const current = await harness.readVersionRelease(intent.project.projectId, intent.command.target);
+      || !['version-release-promotion', 'batch-release-promotion'].includes(resolved.scope) || resolved.stateChanging !== true
+      || (batchRelease ? intent.releaseCandidate.namespace !== 'batch-releases' : intent.releaseCandidate.namespace !== undefined)) throw Object.assign(new Error('Formal release action is not declared by the bound Workflow or candidate namespace.'), { code: 'VISIBLE_RELEASE_ACTION_MISMATCH' });
+    const current = batchRelease ? await harness.readScopedRelease(intent.project.projectId, intent.command.target)
+      : await harness.readVersionRelease(intent.project.projectId, intent.command.target);
     if (current.state.status !== 'prereleased' || current.state.candidateDigest !== intent.releaseCandidate.candidateDigest
       || current.state.revision !== intent.releaseCandidate.revision || current.candidate?.candidateDigest !== intent.releaseCandidate.candidateDigest) throw Object.assign(new Error('Frozen release candidate changed after the user command.'), { code: 'VISIBLE_RELEASE_CANDIDATE_STALE' });
     emit({ kind: 'codex-visible-lifecycle-event', phase: 'preflight', commandId: intent.commandId, intentDigest: intent.intentDigest,
       executionReady: true, candidateDigest: intent.releaseCandidate.candidateDigest, revision: intent.releaseCandidate.revision });
     if (preflightOnly) return;
-    const approval = { id: 'formal-version-release', actor: 'codex-user-command', decision: 'approved',
+    const approval = { id: batchRelease ? 'formal-batch-release' : 'formal-version-release', actor: 'codex-user-command', decision: 'approved',
       projectId: intent.project.projectId, target: intent.command.target, candidateDigest: intent.releaseCandidate.candidateDigest,
       authorityBasis: 'explicit-harness-command', commandId: intent.commandId, intentDigest: intent.intentDigest };
-    const result = await harness.promoteVersionRelease({ projectId: intent.project.projectId, target: intent.command.target,
+    const result = await (batchRelease ? harness.promoteScopedRelease : harness.promoteVersionRelease)({ projectId: intent.project.projectId, target: intent.command.target,
       candidateDigest: intent.releaseCandidate.candidateDigest, expectedRevision: intent.releaseCandidate.revision,
       commandId: intent.commandId, approval });
     emit({ kind: 'codex-visible-lifecycle-event', phase: 'complete', commandId: intent.commandId, intentDigest: intent.intentDigest,
@@ -124,7 +128,7 @@ const main = async () => {
       arguments: intent.command.arguments,
       executionWorkspaceRoot: intent.executionWorkspaceRoot,
     });
-    if (localIncidentContext) localIncidentContext = { ...localIncidentContext, phase: 'planned', runId: plan.run.runId };
+    if (localIncidentContext) localIncidentContext = { ...localIncidentContext, phase: 'planned', runId: plan.run.runId, planDigest: plan.planDigest };
     if (intent.project.workflowId && (plan.workflow?.id !== intent.project.workflowId || plan.workflow.version !== intent.project.workflowVersion || plan.workflow.artifactDigest !== intent.project.workflowDigest)) throw Object.assign(new Error('Visible lifecycle Plan differs from the verified Workflow binding.'), { code: 'VISIBLE_LIFECYCLE_WORKFLOW_IDENTITY_MISMATCH' });
     emit(createPlannedLifecycleEvent({ commandId: intent.commandId, intentDigest: intent.intentDigest, plan }));
     assertMachineBoundQualityTransport(hostExchange, intent.command.action);
@@ -153,6 +157,7 @@ const main = async () => {
     }
     if (preflightOnly) return;
     if (localIncidentContext) localIncidentContext = { ...localIncidentContext, phase: 'execution' };
+    runCreationAttempted = true;
     const result = await harness.executeVisibleLifecyclePlan(plan, { commandId: intent.commandId, preflightReport: preflight, onGateProgress });
     emit({ kind: 'codex-visible-lifecycle-event', phase: 'complete', commandId: intent.commandId, intentDigest: intent.intentDigest, planDigest: plan.planDigest, status: result.status, result });
     if (localIncidentContext && result.status === 'attention-required' && result.reason) {
@@ -168,7 +173,12 @@ const main = async () => {
 main().catch(error => {
   if (localIncidentContext) {
     const incident = classifyLocalIncident({ error, ...localIncidentContext });
-    emit({ kind: 'codex-visible-lifecycle-error', code: incident.code, message: error?.message ?? String(error), incident, details: error?.details ?? null });
+    const retry = preRunProcessGateRetry({ error, phase: localIncidentContext.phase, runCreationAttempted });
+    emit({ kind: 'codex-visible-lifecycle-error', code: incident.code, message: error?.message ?? String(error), incident, details: error?.details ?? null,
+      commandId: localIncidentContext.commandId, intentDigest: localIncidentContext.intentDigest,
+      ...(localIncidentContext.planDigest ? { planDigest: localIncidentContext.planDigest } : {}),
+      ...(retry ? { retry } : {}),
+    });
   } else emit({ kind: 'codex-visible-lifecycle-error', code: error?.code ?? 'UNEXPECTED_ERROR', message: error?.message ?? String(error), details: error?.details ?? null });
   process.exitCode = 1;
 });

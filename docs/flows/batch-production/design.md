@@ -8,6 +8,12 @@
 
 输入包含批次、item、依赖、共享能力归属和已批准 Descriptor；输出端口为 `batch-rules-v1`、`batch-produce-v1`、`batch-quality-v1`、`batch-review-v1`、`batch-accept-v1`、`batch-launch-v1` 与 `batch-close-v1`，形成逐项验收、批次状态及关闭 Receipt。Result/证据必须与当前 Feature 和批次身份相符。当前周期 P0–P3 问题必须关闭；人工验收 Decision、确定性 Gate 和批次关闭条件缺一不可。失败与恢复遵守通用 Attempt/Epoch 语义，不以旧状态字符串提升权威。
 
+## 质量与发布闭环
+
+Harness 按每个 item 的质量根从 Run Authority 投影独立 `QualityTargetSnapshot` 和 Finding inventory；同一批次的复审预算分别计算。`quality review-only` 执行只读复审，`quality repair-known` 只处理当前 Authority 中已知 Finding，`quality closeout` 使用固定的 closeout 快照。修复和复审由公共质量机制生成，批次 Profile 仍负责 item 归属、Barrier、逐项验收和批次关闭。正式质量准出要求本周期 P0–P3 全部关闭；Gate 失败可以生成批次级诊断复审，但不会绕过预算或验收。
+
+`prerelease` 读取同一 Project、Workflow、批次和源码下已关闭的 `full` Run，核对逐项验收、批次关闭 Decision 及关闭 Receipt。项目必须声明发布制品目录、manifest 和最终打包 Gate。预发布完成后，Harness 核对 fresh 最终 Gate、manifest 中精确的 item 集合与实际制品字节，再把候选冻结到外部 Authority 数据根。`release` 仅能用显式用户命令晋升该精确候选。候选封存、修订和晋升使用与版本交付流程相同的公共机制；批次准出和制品清单规则由本流程实现。发布不代替 Git push 或外部分发。
+
 ## Node Task Contract 与 Prompt
 
 `rules`、`produce`、`quality`、`review`、`accept`、`launch`、`close` 各自发布完整 Task Contract。合同明确区分规则就绪、受限生产、只读质量审查、领域复核、Authority 验收、批次发车检查和批次关闭检查；每个 Feature 的 Task 输入固定 batch target 和 item，直接依赖的 typed outputs 由 Workflow 编译器自动绑定。这样后序节点消费真实规则/生产/质量/评审结果，而不是只看到 item ID。

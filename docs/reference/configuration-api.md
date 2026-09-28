@@ -139,6 +139,8 @@ Extension 身份对象的字段是 `id`、`version`、可选或注册后必需�
 | `majorReleaseTargets` | `[]` | 明确允许使用 `quality release-exhaustive` 的大版本目标清单。 |
 | `actionPaths` | 内置默认路径 | action 到允许写路径数组的映射。支持 `requirements`、`plan`、`implement`、`scope`、`docs`、`review`、`deliver` 等动作键。 |
 | `release` | 无 | 可选的预发布策略：`documentationScopePath` 指向业务仓声明，`versionPaths` 限定版本元数据，`packageGateId` 指向实际打包 Gate，`artifactRoot` 与 `artifactIdentity` 指定候选制品。 |
+| `release.manifestPath` | 无 | 批次候选的制品清单路径，位于 `artifactRoot` 内；清单必须声明准确的批次和 item。 |
+| `release.manifestItemsKey` | `itemIds` | 批次制品清单中的 item 数组字段；业务变体可声明不同字段名。 |
 | `excluded` | `.git`、`.agent-harness-data`、`node_modules` | 工作区排除/禁止路径。 |
 
 内置 action：`full`、`requirements`/`req`、`plan`、`implement`/`impl`、`scope`、`quality`/`qa`、`docs`、`prerelease`、`review`、`deliver`、`status`、`resume`、`recover`。质量 preset 为 `full`、`review-only`、`recheck`、`repair-known`、`closeout`、`release-exhaustive`；需求 preset 为 `full`（默认，`intake → expansion → canonical`）、`expand-to-plan`（`intake → expansion → canonical → plan`）、`direct`（不扩展，`intake → canonical → plan`）、`plan-only`（`plan`）。

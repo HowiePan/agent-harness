@@ -192,14 +192,14 @@ export const createQualityFollowUpFeatures = ({ state, feature, findings, result
   return [];
 };
 
-export const createQualityGateDiagnosticReview = ({ state, gateResults }) => {
+export const createQualityGateDiagnosticReview = ({ state, gateResults, qualityRoot: requestedQualityRoot = null, metadata: scopeMetadata = null }) => {
   if (state?.profile?.config?.repairOnly) return null;
   // Environment failures need host/toolchain repair, not a source-code Finding.
   const failed = gateResults.filter(gate => gate.status === 'failed');
   if (!failed.length) return null;
   const prior = [...state.features].reverse().find(feature => feature.metadata?.qualityReview === true && feature.metadata?.qualityFindingPolicy === 'repair-and-rereview');
   if (!prior || !state.features.every(feature => feature.state === 'completed')) return null;
-  const qualityRoot = prior.metadata.qualityRoot ?? prior.logicalRoot;
+  const qualityRoot = requestedQualityRoot ?? prior.metadata.qualityRoot ?? prior.logicalRoot;
   if (qualityReviewBudgetExhausted(state, qualityRoot)) return null;
   const signature = sha256(`${qualityRoot}:${state.sourceDigest}:${failed.map(gate => gate.id).sort().join(',')}`);
   const id = `quality-gate-diagnostic-${signature.slice(0, 24)}`;
@@ -228,7 +228,8 @@ export const createQualityGateDiagnosticReview = ({ state, gateResults }) => {
     metadata: {
       ...structuredClone(prior.metadata.qualityContext ?? {}), stage: 'quality-recheck', sourcePolicy: 'read-only',
       qualityFindingPolicy: 'repair-and-rereview', qualityReview: true, qualityRoot, reviewRound,
-      reviewSourceDigest: state.sourceDigest, diagnostics, qualityContext: structuredClone(prior.metadata.qualityContext ?? {}),
+      reviewSourceDigest: state.sourceDigest, diagnostics, qualityContext: structuredClone(scopeMetadata?.qualityContext ?? prior.metadata.qualityContext ?? {}),
+      ...(scopeMetadata ? structuredClone(scopeMetadata) : {}),
     },
   };
 };
