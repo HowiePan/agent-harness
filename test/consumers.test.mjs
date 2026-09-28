@@ -66,7 +66,7 @@ test('CardWorld full lifecycle keeps every mutable stage before the final qualit
     sourceDigest: 'a'.repeat(64),
   });
   assert.deepEqual(plan.run.features.map(feature => feature.metadata.stage), [
-    'requirement-intake', 'requirement-expansion', 'canonical-requirement', 'version-planning', 'implementation', 'scope-resolution', 'docs-closeout', 'quality', 'user-code-review', 'delivery-receipt',
+    'requirement-intake', 'requirement-expansion', 'canonical-requirement', 'version-planning', 'plan-review', 'implementation', 'scope-resolution', 'docs-closeout', 'quality', 'user-code-review', 'delivery-receipt',
   ]);
   const quality = plan.run.features.find(feature => feature.metadata.stage === 'quality');
   assert.deepEqual(quality.dependsOn, ['docs/V-next']);
@@ -78,7 +78,7 @@ test('CardWorld action plans use action-specific stages, paths, stop conditions,
   project.gateRecipes = [];
   const expected = new Map([
     ['requirements', ['requirement-intake', 'requirement-expansion', 'canonical-requirement']],
-    ['plan', ['version-planning']],
+    ['plan', ['version-planning', 'plan-review']],
     ['implement', ['implementation']],
     ['scope', ['scope-resolution']],
     ['quality', ['quality']],

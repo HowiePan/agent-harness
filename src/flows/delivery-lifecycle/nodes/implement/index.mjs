@@ -1,6 +1,6 @@
 import { deliveryNode, deliveryTask } from '../node.mjs';
 
-export const implementNode = deliveryNode('implement', 'implement', 'implementation', ['plan'], {
+export const implementNode = deliveryNode('implement', 'implement', 'implementation', ['plan-review'], {
   task: deliveryTask({
     role: { id: 'implementation-engineer', description: 'Implements the approved delivery plan inside the exact authorized paths.' },
     objective: 'Implement the planned behavior for the selected target with minimal, verified changes.',

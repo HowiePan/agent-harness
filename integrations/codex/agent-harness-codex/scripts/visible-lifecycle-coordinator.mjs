@@ -159,8 +159,11 @@ const main = async () => {
     if (localIncidentContext) localIncidentContext = { ...localIncidentContext, phase: 'execution' };
     runCreationAttempted = true;
     const result = await harness.executeVisibleLifecyclePlan(plan, { commandId: intent.commandId, preflightReport: preflight, onGateProgress });
+    if (result.planApprovalArtifact) emit({ kind: 'codex-visible-lifecycle-event', phase: 'plan-review-ready', commandId: intent.commandId,
+      status: result.planApprovalArtifact.reviewApproved ? 'awaiting-user-approval' : 'independent-review-rejected',
+      artifact: result.planApprovalArtifact });
     emit({ kind: 'codex-visible-lifecycle-event', phase: 'complete', commandId: intent.commandId, intentDigest: intent.intentDigest, planDigest: plan.planDigest, status: result.status, result });
-    if (localIncidentContext && result.status === 'attention-required' && result.reason) {
+    if (localIncidentContext && result.status === 'attention-required' && result.reason && !['implementation-plan-user-approval-required', 'plan-scope-review-not-approved'].includes(result.reason)) {
       const incident = classifyLocalIncident({ error: result.reason, ...localIncidentContext });
       emit({ kind: 'codex-visible-lifecycle-incident', code: incident.code, incident, details: { reason: result.reason } });
     }

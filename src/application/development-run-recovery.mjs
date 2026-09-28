@@ -14,6 +14,23 @@ import { CodexHostEffectJournal } from './codex-host-effect-journal.mjs';
 const activeLeaseIds = state => state.leases.filter(lease => lease.status === 'active').map(lease => lease.leaseId).sort();
 const activeDispatchIds = state => state.dispatches.filter(dispatch => ['requested', 'assigned'].includes(dispatch.status)).map(dispatch => dispatch.dispatchId).sort();
 
+export const hasRejectedPlanReview = state => {
+  if (state.status !== 'closure-blocked' || !state.features.some(feature => feature.metadata?.stage === 'plan-review' && feature.state === 'completed')) return false;
+  const reviews = state.submissions.filter(submission => state.features.some(feature => feature.id === submission.featureId && feature.metadata?.stage === 'plan-review')
+    && submission.result?.status === 'completed');
+  return reviews.at(-1)?.result.outputs?.['plan-review']?.value?.approved === false;
+};
+
+export const selectDevelopmentRecoveryExtension = ({ state, intent, project, installedExtensions }) => {
+  const workflow = state.metadata?.workflow;
+  assert(workflow?.id === intent.workflowId && state.profile?.id === intent.profileId && state.metadata?.workspace?.root,
+    'DEVELOPMENT_RUN_SCOPE_MISMATCH', 'Recovery cannot identify the original Workflow, Profile, and workspace.');
+  const matches = installedExtensions.filter(extension => project.extensions?.some(bound => bound.id === extension.id && bound.digest === extension.digest)
+    && extension.workflows?.some(item => item.id === intent.workflowId && item.profileId === intent.profileId));
+  assert(matches.length === 1, 'DEVELOPMENT_RUN_SCOPE_MISMATCH', 'Recovery cannot uniquely identify the current project-bound Workflow.');
+  return matches[0];
+};
+
 export const assertDevelopmentRunRecoveryEffects = (state, effects) => {
   const hostLeases = state.leases.filter(item => item.runtimeReceipt?.hostSpawnReceipt);
   assert(hostLeases.length > 0, 'DEVELOPMENT_RUN_HOST_LEASE_REQUIRED', 'Recovery requires a Lease with a completed Host observation.');
@@ -43,12 +60,14 @@ const currentPatchReceipt = async (manifest, state) => {
     const receipt = await readJson(resolve(root, entry.name));
     if (receipt?.kind !== 'development-patch-receipt' || receipt.manifestDigest !== manifest.manifestDigest) continue;
     assert(receipt.receiptDigest === developmentPatchReceiptDigest(receipt), 'DEVELOPMENT_PATCH_RECEIPT_DIGEST_MISMATCH', 'Development patch Receipt digest is invalid.');
-    if (['H2', 'H3'].includes(receipt.level) && receipt.afterRuntimeDigest === manifest.release.artifactDigest
+    // A rejected Plan review also needs a new Plan after a corrected H1 template.
+    // Its negative decision remains in the retired Run; it cannot grant writes.
+    if ((['H2', 'H3'].includes(receipt.level) || (receipt.level === 'H1' && hasRejectedPlanReview(state))) && receipt.afterRuntimeDigest === manifest.release.artifactDigest
       && receipt.affectedRuns?.some(run => run.projectId === state.projectId && run.runId === state.runId && run.revision === state.revision
         && digestJson(run.activeLeaseIds ?? []) === digestJson(activeLeaseIds(state))
         && digestJson(run.activeDispatchIds ?? []) === digestJson(activeDispatchIds(state)))) matches.push(receipt);
   }
-  assert(matches.length === 1, 'DEVELOPMENT_RUN_PATCH_RECEIPT_REQUIRED', 'Exactly one current H2/H3 patch Receipt must cover the unchanged Run and its active Leases.');
+  assert(matches.length === 1, 'DEVELOPMENT_RUN_PATCH_RECEIPT_REQUIRED', 'Exactly one current H2/H3 patch Receipt, or H1 receipt for a rejected Plan review, must cover the unchanged Run and its active Leases.');
   return matches[0];
 };
 
@@ -77,13 +96,8 @@ export const recoverDevelopmentRun = async ({ manifestFile, runId, commandId, cw
     'DEVELOPMENT_RUN_INTENT_REQUIRED', 'Recovery requires the original lifecycle command intent.');
   assert(!intent.workflowInput, 'DEVELOPMENT_RUN_WORKFLOW_INPUT_UNSUPPORTED', 'Recovery cannot recompile a pinned Workflow input without a new source capture.');
   const project = await harness.projectRegistry.get(projectId);
-  const workflow = state.metadata.workflow;
-  const matchingExtensions = installedExtensions.filter(extension => project.extensions?.some(bound => bound.id === extension.id && bound.digest === extension.digest)
-    && extension.workflows?.some(item => item.id === intent.workflowId && item.id === workflow?.id
-      && item.version === workflow.version && item.artifactDigest === workflow.artifactDigest));
-  assert(matchingExtensions.length === 1 && state.metadata?.workspace?.root,
-    'DEVELOPMENT_RUN_SCOPE_MISMATCH', 'Recovery cannot uniquely identify the original Workflow and workspace.');
-  const plan = await harness.createLifecyclePlan({ projectId, extensionId: matchingExtensions[0].id, workflowId: workflow.id,
+  const extension = selectDevelopmentRecoveryExtension({ state, intent, project, installedExtensions });
+  const plan = await harness.createLifecyclePlan({ projectId, extensionId: extension.id, workflowId: intent.workflowId,
     profileId: intent.profileId, action: intent.action, target: intent.target,
     arguments: intent.preset === 'default' ? [] : [intent.preset], executionWorkspaceRoot: state.metadata.workspace.root });
   assert(plan.logicalTaskKey === state.metadata.logicalTaskKey && plan.run.runId !== runId && plan.planDigest !== state.metadata.lifecyclePlanDigest,

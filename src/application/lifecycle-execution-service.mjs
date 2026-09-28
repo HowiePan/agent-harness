@@ -10,6 +10,7 @@ import { validateBusinessResult, validateProfileResult } from '../platform/execu
 import { ensureVersionClearance } from './version-clearance.mjs';
 import { ensurePreReleaseCandidate } from './version-prerelease.mjs';
 import { ensureBatchPreReleaseCandidate } from './batch-prerelease.mjs';
+import { ensurePlanApprovalArtifact } from '../flows/delivery-lifecycle/plan-approval.mjs';
 import { performance } from 'node:perf_hooks';
 
 const recoverableResultCodes = new Set(['REPAIR_CHECKPOINT_REQUIRED', 'REPAIR_CHECKPOINT_EVIDENCE_REQUIRED', 'REPAIR_FINDING_CHECKPOINT_REQUIRED', 'QUALITY_DIAGNOSTIC_DISPOSITION_REQUIRED', 'PROFILE_RESULT_REJECTED']);
@@ -18,6 +19,7 @@ const previousFreshGates = (state, scope, ids) => {
   return results.every(Boolean) ? { results, state } : null;
 };
 const completionReceipts = async (api, dataRoot, plan, state) => ({
+  planApprovalArtifact: await ensurePlanApprovalArtifact(dataRoot, state),
   versionClearance: await ensureVersionClearance(dataRoot, state),
   prereleaseCandidate: state.metadata?.commandIntent?.action === 'prerelease' && !state.metadata.commandIntent.batchClearance
     ? await ensurePreReleaseCandidate({ dataRoot, project: await api.projectRegistry.get(plan.project.id), state, workspaceRoot: plan.run.executionWorkspaceRoot })
@@ -46,7 +48,7 @@ const rejectVisibleResult = ({ error, result, receipt, runtimeReceipt, agentId, 
   };
 };
 
-export const executeHeadlessLifecyclePlan = async (context, api, planInput, { commandId, preflightReport, maxConcurrency, maxRounds = 100, forceFreshGates = true, onGateProgress = null } = {}) => {
+const runHeadlessLifecyclePlan = async (context, api, planInput, { commandId, preflightReport, maxConcurrency, maxRounds = 100, forceFreshGates = true, onGateProgress = null } = {}) => {
   const { authorityStore } = context;
   assert(commandId, 'COMMAND_ID_REQUIRED', 'Lifecycle execution requires a command ID.');
   let started;
@@ -276,4 +278,9 @@ const continueVisibleLifecyclePlan = async (context, api, planInput, { commandId
   return { status: 'closed', planDigest: plan.planDigest, rounds, gates, state: closed.state, ...await completionReceipts(api, authorityStore.root, plan, closed.state) };
 };
 
-export const executeVisibleLifecyclePlan = (context, api, planInput, options = {}) => continueVisibleLifecyclePlan(context, api, planInput, { ...options, continuedStart: null, gateDiagnosticAttempts: 0 });
+const withPlanArtifact = async (context, result) => result?.state
+  ? { ...result, planApprovalArtifact: await ensurePlanApprovalArtifact(context.authorityStore.root, result.state) }
+  : result;
+
+export const executeHeadlessLifecyclePlan = async (context, api, planInput, options = {}) => withPlanArtifact(context, await runHeadlessLifecyclePlan(context, api, planInput, options));
+export const executeVisibleLifecyclePlan = async (context, api, planInput, options = {}) => withPlanArtifact(context, await continueVisibleLifecyclePlan(context, api, planInput, { ...options, continuedStart: null, gateDiagnosticAttempts: 0 }));

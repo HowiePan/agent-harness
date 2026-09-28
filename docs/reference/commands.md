@@ -12,7 +12,9 @@ agent-harness extension register|list|remove
 agent-harness workspace register|list|show|rollback
 agent-harness workflow list --project <id>
 agent-harness lifecycle plan|preflight|start
-agent-harness run status|schedule|dispatch|submit|gates|decision|close|recover
+agent-harness run status|plan-artifact|schedule|dispatch|submit|gates|decision|close|recover
+
+版本规划的独立审查结束后，Harness 在 Control Root 的 `outputs/<project>/<run>/plan-review.md` 生成审阅稿，并返回路径、规划摘要及文件摘要。此时 `plan` Run 停在 `implementation-plan-user-approval-required`，须先向用户展示 Markdown。用户明确同意该稿后，向同一 Run 写入 `implementation-plan-approved` Decision，字段包括 `actor: "user"`、`decision: "approved"` 及返回的 `projectId`、`runId`、`planDigest`、`artifactDigest`，再关闭规划 Run。独立审查拒绝的稿件不能批准。`implement` 仅接受同项目、目标、Workflow 和源码摘要下最新已关闭且已获用户批准的规划 Run；源码变化须重新规划。
 agent-harness version-release status|promote
 agent-harness source capture|read|search
 agent-harness memory query|propose|stage|promote|revoke|reject|recover|export|import

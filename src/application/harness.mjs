@@ -45,6 +45,7 @@ import { createQualityCloseoutSnapshot, createQualityInventorySnapshot, createQu
 import { sealExecutionReadinessReport, verifyExecutionReadinessReport } from './execution-readiness.mjs';
 import { readActiveRelease, resolveActiveRuntimeRoot } from '../platform/registry/active-generation.mjs';
 import { RunLineageStore, resolveRunLineage, verifyRunLineageResolution } from './lineage.mjs';
+import { ensurePlanApprovalArtifact, planApprovalSatisfied, planApprovalSnapshot } from '../flows/delivery-lifecycle/plan-approval.mjs';
 import {
   buildExecutionGrantContext,
   createAgentRuntimeLaunchCapability,
@@ -585,6 +586,19 @@ export const createHarness = async ({ controlRoot: controlRootInput, dataRoot: d
         ...(input.profileConfig?.requiredFinalGates === undefined ? { requiredFinalGates } : {}),
       };
       const snapshot = input.sourceDigest ? null : await captureWorkspace(workspace.root, { excluded: project.workspace.excluded ?? [] });
+      const runSourceDigest = input.sourceDigest ?? snapshot.digest;
+      let approvedPlan = null;
+      if (input.metadata?.commandIntent?.action === 'implement' && input.features.some(feature => feature.metadata?.stage === 'implementation') && !input.features.some(feature => feature.metadata?.stage === 'plan-review')) {
+        const target = input.metadata?.commandIntent?.target;
+        const workflowId = input.metadata?.workflow?.id;
+        const candidates = (await authorityStore.list(project.id)).filter(run => run.status === 'closed'
+          && run.metadata?.commandIntent?.target === target && run.metadata?.workflow?.id === workflowId
+          && run.sourceDigest === runSourceDigest && run.features.some(feature => feature.metadata?.stage === 'plan-review'));
+        const latest = candidates[0];
+        assert(latest && planApprovalSatisfied(latest), 'IMPLEMENTATION_PLAN_USER_APPROVAL_REQUIRED', 'Implementation requires a current, user-approved Markdown plan for this project, target, workflow, and source.');
+        const artifact = await ensurePlanApprovalArtifact(authorityStore.root, latest);
+        approvedPlan = { projectId: latest.projectId, runId: latest.runId, planDigest: artifact.planDigest, artifactDigest: artifact.artifactDigest, sourceDigest: latest.sourceDigest };
+      }
       const pluginSet = pluginHost.snapshot();
       const installedCompositionDigest = digestJson({ plugins: pluginSet.manifests, extensions: extensionSet.installed });
       const policyDigest = input.policyDigest ?? digestJson({ profiles: project.profiles, extensions: project.extensions ?? [], ...(project.workflows ? { workflows: project.workflows } : {}), policy: project.policy ?? {}, gateRecipes: project.gateRecipes ?? [], artifactProviders: project.artifactProviders ?? [] });
@@ -608,7 +622,7 @@ export const createHarness = async ({ controlRoot: controlRootInput, dataRoot: d
         }
         await verifyHeadlessExecutionGrant({ adapter: trustedExecutionAuthorizationAdapter, grant: executionGrant, context, manifest: runtimeManifest, now: kernel.now });
       }
-      return kernel.startRun({ ...input, profileConfig, policyDigest, sourceDigest: input.sourceDigest ?? snapshot.digest, pluginSetDigest: input.pluginSetDigest ?? installedCompositionDigest, metadata: { ...input.metadata, ...(lifecycleExecution ? { lifecycleExecution } : {}), workspace: structuredClone(workspace), gateRecipes: structuredClone(project.gateRecipes ?? []), projectDescriptorDigest: project.descriptorDigest, extensionSetDigest: extensionSet.digest } }, command);
+      return kernel.startRun({ ...input, profileConfig, policyDigest, sourceDigest: runSourceDigest, pluginSetDigest: input.pluginSetDigest ?? installedCompositionDigest, metadata: { ...input.metadata, approvedPlan, ...(lifecycleExecution ? { lifecycleExecution } : {}), workspace: structuredClone(workspace), gateRecipes: structuredClone(project.gateRecipes ?? []), projectDescriptorDigest: project.descriptorDigest, extensionSetDigest: extensionSet.digest } }, command);
     },
 
     async dispatch(projectId, runId, input, command) {
@@ -816,12 +830,15 @@ export const createHarness = async ({ controlRoot: controlRootInput, dataRoot: d
       await atomicWriteJson(dispatch.outputRef, verifiedResult, { root: authorityStore.root });
       const preservedRuntimeEvidence = runtimeEvidence ? JSON.parse(JSON.stringify(runtimeEvidence)) : null;
       const evidence = await evidenceStore.put({ result: verifiedResult, runtimeEvidence: preservedRuntimeEvidence, inputSourceDigest: dispatch.sourceDigest, outputSourceDigest: resultingSnapshot.digest, sourceSnapshotRef: dispatch.sourceSnapshotRef }, { ...evidenceMetadata, mediaType: 'application/json', projectId, ...(state.metadata?.workspaceRef ? { workspaceRef: state.metadata.workspaceRef } : {}), runId, epoch: state.epoch, generation: state.generation, featureId: dispatch.featureId, dispatchId, sourceDigest: dispatch.sourceDigest, artifactDigest: state.artifactDigest, policyDigest: state.policyDigest, pluginSetDigest: state.pluginSetDigest, labels: ['agent-result'] });
-      return kernel.submit(projectId, runId, { dispatchId, outputRef: dispatch.outputRef, agentId: lease.agentId, packetDigest: dispatch.packetDigest, epoch: state.epoch, generation: state.generation, result: verifiedResult, resultingSourceDigest: resultingSnapshot.digest, evidenceRefs: [evidence.ref] }, { expectedRevision: state.revision, commandId });
+      const submitted = await kernel.submit(projectId, runId, { dispatchId, outputRef: dispatch.outputRef, agentId: lease.agentId, packetDigest: dispatch.packetDigest, epoch: state.epoch, generation: state.generation, result: verifiedResult, resultingSourceDigest: resultingSnapshot.digest, evidenceRefs: [evidence.ref] }, { expectedRevision: state.revision, commandId });
+      if (feature?.metadata?.stage === 'plan-review' && verifiedResult.status === 'completed') await ensurePlanApprovalArtifact(authorityStore.root, submitted.state);
+      return submitted;
     },
 
     async status(projectId, runId) {
       const state = await authorityStore.read(projectId, runId);
-      return { authority: state, projection: profileRegistry.get(state.profile.id).project(state) };
+      const planReview = planApprovalSnapshot(state);
+      return { authority: state, projection: profileRegistry.get(state.profile.id).project(state), ...(planReview ? { planApproval: { planDigest: planReview.planDigest, artifactDigest: planReview.artifactDigest, approved: planApprovalSatisfied(state) } } : {}) };
     },
   };
   return api;

@@ -15,7 +15,7 @@ export const createDeliveryTemplates = ({ actionPaths, forbiddenPaths = ['.git',
     forbiddenPaths: qualityReview && qualityFindingPolicy === 'repair-and-rereview'
       ? safeForbidden.filter(path => !verificationOutputPaths.includes(path)) : [...safeForbidden],
     conflictKeys: [`${target}-${qualityReview ? 'quality-review' : action}`], gatePlan: [],
-    metadata: { stage, sourcePolicy, target, version: target, allowDynamicDecomposition: !qualityReview && allowedPaths.length > 0,
+    metadata: { stage, sourcePolicy, target, version: target, allowDynamicDecomposition: stage === 'implementation' && !qualityReview && allowedPaths.length > 0,
       ...(qualityReview ? { qualityReview: true, qualityFindingPolicy, qualityRoot: `${qualityRootPrefix}:${target}`, reviewRound: 1, reviewSourceDigest: sourceDigest, ...(knownFindingInventory ? { knownFindingInventory: structuredClone(knownFindingInventory) } : {}), qualityContext: { target, version: target, verificationOutputPaths: structuredClone(verificationOutputPaths), ...(knownFindingInventory ? { knownFindingInventory: structuredClone(knownFindingInventory) } : {}) } } : {}),
     },
   });
@@ -27,7 +27,7 @@ export const createDeliveryTemplates = ({ actionPaths, forbiddenPaths = ['.git',
     const resolvedPaths = Array.isArray(pathsForAction) ? pathsForAction : [];
     const feature = makeFeature({ action: node.action, target: context.intent.target, stage: node.stage, dependsOn,
       allowedPaths: readOnly ? [] : resolvedPaths, sourcePolicy: readOnly ? 'read-only' : 'write',
-      ownerRole: node.qualityReview || node.action === 'review' ? 'reviewer' : 'operator', qualityReview: Boolean(node.qualityReview),
+      ownerRole: node.qualityReview || node.readOnly || node.action === 'review' ? 'reviewer' : 'operator', qualityReview: Boolean(node.qualityReview),
       qualityFindingPolicy: context.intent.sourcePolicy === 'read-only' ? 'record-only' : 'repair-and-rereview', sourceDigest: context.sourceDigest, knownFindingInventory: context.intent.knownFindingInventory ?? null,
       verificationOutputPaths: context.intent.sourcePolicy === 'read-only' ? [] : context.project?.policy?.qualityVerificationOutputs ?? [] });
     if (node.stage === 'quality-closeout') feature.metadata.qualityCloseout = structuredClone(context.intent.qualityCloseout);

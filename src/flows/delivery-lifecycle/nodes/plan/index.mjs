@@ -4,10 +4,22 @@ export const planNode = deliveryNode('plan', 'plan', 'version-planning', ['canon
   task: deliveryTask({
     role: { id: 'delivery-planner', description: 'Turns the canonical requirement into an executable, conflict-aware Feature plan.' },
     objective: 'Create a deterministic implementation plan that covers the canonical requirement end to end.',
-    instructions: ['Consume the typed canonical requirement.', 'Decompose work into bounded Features with dependencies, ownership, paths, contracts, and verification.', 'Expose conflicts, ordering constraints, and protected operations.'],
+    instructions: ['Consume the typed canonical requirement.', 'Decompose future work into outputs.plan.value.features and outputs.plan.value.proposedFeatures; do not return top-level followUpFeatures from a planning Feature.', 'For every proposed Feature, provide id, projectId, disposition (project-owned or cross-project-dependency), allowedPaths relative to that project root, dependsOn, contracts, and verification. Cross-project work is a dependency proposal and does not grant write authority in this Run.', 'Resolve project ownership from Project Registry and each nested harness.json binding. A shared Git repository does not make nested projects one Harness project; split proposals at project boundaries and use paths relative to each owning project root.', 'Keep dependsOn within the owning project. Record work in another project as an external prerequisite with its own project registration, authorization, and completion evidence; do not make a project-owned Feature depend on a cross-project proposal as if both were executable in this Run.', 'Before finalizing allowedPaths, inspect the current source for every promised write route, including public API adapters, output projections, module registration files, version manifests, dependency lockfiles, and version-pinned tests. A source directory does not cover a sibling package manifest or root lockfile: when a versioned dependency changes, explicitly include its package manifest and lockfile in the owning project proposal. Include each required path in its owning proposal, or explicitly assign that edit to a dependency with path authority.', 'Expose conflicts, ordering constraints, and protected operations.'],
     steps: [{ id: 'decompose', instruction: 'Decompose the requirement into independently verifiable Features.' }, { id: 'order', instruction: 'Build the dependency and conflict graph.' }, { id: 'verify-plan', instruction: 'Check complete requirement coverage and executable boundaries.' }],
-    acceptance: ['Every canonical acceptance criterion maps to planned work and verification.', 'Dependencies and conflicts are explicit and acyclic.', 'The delivery-plan-v1 output lists the complete deterministic Feature plan.'],
+    acceptance: ['Every canonical acceptance criterion maps to planned work and verification.', 'Dependencies and conflicts are explicit and acyclic.', 'The delivery-plan-v1 output lists the complete deterministic Feature plan and project ownership for proposed work.', 'No future implementation proposal is returned as a top-level executable followUpFeature.'],
   }),
 });
 
-export const planNodes = [planNode];
+export const planReviewNode = deliveryNode('plan-review', 'plan-review', 'plan-review', ['plan'], {
+  readOnly: true,
+  task: deliveryTask({
+    role: { id: 'plan-scope-reviewer', description: 'Independently reviews the proposed Feature plan and its project boundaries.' },
+    objective: 'Check that the proposed scope expansion is justified, complete, and assigned to the correct project before implementation.',
+    instructions: ['Read the typed plan result and source evidence without editing files.', 'Check requirement coverage, dependency order, path ownership, and whether each proposed Feature belongs to this project or is a cross-project dependency. Compare Project Registry and nested harness.json bindings even when projects share one Git repository.', 'Trace proposed writes through the current implementation: check entry points, public output routes, module registration files, version manifests, dependency lockfiles, and version-pinned tests against each Feature allowedPaths. If any needed write path is missing and no authorized dependency owns it, return approved: false with the exact missing paths.', 'Approve normal in-scope expansion; report actionable blockers for unsupported or cross-project writes. Approval does not grant write authority.'],
+    steps: [{ id: 'inspect', instruction: 'Inspect the plan, project binding, source evidence, and proposed paths.' }, { id: 'decide', instruction: 'Return an evidence-backed approval decision and explain each out-of-scope proposal.' }],
+    constraints: ['Remain read-only and independent from the planner.', 'Never turn a proposal into an executable Feature or widen any allowlist.'],
+    acceptance: ['The plan-review-v1 output approves only coherent, project-owned work and identifies cross-project dependencies.', 'No workspace files are changed.'],
+  }),
+});
+
+export const planNodes = [planNode, planReviewNode];

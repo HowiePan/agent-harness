@@ -8,6 +8,7 @@ export const deliveryPorts = Object.freeze({
   expansion: 'delivery-expansion-v1',
   canonical: 'canonical-requirement-v1',
   plan: 'delivery-plan-v1',
+  'plan-review': 'delivery-plan-review-v1',
   implement: 'delivery-implementation-v1',
   scope: 'delivery-scope-v1',
   docs: 'delivery-docs-v1',
@@ -23,7 +24,13 @@ export const deliveryValueSchemas = Object.freeze({
   'delivery-intake-v1': { type: 'object', required: ['requirements'], properties: { requirements: strings }, additionalProperties: true },
   'delivery-expansion-v1': { type: 'object', required: ['expandedRequirements'], properties: { expandedRequirements: strings, derivedFrom: strings, assumptions: strings, unresolved: strings }, additionalProperties: true },
   'canonical-requirement-v1': { type: 'object', required: ['id', 'acceptance'], properties: { id: string, acceptance: strings }, additionalProperties: true },
-  'delivery-plan-v1': { type: 'object', required: ['features'], properties: { features: strings }, additionalProperties: true },
+  'delivery-plan-v1': { type: 'object', required: ['features', 'proposedFeatures'], properties: {
+    features: strings,
+    proposedFeatures: { type: 'array', items: { type: 'object', required: ['id', 'projectId', 'disposition', 'allowedPaths', 'dependsOn'], properties: {
+      id: string, projectId: string, disposition: { enum: ['project-owned', 'cross-project-dependency'] }, allowedPaths: strings, dependsOn: strings,
+    }, additionalProperties: true } },
+  }, additionalProperties: true },
+  'delivery-plan-review-v1': { type: 'object', required: ['approved'], properties: { approved: { type: 'boolean' }, findings: strings }, additionalProperties: true },
   'delivery-implementation-v1': { type: 'object', required: ['changedFiles'], properties: { changedFiles: strings }, additionalProperties: true },
   'delivery-scope-v1': { type: 'object', required: ['resolved'], properties: { resolved: { type: 'boolean' } }, additionalProperties: true },
   'delivery-docs-v1': { type: 'object', required: ['documents'], properties: { documents: strings }, additionalProperties: true },

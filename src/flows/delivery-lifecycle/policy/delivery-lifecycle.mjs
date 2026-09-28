@@ -3,13 +3,20 @@ import { defineNodeTaskContract, taskFeatureProjection } from '../../../common/t
 import { approvalSatisfied } from '../../../flow-kit/primitives.mjs';
 import { createQualityFollowUpFeatures, createQualityGateDiagnosticReview, hasCurrentCleanQualityReview, qualityReviewNoProgress, validateQualityReviewPolicies } from '../../../flow-kit/profiles/quality-loop.mjs';
 import { normalizeQualityReviewLimit, qualityReviewBudgetExhausted } from '../../../flow-kit/profiles/quality-budget.mjs';
+import { planApprovalSatisfied } from '../plan-approval.mjs';
 
 export const DELIVERY_STAGES = Object.freeze([
-  'requirement-intake', 'requirement-expansion', 'canonical-requirement', 'version-planning', 'implementation',
+  'requirement-intake', 'requirement-expansion', 'canonical-requirement', 'version-planning', 'plan-review', 'implementation',
   'scope-resolution', 'docs-closeout', 'quality', 'quality-repair', 'quality-recheck', 'quality-closeout', 'release-preparation', 'release-documentation', 'user-code-review', 'delivery-receipt',
 ]);
 
 const stageIndex = stage => DELIVERY_STAGES.indexOf(stage);
+const planReviewApproved = state => {
+  const reviews = state.submissions?.filter(submission =>
+    state.features.some(feature => feature.id === submission.featureId && feature.metadata?.stage === 'plan-review')
+    && submission.result?.status === 'completed') ?? [];
+  return reviews.length > 0 && reviews.at(-1).result.outputs?.['plan-review']?.value?.approved === true;
+};
 
 export const createDeliveryLifecycleProfile = (id = 'delivery-lifecycle') => Object.freeze({
   id,
@@ -40,6 +47,18 @@ export const createDeliveryLifecycleProfile = (id = 'delivery-lifecycle') => Obj
   },
 
   validateResult({ state, feature, result }) {
+    if (feature.metadata?.stage === 'version-planning' && result.status === 'completed' && Array.isArray(result.followUpFeatures) && result.followUpFeatures.length > 0) {
+      return { ok: false, reason: 'planning-proposals-must-use-typed-plan-output' };
+    }
+    if (feature.metadata?.stage === 'version-planning' && result.status === 'completed') {
+      const proposals = result.outputs?.plan?.value?.proposedFeatures ?? [];
+      if (proposals.some(item => (item.projectId === state.projectId) !== (item.disposition === 'project-owned'))) {
+        return { ok: false, reason: 'planning-proposal-project-disposition-mismatch' };
+      }
+    }
+    // A negative review is a valid decision. Preserve its findings instead of
+    // rejecting the result and retrying the same unchanged plan.
+    if (feature.metadata?.stage === 'plan-review' && result.status === 'completed') return { ok: true };
     if (feature.metadata?.stage === 'release-preparation' && result.status === 'completed') {
       const prepared = result.outputs?.['release-prepare']?.value;
       return { ok: prepared?.version === state.metadata?.commandIntent?.target, reason: 'release-version-identity-mismatch' };
@@ -58,6 +77,15 @@ export const createDeliveryLifecycleProfile = (id = 'delivery-lifecycle') => Obj
   canDispatch(feature, state) {
     const stage = feature.metadata.stage;
     const config = state.profile.config;
+    if (stageIndex(stage) > stageIndex('plan-review') && state.features.some(item => item.metadata?.stage === 'plan-review') && !planReviewApproved(state)) {
+      return { ok: false, reason: 'plan-scope-review-not-approved' };
+    }
+    if (stageIndex(stage) > stageIndex('plan-review') && state.features.some(item => item.metadata?.stage === 'plan-review') && !planApprovalSatisfied(state)) {
+      return { ok: false, reason: 'implementation-plan-user-approval-required' };
+    }
+    if (stage === 'implementation' && state.metadata?.commandIntent?.action === 'implement' && !state.features.some(item => item.metadata?.stage === 'plan-review') && !state.metadata?.approvedPlan) {
+      return { ok: false, reason: 'implementation-plan-user-approval-required' };
+    }
     if (config.requireCanonicalDecision && stageIndex(stage) > stageIndex('canonical-requirement')) {
       const approved = approvalSatisfied(state, 'canonical-requirement-approved');
       if (!approved) return { ok: false, reason: 'canonical-requirement-decision-required' };
@@ -70,7 +98,7 @@ export const createDeliveryLifecycleProfile = (id = 'delivery-lifecycle') => Obj
   createFollowUpFeatures(input) {
     const { feature, result } = input;
     const qualityRepairs = createQualityFollowUpFeatures(input);
-    if (!feature.metadata?.allowDynamicDecomposition || !Array.isArray(result?.followUpFeatures)) return qualityRepairs;
+    if (feature.metadata?.stage !== 'implementation' || !feature.metadata?.allowDynamicDecomposition || !Array.isArray(result?.followUpFeatures)) return qualityRepairs;
     const planned = result.followUpFeatures.map(item => {
       assert(item && typeof item === 'object' && !Array.isArray(item), 'FOLLOW_UP_FEATURE_INVALID', 'Every follow-up Feature must be an object.');
       assert(typeof item.id === 'string' && item.id.length > 0, 'FOLLOW_UP_FEATURE_INVALID', 'Every follow-up Feature requires an ID.');
@@ -79,6 +107,7 @@ export const createDeliveryLifecycleProfile = (id = 'delivery-lifecycle') => Obj
       const childPaths = Array.isArray(item.allowedPaths) && item.allowedPaths.length ? item.allowedPaths : parentPaths;
       const withinParent = path => parentPaths.some(root => path === root || path.startsWith(`${root.replace(/\/$/, '')}/`));
       assert(childPaths.every(withinParent), 'FOLLOW_UP_PATH_OUTSIDE_PARENT', `Follow-up Feature ${id} exceeds its parent Feature paths.`);
+      assert(item.projectId === undefined || item.projectId === input.state.projectId, 'FOLLOW_UP_PROJECT_OUTSIDE_PARENT', `Follow-up Feature ${id} belongs to a different project.`);
       const dependencies = [...new Set([feature.id, ...(item.dependsOn ?? []).map(dependency => `${feature.id}/${dependency}`)])];
       const taskProjection = taskFeatureProjection(defineNodeTaskContract({
         role: { id: 'implementation-engineer', description: 'Executes one explicitly proposed and path-bounded delivery follow-up.' },
@@ -124,6 +153,11 @@ export const createDeliveryLifecycleProfile = (id = 'delivery-lifecycle') => Obj
 
   canClose(state) {
     const config = state.profile.config;
+    if (state.features.some(feature => feature.metadata?.stage === 'plan-review') && !planReviewApproved(state)) return { ok: false, reason: 'plan-scope-review-not-approved' };
+    if (state.features.some(feature => feature.metadata?.stage === 'plan-review') && !planApprovalSatisfied(state)) return { ok: false, reason: 'implementation-plan-user-approval-required' };
+    if (state.metadata?.commandIntent && state.features.some(feature => feature.metadata?.stage === 'implementation') && !(
+      state.features.some(feature => feature.metadata?.stage === 'plan-review') ? planApprovalSatisfied(state) : state.metadata?.approvedPlan
+    )) return { ok: false, reason: 'implementation-plan-user-approval-required' };
     if (config.closeoutOnly && state.sourceDigest !== state.metadata?.qualityCloseout?.sourceDigest) return { ok: false, reason: 'quality-closeout-source-drift' };
     if (config.closeoutOnly && state.metadata?.qualityCloseout?.targetDigest !== state.metadata?.qualityTarget?.targetDigest) return { ok: false, reason: 'quality-closeout-evidence-mismatch' };
     if (config.requireFinalQualityReview && !hasCurrentCleanQualityReview(state)) {

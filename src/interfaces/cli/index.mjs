@@ -28,6 +28,7 @@ import { createDevelopmentPatchPlan, rollbackDevelopmentPatch } from '../../appl
 import { recoverDevelopmentRun } from '../../application/development-run-recovery.mjs';
 import { createLocalDevelopmentInvocation } from '../../application/local-development-invocation.mjs';
 import { applySourcePatch, refreshLocalCodexBindings, syncDevelopmentSource } from './local-development-sync.mjs';
+import { ensurePlanApprovalArtifact, planApprovalSatisfied } from '../../flows/delivery-lifecycle/plan-approval.mjs';
 
 const argv = process.argv.slice(2);
 const take = name => {
@@ -108,6 +109,7 @@ agent-harness memory export|import --input <json|-> [--command-id <id>] [--expec
 agent-harness features compile --extension <module> --input <json>
 agent-harness run start --project <id> --run <id> --profile <id> --features <json> [--config <json>] [--execution-workspace <absolute-path>]
 agent-harness run status --project <id> --run <id>
+agent-harness run plan-artifact --project <id> --run <id>
 agent-harness version-release status --project <id> --target <version>
 agent-harness version-release promote --project <id> --target <version> --candidate-digest <sha256> --expected-revision <n> --command-id <id> --approval <json>
  agent-harness release-candidate status --kind <version|scoped> --project <id> --target <id>
@@ -444,6 +446,13 @@ if (command === 'memory' && await handleMemoryCommand({ subject, runDataRoot, co
 if (command === 'run' && subject === 'status') {
   console.log(JSON.stringify({ ok: true, ...(await readRunStatus({ controlRoot, dataRoot: runDataRoot, projectId: take('--project'), runId: take('--run') })) }, null, 2));
   process.exit(0);
+}
+if (command === 'run' && subject === 'plan-artifact') {
+  const store = new AuthorityStore({ root: runDataRoot, controlRoot });
+  const state = await store.read(take('--project'), take('--run'));
+  const artifact = await ensurePlanApprovalArtifact(store.root, state);
+  console.log(JSON.stringify({ ok: Boolean(artifact), artifact, approved: planApprovalSatisfied(state) }, null, 2));
+  process.exit(artifact ? 0 : 2);
 }
 
 const registeredExtensions = await extensionRegistry.loadInstalled();

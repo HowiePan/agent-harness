@@ -7,9 +7,18 @@ import { harnessProjectRoot } from '../src/common/write-boundary.mjs';
 import { createDevelopmentPatchPlan, applyDevelopmentPatchPlan, diffDevelopmentFiles } from '../src/application/development-patch.mjs';
 import { developmentSourceManifestDigest, writeDevelopmentSourceManifest } from '../src/application/development-source.mjs';
 import { syncDevelopmentSource } from '../src/interfaces/cli/local-development-sync.mjs';
-import { assertDevelopmentRunRecoveryEffects } from '../src/application/development-run-recovery.mjs';
+import { assertDevelopmentRunRecoveryEffects, hasRejectedPlanReview, selectDevelopmentRecoveryExtension } from '../src/application/development-run-recovery.mjs';
 
 const record = (path, sha256 = 'a'.repeat(64)) => ({ path, sha256, size: 1 });
+
+test('rejected Plan review permits H1 recovery only for the latest completed negative decision', () => {
+  const state = { status: 'closure-blocked', features: [{ id: 'review', state: 'completed', metadata: { stage: 'plan-review' } }],
+    submissions: [{ featureId: 'review', result: { status: 'completed', outputs: { 'plan-review': { value: { approved: false } } } } }] };
+  assert.equal(hasRejectedPlanReview(state), true);
+  assert.equal(hasRejectedPlanReview({ ...state, status: 'running' }), false);
+  assert.equal(hasRejectedPlanReview({ ...state, submissions: [...state.submissions,
+    { featureId: 'review', result: { status: 'completed', outputs: { 'plan-review': { value: { approved: true } } } } }] }), false);
+});
 
 test('development Run recovery requires terminal, identity-bound Host effects for active Leases', () => {
   const state = { projectId: 'project', runId: 'run', leases: [{ leaseId: 'lease', dispatchId: 'dispatch',
@@ -29,6 +38,16 @@ test('development Run recovery requires terminal, identity-bound Host effects fo
   assert.doesNotThrow(() => assertDevelopmentRunRecoveryEffects({ ...state, leases: [{ ...state.leases[0], status: 'committed' }] }, [effect]));
   assert.throws(() => assertDevelopmentRunRecoveryEffects({ ...state, leases: [] }, [effect]),
     error => error.code === 'DEVELOPMENT_RUN_HOST_LEASE_REQUIRED');
+});
+
+test('development Run recovery selects the newly bound Workflow after an H2 graph change', () => {
+  const state = { profile: { id: 'engine-delivery' }, metadata: { workflow: { id: 'engine-delivery', version: '1.0.0', artifactDigest: 'old' }, workspace: { root: 'F:/CardWorld' } } };
+  const intent = { workflowId: 'engine-delivery', profileId: 'engine-delivery' };
+  const project = { extensions: [{ id: 'engine', digest: 'new-extension' }] };
+  const installedExtensions = [{ id: 'engine', digest: 'new-extension', workflows: [{ id: 'engine-delivery', profileId: 'engine-delivery', version: '1.0.0', artifactDigest: 'new' }] }];
+  assert.equal(selectDevelopmentRecoveryExtension({ state, intent, project, installedExtensions }), installedExtensions[0]);
+  assert.throws(() => selectDevelopmentRecoveryExtension({ state, intent: { ...intent, workflowId: 'collection' }, project, installedExtensions }), error => error.code === 'DEVELOPMENT_RUN_SCOPE_MISMATCH');
+  assert.throws(() => selectDevelopmentRecoveryExtension({ state, intent, project: { extensions: [{ id: 'engine', digest: 'other' }] }, installedExtensions }), error => error.code === 'DEVELOPMENT_RUN_SCOPE_MISMATCH');
 });
 
 test('development changes are classified by active-run compatibility', () => {

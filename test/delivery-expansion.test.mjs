@@ -42,16 +42,32 @@ test('requirements presets map to four distinct routes', () => {
   const manifest = createDeliveryCommandManifest();
   const scopeOf = preset => resolveCommandIntent(manifest, { action: 'requirements', target: 'V-next', arguments: [preset] }).scope;
   assert.deepEqual(planStages('requirements', scopeOf('full')), ['requirement-intake', 'requirement-expansion', 'canonical-requirement']);
-  assert.deepEqual(planStages('requirements', scopeOf('expand-to-plan')), ['requirement-intake', 'requirement-expansion', 'canonical-requirement', 'version-planning']);
-  assert.deepEqual(planStages('requirements', scopeOf('direct')), ['requirement-intake', 'canonical-requirement', 'version-planning']);
-  assert.deepEqual(planStages('requirements', scopeOf('plan-only')), ['version-planning']);
+  assert.deepEqual(planStages('requirements', scopeOf('expand-to-plan')), ['requirement-intake', 'requirement-expansion', 'canonical-requirement', 'version-planning', 'plan-review']);
+  assert.deepEqual(planStages('requirements', scopeOf('direct')), ['requirement-intake', 'canonical-requirement', 'version-planning', 'plan-review']);
+  assert.deepEqual(planStages('requirements', scopeOf('plan-only')), ['version-planning', 'plan-review']);
   assert.equal(new Set(['full', 'expand-to-plan', 'direct', 'plan-only'].map(scopeOf)).size, 4);
 });
 
 test('full action route includes the expansion stage', () => {
   assert.deepEqual(planStages('full', 'requirement-intake..delivery-receipt'), [
-    'requirement-intake', 'requirement-expansion', 'canonical-requirement', 'version-planning', 'implementation', 'scope-resolution', 'docs-closeout', 'quality', 'user-code-review', 'delivery-receipt',
+    'requirement-intake', 'requirement-expansion', 'canonical-requirement', 'version-planning', 'plan-review', 'implementation', 'scope-resolution', 'docs-closeout', 'quality', 'user-code-review', 'delivery-receipt',
   ]);
+});
+
+test('planning proposals are typed and independently reviewed without write authority', () => {
+  const plan = createDeliveryLifecyclePlan({
+    intent: { action: 'plan', target: 'V-next', scope: 'version-planning', qualityTarget },
+    project: createDeliveryProjectDescriptor({ workspaceRoot: process.cwd() }),
+    runId: 'plan-reviewed', sourceDigest: 'a'.repeat(64),
+  });
+  const [planner, reviewer] = plan.run.features;
+  assert.equal(planner.metadata.allowDynamicDecomposition, false);
+  assert.deepEqual(reviewer.dependsOn, [planner.id]);
+  assert.deepEqual(reviewer.allowedPaths, []);
+  assert.equal(reviewer.metadata.sourcePolicy, 'read-only');
+  assert.deepEqual(reviewer.metadata.outputPorts, { 'plan-review': deliveryPorts['plan-review'] });
+  assert.equal(validateJsonSchema({ features: ['engine'], proposedFeatures: [{ id: 'engine', projectId: 'delivery-project', disposition: 'project-owned', allowedPaths: ['src'], dependsOn: [] }] }, deliveryValueSchemas['delivery-plan-v1']).valid, true);
+  assert.equal(validateJsonSchema({ features: ['engine'] }, deliveryValueSchemas['delivery-plan-v1']).valid, false);
 });
 
 test('expansion dispatches before the canonical decision while plan requires it', () => {

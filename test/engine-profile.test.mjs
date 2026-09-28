@@ -143,6 +143,41 @@ test('normal development plans become independently schedulable follow-up Featur
   assert.equal(tick.state.features.filter(item => item.metadata.dynamicParentId === 'implementation/plan').every(item => item.state === 'completed'), true);
 });
 
+test('planning scope expansion is reviewed as a proposal and never becomes a child lease', () => {
+  const planner = feature('plan/V-next', { stage: 'version-planning', sourcePolicy: 'write', allowDynamicDecomposition: true }, { allowedPaths: ['docs/versions'] });
+  const state = { projectId: 'cardworld-engine', features: [planner] };
+  const proposed = {
+    status: 'completed',
+    outputs: { plan: { value: { features: ['engine', 'collection dependency'], proposedFeatures: [
+      { id: 'engine', projectId: 'cardworld-engine', disposition: 'project-owned', allowedPaths: ['card_world_engine/src'], dependsOn: [] },
+      { id: 'collection-check', projectId: 'tabletop-collection', disposition: 'cross-project-dependency', allowedPaths: ['tests'], dependsOn: ['engine'] },
+    ] } } },
+  };
+  assert.deepEqual(engineDeliveryProfile.validateResult({ state, feature: planner, result: proposed }), { ok: true });
+  assert.deepEqual(engineDeliveryProfile.createFollowUpFeatures({ state, feature: planner, result: proposed }), []);
+  const malformed = { ...proposed, followUpFeatures: [{ id: 'engine', allowedPaths: ['card_world_engine/src'] }] };
+  assert.deepEqual(engineDeliveryProfile.validateResult({ state, feature: planner, result: malformed }), { ok: false, reason: 'planning-proposals-must-use-typed-plan-output' });
+  const misowned = structuredClone(proposed);
+  misowned.outputs.plan.value.proposedFeatures[1].disposition = 'project-owned';
+  assert.deepEqual(engineDeliveryProfile.validateResult({ state, feature: planner, result: misowned }), { ok: false, reason: 'planning-proposal-project-disposition-mismatch' });
+  const reviewer = feature('plan-review/V-next', { stage: 'plan-review', sourcePolicy: 'read-only' }, { allowedPaths: [] });
+  const rejectedReview = { status: 'completed', outputs: { 'plan-review': { value: { approved: false, findings: ['missing module registration path'] } } } };
+  assert.deepEqual(engineDeliveryProfile.validateResult({ state, feature: reviewer, result: rejectedReview }), { ok: true });
+  const reviewedState = { ...state, profile: { config: { requireCanonicalDecision: false, requireUserCodeReview: false, requiredFinalGates: [] } }, features: [planner, reviewer], submissions: [{ featureId: reviewer.id, result: rejectedReview }], gates: [] };
+  assert.deepEqual(engineDeliveryProfile.canClose(reviewedState), { ok: false, reason: 'plan-scope-review-not-approved' });
+  assert.deepEqual(engineDeliveryProfile.canDispatch(feature('implement/V-next', { stage: 'implementation' }), reviewedState), { ok: false, reason: 'plan-scope-review-not-approved' });
+  reviewedState.submissions.push({ featureId: reviewer.id, result: { status: 'completed', outputs: { 'plan-review': { value: { approved: true } } } } });
+  assert.deepEqual(engineDeliveryProfile.canClose(reviewedState), { ok: false, reason: 'implementation-plan-user-approval-required' });
+});
+
+test('implementation decomposition cannot cross its project even within a parent path', () => {
+  const parent = feature('implement/V-next', { stage: 'implementation', allowDynamicDecomposition: true }, { allowedPaths: ['src'] });
+  const state = { projectId: 'cardworld-engine' };
+  const child = { id: 'x', projectId: 'tabletop-collection', allowedPaths: ['src/x'], acceptance: ['done'] };
+  assert.throws(() => engineDeliveryProfile.createFollowUpFeatures({ state, feature: parent, result: { followUpFeatures: [child] } }), error => error.code === 'FOLLOW_UP_PROJECT_OUTSIDE_PARENT');
+  assert.throws(() => engineDeliveryProfile.createFollowUpFeatures({ state, feature: parent, result: { followUpFeatures: [{ ...child, projectId: 'cardworld-engine', allowedPaths: ['other/x'] }] } }), error => error.code === 'FOLLOW_UP_PATH_OUTSIDE_PARENT');
+});
+
 test('Dispatch packet keeps the Gate snapshot captured at scheduling time', () => {
   const state = { projectId: 'project', runId: 'run', profile: { id: 'engine-delivery' }, epoch: 1, generation: 1, sourceDigest: 'a'.repeat(64), policyDigest: 'b'.repeat(64), pluginSetDigest: 'c'.repeat(64), artifactDigest: null, gates: [{ id: 'new', status: 'failed' }] };
   const dispatch = { dispatchId: 'dispatch-1', outputRef: 'output.json', sourceDigest: state.sourceDigest, sourceSnapshotRef: 'evidence:snapshot', gateSnapshot: [{ id: 'captured', status: 'passed' }] };
