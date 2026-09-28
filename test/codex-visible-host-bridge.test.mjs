@@ -228,4 +228,11 @@ test('Hook-visible lifecycle intents are short-lived, digest-bound, and safe as 
   forged.command.target = 'V9.9.9';
   assert.throws(() => validateVisibleLifecycleIntent(forged, { now: () => '2026-09-15T00:01:00.000Z' }), error => error.code === 'VISIBLE_LIFECYCLE_INTENT_DIGEST_MISMATCH');
   assert.throws(() => validateVisibleLifecycleIntent(intent, { now: () => '2026-09-15T00:06:00.000Z' }), error => error.code === 'VISIBLE_LIFECYCLE_INTENT_EXPIRED');
+  const releaseInput = { harness: intent.harness, project: intent.project, command: { action: 'release', target: 'V3.8.4', arguments: [] },
+    executionWorkspaceRoot: intent.executionWorkspaceRoot, coordinatorEntrypoint: intent.harness.coordinatorEntrypoint,
+    now: () => '2026-09-15T00:00:00.000Z' };
+  assert.throws(() => createVisibleLifecycleIntent(releaseInput), error => error.code === 'VISIBLE_RELEASE_CANDIDATE_REQUIRED');
+  const releaseIntent = createVisibleLifecycleIntent({ ...releaseInput, releaseCandidate: { candidateDigest: 'c'.repeat(64), revision: 1 } });
+  assert.deepEqual(decodeVisibleLifecycleIntent(encodeVisibleLifecycleIntent(releaseIntent), { now: () => '2026-09-15T00:01:00.000Z' }).releaseCandidate,
+    { candidateDigest: 'c'.repeat(64), revision: 1 });
 });

@@ -158,6 +158,7 @@ test('binding configuration makes project selection and Harness location determi
         'engine|cardworld-engine|engine-delivery|cardworld-engine-profile',
         'collection|tabletop-collection|collection-batch|tabletop-collection-profile',
       ],
+      workflowSpecs: [`engine|engine-delivery|1.0.0|${'a'.repeat(64)}|engine-delivery|cardworld-engine-profile`],
     });
     assert.equal(configured.harness.entrypoint, entrypoint);
 
@@ -179,8 +180,21 @@ test('binding configuration makes project selection and Harness location determi
     const routed = JSON.parse(context.slice(context.indexOf('解析结果：') + '解析结果：'.length));
     const sealed = decodeVisibleLifecycleIntent(routed.coordinationIntent);
     assert.deepEqual(sealed.command, { action: 'req', target: 'V3.8.4', arguments: ['expand-to-plan'] });
-    assert.deepEqual(sealed.project, { projectId: 'cardworld-engine', profileId: 'engine-delivery', extensionId: 'cardworld-engine-profile' });
+    assert.deepEqual(sealed.project, { projectId: 'cardworld-engine', profileId: 'engine-delivery', extensionId: 'cardworld-engine-profile', workflowId: 'engine-delivery', workflowVersion: '1.0.0', workflowDigest: 'a'.repeat(64) });
     assert.equal(sealed.harness.coordinatorEntrypoint, active.coordinatorEntrypoint);
+
+    const releaseDirectory = resolve(active.dataRoot, 'version-releases', 'cardworld-engine', 'V3.8.4');
+    await mkdir(releaseDirectory, { recursive: true });
+    await writeFile(resolve(releaseDirectory, 'state.json'), JSON.stringify({ status: 'prereleased', revision: 1, candidateDigest: 'b'.repeat(64) }));
+    const releaseResponse = await hookResponse({ prompt: 'h:engine release V3.8.4', cwd: workspaceRoot }, options);
+    const releaseContext = releaseResponse.hookSpecificOutput.additionalContext;
+    assert.match(releaseContext, /正式发布 Harness 命令/);
+    const releaseRoute = JSON.parse(releaseContext.slice(releaseContext.indexOf('解析结果：') + '解析结果：'.length));
+    const releaseIntent = decodeVisibleLifecycleIntent(releaseRoute.coordinationIntent);
+    assert.deepEqual(releaseIntent.releaseCandidate, { candidateDigest: 'b'.repeat(64), revision: 1 });
+    assert.deepEqual(releaseIntent.command, { action: 'release', target: 'V3.8.4', arguments: [] });
+    await writeFile(resolve(releaseDirectory, 'state.json'), JSON.stringify({ status: 'prereleased', revision: 2, candidateDigest: 'c'.repeat(64) }));
+    assert.notDeepEqual(decodeVisibleLifecycleIntent(releaseRoute.coordinationIntent).releaseCandidate, { candidateDigest: 'c'.repeat(64), revision: 2 });
 
     const where = await hookResponse({ prompt: 'h:where', cwd: workspaceRoot }, options);
     assert.match(where.hookSpecificOutput.additionalContext, /只读结果/);
@@ -403,6 +417,9 @@ test('the same pseudo actions resolve through the explicitly selected Extension 
   const requirement = resolveCommandIntent(cardWorldCommandManifest, { action: 'req', target: 'V3.8.4', arguments: ['expand-to-plan'] });
   assert.equal(requirement.action, 'requirements');
   assert.equal(requirement.scope, 'requirement-expansion..version-plan');
+  const release = resolveCommandIntent(cardWorldCommandManifest, { action: 'release', target: 'V3.8.4', arguments: [] });
+  assert.equal(release.scope, 'version-release-promotion');
+  assert.deepEqual(release.effectClasses, ['formal-version-release']);
 
   const batchQuality = resolveCommandIntent(tabletopCollectionCommandManifest, { action: 'quality', target: 'B1', arguments: ['game:chess'] });
   assert.equal(batchQuality.profileId, 'collection-batch');

@@ -30,6 +30,7 @@ export const createDeliveryCommandManifest = ({ id = 'delivery-lifecycle-command
     },
     docs: { targetKind: 'version', presets: { default: { scope: 'docs-closeout', stateChanging: true } } },
     prerelease: { targetKind: 'version', presets: { default: { scope: 'release-preparation..release-candidate', stateChanging: true } } },
+    release: { targetKind: 'version', presets: { default: { scope: 'version-release-promotion', stateChanging: true, effectClasses: ['formal-version-release'] } } },
     review: { targetKind: 'version', presets: { default: { scope: 'user-code-review', stateChanging: true, sourcePolicy: 'read-only' } } },
     deliver: { targetKind: 'version', presets: { default: { scope: 'delivery-receipt', stateChanging: true } } },
     status: { targetKind: 'version-or-run-id', presets: { default: { scope: 'status', stateChanging: false } } },

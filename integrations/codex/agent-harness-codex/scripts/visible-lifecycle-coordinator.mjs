@@ -15,6 +15,7 @@ import { decodeVisibleLifecycleIntent } from '../lib/visible-lifecycle-intent.mj
 import { createPlannedLifecycleEvent, createPreflightLifecycleEvent } from '../lib/visible-lifecycle-events.mjs';
 import { captureSourceManifest } from '../../../../src/platform/workflow/source-manifest.mjs';
 import { classifyLocalIncident } from '../../../../src/application/local-incident.mjs';
+import { resolveCommandIntent } from '../../../../src/platform/extensions/command-contract.mjs';
 
 const samePath = (left, right) => process.platform === 'win32'
   ? resolve(left).toLowerCase() === resolve(right).toLowerCase()
@@ -48,6 +49,36 @@ const main = async () => {
   const extensionRegistry = new ExtensionRegistry({ dataRoot: intent.harness.dataRoot, controlRoot: intent.harness.controlRoot, developmentMode });
   const extensions = await extensionRegistry.loadInstalled();
   if (developmentMode && intent.codexSessionId !== process.env.CODEX_SESSION_ID) throw Object.assign(new Error('Source-link Coordinator must run in the Codex session named by its intent.'), { code: 'CODEX_ROLLOUT_SESSION_MISMATCH' });
+  if (intent.command.action === 'release') {
+    if (intent.project.workspaceId) throw Object.assign(new Error('Formal release requires a single bound Project.'), { code: 'VISIBLE_RELEASE_PROJECT_REQUIRED' });
+    const harness = await createHarness({ controlRoot: intent.harness.controlRoot, dataRoot: intent.harness.dataRoot,
+      releaseIdentity, extensions, strictProjectIdentity: !developmentMode });
+    const descriptor = await harness.projectRegistry.get(intent.project.projectId);
+    const workflow = descriptor.workflows?.find(item => item.id === intent.project.workflowId);
+    if (intent.project.workflowId && descriptor.workflows?.length && (!workflow || workflow.version !== intent.project.workflowVersion || workflow.artifactDigest !== intent.project.workflowDigest
+      || workflow.extensionId !== intent.project.extensionId || workflow.profileId !== intent.project.profileId)) throw Object.assign(new Error('Formal release Workflow binding differs from the Project Descriptor.'), { code: 'VISIBLE_RELEASE_WORKFLOW_MISMATCH' });
+    if (!samePath(descriptor.workspace.root, intent.executionWorkspaceRoot)) throw Object.assign(new Error('Formal release must use the exact registered Project checkout.'), { code: 'VISIBLE_RELEASE_WORKSPACE_MISMATCH' });
+    const extension = extensions.find(item => item.id === intent.project.extensionId);
+    if (!extension?.commandManifest) throw Object.assign(new Error('Formal release requires the bound Extension command manifest.'), { code: 'VISIBLE_RELEASE_MANIFEST_REQUIRED' });
+    const resolved = resolveCommandIntent(extension.commandManifest, intent.command);
+    if (resolved.action !== 'release' || resolved.profileId !== intent.project.profileId || resolved.workflowId !== intent.project.workflowId
+      || resolved.scope !== 'version-release-promotion' || resolved.stateChanging !== true) throw Object.assign(new Error('Formal release action is not declared by the bound Workflow.'), { code: 'VISIBLE_RELEASE_ACTION_MISMATCH' });
+    const current = await harness.readVersionRelease(intent.project.projectId, intent.command.target);
+    if (current.state.status !== 'prereleased' || current.state.candidateDigest !== intent.releaseCandidate.candidateDigest
+      || current.state.revision !== intent.releaseCandidate.revision || current.candidate?.candidateDigest !== intent.releaseCandidate.candidateDigest) throw Object.assign(new Error('Frozen release candidate changed after the user command.'), { code: 'VISIBLE_RELEASE_CANDIDATE_STALE' });
+    emit({ kind: 'codex-visible-lifecycle-event', phase: 'preflight', commandId: intent.commandId, intentDigest: intent.intentDigest,
+      executionReady: true, candidateDigest: intent.releaseCandidate.candidateDigest, revision: intent.releaseCandidate.revision });
+    if (preflightOnly) return;
+    const approval = { id: 'formal-version-release', actor: 'codex-user-command', decision: 'approved',
+      projectId: intent.project.projectId, target: intent.command.target, candidateDigest: intent.releaseCandidate.candidateDigest,
+      authorityBasis: 'explicit-harness-command', commandId: intent.commandId, intentDigest: intent.intentDigest };
+    const result = await harness.promoteVersionRelease({ projectId: intent.project.projectId, target: intent.command.target,
+      candidateDigest: intent.releaseCandidate.candidateDigest, expectedRevision: intent.releaseCandidate.revision,
+      commandId: intent.commandId, approval });
+    emit({ kind: 'codex-visible-lifecycle-event', phase: 'complete', commandId: intent.commandId, intentDigest: intent.intentDigest,
+      status: result.state.status, result });
+    return;
+  }
   const hostOptions = { controlRoot: intent.harness.controlRoot, dataRoot: intent.harness.dataRoot, codexSessionId: intent.codexSessionId, onRejected: createHostExchangeDiagnosticWriter({ controlRoot: intent.harness.controlRoot, dataRoot: intent.harness.dataRoot }), ...(developmentMode ? { responseTimeoutMs: 600000 } : {}) };
   const hostExchange = developmentMode ? createCodexRolloutHostExchange(hostOptions) : createHookHostExchange(hostOptions);
   try {

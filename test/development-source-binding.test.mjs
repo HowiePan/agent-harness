@@ -58,6 +58,24 @@ test('development manifest enables read-only workflow planning and fails closed 
   const cli = async args => JSON.parse((await execFileAsync(process.execPath, [resolve(controlRoot, 'bin', 'agent-harness.mjs'), ...args, '--development-manifest', source.file], { cwd: controlRoot })).stdout);
   const listed = await cli(['workflow', 'list', '--project', 'local-debug-fixture']);
   assert.equal(listed.workflows[0].id, 'delivery-lifecycle');
+  const releaseStatus = await cli(['version-release', 'status', '--project', 'local-debug-fixture', '--target', 'synthetic-v1']);
+  assert.equal(releaseStatus.state.status, 'none');
+  const approvalFile = resolve(root, 'approval.json');
+  await writeFile(approvalFile, '{}');
+  await assert.rejects(
+    () => execFileAsync(process.execPath, [resolve(controlRoot, 'bin', 'agent-harness.mjs'), 'version-release', 'promote',
+      '--project', 'local-debug-fixture', '--target', 'synthetic-v1', '--candidate-digest', 'a'.repeat(64),
+      '--expected-revision', '0', '--command-id', 'synthetic-promotion', '--approval', approvalFile,
+      '--development-manifest', source.file], { cwd: controlRoot }),
+    error => error.stderr.includes('LOCAL_DEVELOPMENT_PROJECT_CONTEXT_REQUIRED'),
+  );
+  await assert.rejects(
+    () => execFileAsync(process.execPath, [resolve(controlRoot, 'bin', 'agent-harness.mjs'), 'version-release', 'promote',
+      '--project', 'local-debug-fixture', '--target', 'synthetic-v1', '--candidate-digest', 'a'.repeat(64),
+      '--expected-revision', '0', '--command-id', 'synthetic-promotion', '--approval', approvalFile,
+      '--development-manifest', source.file], { cwd: projectRoot }),
+    error => error.stderr.includes('RELEASE_PROMOTION_DECISION_REQUIRED'),
+  );
   const inputFile = resolve(root, 'quality-input.json');
   await writeFile(inputFile, JSON.stringify({ projectId: 'local-debug-fixture', action: 'quality', target: 'synthetic-v1', arguments: ['review-only'], extensionId: 'delivery-lifecycle-profile', executionWorkspaceRoot: projectRoot }));
   const planned = await cli(['lifecycle', 'plan', '--input', inputFile]);

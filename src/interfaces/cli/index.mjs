@@ -320,8 +320,14 @@ const dataRoot = resolve(take('--data-root') ?? development?.manifest.dataRoot ?
 if (development) {
   if (!samePath(controlRoot, development.manifest.controlRoot) || !samePath(dataRoot, development.manifest.dataRoot)) throw Object.assign(new Error('Development manifest does not match the selected control and data roots.'), { code: 'DEVELOPMENT_MANIFEST_ROOT_MISMATCH' });
   if (take('--harness-digest') && take('--harness-digest') !== development.releaseIdentity.artifactDigest) throw Object.assign(new Error('Development manifest does not match --harness-digest.'), { code: 'DEVELOPMENT_MANIFEST_RELEASE_MISMATCH' });
-  const developmentCommandAllowed = (command === 'workflow' && subject === 'list') || (command === 'lifecycle' && ['plan', 'preflight'].includes(subject)) || (command === 'project' && subject === 'list') || (command === 'extension' && subject === 'list') || command === 'doctor';
-  if (!developmentCommandAllowed) throw Object.assign(new Error('Development manifest is limited to inspection, planning, and preflight. Use the dev commands for source binding changes.'), { code: 'DEVELOPMENT_MANIFEST_COMMAND_UNSUPPORTED' });
+  const developmentCommandAllowed = (command === 'workflow' && subject === 'list') || (command === 'lifecycle' && ['plan', 'preflight'].includes(subject)) || (command === 'project' && subject === 'list') || (command === 'extension' && subject === 'list') || (command === 'version-release' && ['status', 'promote'].includes(subject)) || command === 'doctor';
+  if (!developmentCommandAllowed) throw Object.assign(new Error('Development manifest is limited to inspection, planning, preflight, and frozen version release status/promotion. Use the dev commands for source binding changes.'), { code: 'DEVELOPMENT_MANIFEST_COMMAND_UNSUPPORTED' });
+  if (command === 'version-release' && subject === 'promote') await createLocalDevelopmentInvocation({
+    projectRoot: development.manifest.projectRoot,
+    configPath: development.manifest.configPath,
+    controlRoot,
+    dataRoot,
+  });
 }
 const scopedWorkspaceId = take('--workspace-id') ?? null;
 if (scopedWorkspaceId) safeSegment(scopedWorkspaceId, 'workspaceId');

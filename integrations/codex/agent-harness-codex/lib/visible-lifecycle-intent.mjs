@@ -23,8 +23,10 @@ export const visibleLifecycleIntentDigest = intent => {
   return digestJson(copy);
 };
 
-export const createVisibleLifecycleIntent = ({ harness, project, command, executionWorkspaceRoot, coordinatorEntrypoint, codexSessionId = null, now = () => new Date().toISOString(), ttlMs = 300000 }) => {
+export const createVisibleLifecycleIntent = ({ harness, project, command, executionWorkspaceRoot, coordinatorEntrypoint, codexSessionId = null, releaseCandidate = null, now = () => new Date().toISOString(), ttlMs = 300000 }) => {
   if (!Number.isInteger(ttlMs) || ttlMs < 1000 || ttlMs > 600000) throw Object.assign(new Error('Visible lifecycle intent TTL must be between 1 second and 10 minutes.'), { code: 'VISIBLE_LIFECYCLE_INTENT_TTL_INVALID' });
+  if (command?.action === 'release' && (!releaseCandidate || !sha256Pattern.test(releaseCandidate.candidateDigest ?? '') || !Number.isInteger(releaseCandidate.revision) || releaseCandidate.revision < 1)) throw Object.assign(new Error('Formal release intent must pin an exact candidate digest and revision.'), { code: 'VISIBLE_RELEASE_CANDIDATE_REQUIRED' });
+  if (command?.action !== 'release' && releaseCandidate) throw Object.assign(new Error('Only formal release may pin a release candidate.'), { code: 'VISIBLE_RELEASE_CANDIDATE_UNEXPECTED' });
   const createdAt = now();
   const body = {
     protocolVersion: '1.0',
@@ -51,6 +53,7 @@ export const createVisibleLifecycleIntent = ({ harness, project, command, execut
       target: nonEmpty(command?.target, 'VISIBLE_LIFECYCLE_TARGET_REQUIRED', 'Visible lifecycle intent requires a target.'),
       arguments: [...(command?.arguments ?? [])].map(String),
     },
+    ...(releaseCandidate ? { releaseCandidate: { candidateDigest: releaseCandidate.candidateDigest, revision: releaseCandidate.revision } } : {}),
     executionWorkspaceRoot: nonEmpty(executionWorkspaceRoot, 'VISIBLE_LIFECYCLE_WORKSPACE_REQUIRED', 'Visible lifecycle intent requires a verified execution workspace.'),
     createdAt,
     expiresAt: new Date(Date.parse(createdAt) + ttlMs).toISOString(),
@@ -60,7 +63,7 @@ export const createVisibleLifecycleIntent = ({ harness, project, command, execut
 
 export const validateVisibleLifecycleIntent = (input, { now = () => new Date().toISOString() } = {}) => {
   const intent = structuredClone(input);
-  const allowed = ['protocolVersion', 'kind', 'commandId', 'codexSessionId', 'harness', 'project', 'command', 'executionWorkspaceRoot', 'createdAt', 'expiresAt', 'intentDigest'];
+  const allowed = ['protocolVersion', 'kind', 'commandId', 'codexSessionId', 'harness', 'project', 'command', 'releaseCandidate', 'executionWorkspaceRoot', 'createdAt', 'expiresAt', 'intentDigest'];
   if (!intent || typeof intent !== 'object' || Array.isArray(intent) || Object.keys(intent).some(key => !allowed.includes(key))) throw Object.assign(new Error('Visible lifecycle intent has an invalid envelope.'), { code: 'VISIBLE_LIFECYCLE_INTENT_INVALID' });
   if (intent.protocolVersion !== '1.0' || intent.kind !== 'codex-visible-lifecycle-intent') throw Object.assign(new Error('Visible lifecycle intent protocol is unsupported.'), { code: 'VISIBLE_LIFECYCLE_INTENT_PROTOCOL_UNSUPPORTED' });
   nonEmpty(intent.commandId, 'VISIBLE_LIFECYCLE_COMMAND_ID_REQUIRED', 'Visible lifecycle intent requires a command ID.');
@@ -87,6 +90,10 @@ export const validateVisibleLifecycleIntent = (input, { now = () => new Date().t
   if (!intent.command || Object.keys(intent.command).some(key => !['action', 'target', 'arguments'].includes(key)) || !Array.isArray(intent.command.arguments) || intent.command.arguments.some(value => typeof value !== 'string')) throw Object.assign(new Error('Visible lifecycle command is invalid.'), { code: 'VISIBLE_LIFECYCLE_COMMAND_INVALID' });
   nonEmpty(intent.command.action, 'VISIBLE_LIFECYCLE_COMMAND_INVALID', 'Visible lifecycle command requires an action.');
   nonEmpty(intent.command.target, 'VISIBLE_LIFECYCLE_COMMAND_INVALID', 'Visible lifecycle command requires a target.');
+  if (intent.command.action === 'release') {
+    if (!intent.releaseCandidate || !sha256Pattern.test(intent.releaseCandidate.candidateDigest ?? '') || !Number.isInteger(intent.releaseCandidate.revision) || intent.releaseCandidate.revision < 1 || Object.keys(intent.releaseCandidate).some(key => !['candidateDigest', 'revision'].includes(key))) throw Object.assign(new Error('Formal release intent must pin an exact candidate digest and revision.'), { code: 'VISIBLE_RELEASE_CANDIDATE_REQUIRED' });
+    if (intent.command.arguments.length) throw Object.assign(new Error('Formal release command does not accept a preset.'), { code: 'VISIBLE_RELEASE_ARGUMENTS_INVALID' });
+  } else if (intent.releaseCandidate !== undefined) throw Object.assign(new Error('Only formal release may pin a release candidate.'), { code: 'VISIBLE_RELEASE_CANDIDATE_UNEXPECTED' });
   nonEmpty(intent.executionWorkspaceRoot, 'VISIBLE_LIFECYCLE_WORKSPACE_REQUIRED', 'Visible lifecycle intent requires an execution workspace.');
   const createdAt = Date.parse(intent.createdAt ?? '');
   const expiresAt = Date.parse(intent.expiresAt ?? '');

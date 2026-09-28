@@ -18,6 +18,21 @@ const inside = (parent, child) => {
 const samePath = (left, right) => process.platform === 'win32'
   ? resolve(left).toLowerCase() === resolve(right).toLowerCase()
   : resolve(left) === resolve(right);
+const releaseSegmentPattern = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
+const releaseDigestPattern = /^[a-f0-9]{64}$/;
+
+const readFrozenReleasePointer = async ({ dataRoot, projectId, target }) => {
+  if (!releaseSegmentPattern.test(projectId) || !releaseSegmentPattern.test(target)) throw Object.assign(new Error('Formal release Project or target is invalid.'), { code: 'VISIBLE_RELEASE_SCOPE_INVALID' });
+  const file = resolve(dataRoot, 'version-releases', projectId, target, 'state.json');
+  let state;
+  try { state = JSON.parse(await readFile(file, 'utf8')); }
+  catch (error) {
+    if (error.code === 'ENOENT') throw Object.assign(new Error('No frozen prerelease candidate exists for this target.'), { code: 'VISIBLE_RELEASE_CANDIDATE_MISSING' });
+    throw error;
+  }
+  if (state.status !== 'prereleased' || !releaseDigestPattern.test(state.candidateDigest ?? '') || !Number.isInteger(state.revision) || state.revision < 1) throw Object.assign(new Error('Formal release requires the current frozen prerelease candidate.'), { code: 'VISIBLE_RELEASE_CANDIDATE_UNAVAILABLE' });
+  return { candidateDigest: state.candidateDigest, revision: state.revision };
+};
 
 const optionalLstat = async path => {
   try { return await lstat(path); }
@@ -232,6 +247,12 @@ export const hookResponse = async (input, options = {}) => {
     return contextResponse(`检测到 h:report。使用 $agent-harness-command 在当前任务采集并脱敏相关对话；缺失证据列入 missingEvidence，不得伪造。通过绑定 entrypoint 以 stdin 调用 issue record；只写 controlRoot/issues。不得新建任务、运行 Harness、接受其他输出目录或提交 Git。返回 issue ID、路径和未提交状态。解析结果：${JSON.stringify(report)}`);
   }
 
+  let releaseCandidate = null;
+  if (parsed.action === 'release') {
+    if (selectedProject.workspaceId || parsed.arguments.length) return contextResponse('正式发布命令仅接受已绑定的单项目版本目标，不接受预设或 Workspace 范围；不得创建 Run 或晋升候选。');
+    try { releaseCandidate = await readFrozenReleasePointer({ dataRoot: bindings.harness.dataRoot, projectId: selectedProject.projectId, target: parsed.target }); }
+    catch (error) { return contextResponse(`正式发布未就绪（${error.code ?? 'VISIBLE_RELEASE_CANDIDATE_READ_FAILED'}）：${error.message}。不得创建 Run 或晋升候选。`); }
+  }
   const coordinationIntent = createVisibleLifecycleIntent({
     harness: bindings.harness,
     project: selectedProject,
@@ -239,6 +260,7 @@ export const hookResponse = async (input, options = {}) => {
     executionWorkspaceRoot: workspace.executionWorkspaceRoot,
     coordinatorEntrypoint: bindings.harness.coordinatorEntrypoint,
     codexSessionId: input?.session_id ?? null,
+    releaseCandidate,
   });
   const intent = { ...parsed, project: selectedProject, harness: bindings.harness, workspaceRoot: project.workspaceRoot, workspaceIdentity: project.workspaceIdentity, executionWorkspaceRoot: workspace.executionWorkspaceRoot, workspaceMatch: workspace.kind, cwd, commandId: coordinationIntent.commandId, coordinationIntent: encodeVisibleLifecycleIntent(coordinationIntent), coordinationIntentDigest: coordinationIntent.intentDigest };
   const sourceLink = bindings.harness.release.mode === 'source-link';
@@ -246,6 +268,7 @@ export const hookResponse = async (input, options = {}) => {
   const modeInstructions = sourceLink
     ? `读取已验证源码 Skill ${commandSkill} 并遵守其中 Operator 边界。此绑定直接执行本地源码 Coordinator；原生 collaboration 结果由当前 session 的 Codex rollout 自动核验和记录，不依赖安装包的 PostToolUse Hook。`
     : '使用 $agent-harness-command；当前 Windows Codex 长驻通道使用 tty:true，并把控制台宽度设为至少 4096 列。PostToolUse Hook 会按当前请求和原生工具输出自动写入 Host 响应。';
+  if (parsed.action === 'release') return contextResponse(`检测到正式发布 Harness 命令。所有面向用户的控制对话使用中文。此命令本身是用户对本意图中精确候选摘要的批准；只启动已绑定 coordinatorEntrypoint 一次，原样传入 coordinationIntent 作为 --intent 参数。Coordinator 将复核 Project、Workflow、当前候选摘要及修订号、源码快照和封存制品，并只晋升版本状态；不得组合 CLI 发布脚本、重新预发布、创建业务 Run、提交 Git 或对外分发。候选摘要 ${releaseCandidate.candidateDigest}，修订号 ${releaseCandidate.revision}。解析结果：${JSON.stringify(intent)}`);
   return contextResponse(`检测到 Agent Harness 伪命令。所有面向用户的控制对话使用中文；协议 JSON、命令、路径与错误码保持原样，且不得翻译或改写子 Agent Prompt。把它作为确定性的 Command Intent，而不是自由提示词；动作和预设仍由已绑定 Extension 的 commandManifest 解析。${modeInstructions}启动任何进程前先确认当前任务同时提供 collaboration.spawn_agent/list_agents/wait_agent/interrupt_agent。缺任一项即以 CODEX_MULTI_AGENT_V2_REQUIRED 停止，并提示执行 codex features enable multi_agent_v2 后新建任务；multi_agent_v1 或其他任务接口不得替代。能力满足后，只使用已绑定的 coordinatorEntrypoint，并把 coordinationIntent 作为 --intent 的单一参数。必须解析请求对象并原样使用 arguments，禁止从视觉换行文本抄写字段。逐项原样执行它请求的 collaboration 工具；不得向 Coordinator stdin 手工转录 Host 响应。不得根据目标格式猜项目，不得搜索磁盘，不得把参数当作 shell。解析结果：${JSON.stringify(intent)}`);
 };
 

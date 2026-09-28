@@ -115,7 +115,7 @@ test('candidate seals final docs and package; promotion only changes status for 
   assert.equal(first.candidate.candidateDigest, second.candidate.candidateDigest);
   assert.equal(second.state.revision, 1);
   assert.equal((await readVersionRelease({ dataRoot, projectId: project.id, target: 'V3.8.4' })).state.status, 'prereleased');
-  const request = { dataRoot, project, target: 'V3.8.4', workspaceRoot, candidateDigest: first.candidate.candidateDigest,
+  const request = { dataRoot, project: { ...project, descriptorDigest: 'b'.repeat(64) }, target: 'V3.8.4', workspaceRoot, candidateDigest: first.candidate.candidateDigest,
     expectedRevision: 1, commandId: 'approve-1', approval: { id: 'formal-version-release', actor: 'user', decision: 'approved', projectId: project.id, target: 'V3.8.4', candidateDigest: first.candidate.candidateDigest } };
   await assert.rejects(() => promoteVersionRelease({ ...request, approval: { ...request.approval, candidateDigest: 'd'.repeat(64) } }), error => error.code === 'RELEASE_PROMOTION_DECISION_REQUIRED');
   await writeFile(resolve(workspaceRoot, 'README.md'), 'drift');

@@ -158,6 +158,7 @@ export const readVersionRelease = async ({ dataRoot, projectId, target }) => {
   if (!state.candidateDigest) return { state, candidate: null };
   const candidate = await readJson(receiptPath(root, state.candidateDigest));
   assert(candidate.candidateDigest === digestJson(withoutKeys(candidate, ['candidateDigest'])), 'RELEASE_CANDIDATE_DIGEST_MISMATCH', 'Release candidate digest is invalid.');
+  assert(candidate.projectId === projectId && candidate.target === target, 'RELEASE_CANDIDATE_SCOPE_MISMATCH', 'Release candidate belongs to another Project or target.');
   return { state, candidate };
 };
 
@@ -175,7 +176,10 @@ export const promoteVersionRelease = async ({ dataRoot, project, target, workspa
       return { state, candidate, receipt: previousCommand };
     }
     assert(state.status === 'prereleased' && state.candidateDigest === candidateDigest && state.revision === expectedRevision, 'RELEASE_PROMOTION_STATE_MISMATCH', 'Promotion must target the current frozen prerelease revision.');
-    assert(candidate.descriptorDigest === project.descriptorDigest, 'RELEASE_PROMOTION_PROJECT_DRIFT', 'Project Descriptor changed after candidate freeze.');
+    // Promotion commits only the already frozen candidate. A source-link Harness
+    // update may rebind the Project Descriptor without changing candidate bytes.
+    // The workspace snapshot and staged artifacts below remain the authority for
+    // what the user approved.
     const snapshot = await captureWorkspace(workspaceRoot, { excluded: project.workspace.excluded ?? [] });
     assert(snapshot.digest === candidate.sourceDigest, 'RELEASE_PROMOTION_SOURCE_DRIFT', 'Promotion cannot change or rebuild the frozen source.');
     for (const artifact of candidate.artifacts) {
