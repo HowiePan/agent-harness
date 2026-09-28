@@ -103,6 +103,8 @@ test('Codex plugin exposes one explicit-project pseudo-command router', async ()
   assert.match(skill, /`yield_time_ms` no greater than 1000/);
   assert.match(skill, /stop with `CODEX_VISIBLE_COORDINATOR_SESSION_REQUIRED`/);
   assert.match(skill, /deduplicate by the exact `requestId` plus `requestDigest`/);
+  assert.match(skill, /single-start rule, not a ban on internal continuation/);
+  assert.match(skill, /original authorization covers H0–H3 `dev sync`/);
   assert.match(skill, /Never inspect the pending directory as a substitute/);
   assert.match(operatorSkill, /所有面向用户的控制对话必须使用中文/);
   assert.match(metadata, /allow_implicit_invocation: true/);

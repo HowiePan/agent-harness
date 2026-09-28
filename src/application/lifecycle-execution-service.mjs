@@ -6,12 +6,12 @@ import { isVisibleHostAdapter } from '../platform/plugins/runtime/visible-host-a
 import { canonicalize, digestJson, sha256 } from '../common/canonical.mjs';
 import { assertInside } from '../common/paths.mjs';
 import { atomicWrite } from '../kernel/atomic-io.mjs';
-import { validateBusinessResult } from '../platform/execution/result-contract.mjs';
+import { validateBusinessResult, validateProfileResult } from '../platform/execution/result-contract.mjs';
 import { ensureVersionClearance } from './version-clearance.mjs';
 import { ensurePreReleaseCandidate } from './version-prerelease.mjs';
 import { performance } from 'node:perf_hooks';
 
-const recoverableResultCodes = new Set(['REPAIR_CHECKPOINT_REQUIRED', 'REPAIR_CHECKPOINT_EVIDENCE_REQUIRED', 'REPAIR_FINDING_CHECKPOINT_REQUIRED', 'QUALITY_DIAGNOSTIC_DISPOSITION_REQUIRED']);
+const recoverableResultCodes = new Set(['REPAIR_CHECKPOINT_REQUIRED', 'REPAIR_CHECKPOINT_EVIDENCE_REQUIRED', 'REPAIR_FINDING_CHECKPOINT_REQUIRED', 'QUALITY_DIAGNOSTIC_DISPOSITION_REQUIRED', 'PROFILE_RESULT_REJECTED']);
 const previousFreshGates = (state, scope, ids) => {
   const results = ids.map(id => [...state.gates].reverse().find(gate => gate.id === id && gate.scope === scope && gate.status === 'passed' && gate.forcedFresh && gate.sourceDigest === state.sourceDigest));
   return results.every(Boolean) ? { results, state } : null;
@@ -24,7 +24,7 @@ const completionReceipts = async (api, dataRoot, plan, state) => ({
 });
 
 const rejectVisibleResult = ({ error, result, receipt, runtimeReceipt, agentId, dispatchId, packetDigest }) => {
-  const summary = `Agent result rejected by ${error.code}: ${error.message}`;
+  const summary = `Agent result rejected by ${error.code}: ${error.message}${error.details?.reason ? ` (${error.details.reason})` : ''}`;
   const body = {
     kind: 'result-rejected-receipt', version: '1.0', agentId, dispatchId,
     packetDigest,
@@ -148,7 +148,7 @@ const continueVisibleLifecyclePlan = async (context, api, planInput, { commandId
       }
       for (const dispatch of requested.slice(0, physicalLimit)) {
         const compiled = await api.readDispatchPacket(plan.project.id, activeRunId, dispatch.dispatchId);
-        if (compiled.prompt.contractVersion === '1.4') {
+        if (['1.4', '1.5'].includes(compiled.prompt.contractVersion)) {
           const packetFile = assertInside(authorityStore.root, `${compiled.packet.outputRef}.dispatch-packet.json`, 'Dispatch packet transport');
           const packetBytes = canonicalize(compiled.packet);
           assert(sha256(packetBytes) === compiled.prompt.packetDigest, 'DISPATCH_PACKET_TRANSPORT_DIGEST_MISMATCH', 'Dispatch packet transport differs from the generated Prompt.');
@@ -214,12 +214,22 @@ const continueVisibleLifecyclePlan = async (context, api, planInput, { commandId
       const transported = await trustedAgentAdapter.result({ agentId: lease.agentId, dispatchId: lease.dispatchId, visibility: structuredClone(lease.runtimeReceipt.visibility), runtimeReceipt: structuredClone(lease.runtimeReceipt) });
       timing.resultMs += performance.now() - resultStarted;
       assert(transported?.result, 'VISIBLE_AGENT_STRUCTURED_RESULT_REQUIRED', 'Host result transport must return a structured Agent result.');
+      // Native result observation can outlast the Lease heartbeat window. Renew
+      // through the trusted Host adapter after transport, before submission.
+      state = await authorityStore.read(plan.project.id, activeRunId);
+      const resultHeartbeat = await api.recordHeartbeat(plan.project.id, activeRunId, {
+        leaseId: lease.leaseId, dispatchId: lease.dispatchId, agentId: lease.agentId, progress: 'result-observed',
+      }, { expectedRevision: state.revision, commandId: `${commandId}.result-heartbeat.${lease.dispatchId}.${state.revision}` });
+      state = resultHeartbeat.state;
       const feature = state.features.find(item => item.id === dispatch.featureId);
       let businessResult = transported.result;
       let hostResultReceipt = transported.receipt ?? null;
       let runtimeEvidence = transported.runtimeEvidence ?? {};
       let rejected = null;
-      try { validateBusinessResult(businessResult, { conversationVisible: true, repair: Boolean(feature?.metadata?.repairFindingId), feature }); }
+      try {
+        validateBusinessResult(businessResult, { conversationVisible: true, repair: Boolean(feature?.metadata?.repairFindingId), feature });
+        validateProfileResult({ profile: api.profileRegistry.get(state.profile.id), state, feature, result: businessResult });
+      }
       catch (error) {
         if (!recoverableResultCodes.has(error.code) || businessResult.status !== 'completed' || !hostResultReceipt?.observationRequestDigest) throw error;
         if (error.code.startsWith('REPAIR_') && !feature?.metadata?.repairFindingId) throw error;
@@ -234,7 +244,7 @@ const continueVisibleLifecyclePlan = async (context, api, planInput, { commandId
       if (rejected && submitted.result.featureState === 'blocked') {
         const reopened = await api.kernel.reopenFeature(plan.project.id, activeRunId, {
           featureId: feature.id,
-          reason: `${rejected.rejection.code}: report only observed passing checkpoints for a repair and provide evidence-backed dispositions for every carried diagnostic in a review. Reinspect the current source before reporting completion.`,
+          reason: `${rejected.result.summary}. Reinspect the current source and correct the rejected result before reporting completion.`,
         }, { expectedRevision: state.revision, commandId: `${commandId}.reopen.${dispatch.dispatchId}` });
         state = reopened.state;
       }

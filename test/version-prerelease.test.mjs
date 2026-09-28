@@ -98,13 +98,16 @@ test('candidate seals final docs and package; promotion only changes status for 
     metadata: { projectDescriptorDigest: project.descriptorDigest, commandIntent: { action: 'prerelease', target: 'V3.8.4', releaseDocumentation: docs,
       developmentClearance: { status: 'development-complete', receiptDigest: digestJson({ status: 'development-complete' }) } } },
     profile: { config: { requiredFinalGates: ['package'] } },
-    features: [{ id: 'release-docs/V3.8.4', metadata: { stage: 'release-documentation' } }],
-    submissions: [{ featureId: 'release-docs/V3.8.4', result: { changedFiles: ['README.md'], outputs: { 'release-docs': { value: audit } } } }],
+    features: [{ id: 'release-docs/V3.8.4', submissionId: 'docs-ok', metadata: { stage: 'release-documentation' } }],
+    submissions: [
+      { submissionId: 'docs-rejected', featureId: 'release-docs/V3.8.4', result: { status: 'failed', changedFiles: [], blocker: { code: 'PROFILE_RESULT_REJECTED' } } },
+      { submissionId: 'docs-ok', featureId: 'release-docs/V3.8.4', result: { status: 'completed', changedFiles: ['README.md'], outputs: { 'release-docs': { value: audit } } } },
+    ],
     gates: [{ id: 'package', scope: 'final', status: 'passed', forcedFresh: true, sourceDigest: snapshot.digest, evidenceRefs: ['gate-evidence'] }],
     receipts: [{ kind: 'run-closure', digest: 'c'.repeat(64) }],
   };
   const incomplete = structuredClone(state);
-  incomplete.submissions[0].result.outputs['release-docs'].value.updatedFiles = [];
+  incomplete.submissions[1].result.outputs['release-docs'].value.updatedFiles = [];
   await assert.rejects(() => ensurePreReleaseCandidate({ dataRoot, project, state: incomplete, workspaceRoot }),
     error => error.code === 'PRERELEASE_DOCUMENT_AUDIT_INCOMPLETE');
   const first = await ensurePreReleaseCandidate({ dataRoot, project, state, workspaceRoot });

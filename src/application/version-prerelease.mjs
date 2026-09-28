@@ -4,6 +4,7 @@ import { assert } from '../common/errors.mjs';
 import { digestJson, sha256, withoutKeys } from '../common/canonical.mjs';
 import { assertInside, assertNoLinkPath, safeSegment, slash } from '../common/paths.mjs';
 import { captureWorkspace, diffWorkspaceSnapshots } from '../common/workspace-snapshot.mjs';
+import { currentFeatureSubmission } from '../common/feature-submission.mjs';
 import { atomicWrite, atomicWriteJson, readJson, withDirectoryLock } from '../kernel/atomic-io.mjs';
 import { loadReleaseDocumentationScope } from './release-documentation-scope.mjs';
 
@@ -91,8 +92,8 @@ export const ensurePreReleaseCandidate = async ({ dataRoot, project, state, work
   assert(snapshot.digest === state.sourceDigest, 'PRERELEASE_SOURCE_DRIFT', 'Source changed after prerelease Gates.');
   const docs = await loadReleaseDocumentationScope({ workspaceRoot, configPath: release.documentationScopePath, excluded: project.workspace.excluded ?? [] });
   assert(docs.configSha256 === intent.releaseDocumentation.configSha256, 'PRERELEASE_DOCUMENT_SCOPE_DRIFT', 'Project documentation scope changed during prerelease.');
-  const result = state.submissions.find(submission => !submission.supersededAt
-    && state.features.find(feature => feature.id === submission.featureId)?.metadata?.stage === 'release-documentation')?.result;
+  const docsFeature = state.features.find(feature => feature.metadata?.stage === 'release-documentation');
+  const result = currentFeatureSubmission(state, docsFeature, { status: 'completed' })?.result;
   const audit = result?.outputs?.['release-docs']?.value;
   const finalFiles = docs.files.map(file => file.path);
   assert(audit && Array.isArray(audit.auditedFiles) && digestJson([...audit.auditedFiles].sort()) === digestJson([...finalFiles].sort())

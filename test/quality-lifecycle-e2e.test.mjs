@@ -88,7 +88,7 @@ const externalFinding = { ...finding, id: 'Q-E2E-002', summary: 'Separate fixtur
 const overlappingFinding = { ...finding, id: 'Q-E2E-003', summary: 'Second defect in the same file.', evidence: ['README.md:2'], generatedOutputs: ['generated/second'] };
 const externalDiagnostic = { id: 'full-check-other', summary: 'Full check fails in OTHER.md.', evidence: ['host:full-check:OTHER.md:1'] };
 
-const createHost = ({ workspace, failFirstWait = false, failFirstInspect = false, failFirstConfirm = false, failFirstResult = false, repeatFindingOnce = false, repeatFindingCount = null, rejectRepairResultWithEdit = false, invalidRepairCheckpointOnce = false, externalDiagnosticOnce = false, overlappingFindings = false, missingDiagnosticDispositionOnce = false, cleanInitialReview = false }) => {
+const createHost = ({ workspace, failFirstWait = false, failFirstInspect = false, failFirstConfirm = false, failFirstResult = false, repeatFindingOnce = false, repeatFindingCount = null, rejectRepairResultWithEdit = false, invalidRepairCheckpointOnce = false, externalDiagnosticOnce = false, overlappingFindings = false, missingDiagnosticDispositionOnce = false, cleanInitialReview = false, rejectProfileResultOnce = false, advanceClockOnResult = null, now = () => new Date().toISOString() }) => {
   const agents = new Map();
   const stats = { spawnCount: 0, containCount: 0, terminalCount: 0, maxActive: 0, reconcileCount: 0 };
   let sequence = 0;
@@ -101,6 +101,7 @@ const createHost = ({ workspace, failFirstWait = false, failFirstInspect = false
   let shouldReportExternalDiagnostic = externalDiagnosticOnce;
   let shouldConfirmExternalFinding = externalDiagnosticOnce;
   let shouldOmitDiagnosticDisposition = missingDiagnosticDispositionOnce;
+  let shouldRejectProfileResult = rejectProfileResultOnce;
   const adapter = createVisibleHostAdapter({
     provider: 'quality-e2e-host',
     adapterVersion: '1.1.0',
@@ -112,7 +113,7 @@ const createHost = ({ workspace, failFirstWait = false, failFirstInspect = false
         adapterVersion: '1.1.0',
         contract: { id: 'quality-e2e-native', version: '1.0.0', digest: 'd'.repeat(64) },
         assertionId: 'quality-e2e-reconciliation',
-        observedAt: new Date().toISOString(),
+        observedAt: now(),
         reconciled: [],
         issues: [],
       };
@@ -128,7 +129,7 @@ const createHost = ({ workspace, failFirstWait = false, failFirstInspect = false
         verified: true,
         status: 'running',
         assertionId: `assertion:${expected.agentId}`,
-        observedAt: new Date().toISOString(),
+        observedAt: now(),
         agentId: expected.agentId,
         dispatchId: expected.dispatchId,
         packetDigest: expected.packetDigest,
@@ -170,6 +171,7 @@ const createHost = ({ workspace, failFirstWait = false, failFirstInspect = false
     readVisibleResult: async input => {
       const task = agents.get(input.agentId);
       assert(task);
+      advanceClockOnResult?.();
       const finish = output => {
         agents.delete(input.agentId);
         stats.terminalCount += 1;
@@ -177,6 +179,10 @@ const createHost = ({ workspace, failFirstWait = false, failFirstInspect = false
       };
       const stage = task.packet.feature.metadata.stage;
       if (stage === 'quality') {
+        if (shouldRejectProfileResult) {
+          shouldRejectProfileResult = false;
+          return finish({ result: result({ summary: 'Profile rejected first review.', findings: [], knownFindingDispositions: cleanDisposition, outputs: { quality: { schemaId: 'delivery-quality-v1', value: { findings: [] }, evidenceRefs: ['host:review'] } } }), receipt: { operation: 'result', stage, observationRequestDigest: 'd'.repeat(64) } });
+        }
         if (shouldFailResult) {
           shouldFailResult = false;
           return finish({
@@ -266,7 +272,7 @@ const createHost = ({ workspace, failFirstWait = false, failFirstInspect = false
   return { adapter, agents, stats };
 };
 
-const setup = async ({ failFirstWait = false, failFirstInspect = false, failFirstConfirm = false, failFirstResult = false, repeatFindingOnce = false, repeatFindingCount = null, rejectRepairResultWithEdit = false, invalidRepairCheckpointOnce = false, externalDiagnosticOnce = false, gateFailureUntilRepair = false, overlappingFindings = false, missingDiagnosticDispositionOnce = false, cleanInitialReview = false, preset = 'full', qualityReviewLimit = { mode: 'bounded', maxRechecks: 2 }, majorReleaseTargets = [] } = {}) => {
+const setup = async ({ failFirstWait = false, failFirstInspect = false, failFirstConfirm = false, failFirstResult = false, repeatFindingOnce = false, repeatFindingCount = null, rejectRepairResultWithEdit = false, invalidRepairCheckpointOnce = false, externalDiagnosticOnce = false, gateFailureUntilRepair = false, overlappingFindings = false, missingDiagnosticDispositionOnce = false, cleanInitialReview = false, rejectProfileResultOnce = false, slowResultTransportMs = 0, preset = 'full', qualityReviewLimit = { mode: 'bounded', maxRechecks: 2 }, majorReleaseTargets = [] } = {}) => {
   const controlRoot = resolve(process.cwd());
   const parent = resolve(harnessTemporaryRoot(), 'quality-lifecycle-e2e');
   await mkdir(parent, { recursive: true });
@@ -276,10 +282,20 @@ const setup = async ({ failFirstWait = false, failFirstInspect = false, failFirs
   await mkdir(resolve(workspace, '.git'), { recursive: true });
   await writeFile(resolve(workspace, 'README.md'), '# Quality fixture\n', 'utf8');
   await writeFile(resolve(workspace, 'OTHER.md'), '# Separate fixture\n', 'utf8');
-  const engine = await loadExtensionPack('./integrations/legacy-consumers/cardworld/index.mjs', { cwd: controlRoot, controlRoot });
+  const loadedEngine = await loadExtensionPack('./integrations/legacy-consumers/cardworld/index.mjs', { cwd: controlRoot, controlRoot });
+  const engine = rejectProfileResultOnce ? {
+    ...loadedEngine,
+    profiles: [{ ...loadedEngine.profiles[0], validateResult: input => input.result.status === 'completed' && input.result.summary === 'Profile rejected first review.'
+      ? { ok: false, reason: 'fixture-profile-evidence-incomplete' }
+      : loadedEngine.profiles[0].validateResult(input) }],
+  } : loadedEngine;
   const runtime = await loadExtensionPack('./integrations/codex/extensions/codex-runtime.mjs', { cwd: controlRoot, controlRoot });
-  const host = createHost({ workspace, failFirstWait, failFirstInspect, failFirstConfirm, failFirstResult, repeatFindingOnce, repeatFindingCount, rejectRepairResultWithEdit, invalidRepairCheckpointOnce, externalDiagnosticOnce, overlappingFindings, missingDiagnosticDispositionOnce, cleanInitialReview });
-  const create = () => createHarness({ controlRoot, dataRoot, releaseIdentity, strictProjectIdentity: false, extensions: [engine, runtime], agentAdapter: host.adapter });
+  let clockMs = Date.now();
+  const host = createHost({ workspace, failFirstWait, failFirstInspect, failFirstConfirm, failFirstResult, repeatFindingOnce, repeatFindingCount, rejectRepairResultWithEdit, invalidRepairCheckpointOnce, externalDiagnosticOnce, overlappingFindings, missingDiagnosticDispositionOnce, cleanInitialReview, rejectProfileResultOnce,
+    advanceClockOnResult: slowResultTransportMs ? () => { clockMs += slowResultTransportMs; } : null,
+    ...(slowResultTransportMs ? { now: () => new Date(clockMs).toISOString() } : {}) });
+  const create = () => createHarness({ controlRoot, dataRoot, releaseIdentity, strictProjectIdentity: false, extensions: [engine, runtime], agentAdapter: host.adapter,
+    ...(slowResultTransportMs ? { now: () => new Date(clockMs).toISOString() } : {}) });
   const harness = await create();
   const descriptor = createCardWorldProjectDescriptor({ workspaceRoot: workspace, harness: releaseIdentity, qualityReviewLimit, majorReleaseTargets, knownFindingInventories: { 'V3.8.4': { version: '1.0', sources: [{ path: 'README.md', sha256: sha256('# Quality fixture\n') }], findings: [{ id: finding.id, severity: finding.severity, sourcePath: 'README.md' }] } } });
   descriptor.gateRecipes = gateFailureUntilRepair ? [{ id: 'fixture-gate', scope: 'final', required: true, executionClass: 'deterministic-process', command: [process.execPath, '-e', "process.exit(require('node:fs').readFileSync('OTHER.md','utf8').includes('verified repair') ? 0 : 1)"] }] : [];
@@ -312,6 +328,31 @@ test('a clean initial quality review directly seals version clearance and develo
   assert.equal(completed.versionClearance.receipt.qualityConclusion.fullReviewPerformed, true);
   assert.equal(completed.versionClearance.receipt.status, 'development-complete');
   assert.equal(JSON.parse(await readFile(completed.versionClearance.file, 'utf8')).receiptDigest, completed.versionClearance.receipt.receiptDigest);
+});
+
+test('visible result observation renews the Lease after slow native transport', async t => {
+  const fixture = await setup({ cleanInitialReview: true, slowResultTransportMs: 121000 });
+  t.after(() => rm(fixture.root, { recursive: true, force: true }));
+  const completed = await fixture.harness.executeVisibleLifecyclePlan(fixture.plan, { commandId: 'slow-native-result', preflightReport: await fixture.harness.createExecutionReadinessReport(fixture.plan) });
+  assert.equal(completed.status, 'closed');
+  assert.ok(completed.state.leases[0].heartbeatCount >= 2);
+});
+
+test('a Profile-rejected visible result is recorded and retried inside the original lifecycle', async t => {
+  const fixture = await setup({ cleanInitialReview: true, rejectProfileResultOnce: true });
+  t.after(() => rm(fixture.root, { recursive: true, force: true }));
+  const completed = await fixture.harness.executeVisibleLifecyclePlan(fixture.plan, {
+    commandId: 'profile-result-retry',
+    preflightReport: await fixture.harness.createExecutionReadinessReport(fixture.plan),
+  });
+  assert.equal(completed.status, 'closed');
+  assert.equal(fixture.host.stats.spawnCount, 2);
+  assert.equal(completed.state.metadata.lifecycleInvocationId, 'profile-result-retry');
+  const rejected = completed.state.submissions.find(item => item.result.blocker?.code === 'PROFILE_RESULT_REJECTED');
+  assert(rejected);
+  assert.match(rejected.result.summary, /fixture-profile-evidence-incomplete/);
+  assert.equal(completed.state.leases.filter(lease => lease.status === 'active').length, 0);
+  assert.equal(completed.state.features[0].state, 'completed');
 });
 
 test('visible quality lifecycle completes review, verified repair, fresh re-review, and closure', async t => {

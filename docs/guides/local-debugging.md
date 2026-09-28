@@ -78,6 +78,8 @@ node <Harness源码根>/integrations/codex/agent-harness-codex/scripts/local-sou
 
 所有 source-link Workflow 共用故障处置规则，先区分问题来源和 P0–P3 严重度，再根据**实际补丁文件**判定下表的 H0–H4 影响等级。Host 回执失配属于 Harness 宿主集成故障，初判 P1；涉及 `integrations/codex/` 的修复为 H3。未知错误标为来源未定，P1 只是待复核的保守初判；先核查证据，不能自动登记为 Harness 缺陷。Gate 失败属于项目结果，也不能自动登记为 Harness 缺陷。
 
+“单次启动”只约束生命周期命令和 Coordinator 的启动次数；当前 Coordinator 必须通过 Authority 内部处理可恢复的结果拒绝、续接和 Gate 重试。可信 Host 观察到的 Profile 结果拒绝应作为失败 Submission 记录，并按 Feature 预算重新派发。收口只读取 Feature 当前绑定的 Submission，不把较早的失败尝试当作最终结果。若 Coordinator 因 Harness 缺陷退出，按下述 P/H 分级执行内部恢复；不能以再次请求用户发 `h:local` 或逐步授权代替恢复操作。
+
 | 严重度 | 初判处置 |
 |:---|:---|
 | P0 | Authority 完整性异常：保留现场，先核验状态与迁移方案。 |
@@ -87,7 +89,7 @@ node <Harness源码根>/integrations/codex/agent-harness-codex/scripts/local-sou
 
 本地 Coordinator 在异常时保留 `codex-visible-lifecycle-error` 事件并附加 `incident`；`attention-required` 则额外输出 `codex-visible-lifecycle-incident`。两者携带错误码、阶段、Project/Workflow/目标/Run、故障 ID、初判等级、隔离状态和接续动作。活动 Host Effect 若失去可信证明，先按原 Host Adapter 合同隔离并核验；该隔离不是整个用户任务的最终结论。维护者在独立 Harness checkout 修复并验证源码，随后运行 `dev patch plan`/`dev sync`，依据 H0–H4 的处置恢复原目标。原项目 Run 不获得 Harness 源码写权限；H2/H3 不复用旧 Plan、预检或 Lease。当前用户若要求先审核实现，审核完成前不得启动替代质量 Run。
 
-Hook 在绑定、同步或路由失败时仍用 `decision:block` 阻止无可信意图的业务命令，并在原因中输出故障等级、ID 和维护方向。这个阻断仅针对本次不可信命令；收到原因后应处理 Harness 故障，再按补丁级别重新发出原命令。不能用普通对话或业务脚本绕过 Hook。
+Hook 在绑定、同步或路由失败时仍用 `decision:block` 阻止无可信意图的业务命令，并在原因中输出故障等级、ID 和维护方向。这个阻断仅针对本次不可信命令；收到原因后应处理 Harness 故障，再按补丁级别完成内部接续或安全退出。不能用普通对话或业务脚本绕过 Hook。
 
 源码 Coordinator 在创建 Run 前检查确定性进程 Gate 所需的带输出捕获子进程能力；若当前任务的进程权限返回 `LOCAL_PROCESS_GATE_HOST_UNAVAILABLE`，应在获准的进程权限下重新执行同一入口。不要绕过 Gate 或手写 Gate 结果。
 
@@ -101,6 +103,7 @@ agent-harness dev doctor --manifest <manifest.json>
 agent-harness dev patch status --manifest <manifest.json>
 agent-harness dev watch --manifest <manifest.json>
 agent-harness dev sync --manifest <manifest.json>
+agent-harness dev recover-run --manifest <manifest.json> --run <run-id>
 ```
 
 不再采用“任何变化都停止并从头开始”的绝对规则：
@@ -114,6 +117,8 @@ agent-harness dev sync --manifest <manifest.json>
 | `H4` | Kernel、Authority、持久化、关键 Schema、Registry/Recovery | 禁止热应用，必须显式迁移或走新 Release。 |
 
 `dev sync` 在一个命令内生成补丁计划、应用 H0–H3 变更、按需重新绑定 Project，并刷新默认本地 Codex 绑定。它保留 expected revision、命令 ID、制品摘要和 Receipt；H4 仍禁止热应用。需要审查固定计划时，仍可使用 `dev patch plan` 与 `dev patch apply`。H1 不允许重写已派发任务；当前协调进程保持原先已加载模块，新制品摘要用于后续编译和新 Run。
+
+H2/H3 导致 Coordinator 已退出时，`dev recover-run` 仅在项目 checkout 中使用当前 source-link 绑定。它核验覆盖原 Run 和活动 Lease 的补丁 Receipt、每个 Lease 对应的终态 Host Effect、原命令意图，以及同一逻辑任务的新 Plan；随后以预期 revision 将旧 Run 标记为 `superseded`。若有未决 Host Effect 或任一身份不符，它保持旧 Run 原状并返回错误。成功后由用户下一次 `h:local` 命令启动新 Plan；恢复命令本身不启动生命周期。
 
 ## generation 与回滚
 

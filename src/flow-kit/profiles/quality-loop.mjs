@@ -3,6 +3,7 @@ import { assert } from '../../common/errors.mjs';
 import { defineNodeTaskContract, taskFeatureProjection } from '../../common/task-contract.mjs';
 import { slash } from '../../common/paths.mjs';
 import { qualityReviewBudgetExhausted } from './quality-budget.mjs';
+import { currentFeatureSubmission } from '../../common/feature-submission.mjs';
 
 const unique = values => [...new Set(values ?? [])];
 const safeQualityPath = (value, code, label) => {
@@ -13,7 +14,7 @@ const safeQualityPath = (value, code, label) => {
 const verificationOutputPaths = feature => unique(feature.metadata?.qualityContext?.verificationOutputPaths ?? [])
   .map(value => safeQualityPath(value, 'QUALITY_VERIFICATION_OUTPUT_PATH_INVALID', 'Quality verification output'));
 const cleanReviewSubmission = (state, feature) => {
-  const submission = state.submissions.find(item => item.featureId === feature.id && !item.supersededAt);
+  const submission = currentFeatureSubmission(state, feature);
   const inventory = feature.metadata?.knownFindingInventory;
   if (feature.metadata?.qualityRoot?.startsWith('engine:') && ['quality', 'full', 'deliver'].includes(state.metadata?.commandIntent?.action) && !inventory) return false;
   const dispositions = submission?.result?.knownFindingDispositions;
@@ -29,7 +30,7 @@ export const qualityReviewNoProgress = (state, qualityRoot = null) => {
   if (state.profile?.config?.qualityReviewLimit?.mode !== 'unbounded') return false;
   const latestReview = [...state.features].reverse().find(feature => feature.metadata?.qualityReview === true && feature.state === 'completed' && (!qualityRoot || feature.metadata.qualityRoot === qualityRoot));
   if (!latestReview) return false;
-  const submission = state.submissions.find(item => item.featureId === latestReview.id && !item.supersededAt);
+  const submission = currentFeatureSubmission(state, latestReview);
   return submission?.outputSourceDigest === state.sourceDigest
     && state.features.some(feature => feature.metadata?.repairFindingId && feature.metadata?.qualityRoot === latestReview.metadata.qualityRoot && Number(feature.metadata.reviewRound ?? 0) >= Number(latestReview.metadata.reviewRound ?? 0) && feature.state === 'completed');
 };

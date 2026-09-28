@@ -5,17 +5,23 @@ import { applyDevelopmentPatchPlan, createDevelopmentPatchPlan, verifyDevelopmen
 import { createLocalDevelopmentInvocation } from '../../application/local-development-invocation.mjs';
 import { applyProjectInitializationPlan, createProjectInitializationPlan, loadProjectHarnessConfig } from '../../application/project-initialization.mjs';
 
-export const refreshLocalCodexBindings = async (manifestFile, manifest, initialization) => {
-  if (!initialization) return null;
+const readLocalCodexBindings = async (manifestFile, manifest) => {
   const pluginRoot = resolve(manifest.dataRoot, 'development', 'local-codex');
   const bindingFile = resolve(pluginRoot, '.plugin-data', 'bindings.json');
   let existing;
   try { existing = JSON.parse(await readFile(bindingFile, 'utf8')); }
-  catch (error) { if (error.code === 'ENOENT') return null; throw error; }
+  catch (error) { if (error.code === 'ENOENT') return { pluginRoot, bindingFile, existing: null }; throw error; }
   if (existing.harness?.release?.mode !== 'source-link'
     || resolve(existing.harness.release.developmentManifest) !== resolve(manifestFile)
     || resolve(existing.harness.controlRoot) !== resolve(manifest.controlRoot)
     || resolve(existing.harness.dataRoot) !== resolve(manifest.dataRoot)) throw Object.assign(new Error('Local Codex binding does not match the development manifest.'), { code: 'LOCAL_CODEX_BINDING_MISMATCH' });
+  return { pluginRoot, bindingFile, existing };
+};
+
+export const refreshLocalCodexBindings = async (manifestFile, manifest, initialization) => {
+  if (!initialization) return null;
+  const { pluginRoot, existing } = await readLocalCodexBindings(manifestFile, manifest);
+  if (!existing) return null;
   const alias = initialization.receipt.hostBinding.alias;
   if (!existing.projects?.[alias]) return null;
   const projectSpecs = Object.entries(existing.projects).map(([name, project]) => `${name}|${project.projectId}|${project.profileId}|${project.extensionId}|${project.workspaceRoot}`);
@@ -36,11 +42,12 @@ const rebind = async (manifest, { commandId, decision, developmentInvocation }) 
 
 export const applySourcePatch = async (plan, { decision, commandId, cwd = process.cwd() }) => {
   const patchManifest = JSON.parse(await readFile(resolve(plan.manifestFile), 'utf8'));
+  await readLocalCodexBindings(plan.manifestFile, patchManifest);
   const developmentInvocation = decision ? null : await createLocalDevelopmentInvocation({ projectRoot: patchManifest.projectRoot, configPath: patchManifest.configPath, controlRoot: plan.controlRoot, dataRoot: plan.dataRoot, cwd });
   const patched = await applyDevelopmentPatchPlan(plan, { commandId, authorityDecision: decision, developmentInvocation });
   const initialization = plan.disposition.requiresRebind ? await rebind(patched.manifest, { commandId, decision, developmentInvocation }) : null;
   const bindingFile = await refreshLocalCodexBindings(plan.manifestFile, patched.manifest, initialization);
-  return { ...patched, initialization, bindingFile, continuation: plan.disposition.requiresNewRun ? 'restart-coordinator-and-start-new-run' : 'continue-same-run' };
+  return { ...patched, initialization, bindingFile, continuation: plan.disposition.requiresNewRun ? 'internal-recovery-required' : 'continue-same-run' };
 };
 
 export const syncDevelopmentSource = async (manifestFile, { decision = null, commandId = newId('dev-sync'), forceRebind = false, cwd = process.cwd() } = {}) => {
@@ -48,8 +55,9 @@ export const syncDevelopmentSource = async (manifestFile, { decision = null, com
   if (plan.changes.length) return { plan, ...await applySourcePatch(plan, { decision, commandId, cwd }) };
   if (!forceRebind) return { unchanged: true, planDigest: plan.planDigest, continuation: 'continue-same-run' };
   const { manifest } = await verifyDevelopmentPatchPlan(plan);
+  await readLocalCodexBindings(plan.manifestFile, manifest);
   const developmentInvocation = decision ? null : await createLocalDevelopmentInvocation({ projectRoot: manifest.projectRoot, configPath: manifest.configPath, controlRoot: manifest.controlRoot, dataRoot: manifest.dataRoot, cwd });
   const initialization = await rebind(manifest, { commandId, decision, developmentInvocation });
   const bindingFile = await refreshLocalCodexBindings(plan.manifestFile, manifest, initialization);
-  return { unchanged: true, planDigest: plan.planDigest, initialization, bindingFile, continuation: 'restart-coordinator-and-start-new-run' };
+  return { unchanged: true, planDigest: plan.planDigest, initialization, bindingFile, continuation: 'internal-recovery-required' };
 };

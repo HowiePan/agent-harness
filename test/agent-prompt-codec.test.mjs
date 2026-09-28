@@ -79,6 +79,7 @@ test('Prompt Codec preserves the full 1.3 Prompt for an active visible Dispatch'
 
 test('visible 1.4 Prompt names the digest-bound packet file without duplicating the packet', () => {
   const visible = packet();
+  visible.execution.prompt.contractVersion = '1.4';
   visible.outputRef = '/tmp/dispatch-output.json';
   visible.execution.runtime = { mode: 'conversation-visible', userVisible: true, hostOrchestrated: true };
   visible.execution.result = createDispatchResultContract(visible.feature, { conversationVisible: true });
@@ -87,6 +88,21 @@ test('visible 1.4 Prompt names the digest-bound packet file without duplicating 
   assert.match(compiled.text, /dispatch-output\.json\.dispatch-packet\.json/);
   assert.match(compiled.text, new RegExp(compiled.packetDigest));
   assert.doesNotMatch(compiled.text, /BEGIN_AGENT_HARNESS_DISPATCH_PACKET_JSON/);
+});
+
+test('visible 1.5 Prompt keeps the complete task and result contract in digest-bound files', () => {
+  const visible = packet();
+  visible.outputRef = '/tmp/dispatch-output.json';
+  visible.execution.runtime = { mode: 'conversation-visible', userVisible: true, hostOrchestrated: true };
+  visible.execution.result = createDispatchResultContract(visible.feature, { conversationVisible: true });
+  const compiled = compileAgentPrompt(visible);
+  assert.equal(compiled.contractVersion, '1.5');
+  assert.ok(compiled.text.length < 2500, `Prompt length ${compiled.text.length}`);
+  assert.match(compiled.text, /dispatch-output\.json\.dispatch-packet\.json/);
+  assert.match(compiled.text, /visible-agent-result\.schema\.json/);
+  assert.match(compiled.text, new RegExp(compiled.packetDigest));
+  assert.match(compiled.text, new RegExp(visible.execution.result.contractDigest));
+  assert.doesNotMatch(compiled.text, /"knownFindingDispositions"/);
 });
 
 test('quality repair Prompt separates source edits from declared verification artifacts', () => {
@@ -99,7 +115,7 @@ test('quality repair Prompt separates source edits from declared verification ar
   const compiled = compileAgentPrompt(repair);
   assert.match(compiled.text, /Edit source only within allowedPaths/);
   assert.match(compiled.text, /\.build-output/);
-  assert.match(compiled.text, /transient build and test artifacts/);
+  assert.match(compiled.text, /transient build and test artifacts/i);
   assert.match(compiled.text, /verification-path-prohibited/);
   assert.match(compiled.text, /Never edit source there or include those artifacts in changedFiles/);
 });
