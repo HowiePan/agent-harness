@@ -7,6 +7,7 @@ import { classifyLocalIncident } from '../../../../src/application/local-inciden
 import { capturePostToolUse } from './post-tool-host-bridge.mjs';
 import { hookResponse, loadBindings, parsePseudoCommand } from './pseudo-command-router.mjs';
 import { decodeVisibleLifecycleIntent } from '../lib/visible-lifecycle-intent.mjs';
+import { selectLocalSourceBindingsDir } from './local-source-route.mjs';
 
 const fail = (code, message) => { throw Object.assign(new Error(message), { code }); };
 const samePath = (left, right) => process.platform === 'win32' ? resolve(left).toLowerCase() === resolve(right).toLowerCase() : resolve(left) === resolve(right);
@@ -108,6 +109,8 @@ export const handleLocalSourceHook = async (event, { bindingsDir } = {}) => {
     const prompt = `h:${match[1]}`;
     const parsed = parsePseudoCommand(prompt);
     if (!parsed || parsed.kind === 'invalid') return blockLocalCommand('LOCAL_SOURCE_COMMAND_INVALID', parsed?.error ?? '无法解析本地命令。');
+    try { bindingsDir = await selectLocalSourceBindingsDir({ event, defaultBindingsDir: bindingsDir }); }
+    catch (error) { return blockLocalCommand(error?.code ?? 'LOCAL_SOURCE_ROUTE_FAILED', error.message); }
     let bindingOptions;
     let synchronized = null;
     try { ({ bindingOptions } = await loadLocalSourceBindings(bindingsDir)); }

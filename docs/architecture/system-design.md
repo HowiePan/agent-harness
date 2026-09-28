@@ -59,6 +59,8 @@ Prompt 采用四层确定性组合：不可覆盖的 Core 权限/安全合同、
 
 单项目接入以项目仓内 `harness.json` 为公开输入，经 Core InitPlan 编译、外部 Decision 批准后写入控制根 Registry。CLI、Codex、OpenCode 和 VS Code 只提供同一初始化合同的适配入口。`source-link` 开发模式分别固定 Runtime 与支持文件摘要并保存 Runtime generation。变更按 H0–H4 分类：H0 与仅影响未来编译结果的 H1 可以留下 Patch Receipt 后继续当前已冻结 Run；Profile、Planner、Gate、运行时、Kernel 或 Authority 变化不能静默注入旧 Run，按等级要求新 Run、迁移或新 Release。项目 Run 始终无权修改 Harness，修复在独立 maintenance 上下文完成。完整字段和判定见[配置 API](../reference/configuration-api.md)。
 
+同一 Git checkout 含有多个独立项目时，本地 Codex Hook 可以由仓库根的可信入口统一接收命令。入口只在提交命令的工作目录到 Git 根之间读取声明式 `harness.json`，优先选择最近且与命令别名匹配的项目；外部路由索引把项目 ID、配置摘要和 source-link 绑定目录固定在控制根。路由选择不得执行发现到的子目录 Hook，不得因为某个绑定不可用而回退到另一项目；身份失配须阻断。命令意图仍由选中绑定的既有校验链生成，路由索引不拥有 Authority。
+
 ## 6. 渠道制品
 
 通用 Harness npm 包与宿主插件按渠道独立打包。Core Release Manifest 和 SBOM 只枚举通用 npm 包；该包保留已公开的 Codex Runtime/Extension API，但不包含 Codex 宿主插件目录或本地 marketplace。Codex 渠道包单独列出插件文件摘要及精确的 Core `packageDigest`；安装或组合验证必须拒绝摘要不符的 Core。渠道命令、产物路径和本机安装流程见[渠道打包](../reference/packaging.md)。未来宿主须有自己的打包入口、清单和安装验证，不复用 Codex 发布命令来隐式选择渠道。

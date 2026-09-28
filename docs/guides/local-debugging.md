@@ -74,6 +74,8 @@ node <Harness源码根>/integrations/codex/agent-harness-codex/scripts/local-sou
 
 开发准出后使用 `h:local engine prerelease <版本>` 准备候选：版本元数据、CardWorld 自有 `release/docs-scope.json` 中全部主文档与目录的存量审计、fresh 最终 Gate 和真实 WASM 制品打包都在此阶段完成。`prerelease` 不消耗质量复审预算。候选封存并经用户审核后，从已绑定的 CardWorld checkout 提交 `h:local engine release <版本>`：Hook 将当前候选摘要和修订号固定到本次命令，Coordinator 复核并晋升状态，不创建另一个 Run，也不要求用户组合 `status` 与 `promote` CLI 脚本。Harness 源码同步引起的 Project Descriptor 重新绑定不改变已封存候选；晋升仍逐字节核对业务源码快照与封存制品。当前 V3.8.4 的开发准出凭证可以直接被入口读取；新增的项目侧文档配置作为允许的发布元数据差异记录。
 
+同一 Git 仓库包含多个独立项目时，Codex 可能只加载仓库根的 `.codex/hooks.json`。此时保留根 Hook 命令，并在其默认绑定目录配置 `project-routes.json`：运行 `node <Harness源码根>/integrations/codex/agent-harness-codex/scripts/configure-local-routes.mjs --bindings-dir <根项目绑定目录> --route '<根别名>|<根项目ID>|<根项目checkout>|<根绑定目录>' --route '<子别名>|<子项目ID>|<子项目checkout>|<子绑定目录>'`。配置器核对各项目 `harness.json`、外部绑定和控制根，并固定配置摘要。Hook 从本次工作目录向 Git 根查找最近的 `harness.json`，按命令别名选择已注册的绑定；子项目内显式指定根别名时继续向上查找。配置缺失、漂移或身份冲突时阻断，绝不执行子项目 Hook 文件。没有路由索引时仍使用原单项目绑定。路由索引只存放在外部 Harness 数据根，不写入业务仓库。更新项目配置或绑定后须重新生成索引并核验 Hook 输出；仅看到 `/hooks` 列表或信任记录不等于当前任务收到 `additionalContext`。
+
 ### 本地故障的分级与接续
 
 所有 source-link Workflow 共用故障处置规则，先区分问题来源和 P0–P3 严重度，再根据**实际补丁文件**判定下表的 H0–H4 影响等级。Host 回执失配属于 Harness 宿主集成故障，初判 P1；涉及 `integrations/codex/` 的修复为 H3。未知错误标为来源未定，P1 只是待复核的保守初判；先核查证据，不能自动登记为 Harness 缺陷。Gate 失败属于项目结果，也不能自动登记为 Harness 缺陷。
