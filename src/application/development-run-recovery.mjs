@@ -87,10 +87,13 @@ export const recoverDevelopmentRun = async ({ manifestFile, runId, commandId, cw
   assert(state.status !== 'closed' && state.status !== 'superseded' && state.metadata?.lifecycleInvocationId,
     'DEVELOPMENT_RUN_NOT_RECOVERABLE', 'Only an unfinished, lifecycle-owned Run can be retired by source-link recovery.');
   const receipt = await currentPatchReceipt(manifest, state);
-  const hostContract = state.leases.find(lease => lease.runtimeReceipt?.hostSpawnReceipt)?.runtimeReceipt.hostSpawnReceipt.contract;
-  assert(hostContract, 'DEVELOPMENT_RUN_HOST_CONTRACT_REQUIRED', 'Recovery requires the bound Host contract.');
-  const effects = new CodexHostEffectJournal({ controlRoot: manifest.controlRoot, dataRoot: manifest.dataRoot, contract: hostContract });
-  assertDevelopmentRunRecoveryEffects(state, await effects.list());
+  // Host Effects are created from Dispatches. A Run stopped before its first Dispatch has no Host contract to verify.
+  if (state.dispatches.length > 0 || state.leases.length > 0) {
+    const hostContract = state.leases.find(lease => lease.runtimeReceipt?.hostSpawnReceipt)?.runtimeReceipt.hostSpawnReceipt.contract;
+    assert(hostContract, 'DEVELOPMENT_RUN_HOST_CONTRACT_REQUIRED', 'Recovery requires the bound Host contract.');
+    const effects = new CodexHostEffectJournal({ controlRoot: manifest.controlRoot, dataRoot: manifest.dataRoot, contract: hostContract });
+    assertDevelopmentRunRecoveryEffects(state, await effects.list());
+  }
   const intent = state.metadata.commandIntent;
   assert(intent?.action && intent?.target && intent?.workflowId && intent?.profileId && intent?.preset,
     'DEVELOPMENT_RUN_INTENT_REQUIRED', 'Recovery requires the original lifecycle command intent.');

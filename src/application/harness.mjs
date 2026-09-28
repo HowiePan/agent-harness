@@ -423,6 +423,25 @@ export const createHarness = async ({ controlRoot: controlRootInput, dataRoot: d
       const runtimePolicy = assertAgentRuntimeCompatible({ project, manifest: runtimeManifest, action: plan.intent.action, workflowId: plan.workflow?.id, runtimePluginId: plan.run.runtimePluginId, agentExecutionMode: plan.run.agentExecutionMode });
       const trustedAgentAdapter = resolveVisibleHostAdapter(plan.run.runtimePluginId);
       await verifyPlanExecutionAuthorization({ project, plan, manifest: runtimeManifest });
+      const commitCommandDecisions = async initialState => {
+        let state = initialState;
+        const profile = profileRegistry.get(state.profile.id);
+        const decisions = profile.commandDecisions?.(state) ?? [];
+        assert(Array.isArray(decisions), 'PROFILE_COMMAND_DECISIONS_INVALID', `Profile ${profile.id} must return a Decision list.`);
+        for (const [index, decision] of decisions.entries()) {
+          assert(decision?.id && decision?.actor && decision?.decision, 'PROFILE_COMMAND_DECISION_INVALID', `Profile ${profile.id} returned an invalid Decision.`);
+          const prior = state.decisions.find(item => item.id === decision.id);
+          if (prior) {
+            assert(prior.digest === digestJson(decision), 'PROFILE_COMMAND_DECISION_CONFLICT', `Decision ${decision.id} differs from the current Lifecycle Command.`);
+            continue;
+          }
+          state = (await kernel.recordDecision(plan.project.id, state.runId, decision, {
+            expectedRevision: state.revision,
+            commandId: `${commandId}.profile-decision.${index}`,
+          })).state;
+        }
+        return state;
+      };
       const observedLineage = await lineageStore.read(plan.project.id, plan.logicalTaskKey);
       const activationCommandId = `${commandId}.lineage.activate`;
       const priorActivation = observedLineage?.commands?.[activationCommandId];
@@ -430,6 +449,7 @@ export const createHarness = async ({ controlRoot: controlRootInput, dataRoot: d
         assert(priorActivation.result.planDigest === plan.planDigest, 'COMMAND_ID_REUSED', 'The lifecycle command ID was reused with a different Lifecycle Plan.');
         let state = await authorityStore.read(plan.project.id, priorActivation.result.activeRunId);
         assert(state.metadata?.lifecyclePlanDigest === plan.planDigest, 'LIFECYCLE_COMMAND_RECEIPT_INVALID', 'The lifecycle command receipt points to a Run bound to another Command Plan.');
+        state = await commitCommandDecisions(state);
         if (state.status !== 'closed') {
           const current = resolveRunLineage({ plan, states: await authorityStore.list(plan.project.id), currentLineage: observedLineage, policy: project.policy?.recovery ?? {}, now: kernel.now });
           if (current.action === 'ordinary-resume' && current.selectedRunId === state.runId) {
@@ -491,6 +511,7 @@ export const createHarness = async ({ controlRoot: controlRootInput, dataRoot: d
       } else if (lineageResolution.action !== 'return-closed') {
         assert(state.metadata?.lifecyclePlanDigest === plan.planDigest, 'LIFECYCLE_PLAN_RUN_CONFLICT', 'Existing Run is bound to another Command Plan.');
       }
+      state = await commitCommandDecisions(state);
       for (const candidate of lineageResolution.candidates) {
         if (candidate.runId === state.runId || candidate.status === 'closed' || candidate.status === 'superseded') continue;
         const current = await authorityStore.read(plan.project.id, candidate.runId);

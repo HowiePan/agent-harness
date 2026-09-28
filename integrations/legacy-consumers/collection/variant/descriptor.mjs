@@ -40,7 +40,10 @@ export const createTabletopCollectionProjectDescriptor = ({
   assert(workspaceRoot && isAbsolute(workspaceRoot), 'COLLECTION_WORKSPACE_REQUIRED', 'Collection descriptor requires an absolute workspaceRoot.');
   if (runtimePluginId !== 'codex-conversation-runtime') assert(agentExecutionMode, 'HEADLESS_EXECUTION_MODE_EXPLICIT_REQUIRED', 'Selecting a non-default Runtime requires an explicit agentExecutionMode; headless execution is never inferred from a Runtime ID.');
   const resolvedAgentExecutionMode = agentExecutionMode ?? 'conversation-visible';
-  const workspace = { root: workspaceRoot, rootSelector: 'git-worktree', excluded: [...new Set(['.git', 'node_modules', 'dist', 'build', 'coverage', 'runs', ...(release?.artifactRoot ? [release.artifactRoot] : [])])] };
+  const gameIds = [...new Set(batches.flatMap(batch => batch.gameIds ?? []))];
+  for (const gameId of gameIds) assert(/^[a-z0-9][a-z0-9-]*$/.test(gameId), 'COLLECTION_GAME_ID_INVALID', `Invalid Collection game ID: ${gameId}`);
+  const itemPaths = Object.fromEntries(gameIds.map(gameId => [gameId, [`games/presets/${gameId}`]]));
+  const workspace = { root: workspaceRoot, rootSelector: 'git-worktree', excluded: [...new Set(['.git', '.cardworld-local', '.pnpm-store', 'node_modules', 'dist', 'build', 'coverage', 'runs', ...(release?.artifactRoot ? [release.artifactRoot] : [])])] };
   if (remote) workspace.remote = remote;
   const runtimePlugins = [...new Set(runtimePluginIds)];
   assert(runtimePlugins.includes(runtimePluginId), 'PROJECT_RUNTIME_ALLOWLIST_INVALID', 'runtimePluginIds must include the default Runtime.');
@@ -73,6 +76,7 @@ export const createTabletopCollectionProjectDescriptor = ({
       recovery: { automaticLineageResolution: true, automaticOrdinaryResume: true, automaticVerifiedHardRecovery: true, preserveSupersededRuns: true },
       maxConcurrency,
       maxLogicalGames,
+      itemPaths,
       qualityReviewLimit: structuredClone(qualityReviewLimit),
       ...(release ? { release: structuredClone({ ...release, manifestItemsKey: release.manifestItemsKey ?? 'gameIds' }) } : {}),
       collectionBatches: structuredClone(batches),

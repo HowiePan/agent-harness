@@ -8,6 +8,8 @@
 
 输入包含批次、item、依赖、共享能力归属和已批准 Descriptor；输出端口为 `batch-rules-v1`、`batch-produce-v1`、`batch-quality-v1`、`batch-review-v1`、`batch-accept-v1`、`batch-launch-v1` 与 `batch-close-v1`，形成逐项验收、批次状态及关闭 Receipt。Result/证据必须与当前 Feature 和批次身份相符。当前周期 P0–P3 问题必须关闭；人工验收 Decision、确定性 Gate 和批次关闭条件缺一不可。失败与恢复遵守通用 Attempt/Epoch 语义，不以旧状态字符串提升权威。
 
+显式 `produce <batch>` Lifecycle Command 在创建 Run 时记录绑定命令 ID 与 Plan 摘要的 `batch:<batch>:launched` Decision，再按批次 Barrier 派发。普通 `startRun` 不产生这条 Decision；单独的 `launch` 路由仍只检查就绪，不代替发车授权。每个 item 的写入路径由 Descriptor 提供，Collection shim 将游戏限制在各自的 `games/presets/<gameId>`。
+
 ## 质量与发布闭环
 
 Harness 按每个 item 的质量根从 Run Authority 投影独立 `QualityTargetSnapshot` 和 Finding inventory；同一批次的复审预算分别计算。`quality review-only` 执行只读复审，`quality repair-known` 只处理当前 Authority 中已知 Finding，`quality closeout` 使用固定的 closeout 快照。修复和复审由公共质量机制生成，批次 Profile 仍负责 item 归属、Barrier、逐项验收和批次关闭。正式质量准出要求本周期 P0–P3 全部关闭；Gate 失败可以生成批次级诊断复审，但不会绕过预算或验收。

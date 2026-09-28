@@ -102,6 +102,7 @@ test('visible 1.5 Prompt keeps the complete task and result contract in digest-b
   assert.match(compiled.text, /visible-agent-result\.schema\.json/);
   assert.match(compiled.text, new RegExp(compiled.packetDigest));
   assert.match(compiled.text, new RegExp(visible.execution.result.contractDigest));
+  assert.match(compiled.text, /A dirty Git status may contain work from an earlier Run/);
   assert.doesNotMatch(compiled.text, /"knownFindingDispositions"/);
 });
 

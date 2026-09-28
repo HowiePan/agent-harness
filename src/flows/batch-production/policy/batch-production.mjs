@@ -50,6 +50,20 @@ export const createBatchProductionProfile = ({
     return createQualityFollowUpFeatures(input);
   },
 
+  commandDecisions(state) {
+    const intent = state.metadata?.commandIntent;
+    const batch = state.profile.config.activeBatch;
+    if (intent?.action !== 'produce' || intent.target !== batch || !state.profile.config.requireBatchLaunchDecision) return [];
+    assert(state.metadata?.lifecycleInvocationId && state.metadata?.lifecyclePlanDigest, 'BATCH_LAUNCH_COMMAND_IDENTITY_REQUIRED', 'Batch launch authorization requires a bound Lifecycle Command.');
+    return [{
+      id: `batch:${batch}:launched`,
+      actor: 'lifecycle-command',
+      decision: 'approved',
+      lifecycleInvocationId: state.metadata.lifecycleInvocationId,
+      lifecyclePlanDigest: state.metadata.lifecyclePlanDigest,
+    }];
+  },
+
   createGateDiagnosticReview({ state, gateResults }) {
     const batchId = state.profile.config.activeBatch;
     return createQualityGateDiagnosticReview({ state, gateResults, qualityRoot: `batch:${batchId}:gate-diagnostic`,
