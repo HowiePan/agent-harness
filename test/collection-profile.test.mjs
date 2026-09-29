@@ -73,6 +73,29 @@ test('produce Lifecycle Command yields a launch Decision bound to that exact com
   assert.deepEqual(collectionBatchProfile.commandDecisions({ ...state, metadata: { ...state.metadata, commandIntent: { action: 'produce', target: 'B2' } } }), []);
 });
 
+test('Collection blocked production requires an exhausted, evidenced scenario audit', () => {
+  const config = collectionBatchProfile.validateConfig({ activeBatch: 'B1', requireBlockedScenarioAudit: true }, [gameFeature('g1')]);
+  const state = { profile: { config }, findings: [] };
+  const assigned = gameFeature('g1', 'produce', { metadata: { stage: 'produce' } });
+  const base = { status: 'blocked', summary: 'Artifact capability gap', changedFiles: [], blocker: { kind: 'engine-artifact', summary: 'No public operation' } };
+  assert.equal(collectionBatchProfile.validateResult({ state, feature: assigned, result: base }).ok, false);
+  const result = { ...base, outputs: { produce: { schemaId: 'batch-produce-v1', evidenceRefs: ['fixture:board'], value: {
+    changedFiles: [], requiredScenarios: ['rule-coverage', 'turn-order'], readyRemaining: [], scenarioAudit: [
+      { id: 'rule-coverage', disposition: 'passed', evidenceRefs: ['fixture:rule'] },
+      { id: 'turn-order', disposition: 'blocked', blockerKind: 'engine-artifact', evidenceRefs: ['fixture:board'] },
+    ],
+  } } } };
+  assert.equal(collectionBatchProfile.validateResult({ state, feature: assigned, result }).ok, true);
+  result.outputs.produce.value.readyRemaining.push('deterministic-replay');
+  assert.equal(collectionBatchProfile.validateResult({ state, feature: assigned, result }).ok, false);
+  result.outputs.produce.value.readyRemaining.length = 0;
+  assigned.metadata.requiredScenarios = ['rule-coverage', 'turn-order', 'deterministic-replay'];
+  assert.equal(collectionBatchProfile.validateResult({ state, feature: assigned, result }).reason, 'blocked-produce-scenario-audit-incomplete');
+  assigned.metadata.requiredScenarios = ['rule-coverage', 'turn-order'];
+  result.outputs.produce.value.scenarioAudit[1].blockerKind = 'collection-mapping';
+  assert.equal(collectionBatchProfile.validateResult({ state, feature: assigned, result }).reason, 'blocked-produce-scenario-audit-invalid');
+});
+
 test('shared capability has one owner and consumers depend on it', async t => {
   const fixture = await makeFixture({ profiles: ['collection-batch'] }); t.after(() => fixture.cleanup());
   const owner = gameFeature('shared', 'capability', { metadata: { capabilityKey: 'family/dice', capabilityOwner: true } });

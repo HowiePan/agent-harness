@@ -46,6 +46,7 @@ import { sealExecutionReadinessReport, verifyExecutionReadinessReport } from './
 import { readActiveRelease, resolveActiveRuntimeRoot } from '../platform/registry/active-generation.mjs';
 import { RunLineageStore, resolveRunLineage, verifyRunLineageResolution } from './lineage.mjs';
 import { ensurePlanApprovalArtifact, planApprovalSatisfied, planApprovalSnapshot } from '../flows/delivery-lifecycle/plan-approval.mjs';
+import { assessPlanSourceCompatibility, planSourceCompatibilitySatisfied } from './plan-source-compatibility.mjs';
 import {
   buildExecutionGrantContext,
   createAgentRuntimeLaunchCapability,
@@ -614,11 +615,23 @@ export const createHarness = async ({ controlRoot: controlRootInput, dataRoot: d
         const workflowId = input.metadata?.workflow?.id;
         const candidates = (await authorityStore.list(project.id)).filter(run => run.status === 'closed'
           && run.metadata?.commandIntent?.target === target && run.metadata?.workflow?.id === workflowId
-          && run.sourceDigest === runSourceDigest && run.features.some(feature => feature.metadata?.stage === 'plan-review'));
+          && run.features.some(feature => feature.metadata?.stage === 'plan-review'));
         const latest = candidates[0];
         assert(latest && planApprovalSatisfied(latest), 'IMPLEMENTATION_PLAN_USER_APPROVAL_REQUIRED', 'Implementation requires a current, user-approved Markdown plan for this project, target, workflow, and source.');
         const artifact = await ensurePlanApprovalArtifact(authorityStore.root, latest);
-        approvedPlan = { projectId: latest.projectId, runId: latest.runId, planDigest: artifact.planDigest, artifactDigest: artifact.artifactDigest, sourceDigest: latest.sourceDigest };
+        let sourceCompatibility = null;
+        if (latest.sourceDigest !== runSourceDigest) {
+          const current = snapshot ?? await captureWorkspace(workspace.root, { excluded: project.workspace.excluded ?? [] });
+          assert(current.digest === runSourceDigest, 'IMPLEMENTATION_PLAN_SOURCE_MISMATCH', 'Implementation source digest does not match the current project workspace.');
+          const sourceRef = latest.dispatches.findLast(dispatch => dispatch.sourceDigest === latest.sourceDigest && dispatch.sourceSnapshotRef)?.sourceSnapshotRef;
+          assert(sourceRef, 'IMPLEMENTATION_PLAN_SOURCE_EVIDENCE_REQUIRED', 'Approved plan has no source snapshot evidence for drift assessment.');
+          const evidence = await evidenceStore.read(sourceRef);
+          assert(evidence.metadata.projectId === project.id && evidence.metadata.runId === latest.runId, 'IMPLEMENTATION_PLAN_SOURCE_EVIDENCE_MISMATCH', 'Plan source evidence belongs to another Run.');
+          const assessment = assessPlanSourceCompatibility({ planRun: latest, baselineSnapshot: JSON.parse(evidence.bytes.toString('utf8')), currentSnapshot: current, excluded: project.workspace.excluded ?? [] });
+          assert(planSourceCompatibilitySatisfied(latest, assessment), 'IMPLEMENTATION_PLAN_SOURCE_MISMATCH', 'Approved plan source changed without a matching compatibility Decision.', { changedFiles: assessment.changedFiles });
+          sourceCompatibility = { decisionId: 'implementation-plan-source-compatible', changedFilesDigest: assessment.changedFilesDigest };
+        }
+        approvedPlan = { projectId: latest.projectId, runId: latest.runId, planDigest: artifact.planDigest, artifactDigest: artifact.artifactDigest, sourceDigest: runSourceDigest, originalSourceDigest: latest.sourceDigest, ...(sourceCompatibility ? { sourceCompatibility } : {}) };
       }
       const pluginSet = pluginHost.snapshot();
       const installedCompositionDigest = digestJson({ plugins: pluginSet.manifests, extensions: extensionSet.installed });

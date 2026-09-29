@@ -20,7 +20,7 @@ const defaultContextBudgetCommand = () => [process.execPath, resolve(packageRoot
 const gate = (id, command, cwd, extra = {}) => ({ id, executionClass: 'deterministic-process', scope: 'final', required: true, forceFresh: true, command, cwd, ...extra });
 const powershell = process.platform === 'win32' ? 'powershell' : 'pwsh';
 const cardWorldTask = (task, ...args) => [powershell, '-NoProfile', '-File', 'scripts/cardworld.ps1', '-Task', task, ...args];
-const qualityVerificationOutputs = Object.freeze(['.cardworld-local', 'tabletop-collection/.cardworld-local']);
+const qualityVerificationOutputs = Object.freeze(['.cardworld-local']);
 
 export const createCardWorldProjectDescriptor = ({
   id = 'cardworld-engine',
@@ -46,7 +46,7 @@ export const createCardWorldProjectDescriptor = ({
   assert(actionExecution && typeof actionExecution === 'object' && !Array.isArray(actionExecution), 'CARDWORLD_ACTION_EXECUTION_INVALID', 'CardWorld actionExecution must be an object.');
   if (runtimePluginId !== 'codex-conversation-runtime') assert(agentExecutionMode, 'HEADLESS_EXECUTION_MODE_EXPLICIT_REQUIRED', 'Selecting a non-default Runtime requires an explicit agentExecutionMode; headless execution is never inferred from a Runtime ID.');
   const resolvedAgentExecutionMode = agentExecutionMode ?? 'conversation-visible';
-  const workspace = { root: workspaceRoot, rootSelector: 'git-worktree', excluded: ['.git', ...qualityVerificationOutputs, 'card_world_engine/target', 'card_world_engine/pkg', 'node_modules'] };
+  const workspace = { root: workspaceRoot, rootSelector: 'git-worktree', excluded: ['.git', 'tabletop-collection', ...qualityVerificationOutputs, 'card_world_engine/target', 'card_world_engine/pkg', 'node_modules'] };
   if (remote) workspace.remote = remote;
   const runtimePlugins = [...new Set(runtimePluginIds)];
   assert(runtimePlugins.includes(runtimePluginId), 'PROJECT_RUNTIME_ALLOWLIST_INVALID', 'runtimePluginIds must include the default Runtime.');

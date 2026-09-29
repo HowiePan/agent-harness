@@ -237,7 +237,7 @@ const continueVisibleLifecyclePlan = async (context, api, planInput, { commandId
         validateProfileResult({ profile: api.profileRegistry.get(state.profile.id), state, feature, result: businessResult });
       }
       catch (error) {
-        if (!recoverableResultCodes.has(error.code) || businessResult.status !== 'completed' || !hostResultReceipt?.observationRequestDigest) throw error;
+        if (!recoverableResultCodes.has(error.code) || !['completed', 'blocked'].includes(businessResult.status) || !hostResultReceipt?.observationRequestDigest) throw error;
         if (error.code.startsWith('REPAIR_') && !feature?.metadata?.repairFindingId) throw error;
         if (error.code.startsWith('QUALITY_') && !feature?.metadata?.qualityReview) throw error;
         rejected = rejectVisibleResult({ error, result: businessResult, receipt: hostResultReceipt, runtimeReceipt: lease.runtimeReceipt, agentId: lease.agentId, dispatchId: dispatch.dispatchId, packetDigest: dispatch.packetDigest });

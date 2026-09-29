@@ -106,6 +106,14 @@ export const resolveRunLineage = ({ plan, states, currentLineage = null, policy 
         selectedRunId = null;
         reasonCode = 'EXHAUSTIVE_RELEASE_ALREADY_STARTED';
         blockers = [{ code: reasonCode, message: 'The major-release exhaustive review must continue its original Run and cannot start a second invocation.' }];
+      } else if (policy.automaticBlockedRunReplacement === true
+        && plan.intent.action === 'produce'
+        && candidates.every(candidate => ['closed', 'all-remaining-blocked'].includes(candidate.status))
+        && candidates.some(candidate => candidate.status === 'all-remaining-blocked')
+        && candidates.every(candidate => candidate.activeLeaseCount === 0 && candidate.activeDispatchCount === 0)
+        && candidates.some(candidate => candidate.sourceDigest !== plan.run.sourceDigest)) {
+        action = 'supersede-and-start';
+        reasonCode = 'BLOCKED_RUN_SOURCE_REPLANNED';
       } else if (candidates.some(candidate => candidate.status !== 'closed')) {
         action = 'block';
         selectedRunId = null;

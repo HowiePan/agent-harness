@@ -32,6 +32,7 @@ export const createBatchProductionProfile = ({
       maxLogicalItems: maxItems,
       requiredFinalGates: [...new Set(config.requiredFinalGates ?? [])],
       requireRuleReady: config.requireRuleReady !== false,
+      requireBlockedScenarioAudit: config.requireBlockedScenarioAudit === true,
       requireHarnessAcceptance: config.requireHarnessAcceptance !== false,
       requireIndependentReview: config.requireIndependentReview !== false,
       requireUserItemAcceptance: config.requireUserItemAcceptance !== false,
@@ -71,6 +72,30 @@ export const createBatchProductionProfile = ({
   },
 
   validateResult({ state, feature, result }) {
+    if (state.profile.config.requireBlockedScenarioAudit && feature.metadata?.stage === 'produce' && result.status === 'blocked') {
+      const value = result.outputs?.produce?.value;
+      const audit = value?.scenarioAudit;
+      const inventory = value?.requiredScenarios;
+      if (result.blocker?.kind !== 'engine-artifact') return { ok: false, reason: 'blocked-produce-requires-engine-artifact-blocker' };
+      if (!Array.isArray(audit) || audit.length === 0 || !Array.isArray(inventory) || inventory.length === 0
+        || new Set(inventory).size !== inventory.length || inventory.some(id => typeof id !== 'string' || !id)
+        || !Array.isArray(value.readyRemaining) || value.readyRemaining.length !== 0)
+        return { ok: false, reason: 'blocked-produce-requires-exhaustive-scenario-audit' };
+      const ids = new Set();
+      for (const entry of audit) {
+        if (!entry || typeof entry.id !== 'string' || !entry.id || ids.has(entry.id)
+          || !['passed', 'blocked'].includes(entry.disposition)
+          || !Array.isArray(entry.evidenceRefs) || entry.evidenceRefs.length === 0
+          || (entry.disposition === 'blocked' && entry.blockerKind !== 'engine-artifact'))
+          return { ok: false, reason: 'blocked-produce-scenario-audit-invalid' };
+        ids.add(entry.id);
+      }
+      if (!audit.some(entry => entry.disposition === 'blocked')) return { ok: false, reason: 'blocked-produce-has-no-blocked-scenario' };
+      const required = feature.metadata?.requiredScenarios;
+      if (inventory.length !== ids.size || inventory.some(id => !ids.has(id))
+        || (Array.isArray(required) && (required.length !== ids.size || required.some(id => !ids.has(id)))))
+        return { ok: false, reason: 'blocked-produce-scenario-audit-incomplete' };
+    }
     if (feature.metadata?.qualityReview && Array.isArray(result.findings)) {
       const collision = result.findings.find(finding => state.findings.some(prior => prior.id === finding.id
         && state.features.find(item => item.id === prior.featureId)?.metadata?.qualityRoot !== feature.metadata.qualityRoot));

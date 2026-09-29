@@ -36,6 +36,13 @@ test('lineage resolver selects every safe lifecycle continuation without user ch
   assert.equal(resolveRunLineage({ plan, states: [state({ status: 'running', leases: [expiredLease] })], now: () => now }).action, 'ordinary-resume');
   const incompatible = state({ runId: 'old', planDigest: 'd'.repeat(64) });
   assert.equal(resolveRunLineage({ plan, states: [incompatible], now: () => now }).reasonCode, 'EXISTING_RUN_REQUIRES_INTERNAL_CONTINUATION');
+  const blockedProduce = state({ runId: 'blocked-produce', planDigest: 'd'.repeat(64), status: 'all-remaining-blocked' });
+  const changedProducePlan = { ...plan, intent: { ...plan.intent, action: 'produce' }, run: { ...plan.run, sourceDigest: 'e'.repeat(64) } };
+  const sourceReplan = resolveRunLineage({ plan: changedProducePlan, states: [blockedProduce], policy: { automaticBlockedRunReplacement: true }, now: () => now });
+  assert.equal(sourceReplan.action, 'supersede-and-start');
+  assert.equal(sourceReplan.reasonCode, 'BLOCKED_RUN_SOURCE_REPLANNED');
+  assert.equal(resolveRunLineage({ plan: changedProducePlan, states: [blockedProduce], now: () => now }).action, 'block');
+  assert.equal(resolveRunLineage({ plan: { ...changedProducePlan, run: { ...changedProducePlan.run, sourceDigest: plan.run.sourceDigest } }, states: [blockedProduce], policy: { automaticBlockedRunReplacement: true }, now: () => now }).action, 'block');
   const incompatibleLive = state({ runId: 'old-live', planDigest: 'd'.repeat(64), status: 'running', leases: [healthyLease] });
   const blocked = resolveRunLineage({ plan, states: [incompatibleLive], now: () => now });
   assert.equal(blocked.action, 'block');

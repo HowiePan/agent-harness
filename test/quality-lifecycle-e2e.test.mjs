@@ -360,10 +360,10 @@ test('visible quality lifecycle completes review, verified repair, fresh re-revi
   t.after(() => rm(fixture.root, { recursive: true, force: true }));
   assert.equal(fixture.plan.run.features[0].metadata.sourcePolicy, 'read-only');
   assert.equal(fixture.plan.run.features[0].metadata.qualityFindingPolicy, 'repair-and-rereview');
-  assert.deepEqual(fixture.plan.run.features[0].metadata.qualityContext.verificationOutputPaths, ['.cardworld-local', 'tabletop-collection/.cardworld-local']);
+  assert.deepEqual(fixture.plan.run.features[0].metadata.qualityContext.verificationOutputPaths, ['.cardworld-local']);
   const preflight = await fixture.harness.createExecutionReadinessReport(fixture.plan);
   assert.equal(preflight.executionReady, true);
-  assert.deepEqual(preflight.checks.find(check => check.id === 'quality-verification-paths')?.details.outputs, ['.cardworld-local', 'tabletop-collection/.cardworld-local']);
+  assert.deepEqual(preflight.checks.find(check => check.id === 'quality-verification-paths')?.details.outputs, ['.cardworld-local']);
   const completed = await fixture.harness.executeVisibleLifecyclePlan(fixture.plan, { commandId: 'quality-e2e', preflightReport: preflight, maxConcurrency: 10 });
   for (const dispatch of completed.state.dispatches) assert.equal(sha256(await readFile(`${dispatch.outputRef}.dispatch-packet.json`, 'utf8')), dispatch.packetDigest);
   assert.equal(completed.rounds.every(round => round.physicalLimit === 1), true);
@@ -371,10 +371,10 @@ test('visible quality lifecycle completes review, verified repair, fresh re-revi
   assertClosedQualityLoop(completed.state);
   assert.equal(completed.versionClearance.receipt.status, 'development-complete');
   const repair = completed.state.features.find(feature => feature.metadata.stage === 'quality-repair');
-  assert.deepEqual(repair.metadata.verificationOutputPaths, ['.cardworld-local', 'tabletop-collection/.cardworld-local']);
+  assert.deepEqual(repair.metadata.verificationOutputPaths, ['.cardworld-local']);
   assert.deepEqual(repair.allowedPaths, ['README.md']);
   assert.equal(repair.generatedOutputs.includes('.cardworld-local'), true);
-  assert.equal(repair.generatedOutputs.includes('tabletop-collection/.cardworld-local'), true);
+  assert.equal(repair.generatedOutputs.includes('tabletop-collection/.cardworld-local'), false);
 });
 
 test('out-of-scope check diagnostic is confirmed by review and repaired in the same Run', async t => {

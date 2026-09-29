@@ -29,6 +29,7 @@
       "properties": {
         "automaticLineageResolution": { "type": "boolean" },
         "automaticOrdinaryResume": { "type": "boolean" },
+        "automaticBlockedRunReplacement": { "type": "boolean" },
         "automaticVerifiedHardRecovery": { "type": "boolean" },
         "preserveSupersededRuns": { "const": true }
       },

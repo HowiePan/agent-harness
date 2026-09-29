@@ -10,6 +10,8 @@
 
 显式 `produce <batch>` Lifecycle Command 在创建 Run 时记录绑定命令 ID 与 Plan 摘要的 `batch:<batch>:launched` Decision，再按批次 Barrier 派发。普通 `startRun` 不产生这条 Decision；单独的 `launch` 路由仍只检查就绪，不代替发车授权。每个 item 的写入路径由 Descriptor 提供，Collection shim 将游戏限制在各自的 `games/presets/<gameId>`。
 
+Collection Profile 的 `produce` 遇到单个引擎缺口时，仍要完成该款所有独立可做的场景。若提交 `blocked`，结果必须抄录该款 manifest 的 `requiredScenarios`，给出同集合的逐场景 `scenarioAudit`（passed/blocked、证据引用、阻塞类型）且 `readyRemaining=[]`；缺项或非引擎缺口拒绝进入已阻塞状态并按 Feature 预算重试。若 Feature 元数据另有固定场景清单，还须与之相等。已耗尽的旧 Run 只在源摘要变化、无活动 Lease/Dispatch 且 Descriptor 显式允许时，才能保留旧 Authority 并启动新的同批次 Run；未变化时按原 lineage 继续。
+
 ## 质量与发布闭环
 
 Harness 按每个 item 的质量根从 Run Authority 投影独立 `QualityTargetSnapshot` 和 Finding inventory；同一批次的复审预算分别计算。`quality review-only` 执行只读复审，`quality repair-known` 只处理当前 Authority 中已知 Finding，`quality closeout` 使用固定的 closeout 快照。修复和复审由公共质量机制生成，批次 Profile 仍负责 item 归属、Barrier、逐项验收和批次关闭。正式质量准出要求本周期 P0–P3 全部关闭；Gate 失败可以生成批次级诊断复审，但不会绕过预算或验收。

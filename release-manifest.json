@@ -22,8 +22,8 @@
     },
     {
       "path": "docs/flows/batch-production/design.md",
-      "sha256": "88a05a610e7ff0e176b196fbc90629292d4815e8fa9315d11f33be134d065fe0",
-      "size": 4185
+      "sha256": "b759d1c6d418ad1e1c3465be6c2dc4fb064d613824b6a516d57e5c5d4493424d",
+      "size": 5250
     },
     {
       "path": "docs/flows/delivery-lifecycle/design.md",
@@ -312,13 +312,13 @@
     },
     {
       "path": "docs/reference/commands.md",
-      "sha256": "811190edddb50a2a71dfaf7faab790f79b6dad709358aa3ca672975c2f5a1633",
-      "size": 5123
+      "sha256": "74e4fbc5e371b3122cadff5ab16e3bb32625469e7116e21c7fbce21603cecde8",
+      "size": 5567
     },
     {
       "path": "docs/reference/configuration-api.md",
-      "sha256": "05bd87314a6e116ae9d4b58cbc673754a4a1adc7605231b8322ace3b5baacd23",
-      "size": 33527
+      "sha256": "8043f30861bec7382e4d480292b9ab6edcebafaeeaf84541946a894a9bd6b2df",
+      "size": 33720
     },
     {
       "path": "docs/reference/legacy-compatibility.md",
@@ -452,8 +452,8 @@
     },
     {
       "path": "integrations/legacy-consumers/cardworld/variant/descriptor.mjs",
-      "sha256": "0cb6dd77f588cbd768ec3d80c3cd9143575ca7838c431b5ed36101e7ed20a2e5",
-      "size": 7970
+      "sha256": "b1a286d8b3b5164054c7f4360d3b7e116d8a268fff28042154a0212fa5644029",
+      "size": 7953
     },
     {
       "path": "integrations/legacy-consumers/cardworld/variant/feature.mjs",
@@ -482,8 +482,8 @@
     },
     {
       "path": "integrations/legacy-consumers/collection/variant/descriptor.mjs",
-      "sha256": "b79697315f73cb7c32ddf954c2ed0b6494f57cb4623fbcf37b1f83b5772ccd1b",
-      "size": 7970
+      "sha256": "c75faab50728a90b1d0751225ebe0bc352f5de7c2f5fef0bf86717dabcde47a6",
+      "size": 8424
     },
     {
       "path": "integrations/legacy-consumers/collection/variant/feature.mjs",
@@ -687,13 +687,13 @@
     },
     {
       "path": "schemas/project-descriptor-input.schema.json",
-      "sha256": "518ef2a2bed66ed0470fa06c1d81ff05cb28e45d6933516f479bafbdd965e199",
-      "size": 5674
+      "sha256": "7b9d5174b6502c7474b8dfd7807f2919068cae466cf9cfd5fd6a8d4107d40c45",
+      "size": 5739
     },
     {
       "path": "schemas/project-descriptor.schema.json",
-      "sha256": "3d82d97d4c4dd068e405f9cded06c369f144d7eb0085e18b5c5740c22a44e2d8",
-      "size": 5687
+      "sha256": "478dabb7d141398263fae604223a71e757944c67015605efedc05be46bb0ca3b",
+      "size": 5752
     },
     {
       "path": "schemas/project-harness-config.schema.json",
@@ -812,8 +812,8 @@
     },
     {
       "path": "src/application/development-run-recovery.mjs",
-      "sha256": "2c924a535c3e74ddd9c8b2e922d17d9d69e56178c1c2be29a8748e179140cd13",
-      "size": 9544
+      "sha256": "3de75e3a8c4a485c1fec1f193546b9122396e1cdc0c74dd76b62d6ffc61a9379",
+      "size": 9739
     },
     {
       "path": "src/application/development-source.mjs",
@@ -832,8 +832,8 @@
     },
     {
       "path": "src/application/harness.mjs",
-      "sha256": "3a2731f39c99cca3fe8a52196b255cff139bfa02da4ff789e31053b2ff812603",
-      "size": 82014
+      "sha256": "cfb0281f138ae79d792a43dc0f183c3f5193867c17c556dd72aaf57537d91507",
+      "size": 85002
     },
     {
       "path": "src/application/installation.mjs",
@@ -847,13 +847,13 @@
     },
     {
       "path": "src/application/lifecycle-execution-service.mjs",
-      "sha256": "847e3683a92c47cfda75100addc7ebd41d76552a51e31c7daafe9d1719a8ad83",
-      "size": 24611
+      "sha256": "14b879de3c9831d51fdeb977ef3319161a49f2761ebc101f27178156df525270",
+      "size": 24631
     },
     {
       "path": "src/application/lineage.mjs",
-      "sha256": "fd56a3b001ff55fb0f158f201df4c4478f3a449b3005c64c6cbca282f82f5059",
-      "size": 12515
+      "sha256": "3e43f8995b7c1bf63c6166134d9a91f82c72d576bfde8039aadb2a4e8afca1b2",
+      "size": 13114
     },
     {
       "path": "src/application/local-development-invocation.mjs",
@@ -864,6 +864,11 @@
       "path": "src/application/local-incident.mjs",
       "sha256": "790474942a25a816fe616b1bdb0319f6ac9a9f9b0ac20af25e1f7e396e6f38b5",
       "size": 4327
+    },
+    {
+      "path": "src/application/plan-source-compatibility.mjs",
+      "sha256": "b02cf8bddc75f637838980cfac661f439e508b382f669e9f149a9727db196aff",
+      "size": 2132
     },
     {
       "path": "src/application/project-initialization.mjs",
@@ -1042,8 +1047,8 @@
     },
     {
       "path": "src/flows/batch-production/nodes/produce/index.mjs",
-      "sha256": "eacb50c81fe2fff5d3c45ecf41085aabcaa5301d6f6f7147f752ee186d93435d",
-      "size": 1104
+      "sha256": "8cf9e44b56c75641619658f0ddc16f8e07bd7be615fbfca591b36f7b086f3f49",
+      "size": 2051
     },
     {
       "path": "src/flows/batch-production/nodes/quality/closeout.mjs",
@@ -1077,8 +1082,8 @@
     },
     {
       "path": "src/flows/batch-production/policy/batch-production.mjs",
-      "sha256": "4a7acce0930908c64293d664d5076d59e6e94701bfde38a92bd634171b7a0ccf",
-      "size": 10626
+      "sha256": "b24274bd12b039401495071244df371aa25b34aa3dc2b5f6fb175072869e3f73",
+      "size": 13207
     },
     {
       "path": "src/flows/batch-production/policy/index.mjs",
@@ -1502,8 +1507,8 @@
     },
     {
       "path": "src/platform/plugins/codec/agent-prompt-codec.mjs",
-      "sha256": "a0572be3fb14ddb19f26e8a5e4c904a7b8ed6d63e07b63019e94fd9cd6b57a69",
-      "size": 19464
+      "sha256": "5235508b4b84d7b6426a24b9206fd75a11cc581e36515d92c21e58ddf9b45685",
+      "size": 19726
     },
     {
       "path": "src/platform/plugins/codec/json-codec.mjs",
@@ -1717,8 +1722,8 @@
     },
     {
       "path": "src/platform/workflow/profiles/registry.mjs",
-      "sha256": "9ca9262abe403aeb0feaeaf0350558b38ae606b5f819a18edd5fa0e82e9e25f5",
-      "size": 1096
+      "sha256": "b7f49352c664b771428cfa7cc6bc935c016eaad00f8ab37505bf4d372c876733",
+      "size": 1290
     },
     {
       "path": "src/platform/workflow/source-manifest.mjs",
@@ -1751,7 +1756,7 @@
       "size": 19877
     }
   ],
-  "packageDigest": "c9955d7f7ed8efc7f9c92c3418f5af7bbe7e8742302849ba5e521bab7a447efd",
+  "packageDigest": "99aa177687cf4d31dc0995d8a212c5fc3a006a7de6b5f84acf4f6d6b417c3543",
   "metadataFiles": [
     "release-manifest.json",
     "sbom.spdx.json"
