@@ -312,13 +312,13 @@
     },
     {
       "path": "docs/reference/commands.md",
-      "sha256": "74e4fbc5e371b3122cadff5ab16e3bb32625469e7116e21c7fbce21603cecde8",
-      "size": 5567
+      "sha256": "26c05d4a9a93dc89ecd5d90e8f4bd60ea89970ab2e505c6fa55c52fbcdc1f6a9",
+      "size": 7081
     },
     {
       "path": "docs/reference/configuration-api.md",
-      "sha256": "8043f30861bec7382e4d480292b9ab6edcebafaeeaf84541946a894a9bd6b2df",
-      "size": 33720
+      "sha256": "4db86695922cd05e3029de9226104a8757460c9cd47a6afb7fcab979cebfbd25",
+      "size": 34175
     },
     {
       "path": "docs/reference/legacy-compatibility.md",
@@ -452,8 +452,8 @@
     },
     {
       "path": "integrations/legacy-consumers/cardworld/variant/descriptor.mjs",
-      "sha256": "b1a286d8b3b5164054c7f4360d3b7e116d8a268fff28042154a0212fa5644029",
-      "size": 7953
+      "sha256": "88f1e708adef333f3e34bedc99b2ad41d08f0b13152d1428cacf5380211bd6b3",
+      "size": 8115
     },
     {
       "path": "integrations/legacy-consumers/cardworld/variant/feature.mjs",
@@ -572,8 +572,8 @@
     },
     {
       "path": "schemas/cardworld-project-input.schema.json",
-      "sha256": "3b87ad84c72fcc0d2486e23c54127a06454726bb7632ba10d4f878703c9c32d1",
-      "size": 2150
+      "sha256": "7db6589cc8b650377409642c53ea77613101314f5307844db5c4f9ea76743fe9",
+      "size": 2748
     },
     {
       "path": "schemas/codex-host-effect.schema.json",
@@ -732,8 +732,8 @@
     },
     {
       "path": "schemas/run-lineage-resolution.schema.json",
-      "sha256": "cd23d7789eccada24d23b2529bf2f5935e8d3a99528d661ad454b3483b9f0ac6",
-      "size": 2948
+      "sha256": "0e3e369afffce2846435879ad9a352f8a53deaa2f2f0aec13ec9b19aa6330805",
+      "size": 3003
     },
     {
       "path": "schemas/run-lineage.schema.json",
@@ -832,8 +832,8 @@
     },
     {
       "path": "src/application/harness.mjs",
-      "sha256": "48422b48f0aea830e14d8e4bbc8aba301c0f262383fc6a1c3b0eff791e08cceb",
-      "size": 85015
+      "sha256": "83417d11b527228b737b19e7c6105e8f43e8101b7d55a6662017faecfd6f49d9",
+      "size": 87262
     },
     {
       "path": "src/application/installation.mjs",
@@ -842,8 +842,8 @@
     },
     {
       "path": "src/application/lifecycle-command-plan.mjs",
-      "sha256": "c5e2bab722ca096c64060d181959c6bca9359520be264ed89a7db953a9f2d846",
-      "size": 17925
+      "sha256": "baea1e08d3e898f5a5bd4c1b78f2c37c698c3d443c7552e45921a7a36d2e20fe",
+      "size": 18074
     },
     {
       "path": "src/application/lifecycle-execution-service.mjs",
@@ -852,8 +852,8 @@
     },
     {
       "path": "src/application/lineage.mjs",
-      "sha256": "3e43f8995b7c1bf63c6166134d9a91f82c72d576bfde8039aadb2a4e8afca1b2",
-      "size": 13114
+      "sha256": "d03c88f0ae319b6a2e2cef07847ddcc9f3b003bd08a4a86791319c6dc5c179d8",
+      "size": 14974
     },
     {
       "path": "src/application/local-development-invocation.mjs",
@@ -864,6 +864,11 @@
       "path": "src/application/local-incident.mjs",
       "sha256": "790474942a25a816fe616b1bdb0319f6ac9a9f9b0ac20af25e1f7e396e6f38b5",
       "size": 4327
+    },
+    {
+      "path": "src/application/plan-revision.mjs",
+      "sha256": "50ce34260db21f7faa1093525c6454b7b1bc9d14e3b2bc4dc9dd03224801794b",
+      "size": 4487
     },
     {
       "path": "src/application/plan-source-compatibility.mjs",
@@ -1092,8 +1097,8 @@
     },
     {
       "path": "src/flows/delivery-lifecycle/commands.mjs",
-      "sha256": "06e018e6950c124e2272676f26beef33e836121f04418f646401e95f681ebcad",
-      "size": 3413
+      "sha256": "70a153a9436ed5a655af04977f3dabc7be1ddbf801c000aa0b10174d80a5deab",
+      "size": 3648
     },
     {
       "path": "src/flows/delivery-lifecycle/contracts/index.mjs",
@@ -1112,8 +1117,8 @@
     },
     {
       "path": "src/flows/delivery-lifecycle/graph/definition.mjs",
-      "sha256": "474b91e29adb4827cca938a7bbc782295758e7e723e9b04ee4038939424321b8",
-      "size": 2093
+      "sha256": "42c812bc12229d35871a9d7a32f420a9ffb6bae366b6d49cc2e748ff4241cd39",
+      "size": 2147
     },
     {
       "path": "src/flows/delivery-lifecycle/index.mjs",
@@ -1157,8 +1162,8 @@
     },
     {
       "path": "src/flows/delivery-lifecycle/nodes/plan/index.mjs",
-      "sha256": "664bf09a3d37bc8775a7690153b14bd83c2dfbe8e408b03975d48a5f284fecae",
-      "size": 4664
+      "sha256": "175a4d7aa8d5e4d9a62a8dd68370a4cb0d55e4e92edbf62da2745c36c6bbca90",
+      "size": 5743
     },
     {
       "path": "src/flows/delivery-lifecycle/nodes/prerelease/index.mjs",
@@ -1187,13 +1192,18 @@
     },
     {
       "path": "src/flows/delivery-lifecycle/plan-approval.mjs",
-      "sha256": "ca72302e42a688bb0f808e2bc25db7accc2b694c2bbc4c63b3bc9c418c355a60",
-      "size": 4392
+      "sha256": "e21c88b010a08a1bc67901905c0d3b69308ea9a5d2fa5539ca4a8e8a5d291d24",
+      "size": 5510
+    },
+    {
+      "path": "src/flows/delivery-lifecycle/plan-diff.mjs",
+      "sha256": "3e1681b1f657f4a35ad4fdc61333e2d31776a8bf950b1139821a4d1979d16407",
+      "size": 985
     },
     {
       "path": "src/flows/delivery-lifecycle/planner.mjs",
-      "sha256": "b3cd20cb7c99aa0bf54f4b448e494295976c3034ee33234dc7459a113aa9456a",
-      "size": 6992
+      "sha256": "aa670da6e551d0f1a74929e6c1c7115e96628e3e14b5bb36608be3aecd7552bf",
+      "size": 7224
     },
     {
       "path": "src/flows/delivery-lifecycle/policy/delivery-lifecycle.mjs",
@@ -1756,7 +1766,7 @@
       "size": 19877
     }
   ],
-  "packageDigest": "23a69f995ec04686afa0160838382c12b74f41de3cfc6437297335aa0d6cca28",
+  "packageDigest": "020596c8f063350d402de463f74b520515646ff5e19df2f9224a86313cf50460",
   "metadataFiles": [
     "release-manifest.json",
     "sbom.spdx.json"

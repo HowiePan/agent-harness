@@ -135,6 +135,7 @@ Extension 身份对象的字段是 `id`、`version`、可选或注册后必需�
 | `maxConcurrency` | `auto` | 正整数或 `auto`；是物理并发上限，不绕过依赖/冲突。 |
 | `actionExecution` | `{}` | 按 action 绑定 `{agentExecutionMode,runtimePluginId}`；Runtime 必须在 `runtimePluginIds`。 |
 | `knownFindingInventories` | 无 | 以质量目标为键的权威 Finding inventory 快照。 |
+| `planChangeRequests` | 无 | 支持该字段的消费者在 `harness.json` 的 `project.input` 中以变更单 ID 为键声明；每项含 `target`、`kind`、`summary`、`requirements[]`、`acceptance[]`。同步项目绑定后由 `replan <目标> change:<ID>` 精确引用并固定摘要。 |
 | `qualityReviewLimit` | `{mode:"bounded",maxRechecks:2}` | 质量目标跨 Run 的复审上限；初审不计入 `maxRechecks`。仅显式大版本准出可选无数值上限。 |
 | `majorReleaseTargets` | `[]` | 明确允许使用 `quality release-exhaustive` 的大版本目标清单。 |
 | `actionPaths` | 内置默认路径 | action 到允许写路径数组的映射。支持 `requirements`、`plan`、`implement`、`scope`、`docs`、`review`、`deliver` 等动作键。 |
@@ -143,7 +144,7 @@ Extension 身份对象的字段是 `id`、`version`、可选或注册后必需�
 | `release.manifestItemsKey` | `itemIds` | 批次制品清单中的 item 数组字段；业务变体可声明不同字段名。 |
 | `excluded` | `.git`、`.agent-harness-data`、`node_modules` | 工作区排除/禁止路径。 |
 
-内置 action：`full`、`requirements`/`req`、`plan`、`implement`/`impl`、`scope`、`quality`/`qa`、`docs`、`prerelease`、`review`、`deliver`、`status`、`resume`、`recover`。质量 preset 为 `full`、`review-only`、`recheck`、`repair-known`、`closeout`、`release-exhaustive`；需求 preset 为 `full`（默认，`intake → expansion → canonical`）、`expand-to-plan`（`intake → expansion → canonical → plan`）、`direct`（不扩展，`intake → canonical → plan`）、`plan-only`（`plan`）。
+内置 action：`full`、`requirements`/`req`、`plan`、`replan`、`implement`/`impl`、`scope`、`quality`/`qa`、`docs`、`prerelease`、`review`、`deliver`、`status`、`resume`、`recover`。`replan` 的 `change:<ID>` 参数引用项目输入中的 `planChangeRequests`；无参数时仅处理源码修正或上次被拒的计划审查。质量 preset 为 `full`、`review-only`、`recheck`、`repair-known`、`closeout`、`release-exhaustive`；需求 preset 为 `full`（默认，`intake → expansion → canonical`）、`expand-to-plan`（`intake → expansion → canonical → plan`）、`direct`（不扩展，`intake → canonical → plan`）、`plan-only`（`plan`）。
 
 `qualityReviewLimit.mode` 为 `bounded` 或 `unbounded`；`bounded` 时 `maxRechecks` 为非负整数，默认 2。一般流程达到上限即停在 `quality-review-limit-reached`，续接和新 Run 不重置目标累计次数。`unbounded` 只能用于已列入 `majorReleaseTargets` 的 `release-exhaustive`，同一大版本只允许一次启动，进程中断后须续接原 Run。`repair-known` 冻结当前权威台账的开放 Finding，只派发对应修复并运行最终 Gate；不做初审或复审，准出凭证注明 `fullReviewPerformed:false`，等待 `routine-version-exit` 人工决定后关闭。开放 Finding 为零时，它规划只读证据收口；相同命令已有未完成 Run 时，仍按单次启动规则继续原 Run。`closeout` 是独立收口入口：要求已有审查、全部 Finding 已解决且最新质量 Run 的源码摘要与当前源码一致；它不消耗复审预算，完成只读证据核对、fresh 最终 Gate 和必要的准出决定后，从不可变 `run-closure` 凭证派生可重复核验的 `version-clearance` 凭证，标记版本开发完成。该投影不修改 Kernel Authority；提交、发布和推送仍需单独授权。
 

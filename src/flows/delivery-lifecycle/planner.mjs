@@ -20,6 +20,7 @@ const resolveDeliveryRoute = intent => {
 const defaultActionPaths = Object.freeze({
   requirements: ['docs/requirements.md', 'docs/versions'],
   plan: ['docs/versions', 'docs/requirements.md'],
+  replan: ['docs/versions', 'docs/requirements.md'],
   implement: ['src', 'tests', 'docs'],
   scope: ['docs/versions', 'docs/requirements.md'],
   docs: ['docs/versions', 'docs/versions/INDEX.md', 'docs/integration_guide.md'],
@@ -85,7 +86,7 @@ export const createDeliveryLifecyclePlanner = ({
     if (prerelease) feature.metadata.releaseDocumentationDigest = intent.releaseDocumentation.inventoryDigest;
   }
   return {
-    run: { runId, profileId, profileConfig, features, metadata: { workflow: { id: workflowDefinition.id, version: workflowDefinition.version, artifactDigest: workflowDefinition.artifactDigest }, qualityTarget: structuredClone(intent.qualityTarget), ...(repairOnly ? { qualityRepairInventory: structuredClone(intent.qualityRepairInventory) } : {}), ...(closeoutOnly ? { qualityCloseout: structuredClone(intent.qualityCloseout) } : {}) } },
+    run: { runId, profileId, profileConfig, features, metadata: { workflow: { id: workflowDefinition.id, version: workflowDefinition.version, artifactDigest: workflowDefinition.artifactDigest }, qualityTarget: structuredClone(intent.qualityTarget), ...(intent.planRevision ? { planRevision: structuredClone(intent.planRevision) } : {}), ...(intent.changeRequest ? { changeRequest: structuredClone(intent.changeRequest) } : {}), ...(repairOnly ? { qualityRepairInventory: structuredClone(intent.qualityRepairInventory) } : {}), ...(closeoutOnly ? { qualityCloseout: structuredClone(intent.qualityCloseout) } : {}) } },
     stopCondition: { type: repairOnly || closeoutOnly ? 'routine-version-exit' : quality ? 'quality-run-complete' : full ? `${stopConditionPrefix}-full-complete` : `${stopConditionPrefix}-action-complete`, action: intent.action, requiresFeatureCompletion: true, requiresAllFindingsResolved: full || quality || intent.action === 'implement' || intent.action === 'deliver', requiredFinalGates: gateIds },
     protectedOperations: ['publication', 'commit', 'push', 'legacy-destruction', 'privilege-expansion', 'external-cutover', 'irreversible-migration'],
   };

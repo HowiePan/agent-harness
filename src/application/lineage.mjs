@@ -12,6 +12,9 @@ const resolutionSchema = JSON.parse(readFileSync(new URL('../../schemas/run-line
 const lineageSchema = JSON.parse(readFileSync(new URL('../../schemas/run-lineage.schema.json', import.meta.url), 'utf8'));
 const activeLease = lease => lease.status === 'active';
 const activeDispatch = dispatch => ['requested', 'assigned'].includes(dispatch.status);
+const rejectedPlanReview = state => state.status === 'closure-blocked' && state.submissions?.some(submission =>
+  state.features?.some(feature => feature.id === submission.featureId && feature.metadata?.stage === 'plan-review')
+  && submission.result?.status === 'completed' && submission.result.outputs?.['plan-review']?.value?.approved === false);
 
 export const runLineageResolutionDigest = resolution => digestJson(withoutKeys(resolution, ['resolutionDigest']));
 export const runLineageAuthorityDigest = lineage => digestJson(withoutKeys(lineage, ['authorityDigest']));
@@ -41,6 +44,7 @@ const candidateFor = (state, now) => {
     activeLeaseCount: activeLeases.length,
     expiredLeaseCount: health.filter(item => item.hardExpired).length,
     activeDispatchCount: state.dispatches.filter(activeDispatch).length,
+    rejectedPlanReview: Boolean(rejectedPlanReview(state)),
     updatedAt: state.updatedAt,
   };
 };
@@ -101,11 +105,30 @@ export const resolveRunLineage = ({ plan, states, currentLineage = null, policy 
     }
   } else {
     if (candidates.length) {
+      const idle = candidate => candidate.activeLeaseCount === 0 && candidate.activeDispatchCount === 0;
+      const revision = plan.intent.planRevision;
+      const parent = revision && candidates.find(candidate => candidate.runId === revision.parentRunId);
       if (plan.intent.action === 'quality' && plan.intent.preset === 'release-exhaustive') {
         action = 'block';
         selectedRunId = null;
         reasonCode = 'EXHAUSTIVE_RELEASE_ALREADY_STARTED';
         blockers = [{ code: reasonCode, message: 'The major-release exhaustive review must continue its original Run and cannot start a second invocation.' }];
+      } else if (plan.intent.action === 'replan' && parent && parent.authorityDigest === revision.parentAuthorityDigest
+        && (!currentLineage?.activeRunId || currentLineage.activeRunId === parent.runId)
+        && candidates.every(candidate => candidate.status === 'closed' || idle(candidate))
+        && candidates.every(candidate => candidate.status === 'closed' || candidate.runId === parent.runId)) {
+        action = 'supersede-and-start';
+        reasonCode = 'PLAN_REVISION_REQUESTED';
+      } else if (plan.intent.action === 'replan') {
+        action = 'block';
+        selectedRunId = null;
+        reasonCode = 'REPLAN_PARENT_STALE_OR_BUSY';
+        blockers = [{ code: reasonCode, message: 'The referenced plan is no longer the current idle revision or its Authority changed.' }];
+      } else if (plan.intent.action === 'plan'
+        && candidates.some(candidate => candidate.rejectedPlanReview && candidate.sourceDigest !== plan.run.sourceDigest)
+        && candidates.every(candidate => candidate.status === 'closed' || (candidate.rejectedPlanReview && idle(candidate)))) {
+        action = 'supersede-and-start';
+        reasonCode = 'REJECTED_PLAN_SOURCE_REPLANNED';
       } else if (policy.automaticBlockedRunReplacement === true
         && plan.intent.action === 'produce'
         && candidates.every(candidate => ['closed', 'all-remaining-blocked'].includes(candidate.status))

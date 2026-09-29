@@ -16,6 +16,10 @@ export const createDeliveryCommandManifest = ({ id = 'delivery-lifecycle-command
       },
     },
     plan: { targetKind: 'version', presets: { default: { scope: 'version-planning', stateChanging: true } } },
+    replan: { targetKind: 'version', presets: {
+      default: { scope: 'version-planning-revision', stateChanging: true },
+      change: { scope: 'version-planning-revision', stateChanging: true, argumentPrefix: 'change:' },
+    } },
     implement: { aliases: ['impl'], targetKind: 'version', presets: { default: { scope: 'implementation..quality', stateChanging: true, sourcePolicy: 'review-and-repair' } } },
     scope: { targetKind: 'version', presets: { default: { scope: 'scope-resolution', stateChanging: true } } },
     quality: {

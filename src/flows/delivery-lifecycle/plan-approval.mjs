@@ -2,6 +2,7 @@ import { resolve } from 'node:path';
 import { digestJson, sha256 } from '../../common/canonical.mjs';
 import { safeSegment } from '../../common/paths.mjs';
 import { atomicWrite } from '../../kernel/atomic-io.mjs';
+import { diffPlanFeatures } from './plan-diff.mjs';
 
 const latestOutput = (state, stage, port) => {
   const ids = new Set(state.features.filter(feature => feature.metadata?.stage === stage && feature.state === 'completed').map(feature => feature.id));
@@ -30,6 +31,23 @@ export const planApprovalSnapshot = state => {
     rows.push(`- 建议路径：${(item.allowedPaths ?? []).length ? item.allowedPaths.map(line).join('；') : '无'}`);
     rows.push('');
     rows.push(...list('外部前置', item.externalPrerequisites), ...list('交付合同', item.contracts), ...list('验证', item.verification));
+  }
+  if (state.metadata?.planRevision) {
+    const revision = state.metadata.planRevision;
+    const changes = diffPlanFeatures(revision.parentPlan, plan);
+    rows.push('## 相对上一版的修订', '', `- 上一版 Run：${line(revision.parentRunId)}`,
+      `- 上一版规划摘要：${line(revision.parentPlanDigest)}`,
+      `- 变更单：${line(state.metadata.changeRequest?.id ?? '无；根据源码或上次审查修订')}`,
+      `- 差异摘要：${digestJson(changes)}`, '');
+    if (state.metadata.changeRequest) {
+      rows.push(`- 变更类型：${line(state.metadata.changeRequest.kind)}`,
+        `- 变更摘要：${line(state.metadata.changeRequest.summary)}`,
+        `- 变更单摘要：${line(state.metadata.changeRequest.digest)}`, '');
+      rows.push(...list('新增或变动的需求', state.metadata.changeRequest.requirements),
+        ...list('变更验收标准', state.metadata.changeRequest.acceptance));
+    }
+    for (const change of changes) rows.push(`- ${line(change.disposition)}：${line(change.id)}`);
+    rows.push('');
   }
   rows.push(...list('独立审查发现', review.findings));
   if (plan.acceptanceCoverage && typeof plan.acceptanceCoverage === 'object') {

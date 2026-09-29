@@ -39,6 +39,7 @@ export const createCardWorldProjectDescriptor = ({
   maxConcurrency = AUTO_CONCURRENCY,
   actionExecution = {},
   knownFindingInventories,
+  planChangeRequests,
   qualityReviewLimit = { mode: 'bounded', maxRechecks: 2 },
   majorReleaseTargets = [],
 } = {}) => {
@@ -84,6 +85,7 @@ export const createCardWorldProjectDescriptor = ({
       majorReleaseTargets: [...majorReleaseTargets],
       ...(Object.keys(actionExecution).length ? { actionExecution: structuredClone(actionExecution) } : {}),
       ...(knownFindingInventories && Object.keys(knownFindingInventories).length ? { knownFindingInventories: structuredClone(knownFindingInventories) } : {}),
+      ...(planChangeRequests && Object.keys(planChangeRequests).length ? { planChangeRequests: structuredClone(planChangeRequests) } : {}),
       recovery: { automaticLineageResolution: true, automaticOrdinaryResume: true, automaticVerifiedHardRecovery: true, preserveSupersededRuns: true },
       maxConcurrency,
     },

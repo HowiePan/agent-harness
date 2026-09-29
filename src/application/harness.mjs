@@ -47,6 +47,7 @@ import { readActiveRelease, resolveActiveRuntimeRoot } from '../platform/registr
 import { RunLineageStore, resolveRunLineage, verifyRunLineageResolution } from './lineage.mjs';
 import { ensurePlanApprovalArtifact, planApprovalSatisfied, planApprovalSnapshot } from '../flows/delivery-lifecycle/plan-approval.mjs';
 import { assessPlanSourceCompatibility, planSourceCompatibilitySatisfied } from './plan-source-compatibility.mjs';
+import { preparePlanRevisionIntent } from './plan-revision.mjs';
 import {
   buildExecutionGrantContext,
   createAgentRuntimeLaunchCapability,
@@ -325,6 +326,11 @@ export const createHarness = async ({ controlRoot: controlRootInput, dataRoot: d
       assert(required.version === extension.version && required.digest === extension.digest, 'PROJECT_EXTENSION_IDENTITY_MISMATCH', `Project ${project.id} does not bind the active Extension ${extension.id}.`);
       if (strictProjectIdentity) assert(project.harness?.version === currentReleaseIdentity.version && project.harness?.artifactDigest === currentReleaseIdentity.artifactDigest, 'PROJECT_HARNESS_IDENTITY_MISMATCH', `Project ${project.id} does not bind the active Harness release.`);
       const snapshot = await captureWorkspace(workspace.root, { excluded: project.workspace.excluded ?? [] });
+      if (intent.action === 'replan') {
+        const released = await api.readVersionRelease(project.id, intent.target);
+        assert(released?.state?.status !== 'released', 'REPLAN_VERSION_RELEASED', 'A released version requires a new target or a separately authorized patch release.');
+        intent = preparePlanRevisionIntent({ intent, project, states: await authorityStore.list(project.id), sourceDigest: snapshot.digest });
+      }
       if (intent.action === 'prerelease') {
         intent = await preparePrereleaseIntent({ intent, extension, project, snapshot, workspace, authorityStore, evidenceStore });
       }
@@ -480,6 +486,19 @@ export const createHarness = async ({ controlRoot: controlRootInput, dataRoot: d
         lineageResolution = resolveRunLineage({ plan, states, currentLineage: observedLineage, policy: project.policy?.recovery ?? {}, now: kernel.now });
       }
       assert(lineageResolution.action !== 'block', 'RUN_LINEAGE_BLOCKED', 'Lifecycle Plan has no safe automatic Run lineage action.', { blockers: lineageResolution.blockers ?? [] });
+      if (plan.intent.action === 'replan') {
+        for (const affected of plan.intent.planRevision.affectedImplementationRuns ?? []) {
+          const current = await authorityStore.read(plan.project.id, affected.runId);
+          if (current.status === 'superseded' && current.metadata?.supersededByRunId === plan.run.runId && current.metadata?.supersedePlanDigest === plan.planDigest) continue;
+          assert(current.revision === affected.revision && current.authorityDigest === affected.authorityDigest
+            && !current.leases.some(lease => lease.status === 'active')
+            && !current.dispatches.some(dispatch => ['requested', 'assigned'].includes(dispatch.status))
+            && !current.findings.some(finding => finding.status !== 'resolved'),
+          'REPLAN_IMPLEMENTATION_CHANGED', 'Implementation changed or became active after the revision plan was captured.');
+          await kernel.supersedeRun(plan.project.id, current.runId, { replacementRunId: plan.run.runId, planDigest: plan.planDigest,
+            reason: 'plan-revision-requested' }, { expectedRevision: current.revision, commandId: `${commandId}.replan.supersede.${current.runId}` });
+        }
+      }
       const selectedRunId = lineageResolution.selectedRunId ?? plan.run.runId;
       const existing = await authorityStore.read(plan.project.id, selectedRunId, { required: false });
       if (existing && existing.status !== 'closed' && existing.metadata?.lifecycleInvocationId && existing.metadata.lifecycleInvocationId !== commandId) {
@@ -613,10 +632,14 @@ export const createHarness = async ({ controlRoot: controlRootInput, dataRoot: d
       if (input.metadata?.commandIntent?.action === 'implement' && input.features.some(feature => feature.metadata?.stage === 'implementation') && !input.features.some(feature => feature.metadata?.stage === 'plan-review')) {
         const target = input.metadata?.commandIntent?.target;
         const workflowId = input.metadata?.workflow?.id;
-        const candidates = (await authorityStore.list(project.id)).filter(run => run.status === 'closed'
+        const candidates = (await authorityStore.list(project.id)).filter(run => run.status !== 'superseded'
           && run.metadata?.commandIntent?.target === target && run.metadata?.workflow?.id === workflowId
           && run.features.some(feature => feature.metadata?.stage === 'plan-review'));
-        const latest = candidates[0];
+        const planKey = candidates.find(run => run.metadata?.logicalTaskKey)?.metadata.logicalTaskKey;
+        const activePlanLineage = planKey ? await lineageStore.read(project.id, planKey) : null;
+        const latest = activePlanLineage ? candidates.find(run => run.runId === activePlanLineage.activeRunId)
+          : candidates.find(run => !run.metadata?.logicalTaskKey && run.status === 'closed');
+        assert(latest?.status === 'closed', 'IMPLEMENTATION_PLAN_CURRENT_REVISION_REQUIRED', 'Implementation requires the active plan revision to be closed and approved.');
         assert(latest && planApprovalSatisfied(latest), 'IMPLEMENTATION_PLAN_USER_APPROVAL_REQUIRED', 'Implementation requires a current, user-approved Markdown plan for this project, target, workflow, and source.');
         const artifact = await ensurePlanApprovalArtifact(authorityStore.root, latest);
         let sourceCompatibility = null;

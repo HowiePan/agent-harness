@@ -19,7 +19,14 @@
     "contextBudgetCommand": { "type": "array", "minItems": 1, "items": { "type": "string" } },
     "maxConcurrency": { "anyOf": [{ "const": "auto" }, { "type": "integer", "minimum": 1 }] },
     "actionExecution": { "type": "object", "additionalProperties": { "$ref": "project-descriptor-input.schema.json#/$defs/actionExecution" } },
-    "knownFindingInventories": { "type": "object", "additionalProperties": { "type": "object" } }
+    "knownFindingInventories": { "type": "object", "additionalProperties": { "type": "object" } },
+    "planChangeRequests": { "type": "object", "additionalProperties": { "type": "object", "required": ["target", "kind", "summary", "requirements", "acceptance"], "properties": {
+      "target": { "type": "string", "minLength": 1 },
+      "kind": { "enum": ["add", "modify", "remove", "defer", "dependency", "technical"] },
+      "summary": { "type": "string", "minLength": 1 },
+      "requirements": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+      "acceptance": { "type": "array", "items": { "type": "string", "minLength": 1 } }
+    }, "additionalProperties": false } }
   },
   "additionalProperties": false,
   "$defs": {

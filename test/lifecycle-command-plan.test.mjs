@@ -76,6 +76,55 @@ test('lifecycle planning deterministically composes quality/full without convers
   assert.equal(await harness.authorityStore.read(descriptor.id, first.run.runId, { required: false }), null);
 });
 
+test('replan compiles a complete reviewed replacement against the active plan lineage', async t => {
+  const controlRoot = resolve(process.cwd());
+  const parent = resolve(harnessTemporaryRoot(), 'lifecycle-command-tests');
+  await mkdir(parent, { recursive: true });
+  const root = await mkdtemp(resolve(parent, 'replan-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const workspaceRoot = resolve(root, 'CardWorld');
+  await mkdir(resolve(workspaceRoot, '.git'), { recursive: true });
+  await writeFile(resolve(workspaceRoot, 'README.md'), 'fixture\n');
+  const extension = await loadExtensionPack('./integrations/legacy-consumers/cardworld/index.mjs', { cwd: controlRoot, controlRoot });
+  const runtime = await loadExtensionPack('./integrations/codex/extensions/codex-runtime.mjs', { cwd: controlRoot, controlRoot });
+  const harness = await createHarness({ controlRoot, dataRoot: resolve(root, 'data'), releaseIdentity, strictProjectIdentity: false, extensions: [extension, runtime] });
+  const descriptor = createCardWorldProjectDescriptor({ workspaceRoot, harness: releaseIdentity, planChangeRequests: {
+    'CR-1': { target: 'V3.8.5', kind: 'add', summary: 'Add privacy requirement', requirements: ['Hide private event counts'], acceptance: ['No viewer infers hidden activity'] },
+  } });
+  descriptor.extensions = descriptor.extensions.map(item => ({ ...item, digest: item.id === extension.id ? extension.digest : runtime.digest }));
+  await harness.projectRegistry.register(descriptor, { expectedRevision: 0, commandId: 'register-replan-project' });
+  const original = await harness.createLifecyclePlan({ projectId: descriptor.id, action: 'plan', target: 'V3.8.5', extensionId: extension.id, executionWorkspaceRoot: workspaceRoot });
+  const started = await harness.startRun({ projectId: descriptor.id, runId: original.run.runId, profileId: original.run.profileId,
+    features: original.run.features, profileConfig: original.run.profileConfig, sourceDigest: original.run.sourceDigest,
+    metadata: { ...original.run.metadata, logicalTaskKey: original.logicalTaskKey, lifecyclePlanDigest: original.planDigest, commandIntent: original.intent } },
+  { commandId: 'start-old-plan' });
+  await harness.authorityStore.transact(descriptor.id, original.run.runId,
+    { expectedRevision: started.state.revision, commandId: 'finish-old-plan', payload: {} }, state => {
+      state.features.forEach(feature => { feature.state = 'completed'; });
+      state.submissions = [
+        { featureId: 'plan/V3.8.5', result: { status: 'completed', outputs: { plan: { value: { proposedFeatures: [{ id: 'F04', projectId: descriptor.id, disposition: 'project-owned', allowedPaths: ['src/view.rs'], dependsOn: [], contracts: [], verification: [] }] } } } } },
+        { featureId: 'plan-review/V3.8.5', result: { status: 'completed', outputs: { 'plan-review': { value: { approved: false, findings: ['Missing Mahjong projection'] } } } } },
+      ];
+      state.status = 'closure-blocked';
+    });
+  await writeFile(resolve(workspaceRoot, 'README.md'), 'corrected planning source\n');
+  const revised = await harness.createLifecyclePlan({ projectId: descriptor.id, action: 'replan', target: 'V3.8.5', extensionId: extension.id, executionWorkspaceRoot: workspaceRoot });
+  assert.equal(revised.logicalTaskKey, original.logicalTaskKey);
+  assert.deepEqual(revised.run.features.map(feature => feature.metadata.stage), ['version-planning', 'plan-review']);
+  assert.equal(revised.intent.planRevision.parentRunId, original.run.runId);
+  assert.deepEqual(revised.intent.planRevision.parentReviewFindings, ['Missing Mahjong projection']);
+  assert.equal(revised.run.features[0].task.inputs.some(input => input.id === 'prior-plan'), true);
+  const changed = await harness.createLifecyclePlan({ projectId: descriptor.id, action: 'replan', target: 'V3.8.5', arguments: ['change:CR-1'], extensionId: extension.id, executionWorkspaceRoot: workspaceRoot });
+  assert.equal(changed.intent.changeRequest.id, 'CR-1');
+  assert.equal(changed.logicalTaskKey, original.logicalTaskKey);
+  assert.notEqual(changed.planDigest, revised.planDigest);
+  const readRelease = harness.readVersionRelease;
+  harness.readVersionRelease = async () => ({ state: { status: 'released' } });
+  await assert.rejects(() => harness.createLifecyclePlan({ projectId: descriptor.id, action: 'replan', target: 'V3.8.5', extensionId: extension.id, executionWorkspaceRoot: workspaceRoot }),
+    error => error.code === 'REPLAN_VERSION_RELEASED');
+  harness.readVersionRelease = readRelease;
+});
+
 test('headless quality requires one trusted command grant while other Engine actions stay visible', async t => {
   const controlRoot = resolve(process.cwd());
   const tempParent = resolve(harnessTemporaryRoot(), 'lifecycle-command-tests');

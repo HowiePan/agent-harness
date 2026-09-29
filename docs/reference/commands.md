@@ -14,7 +14,11 @@ agent-harness workflow list --project <id>
 agent-harness lifecycle plan|preflight|start
 agent-harness run status|plan-artifact|schedule|dispatch|submit|gates|decision|close|recover
 
-版本规划的独立审查结束后，Harness 在 Control Root 的 `outputs/<project>/<run>/plan-review.md` 生成审阅稿，并返回路径、规划摘要及文件摘要。此时 `plan` Run 停在 `implementation-plan-user-approval-required`，须先向用户展示 Markdown。用户明确同意该稿后，向同一 Run 写入 `implementation-plan-approved` Decision，字段包括 `actor: "user"`、`decision: "approved"` 及返回的 `projectId`、`runId`、`planDigest`、`artifactDigest`，再关闭规划 Run。独立审查拒绝的稿件不能批准。`implement` 仅接受同项目、目标、Workflow 下最新已关闭且已获用户批准的规划 Run，并核对当前项目源码摘要。聚合仓库中的独立子项目应从拥有者 Project 的工作区快照排除；已有计划若因项目边界调整或审阅稿发布而产生摘要差异，须按计划 Run 的源码快照证据计算差异，并记录绑定计划、审阅稿、前后源码摘要和差异路径摘要的 `implementation-plan-source-compatible` Decision。后续实际源码再变化仍会阻止复用该决定；最终 Gate 在当前项目源码上重新执行。
+版本规划的独立审查结束后，Harness 在 Control Root 的 `outputs/<project>/<run>/plan-review.md` 生成审阅稿，并返回路径、规划摘要及文件摘要。此时 `plan` Run 停在 `implementation-plan-user-approval-required`，须先向用户展示 Markdown。用户明确同意该稿后，向同一 Run 写入 `implementation-plan-approved` Decision，字段包括 `actor: "user"`、`decision: "approved"` 及返回的 `projectId`、`runId`、`planDigest`、`artifactDigest`，再关闭规划 Run。独立审查拒绝的稿件不能批准。`implement` 仅接受同项目、目标、Workflow 下当前谱系中已关闭且获用户批准的规划 Run，并核对当前项目源码摘要。聚合仓库中的独立子项目应从拥有者 Project 的工作区快照排除；已有计划若因项目边界调整或审阅稿发布而产生摘要差异，须按计划 Run 的源码快照证据计算差异，并记录绑定计划、审阅稿、前后源码摘要和差异路径摘要的 `implementation-plan-source-compatible` Decision。后续实际源码再变化仍会阻止复用该决定；最终 Gate 在当前项目源码上重新执行。
+
+`h:local engine replan <版本>` 修订该项目、Workflow 和目标的现行计划。它读取上一版完整计划及独立审查发现，产出完整替代计划和工作包差异，再走独立审查与新的用户批准。已有计划审查被拒且项目源码已修正时，重新提交普通 `plan` 也可安全替换被拒 Run；旧审查作为审计证据保留。已批准但尚未实施的计划、待批准计划、以及处于空闲边界且无开放 Finding 的实施 Run 可通过显式 `replan` 修订；存在活动 Lease、待处理 Dispatch 或开放 Finding 时分别返回 `REPLAN_IMPLEMENTATION_BUSY` 或 `REPLAN_OPEN_FINDINGS`，不会撤销正在执行或待修复的工作。新计划进入审查后，旧计划批准不得用于启动 `implement`。已发布的版本不能原地 `replan`。
+
+新增、修改、移除、延期或转移需求时，在项目 `harness.json` 的 `project.input.planChangeRequests` 中登记结构化变更并同步项目绑定，再执行 `h:local engine replan <版本> change:<ID>`。每项包含匹配的 `target`、`kind`（`add|modify|remove|defer|dependency|technical`）、`summary`、`requirements` 和 `acceptance`。变更内容和摘要固定到新 Plan，审阅稿展示变更及与上一版的差异。跨项目需求只作为依赖提案；此命令不会授予另一项目写权限。无变更单的 `replan` 仅用于项目源码变化或修复上次被拒审查，不从聊天历史猜测新需求。首次规划仍使用 `plan`。
 agent-harness version-release status|promote
 agent-harness source capture|read|search
 agent-harness memory query|propose|stage|promote|revoke|reject|recover|export|import

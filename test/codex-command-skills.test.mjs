@@ -448,6 +448,9 @@ test('the same pseudo actions resolve through the explicitly selected Extension 
   assert.equal(requirement.action, 'requirements');
   assert.equal(requirement.scope, 'requirement-expansion..version-plan');
   const release = resolveCommandIntent(cardWorldCommandManifest, { action: 'release', target: 'V3.8.4', arguments: [] });
+  const replan = resolveCommandIntent(cardWorldCommandManifest, { action: 'replan', target: 'V3.8.5', arguments: ['change:CR-1'] });
+  assert.equal(replan.action, 'replan');
+  assert.equal(replan.selector, 'CR-1');
   assert.equal(release.scope, 'version-release-promotion');
   assert.deepEqual(release.effectClasses, ['formal-version-release']);
 
