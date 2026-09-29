@@ -19,7 +19,7 @@ const qualityTarget = deriveQualityTargetSnapshot({ projectId: 'delivery-project
 const knownFindingInventory = sealKnownFindingInventory({ projectId: 'delivery-project', target: 'V-next', declaration: { version: '1.0', sources: [{ path: 'docs/version.md', sha256: 'b'.repeat(64) }], findings: [] }, snapshot: { digest: 'a'.repeat(64), files: [{ path: 'docs/version.md', sha256: 'b'.repeat(64) }] } });
 
 const planStages = (action, scope) => createDeliveryLifecyclePlan({
-  intent: { action, target: 'V-next', scope, qualityTarget, ...(['quality', 'full', 'deliver'].includes(action) ? { knownFindingInventory } : {}) },
+  intent: { action, target: 'V-next', scope, qualityTarget, ...(['implement', 'quality', 'full', 'deliver'].includes(action) ? { knownFindingInventory } : {}) },
   project: createDeliveryProjectDescriptor({ workspaceRoot: process.cwd() }),
   runId: `${action}:${scope}`,
   sourceDigest: 'a'.repeat(64),
@@ -52,6 +52,12 @@ test('full action route includes the expansion stage', () => {
   assert.deepEqual(planStages('full', 'requirement-intake..delivery-receipt'), [
     'requirement-intake', 'requirement-expansion', 'canonical-requirement', 'version-planning', 'plan-review', 'implementation', 'scope-resolution', 'docs-closeout', 'quality', 'user-code-review', 'delivery-receipt',
   ]);
+});
+
+test('implement command stays in one route through quality review', () => {
+  const scope = resolveCommandIntent(createDeliveryCommandManifest(), { action: 'implement', target: 'V-next' }).scope;
+  assert.equal(scope, 'implementation..quality');
+  assert.deepEqual(planStages('implement', scope), ['implementation', 'scope-resolution', 'docs-closeout', 'quality']);
 });
 
 test('planning proposals are typed and independently reviewed without write authority', () => {

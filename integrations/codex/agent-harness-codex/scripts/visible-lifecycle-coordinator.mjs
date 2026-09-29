@@ -11,7 +11,7 @@ import { createHookHostExchange } from '../lib/hook-host-exchange.mjs';
 import { createCodexRolloutHostExchange } from '../lib/codex-rollout-host-exchange.mjs';
 import { assertLocalProcessGateHost } from '../lib/local-process-gate-readiness.mjs';
 import { createHostExchangeDiagnosticWriter } from '../lib/host-exchange-diagnostics.mjs';
-import { decodeVisibleLifecycleIntent } from '../lib/visible-lifecycle-intent.mjs';
+import { resolveVisibleLifecycleIntentArgument } from '../lib/visible-lifecycle-intent-reference.mjs';
 import { createPlannedLifecycleEvent, createPreflightLifecycleEvent, preRunProcessGateRetry } from '../lib/visible-lifecycle-events.mjs';
 import { captureSourceManifest } from '../../../../src/platform/workflow/source-manifest.mjs';
 import { classifyLocalIncident } from '../../../../src/application/local-incident.mjs';
@@ -35,7 +35,7 @@ const renderWorkflowInput = (value, intent) => {
 const main = async () => {
   const preflightOnly = process.argv.length === 5 && process.argv[4] === '--preflight-only';
   if (![4, 5].includes(process.argv.length) || process.argv[2] !== '--intent' || (process.argv.length === 5 && !preflightOnly)) throw Object.assign(new Error('Usage: visible-lifecycle-coordinator.mjs --intent <base64url-intent> [--preflight-only]'), { code: 'VISIBLE_LIFECYCLE_COORDINATOR_ARGUMENTS_INVALID' });
-  const intent = decodeVisibleLifecycleIntent(process.argv[3]);
+  const intent = await resolveVisibleLifecycleIntentArgument(process.argv[3]);
   if (intent.harness.release.mode === 'source-link') localIncidentContext = { phase: 'binding', projectId: intent.project.projectId, workflowId: intent.project.workflowId, action: intent.command.action, target: intent.command.target, commandId: intent.commandId, intentDigest: intent.intentDigest };
   const active = await validateActiveReleaseBinding({
     controlRoot: intent.harness.controlRoot,

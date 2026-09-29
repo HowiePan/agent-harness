@@ -34,7 +34,11 @@ agent-harness lifecycle preflight --plan <plan.json> --development-manifest <man
 
 ## Codex 本地源码执行入口
 
+本地 Hook 的配置文件、信任记录和静态绑定检查都不是当前任务收到 `additionalContext` 的证明。交付验收必须在新 Codex 任务中提交查询动作 `h:local where <别名>`，检查当次 Hook 输出确实进入该 turn；绑定过期时该查询仍可能触发文档所述的 H0–H3 自动同步。随后用独立测试目标核对状态改变命令的第一步是绑定 Coordinator，而不是业务脚本。若本次 `h:local` 没有可信 `coordinationIntent`，立即停止业务工具调用并报告宿主入口故障，不能手工实现、构建或重新拼装命令。此检查不启动真实业务 `implement` Run。
+
 `source-link` 的计划命令不注入 Host Adapter。真实 Codex Agent 执行由当前任务直接运行源码 Coordinator；项目 Hook 的命令前缀是 `h:local`，与安装态 `h:<别名>` 区分。开发态 Host 交换从当前 Codex session 的宿主 rollout 中读取原生 `function_call` 和 `function_call_output`，按 session、工作目录、工具名、参数摘要、调用 ID 与 Turn ID 绑定请求和结果。该路径不依赖项目 Hook 投递。rollout 与 `state_5.sqlite` 属于 Codex 当前宿主的内部格式；格式变更时交换层应拒绝执行，重新验证适配器后才能继续。
+
+本地 Hook 在已绑定数据根的 `visible-intents/` 保存经校验的意图，并把 `coordinationIntent` 缩成 `ref.` 引用。Coordinator 仍逐项校验原意图的摘要、命令 ID、会话、期限及 Release 身份。操作人将引用作为单一 `--intent` 参数原样传递，允许的同意图重试也复用这一个值；不再手工复制很长的 base64 意图。启动前用真正的带输出捕获子进程探针，例如 `node -e "require('node:child_process').execFileSync(process.execPath,['--version'],{stdio:'pipe'})"`。若返回 `EPERM`，第一次启动 Coordinator 就对精确命令申请窄范围沙箱提权。
 
 先用 `dev execute` 的 `hostBinding` 回执和 development manifest 配置本地绑定。以下路径全部是绝对路径；`--plugin-root` 仅是控制根内的本地绑定目录，不是插件安装目录：
 

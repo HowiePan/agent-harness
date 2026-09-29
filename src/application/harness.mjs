@@ -377,7 +377,7 @@ export const createHarness = async ({ controlRoot: controlRootInput, dataRoot: d
           intent.qualityRepairInventory = createQualityRepairInventorySnapshot(qualityTarget);
           if (intent.qualityRepairInventory.findings.length === 0) intent.qualityCloseout = createQualityCloseoutSnapshot(qualityTarget);
         } else if (intent.action === 'quality' && intent.preset === 'closeout') intent.qualityCloseout = createQualityCloseoutSnapshot(qualityTarget);
-        else if (['quality', 'full', 'deliver'].includes(intent.action)) intent.knownFindingInventory = createQualityInventorySnapshot(qualityTarget);
+        else if (['implement', 'quality', 'full', 'deliver'].includes(intent.action)) intent.knownFindingInventory = createQualityInventorySnapshot(qualityTarget);
         }
       }
       const sourceToolBinding = workflowInput ? { commandPrefix: [process.execPath, fileURLToPath(new URL('../interfaces/cli/index.mjs', import.meta.url)), 'source'], controlRoot, dataRoot: authorityStore.root } : null;

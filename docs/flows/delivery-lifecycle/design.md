@@ -4,13 +4,15 @@
 
 ## 用途和合同
 
+独立的 `implement` 命令在已批准计划上连续执行 `implement → scope → docs → quality`，包括质量修复、复审和最终 Gate，不能在实现 Feature 完成时结束。它与 `full` 路线共享质量收口规则，并从 Target 取得当前源码的 `QualityInventorySnapshot@2.0`。
+
 适用于一个版本/功能的需求到交付闭环。输入是动作、目标版本、Feature、已批准的项目 Descriptor、执行模式、Gate Recipe，以及 Harness 从 Run Authority 派生的 `QualityTargetSnapshot`。`full` 路由顺序为 `intake → expansion → canonical → plan → implement → scope → docs → quality → review → deliver`。`requirements` 动作有四个 preset：`full`（默认，`intake → expansion → canonical`）、`expand-to-plan`（`intake → expansion → canonical → plan`）、`direct`（不扩展，`intake → canonical → plan`）、`plan-only`（`plan`）；`deliver` 可选择部分路线，其他阶段动作也可独立启动。端口依次使用 `delivery-intake-v1`、`delivery-expansion-v1`、`canonical-requirement-v1`、`delivery-plan-v1`、`delivery-implementation-v1`、`delivery-scope-v1`、`delivery-docs-v1`、`delivery-quality-v1`、`delivery-review-v1` 与 `delivery-receipt-v1`。节点由 `graph/definition.mjs` 声明，`nodes/delivery/` 生成 Feature，`policy/` 固定质量、评审和关闭规则。
 
 结果须符合 Feature/Profile 合同并附来源和变更文件证据。`quality` 是质量检查点，`review`/`deliver` 是只读阶段；当前周期 P0–P3 必须关闭，必要人工 Decision 与最终 Gate Receipt 齐全才能关闭 Run。失败按 Attempt 预算处理；恢复只能遵守固定 Run 身份和 Epoch 规则。
 
 版本 Target 的确定性身份为 `projectId + workflowId + target`。首次规划时 Target revision 为 0，Finding Ledger 可以为空；因此质量流程不要求 Project Descriptor 预先知道审查将发现的问题。后续独立的 `plan`、`implement`、`quality` 或 `deliver` 命令读取同一 Target 投影。终态 Run 中的 Finding、修复 Evidence 和 `knownFindingDispositions` 合并为下一 revision；活动且尚未完成的 Run 不进入新 Plan，避免心跳、Decision 或中间提交导致恢复 Plan 漂移。
 
-进入 `quality`、`full` 或 `deliver` 时，Harness 从 Target 生成不可变 `QualityInventorySnapshot@2.0`，绑定 Target revision/digest 和当前 Source digest。质量结果必须逐条处置快照中的既有 Finding，同时允许提交新的 Finding。源码变化保留 Ledger 历史但使旧 clean review 失效，必须在新 Source digest 上完成完整复审。旧 `policy.knownFindingInventories` 只作为迁移种子读取：迁移验证已注册声明自身并保留旧来源摘要，不再要求当前版本文档仍等于旧摘要；新快照独立绑定当前 Source digest，并记录原 inventory digest。新 Project Descriptor 不再生成旧字段。
+进入 `implement`、`quality`、`full` 或 `deliver` 时，Harness 从 Target 生成不可变 `QualityInventorySnapshot@2.0`，绑定 Target revision/digest 和当前 Source digest。质量结果必须逐条处置快照中的既有 Finding，同时允许提交新的 Finding。源码变化保留 Ledger 历史但使旧 clean review 失效，必须在新 Source digest 上完成完整复审。旧 `policy.knownFindingInventories` 只作为迁移种子读取：迁移验证已注册声明自身并保留旧来源摘要，不再要求当前版本文档仍等于旧摘要；新快照独立绑定当前 Source digest，并记录原 inventory digest。新 Project Descriptor 不再生成旧字段。
 
 权限边界不变：质量审查只读，修复由独立 Feature 执行；Flow 和 Extension 只返回 Intent/Event/Receipt，不直接写 Kernel Authority。Target 投影可从 Run Authority 和 Receipt 重建，不依赖模型上下文或插件内部状态。
 

@@ -3,7 +3,7 @@ import { normalizeQualityReviewLimit } from './quality-budget.mjs';
 import { assertQualityRepairInventorySnapshot } from '../../platform/execution/quality-target.mjs';
 
 /** Shared, Authority-bound planning rules for quality actions. Flow planners own routes and closure policy. */
-export const prepareQualityPlanning = ({ intent, project, sourceDigest, profileConfigKeys, actions = ['quality', 'full', 'deliver'], majorReleasePreset = 'release-exhaustive',
+export const prepareQualityPlanning = ({ intent, project, sourceDigest, profileConfigKeys, actions = ['implement', 'quality', 'full', 'deliver'], majorReleasePreset = 'release-exhaustive',
   missingTargetMessage = 'Quality planning requires an Authority-derived Quality Target snapshot.',
   missingInventoryMessage = 'Quality planning requires an Authority-derived quality inventory snapshot.' }) => {
   assert(intent.qualityTarget, 'QUALITY_TARGET_SNAPSHOT_REQUIRED', missingTargetMessage);

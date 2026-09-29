@@ -13,7 +13,8 @@ const digestPattern = /^[a-f0-9]{64}$/;
 
 export const readDevelopmentClearance = async ({ dataRoot, projectId, target, runs, evidenceStore, currentSnapshot, allowedPaths, excluded = [] }) => {
   const closed = runs.filter(run => run.status === 'closed' && run.metadata?.commandIntent?.target === target
-    && ['quality', 'full', 'deliver'].includes(run.metadata?.commandIntent?.action)).sort((a, b) => String(b.closedAt).localeCompare(String(a.closedAt)));
+    && ['implement', 'quality', 'full', 'deliver'].includes(run.metadata?.commandIntent?.action)
+    && (run.metadata.commandIntent.action !== 'implement' || (run.profile?.config?.requireFinalQualityReview === true && run.features?.some(feature => feature.metadata?.qualityReview === true)))).sort((a, b) => String(b.closedAt).localeCompare(String(a.closedAt)));
   for (const run of closed) {
     const directory = resolve(dataRoot, 'receipts', safeSegment(projectId), safeSegment(run.runId));
     let names;

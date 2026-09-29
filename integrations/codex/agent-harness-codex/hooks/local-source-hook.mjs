@@ -7,6 +7,7 @@ import { classifyLocalIncident } from '../../../../src/application/local-inciden
 import { capturePostToolUse } from './post-tool-host-bridge.mjs';
 import { hookResponse, loadBindings, parsePseudoCommand } from './pseudo-command-router.mjs';
 import { decodeVisibleLifecycleIntent } from '../lib/visible-lifecycle-intent.mjs';
+import { storeVisibleLifecycleIntentReference } from '../lib/visible-lifecycle-intent-reference.mjs';
 import { selectLocalSourceBindingsDir } from './local-source-route.mjs';
 
 const fail = (code, message) => { throw Object.assign(new Error(message), { code }); };
@@ -94,7 +95,7 @@ export const renderLocalSourceHooks = async ({ bindingsDir } = {}) => {
   const paths = [process.execPath, fileURLToPath(import.meta.url), '--bindings-dir', resolve(bindingsDir)];
   const quote = value => process.platform === 'win32' ? `"${value}"` : `'${value.replaceAll("'", "'\\''")}'`;
   const command = paths.map(quote).join(' ');
-  const handler = { type: 'command', command, ...(process.platform === 'win32' ? { commandWindows: command } : {}), timeout: 120, additionalContextLimit: 8000 };
+  const handler = { type: 'command', command, ...(process.platform === 'win32' ? { commandWindows: `& ${command}` } : {}), timeout: 120, additionalContextLimit: 8000 };
   return { description: 'Agent Harness source-link local command router.', hooks: {
     UserPromptSubmit: [{ hooks: [handler] }],
   } };
@@ -102,29 +103,41 @@ export const renderLocalSourceHooks = async ({ bindingsDir } = {}) => {
 
 export const handleLocalSourceHook = async (event, { bindingsDir } = {}) => {
   if (event?.hook_event_name === 'UserPromptSubmit') {
-    if (typeof event.prompt !== 'string' || !/^h:local(?:\s|$)/.test(event.prompt)) return {};
-    const match = event.prompt.match(/^h:local\s+(.+)$/);
+    const submitted = typeof event.prompt === 'string' ? event.prompt.trim() : '';
+    if (!/^h:local(?:\s|$)/.test(submitted)) return {};
+    const match = submitted.match(/^h:local[ \t]+(.+)$/);
     if (!match) return blockLocalCommand('LOCAL_SOURCE_COMMAND_INVALID', '命令语法为 h:local <项目别名> <动作> <目标> [预设]。');
     if (match[1].startsWith('init ')) return blockLocalCommand('LOCAL_SOURCE_INITIALIZATION_REQUIRED', '首次本地绑定请从项目 checkout 运行 agent-harness dev execute。');
     const prompt = `h:${match[1]}`;
     const parsed = parsePseudoCommand(prompt);
     if (!parsed || parsed.kind === 'invalid') return blockLocalCommand('LOCAL_SOURCE_COMMAND_INVALID', parsed?.error ?? '无法解析本地命令。');
-    try { bindingsDir = await selectLocalSourceBindingsDir({ event, defaultBindingsDir: bindingsDir }); }
+    try { bindingsDir = await selectLocalSourceBindingsDir({ event: { ...event, prompt: submitted }, defaultBindingsDir: bindingsDir }); }
     catch (error) { return blockLocalCommand(error?.code ?? 'LOCAL_SOURCE_ROUTE_FAILED', error.message); }
     let bindingOptions;
+    let bindings;
     let synchronized = null;
-    try { ({ bindingOptions } = await loadLocalSourceBindings(bindingsDir)); }
+    try { ({ bindings, bindingOptions } = await loadLocalSourceBindings(bindingsDir)); }
     catch (error) {
       if (!staleBindingCodes.has(error?.code)) return bindingFailureContext(error);
       try { synchronized = await syncLocalSourceBinding({ event, parsed, bindingsDir, forceRebind: error.code === 'SOURCE_LINK_RELEASE_STALE' }); }
       catch (syncError) { return autoSyncFailureContext(syncError); }
-      try { ({ bindingOptions } = await loadLocalSourceBindings(bindingsDir)); }
+      try { ({ bindings, bindingOptions } = await loadLocalSourceBindings(bindingsDir)); }
       catch (retryError) { return bindingFailureContext(retryError); }
     }
     let response;
     try { response = await hookResponse({ ...event, prompt }, bindingOptions) ?? {}; }
     catch (error) { return blockLocalCommand(error?.code ?? 'LOCAL_SOURCE_ROUTING_FAILED', '命令意图生成失败。'); }
     if (parsed.kind === 'command' && !verifiedCommandResponse(response, parsed)) return blockLocalCommand('LOCAL_SOURCE_COMMAND_INTENT_MISSING', '没有取得与项目、动作和目标一致的可信 Coordinator 意图。');
+    if (parsed.kind === 'command') {
+      const context = response.hookSpecificOutput.additionalContext;
+      const marker = '解析结果：';
+      const prefix = context.slice(0, context.lastIndexOf(marker) + marker.length);
+      const resolved = JSON.parse(context.slice(prefix.length));
+      try {
+        resolved.coordinationIntent = await storeVisibleLifecycleIntentReference({ encodedIntent: resolved.coordinationIntent, dataRoot: bindings.harness.dataRoot });
+      } catch (error) { return blockLocalCommand(error?.code ?? 'LOCAL_SOURCE_COMMAND_INTENT_REFERENCE_FAILED', '无法保存已验证的短意图引用。'); }
+      response.hookSpecificOutput.additionalContext = `${prefix}${JSON.stringify(resolved)}`;
+    }
     if (synchronized && response.hookSpecificOutput?.additionalContext) response.hookSpecificOutput.additionalContext = `本地 source-link 已自动同步（${synchronized.level ?? '无源码差异'}；${synchronized.continuation ?? '已更新绑定'}）。${response.hookSpecificOutput.additionalContext}`;
     return response;
   }

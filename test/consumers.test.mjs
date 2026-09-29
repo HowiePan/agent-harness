@@ -80,7 +80,7 @@ test('CardWorld action plans use action-specific stages, paths, stop conditions,
   const expected = new Map([
     ['requirements', ['requirement-intake', 'requirement-expansion', 'canonical-requirement']],
     ['plan', ['version-planning', 'plan-review']],
-    ['implement', ['implementation']],
+    ['implement', ['implementation', 'scope-resolution', 'docs-closeout', 'quality']],
     ['scope', ['scope-resolution']],
     ['quality', ['quality']],
     ['docs', ['docs-closeout']],
@@ -88,9 +88,15 @@ test('CardWorld action plans use action-specific stages, paths, stop conditions,
     ['deliver', ['quality', 'delivery-receipt']],
   ]);
   for (const [action, stages] of expected) {
-    const plan = createCardWorldLifecyclePlan({ intent: { action, target: 'V-next', scope: action, sourcePolicy: action === 'quality' ? 'review-and-repair' : null, qualityTarget, ...(['quality', 'full', 'deliver'].includes(action) ? { knownFindingInventory } : {}) }, project, runId: `${action}-v-next`, sourceDigest: 'a'.repeat(64) });
+    const plan = createCardWorldLifecyclePlan({ intent: { action, target: 'V-next', scope: action, sourcePolicy: ['implement', 'quality'].includes(action) ? 'review-and-repair' : null, qualityTarget, ...(['implement', 'quality', 'full', 'deliver'].includes(action) ? { knownFindingInventory } : {}) }, project, runId: `${action}-v-next`, sourceDigest: 'a'.repeat(64) });
     assert.deepEqual(plan.run.features.map(feature => feature.metadata.stage), stages, action);
     assert.equal(plan.stopCondition.action, action);
+    if (action === 'implement') {
+      assert.equal(plan.run.features.at(-1).metadata.qualityReview, true);
+      assert.deepEqual(plan.run.features.at(-1).dependsOn, ['docs/V-next']);
+      assert.equal(plan.run.profileConfig.requireFinalQualityReview, true);
+      assert.equal(plan.stopCondition.requiresAllFindingsResolved, true);
+    }
   }
   const quality = createCardWorldLifecyclePlan({ intent: { action: 'quality', target: 'V-next', scope: 'quality', sourcePolicy: 'review-and-repair', qualityTarget, knownFindingInventory }, project, runId: 'quality-v-next', sourceDigest: 'a'.repeat(64) });
   assert.deepEqual(quality.run.features[0].allowedPaths, []);
@@ -103,6 +109,12 @@ test('CardWorld action plans use action-specific stages, paths, stop conditions,
   const deliver = createCardWorldLifecyclePlan({ intent: { action: 'deliver', target: 'V-next', scope: 'delivery-receipt', qualityTarget, knownFindingInventory }, project, runId: 'deliver-v-next', sourceDigest: 'a'.repeat(64) });
   assert.equal(deliver.run.profileConfig.requireFinalQualityReview, true);
   assert.equal(deliver.run.profileConfig.requireUserCodeReview, true);
+  assert.equal(cardWorldCommandManifest.actions.implement.presets.default.scope, 'implementation..quality');
+  assert.throws(() => createCardWorldLifecyclePlan({ intent: { action: 'implement', target: 'V-next', qualityTarget }, project, runId: 'implement-no-inventory', sourceDigest: 'a'.repeat(64) }), error => error.code === 'QUALITY_INVENTORY_SNAPSHOT_REQUIRED');
+  project.gateRecipes = [{ id: 'fresh-final-gate', scope: 'final', required: true }];
+  const implement = createCardWorldLifecyclePlan({ intent: { action: 'implement', target: 'V-next', qualityTarget, knownFindingInventory }, project, runId: 'implement-with-final-gate', sourceDigest: 'a'.repeat(64) });
+  assert.deepEqual(implement.stopCondition.requiredFinalGates, ['fresh-final-gate']);
+  assert.deepEqual(implement.run.profileConfig.requiredFinalGates, ['fresh-final-gate']);
 });
 
 test('Collection consumer keeps ten game lanes, Feature dependencies, and one shared capability owner', () => {

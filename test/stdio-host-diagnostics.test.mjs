@@ -63,7 +63,7 @@ test('Host envelope is built from the pending request and a timeout closes the e
 test('quality actions fail before Run start when the Host result still needs manual transcription', () => {
   const exchange = createStdioHostExchange({ input: new PassThrough(), output: new PassThrough() });
   assert.equal(exchange.machineBoundResults, false);
-  for (const action of ['quality', 'full', 'deliver']) assert.throws(
+  for (const action of ['implement', 'quality', 'full', 'deliver']) assert.throws(
     () => assertMachineBoundQualityTransport(exchange, action),
     error => error.code === 'CODEX_HOST_MACHINE_BRIDGE_UNAVAILABLE',
   );

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { once } from 'node:events';
-import { execFile } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
@@ -15,6 +15,7 @@ import { handleLocalSourceHook, renderLocalSourceHooks } from '../integrations/c
 import { resolveProbeSessionId, runLocalSourceHostProbe } from '../integrations/codex/agent-harness-codex/scripts/local-source-host-probe.mjs';
 import { createLocalSourceLifecycleCommand } from '../integrations/codex/agent-harness-codex/scripts/local-source-lifecycle-intent.mjs';
 import { decodeVisibleLifecycleIntent } from '../integrations/codex/agent-harness-codex/lib/visible-lifecycle-intent.mjs';
+import { resolveVisibleLifecycleIntentArgument } from '../integrations/codex/agent-harness-codex/lib/visible-lifecycle-intent-reference.mjs';
 
 
 test('source-linked project hooks route native tool evidence without a packaged plugin binding', async t => {
@@ -46,6 +47,22 @@ test('source-linked project hooks route native tool evidence without a packaged 
   assert.match(hooks.hooks.UserPromptSubmit[0].hooks[0].command, /local-source-hook\.mjs/);
   assert.equal(hooks.hooks.UserPromptSubmit[0].hooks[0].timeout, 120);
   assert.equal(hooks.hooks.UserPromptSubmit[0].hooks[0].additionalContextLimit, 8000);
+  if (process.platform === 'win32') {
+    const command = hooks.hooks.UserPromptSubmit[0].hooks[0].commandWindows;
+    assert.match(command, /^& "/);
+    const result = await new Promise((resolveRun, rejectRun) => {
+      const child = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', command], { cwd: projectRoot, windowsHide: true });
+      let stdout = '';
+      let stderr = '';
+      child.stdout.on('data', chunk => { stdout += chunk; });
+      child.stderr.on('data', chunk => { stderr += chunk; });
+      child.on('error', rejectRun);
+      child.on('close', code => resolveRun({ code, stdout, stderr }));
+      child.stdin.end(JSON.stringify({ hook_event_name: 'UserPromptSubmit', prompt: 'h:local where local-debug', cwd: projectRoot, session_id: 'local-source-session' }));
+    });
+    assert.equal(result.code, 0, result.stderr);
+    assert.match(JSON.parse(result.stdout).hookSpecificOutput.additionalContext, /h:where/);
+  }
   assert.equal(JSON.parse(await readFile(configured.bindingFile, 'utf8')).harness.release.mode, 'source-link');
   assert.equal(resolveProbeSessionId({ environmentSessionId: 'local-source-session' }), 'local-source-session');
   assert.throws(() => resolveProbeSessionId({ explicitSessionId: 'other-session', environmentSessionId: 'local-source-session' }), { code: 'LOCAL_SOURCE_HOST_PROBE_SESSION_MISMATCH' });
@@ -62,10 +79,24 @@ test('source-linked project hooks route native tool evidence without a packaged 
   await assert.rejects(() => createLocalSourceLifecycleCommand({ bindingsDir, alias: 'unknown', action: 'quality', target: 'fixture-v1', sessionId: 'local-source-session' }), { code: 'LOCAL_SOURCE_PROJECT_ALIAS_UNKNOWN' });
   const routed = await handleLocalSourceHook({ hook_event_name: 'UserPromptSubmit', prompt: 'h:local local-debug quality fixture-v1', cwd: projectRoot, session_id: 'local-source-session' }, { bindingsDir });
   assert.match(routed.hookSpecificOutput.additionalContext, /本地源码 Coordinator/);
+  const pasted = await handleLocalSourceHook({ hook_event_name: 'UserPromptSubmit', prompt: '  h:local local-debug quality fixture-v1\r\n', cwd: projectRoot, session_id: 'local-source-session' }, { bindingsDir });
+  assert.equal(pasted.decision, undefined);
+  assert.match(pasted.hookSpecificOutput.additionalContext, /本地源码 Coordinator/);
+  const multiline = await handleLocalSourceHook({ hook_event_name: 'UserPromptSubmit', prompt: 'h:local local-debug quality\nfixture-v1', cwd: projectRoot, session_id: 'local-source-session' }, { bindingsDir });
+  assert.equal(multiline.decision, 'block');
+  assert.match(multiline.reason, /LOCAL_SOURCE_COMMAND_INVALID/);
   const routedIntent = JSON.parse(routed.hookSpecificOutput.additionalContext.split('解析结果：').at(-1));
-  const qualityCommand = decodeVisibleLifecycleIntent(routedIntent.coordinationIntent).command;
+  assert.match(routedIntent.coordinationIntent, /^ref\./);
+  assert.ok(routedIntent.coordinationIntent.length < 512);
+  const qualityCommand = (await resolveVisibleLifecycleIntentArgument(routedIntent.coordinationIntent)).command;
   assert.equal(qualityCommand.target, 'fixture-v1');
   assert.equal(resolveCommandIntent(deliveryLifecycleCommandManifest, qualityCommand).sourcePolicy, 'review-and-repair');
+  const implementation = await handleLocalSourceHook({ hook_event_name: 'UserPromptSubmit', prompt: 'h:local local-debug implement fixture-v1', cwd: projectRoot, session_id: 'local-source-session' }, { bindingsDir });
+  assert.equal(implementation.decision, undefined);
+  const implementationIntent = JSON.parse(implementation.hookSpecificOutput.additionalContext.split('解析结果：').at(-1));
+  const implementationCommand = (await resolveVisibleLifecycleIntentArgument(implementationIntent.coordinationIntent)).command;
+  assert.deepEqual(implementationCommand, { action: 'implement', target: 'fixture-v1', arguments: [] });
+  assert.equal(resolveCommandIntent(deliveryLifecycleCommandManifest, implementationCommand).scope, 'implementation..quality');
   for (const [preset, expectedPolicy] of [
     ['repair-known', 'repair'],
     ['closeout', 'read-only'],
@@ -76,7 +107,7 @@ test('source-linked project hooks route native tool evidence without a packaged 
     const response = await handleLocalSourceHook({ hook_event_name: 'UserPromptSubmit', prompt: `h:local local-debug quality fixture-v1 ${preset}`, cwd: projectRoot, session_id: 'local-source-session' }, { bindingsDir });
     assert.equal(response.decision, undefined, `${preset} must produce a trusted intent`);
     const envelope = JSON.parse(response.hookSpecificOutput.additionalContext.split('解析结果：').at(-1));
-    const command = decodeVisibleLifecycleIntent(envelope.coordinationIntent).command;
+    const command = (await resolveVisibleLifecycleIntentArgument(envelope.coordinationIntent)).command;
     assert.deepEqual(command.arguments, [preset]);
     const resolved = resolveCommandIntent(deliveryLifecycleCommandManifest, command);
     assert.equal(resolved.preset, preset);
@@ -131,7 +162,7 @@ test('source-linked project hooks route native tool evidence without a packaged 
   } finally { process.chdir(previousCwd); }
   assert.match(synced.hookSpecificOutput.additionalContext, /已自动同步（H3/);
   const syncedIntent = JSON.parse(synced.hookSpecificOutput.additionalContext.split('解析结果：').at(-1));
-  assert.equal(decodeVisibleLifecycleIntent(syncedIntent.coordinationIntent).command.target, 'fixture-v1');
+  assert.equal((await resolveVisibleLifecycleIntentArgument(syncedIntent.coordinationIntent)).command.target, 'fixture-v1');
   assert.notEqual(JSON.parse(await readFile(source.file, 'utf8')).release.artifactDigest, staleManifest.release.artifactDigest);
 
   const mismatchedBinding = JSON.parse(await readFile(configured.bindingFile, 'utf8'));

@@ -16,7 +16,7 @@ const verificationOutputPaths = feature => unique(feature.metadata?.qualityConte
 const cleanReviewSubmission = (state, feature) => {
   const submission = currentFeatureSubmission(state, feature);
   const inventory = feature.metadata?.knownFindingInventory;
-  if (feature.metadata?.qualityRoot?.startsWith('engine:') && ['quality', 'full', 'deliver'].includes(state.metadata?.commandIntent?.action) && !inventory) return false;
+  if (feature.metadata?.qualityRoot?.startsWith('engine:') && ['implement', 'quality', 'full', 'deliver'].includes(state.metadata?.commandIntent?.action) && !inventory) return false;
   const dispositions = submission?.result?.knownFindingDispositions;
   const inventoryClean = !inventory || (Array.isArray(dispositions) && dispositions.length === inventory.findings.length && dispositions.every(item => item.disposition === 'not-reproduced'));
   return Boolean(submission && submission.outputSourceDigest === state.sourceDigest && (submission.result.findings ?? []).length === 0 && inventoryClean && !state.findings.some(finding => finding.status !== 'resolved'));

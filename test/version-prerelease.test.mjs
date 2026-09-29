@@ -7,6 +7,7 @@ import { digestJson, sha256 } from '../src/common/canonical.mjs';
 import { captureWorkspace } from '../src/common/workspace-snapshot.mjs';
 import { loadReleaseDocumentationScope } from '../src/application/release-documentation-scope.mjs';
 import { ensurePreReleaseCandidate, promoteVersionRelease, readDevelopmentClearance, readVersionRelease } from '../src/application/version-prerelease.mjs';
+import { ensureVersionClearance } from '../src/application/version-clearance.mjs';
 import { createCardWorldProjectDescriptor, createCardWorldLifecyclePlan } from '../integrations/legacy-consumers/cardworld/index.mjs';
 
 const setup = async t => {
@@ -52,6 +53,12 @@ test('nested build output exclusion keeps package bytes outside source digest', 
   assert.equal(after.digest, before.digest);
 });
 
+test('old implementation-only runs cannot acquire a quality clearance after the route changes', async t => {
+  const fixture = await setup(t);
+  const state = { status: 'closed', metadata: { qualityTarget: {}, commandIntent: { action: 'implement' } }, profile: { config: { requireFinalQualityReview: false } }, features: [] };
+  assert.equal(await ensureVersionClearance(fixture.dataRoot, state), null);
+});
+
 test('development clearance accepts only declared release delta and prerelease bypasses review budget', async t => {
   const fixture = await setup(t);
   const snapshot = await captureWorkspace(fixture.workspaceRoot, { excluded: fixture.project.workspace.excluded });
@@ -70,6 +77,14 @@ test('development clearance accepts only declared release delta and prerelease b
     evidenceStore: { read: async () => ({ bytes: Buffer.from(JSON.stringify(baseline)), metadata: { sourceDigest: baseline.digest } }) }, currentSnapshot: snapshot,
     allowedPaths: ['release/docs-scope.json'] });
   assert.deepEqual(source.authorizedPreReleaseDelta, ['release/docs-scope.json']);
+  const implementedRun = { ...run, metadata: { commandIntent: { action: 'implement', target: 'V3.8.4' } }, profile: { config: { requireFinalQualityReview: true } }, features: [{ metadata: { qualityReview: true } }] };
+  const implemented = await readDevelopmentClearance({ dataRoot: fixture.dataRoot, projectId: fixture.project.id, target: 'V3.8.4', runs: [implementedRun],
+    evidenceStore: { read: async () => ({ bytes: Buffer.from(JSON.stringify(baseline)), metadata: { sourceDigest: baseline.digest } }) }, currentSnapshot: snapshot,
+    allowedPaths: ['release/docs-scope.json'] });
+  assert.deepEqual(implemented.authorizedPreReleaseDelta, ['release/docs-scope.json']);
+  await assert.rejects(() => readDevelopmentClearance({ dataRoot: fixture.dataRoot, projectId: fixture.project.id, target: 'V3.8.4', runs: [{ ...implementedRun, profile: { config: { requireFinalQualityReview: false } } }],
+    evidenceStore: { read: async () => ({ bytes: Buffer.from(JSON.stringify(baseline)), metadata: { sourceDigest: baseline.digest } }) }, currentSnapshot: snapshot,
+    allowedPaths: ['release/docs-scope.json'] }), error => error.code === 'DEVELOPMENT_CLEARANCE_REQUIRED');
   await assert.rejects(() => readDevelopmentClearance({ dataRoot: fixture.dataRoot, projectId: fixture.project.id, target: 'V3.8.4',
     runs: [{ ...run, decisions: [] }], evidenceStore: { read: async () => ({ bytes: Buffer.from(JSON.stringify(baseline)), metadata: { sourceDigest: baseline.digest } }) },
     currentSnapshot: snapshot, allowedPaths: ['release/docs-scope.json'] }), error => error.code === 'DEVELOPMENT_EXIT_APPROVAL_REQUIRED');

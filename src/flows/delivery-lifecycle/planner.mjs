@@ -46,7 +46,7 @@ export const createDeliveryLifecyclePlanner = ({
     missingTargetMessage: 'Delivery lifecycle planning requires an Authority-derived Quality Target snapshot.',
     missingInventoryMessage: 'Delivery quality planning requires an Authority-derived quality inventory snapshot.' });
   const finalGateIds = (project.gateRecipes ?? []).filter(recipe => recipe.scope === 'final' && recipe.required !== false).map(recipe => recipe.id);
-  const gateIds = ['full', 'quality', 'deliver'].includes(intent.action) ? finalGateIds : prerelease ? [...new Set([...finalGateIds, project.policy.release.packageGateId])] : [];
+  const gateIds = ['implement', 'full', 'quality', 'deliver'].includes(intent.action) ? finalGateIds : prerelease ? [...new Set([...finalGateIds, project.policy.release.packageGateId])] : [];
   const quality = intent.action === 'quality';
   const full = intent.action === 'full';
   const profileConfig = {
@@ -54,7 +54,7 @@ export const createDeliveryLifecyclePlanner = ({
     requiredFinalGates: gateIds,
     requireCanonicalDecision: full || (intent.action === 'requirements' && intent.scope !== 'version-planning'),
     requireUserCodeReview: full || intent.action === 'deliver' || exhaustive,
-    requireFinalQualityReview: full || quality || intent.action === 'deliver',
+    requireFinalQualityReview: full || quality || intent.action === 'implement' || intent.action === 'deliver',
     qualityReviewLimit,
     priorQualityReviews,
     repairOnly,
@@ -86,7 +86,7 @@ export const createDeliveryLifecyclePlanner = ({
   }
   return {
     run: { runId, profileId, profileConfig, features, metadata: { workflow: { id: workflowDefinition.id, version: workflowDefinition.version, artifactDigest: workflowDefinition.artifactDigest }, qualityTarget: structuredClone(intent.qualityTarget), ...(repairOnly ? { qualityRepairInventory: structuredClone(intent.qualityRepairInventory) } : {}), ...(closeoutOnly ? { qualityCloseout: structuredClone(intent.qualityCloseout) } : {}) } },
-    stopCondition: { type: repairOnly || closeoutOnly ? 'routine-version-exit' : quality ? 'quality-run-complete' : full ? `${stopConditionPrefix}-full-complete` : `${stopConditionPrefix}-action-complete`, action: intent.action, requiresFeatureCompletion: true, requiresAllFindingsResolved: full || quality || intent.action === 'deliver', requiredFinalGates: gateIds },
+    stopCondition: { type: repairOnly || closeoutOnly ? 'routine-version-exit' : quality ? 'quality-run-complete' : full ? `${stopConditionPrefix}-full-complete` : `${stopConditionPrefix}-action-complete`, action: intent.action, requiresFeatureCompletion: true, requiresAllFindingsResolved: full || quality || intent.action === 'implement' || intent.action === 'deliver', requiredFinalGates: gateIds },
     protectedOperations: ['publication', 'commit', 'push', 'legacy-destruction', 'privilege-expansion', 'external-cutover', 'irreversible-migration'],
   };
 };

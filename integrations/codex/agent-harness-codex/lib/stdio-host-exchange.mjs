@@ -12,7 +12,7 @@ export const createHostResponseEnvelope = (request, result) => ({
 });
 
 export const assertMachineBoundQualityTransport = (exchange, action) => {
-  if (['quality', 'full', 'deliver'].includes(action) && exchange.machineBoundResults !== true) fail('CODEX_HOST_MACHINE_BRIDGE_UNAVAILABLE', 'Quality lifecycle requires a Host bridge that binds the native tool result to the pending request without manual frame transcription.');
+  if (['implement', 'quality', 'full', 'deliver'].includes(action) && exchange.machineBoundResults !== true) fail('CODEX_HOST_MACHINE_BRIDGE_UNAVAILABLE', 'Quality lifecycle requires a Host bridge that binds the native tool result to the pending request without manual frame transcription.');
 };
 
 export const createStdioHostExchange = ({ input = process.stdin, output = process.stdout, onRejected = null, responseTimeoutMs = 120000 } = {}) => {

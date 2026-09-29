@@ -58,6 +58,11 @@ test('lifecycle planning deterministically composes quality/full without convers
   assert.equal(first.stopCondition.type, 'quality-run-complete');
   assert.equal(first.protectedOperations.includes('hard-recovery'), false);
   assert.equal(first.protectedOperations.includes('external-cutover'), true);
+  const implementation = await harness.createLifecyclePlan({ projectId: descriptor.id, action: 'implement', target: 'V3.8.4', extensionId: extension.id, executionWorkspaceRoot: workspaceRoot });
+  assert.equal(implementation.intent.knownFindingInventory.version, '2.0');
+  assert.deepEqual(implementation.run.features.map(feature => feature.metadata.stage), ['implementation', 'scope-resolution', 'docs-closeout', 'quality']);
+  assert.equal(implementation.run.profileConfig.requireFinalQualityReview, true);
+  assert.equal(implementation.stopCondition.requiresAllFindingsResolved, true);
   const preflight = await harness.createExecutionReadinessReport(first);
   assert.equal(preflight.executionReady, false);
   assert.equal(preflight.checks.find(check => check.id === 'visible-host').issues[0].code, 'VISIBLE_AGENT_HOST_COORDINATOR_UNAVAILABLE');
