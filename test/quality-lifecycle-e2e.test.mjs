@@ -88,11 +88,12 @@ const externalFinding = { ...finding, id: 'Q-E2E-002', summary: 'Separate fixtur
 const overlappingFinding = { ...finding, id: 'Q-E2E-003', summary: 'Second defect in the same file.', evidence: ['README.md:2'], generatedOutputs: ['generated/second'] };
 const externalDiagnostic = { id: 'full-check-other', summary: 'Full check fails in OTHER.md.', evidence: ['host:full-check:OTHER.md:1'] };
 
-const createHost = ({ workspace, failFirstWait = false, failFirstInspect = false, failFirstConfirm = false, failFirstResult = false, repeatFindingOnce = false, repeatFindingCount = null, rejectRepairResultWithEdit = false, invalidRepairCheckpointOnce = false, externalDiagnosticOnce = false, overlappingFindings = false, missingDiagnosticDispositionOnce = false, cleanInitialReview = false, rejectProfileResultOnce = false, advanceClockOnResult = null, now = () => new Date().toISOString() }) => {
+const createHost = ({ workspace, failFirstWait = false, runningWaitCount = 0, failFirstInspect = false, failFirstConfirm = false, failFirstResult = false, repeatFindingOnce = false, repeatFindingCount = null, rejectRepairResultWithEdit = false, invalidRepairCheckpointOnce = false, externalDiagnosticOnce = false, overlappingFindings = false, missingDiagnosticDispositionOnce = false, cleanInitialReview = false, rejectProfileResultOnce = false, advanceClockOnResult = null, now = () => new Date().toISOString() }) => {
   const agents = new Map();
   const stats = { spawnCount: 0, containCount: 0, terminalCount: 0, maxActive: 0, reconcileCount: 0 };
   let sequence = 0;
   let shouldFailWait = failFirstWait;
+  let remainingRunningWaits = runningWaitCount;
   let shouldFailInspect = failFirstInspect;
   let shouldFailConfirm = failFirstConfirm;
   let shouldFailResult = failFirstResult;
@@ -166,6 +167,10 @@ const createHost = ({ workspace, failFirstWait = false, failFirstInspect = false
         throw error;
       }
       assert(agents.has(input.agentId));
+      if (remainingRunningWaits > 0) {
+        remainingRunningWaits -= 1;
+        return { status: 'running', progress: 'working', receipt: { operation: 'wait', agentId: input.agentId } };
+      }
       return { status: 'completed', progress: 'completed', receipt: { operation: 'wait', agentId: input.agentId } };
     },
     readVisibleResult: async input => {
@@ -272,7 +277,7 @@ const createHost = ({ workspace, failFirstWait = false, failFirstInspect = false
   return { adapter, agents, stats };
 };
 
-const setup = async ({ failFirstWait = false, failFirstInspect = false, failFirstConfirm = false, failFirstResult = false, repeatFindingOnce = false, repeatFindingCount = null, rejectRepairResultWithEdit = false, invalidRepairCheckpointOnce = false, externalDiagnosticOnce = false, gateFailureUntilRepair = false, overlappingFindings = false, missingDiagnosticDispositionOnce = false, cleanInitialReview = false, rejectProfileResultOnce = false, slowResultTransportMs = 0, preset = 'full', qualityReviewLimit = { mode: 'bounded', maxRechecks: 2 }, majorReleaseTargets = [] } = {}) => {
+const setup = async ({ failFirstWait = false, runningWaitCount = 0, failFirstInspect = false, failFirstConfirm = false, failFirstResult = false, repeatFindingOnce = false, repeatFindingCount = null, rejectRepairResultWithEdit = false, invalidRepairCheckpointOnce = false, externalDiagnosticOnce = false, gateFailureUntilRepair = false, overlappingFindings = false, missingDiagnosticDispositionOnce = false, cleanInitialReview = false, rejectProfileResultOnce = false, slowResultTransportMs = 0, preset = 'full', qualityReviewLimit = { mode: 'bounded', maxRechecks: 2 }, majorReleaseTargets = [] } = {}) => {
   const controlRoot = resolve(process.cwd());
   const parent = resolve(harnessTemporaryRoot(), 'quality-lifecycle-e2e');
   await mkdir(parent, { recursive: true });
@@ -291,7 +296,7 @@ const setup = async ({ failFirstWait = false, failFirstInspect = false, failFirs
   } : loadedEngine;
   const runtime = await loadExtensionPack('./integrations/codex/extensions/codex-runtime.mjs', { cwd: controlRoot, controlRoot });
   let clockMs = Date.now();
-  const host = createHost({ workspace, failFirstWait, failFirstInspect, failFirstConfirm, failFirstResult, repeatFindingOnce, repeatFindingCount, rejectRepairResultWithEdit, invalidRepairCheckpointOnce, externalDiagnosticOnce, overlappingFindings, missingDiagnosticDispositionOnce, cleanInitialReview, rejectProfileResultOnce,
+  const host = createHost({ workspace, failFirstWait, runningWaitCount, failFirstInspect, failFirstConfirm, failFirstResult, repeatFindingOnce, repeatFindingCount, rejectRepairResultWithEdit, invalidRepairCheckpointOnce, externalDiagnosticOnce, overlappingFindings, missingDiagnosticDispositionOnce, cleanInitialReview, rejectProfileResultOnce,
     advanceClockOnResult: slowResultTransportMs ? () => { clockMs += slowResultTransportMs; } : null,
     ...(slowResultTransportMs ? { now: () => new Date(clockMs).toISOString() } : {}) });
   const create = () => createHarness({ controlRoot, dataRoot, releaseIdentity, strictProjectIdentity: false, extensions: [engine, runtime], agentAdapter: host.adapter,
@@ -328,6 +333,19 @@ test('a clean initial quality review directly seals version clearance and develo
   assert.equal(completed.versionClearance.receipt.qualityConclusion.fullReviewPerformed, true);
   assert.equal(completed.versionClearance.receipt.status, 'development-complete');
   assert.equal(JSON.parse(await readFile(completed.versionClearance.file, 'utf8')).receiptDigest, completed.versionClearance.receipt.receiptDigest);
+});
+
+test('running Host waits do not consume the visible coordination round budget', async t => {
+  const fixture = await setup({ cleanInitialReview: true, runningWaitCount: 3 });
+  t.after(() => rm(fixture.root, { recursive: true, force: true }));
+  const completed = await fixture.harness.executeVisibleLifecyclePlan(fixture.plan, {
+    commandId: 'running-waits-budget',
+    preflightReport: await fixture.harness.createExecutionReadinessReport(fixture.plan),
+    maxRounds: 1,
+  });
+  assert.equal(completed.status, 'closed');
+  assert.equal(completed.rounds.length, 1);
+  assert.ok(completed.state.leases[0].heartbeatCount >= 4);
 });
 
 test('visible result observation renews the Lease after slow native transport', async t => {

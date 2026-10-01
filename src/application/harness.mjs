@@ -45,8 +45,8 @@ import { createQualityCloseoutSnapshot, createQualityInventorySnapshot, createQu
 import { sealExecutionReadinessReport, verifyExecutionReadinessReport } from './execution-readiness.mjs';
 import { readActiveRelease, resolveActiveRuntimeRoot } from '../platform/registry/active-generation.mjs';
 import { RunLineageStore, resolveRunLineage, verifyRunLineageResolution } from './lineage.mjs';
-import { ensurePlanApprovalArtifact, planApprovalSatisfied, planApprovalSnapshot } from '../flows/delivery-lifecycle/plan-approval.mjs';
-import { assessPlanSourceCompatibility, planSourceCompatibilitySatisfied } from './plan-source-compatibility.mjs';
+import { ensurePlanApprovalArtifact, planApprovalSatisfied, planApprovalSnapshot, reviewedPlanProposal } from '../flows/delivery-lifecycle/plan-approval.mjs';
+import { assessAutomaticPlanSourceCompatibility, assessPlanSourceCompatibility, assessRecoveredImplementationContinuation, assessVerifiedImplementationContinuation, matchingPlanSourceCompatibilityDecision } from './plan-source-compatibility.mjs';
 import { preparePlanRevisionIntent } from './plan-revision.mjs';
 import {
   buildExecutionGrantContext,
@@ -632,7 +632,8 @@ export const createHarness = async ({ controlRoot: controlRootInput, dataRoot: d
       if (input.metadata?.commandIntent?.action === 'implement' && input.features.some(feature => feature.metadata?.stage === 'implementation') && !input.features.some(feature => feature.metadata?.stage === 'plan-review')) {
         const target = input.metadata?.commandIntent?.target;
         const workflowId = input.metadata?.workflow?.id;
-        const candidates = (await authorityStore.list(project.id)).filter(run => run.status !== 'superseded'
+        const projectRuns = await authorityStore.list(project.id);
+        const candidates = projectRuns.filter(run => run.status !== 'superseded'
           && run.metadata?.commandIntent?.target === target && run.metadata?.workflow?.id === workflowId
           && run.features.some(feature => feature.metadata?.stage === 'plan-review'));
         const planKey = candidates.find(run => run.metadata?.logicalTaskKey)?.metadata.logicalTaskKey;
@@ -651,10 +652,26 @@ export const createHarness = async ({ controlRoot: controlRootInput, dataRoot: d
           const evidence = await evidenceStore.read(sourceRef);
           assert(evidence.metadata.projectId === project.id && evidence.metadata.runId === latest.runId, 'IMPLEMENTATION_PLAN_SOURCE_EVIDENCE_MISMATCH', 'Plan source evidence belongs to another Run.');
           const assessment = assessPlanSourceCompatibility({ planRun: latest, baselineSnapshot: JSON.parse(evidence.bytes.toString('utf8')), currentSnapshot: current, excluded: project.workspace.excluded ?? [] });
-          assert(planSourceCompatibilitySatisfied(latest, assessment), 'IMPLEMENTATION_PLAN_SOURCE_MISMATCH', 'Approved plan source changed without a matching compatibility Decision.', { changedFiles: assessment.changedFiles });
-          sourceCompatibility = { decisionId: 'implementation-plan-source-compatible', changedFilesDigest: assessment.changedFilesDigest };
+          const reviewedDecision = matchingPlanSourceCompatibilityDecision(latest, assessment);
+          if (reviewedDecision) {
+            sourceCompatibility = { mode: 'reviewed-decision', decisionId: reviewedDecision.id, changedFilesDigest: assessment.changedFilesDigest };
+          } else {
+            sourceCompatibility = assessVerifiedImplementationContinuation({ planRun: latest, planArtifact: artifact,
+              priorRuns: projectRuns, currentSourceDigest: runSourceDigest, workspaceRoot: workspace.root,
+              implementationFeatures: input.features })
+              ?? await assessRecoveredImplementationContinuation({ planRun: latest, planArtifact: artifact,
+                priorRuns: projectRuns, currentSnapshot: current, workspaceRoot: workspace.root,
+                implementationFeatures: input.features,
+                evidenceStore, controlRoot, dataRoot: globalDataRoot })
+              ?? assessAutomaticPlanSourceCompatibility({ planRun: latest, assessment,
+                implementationFeatures: input.features, policyPaths: project.policy?.planSourceAutoCompatiblePaths ?? [] });
+            assert(sourceCompatibility, 'IMPLEMENTATION_PLAN_SOURCE_MISMATCH', 'Approved plan source changed outside the configured automatic compatibility paths or approved implementation scope.', { changedFiles: assessment.changedFiles });
+          }
         }
-        approvedPlan = { projectId: latest.projectId, runId: latest.runId, planDigest: artifact.planDigest, artifactDigest: artifact.artifactDigest, sourceDigest: runSourceDigest, originalSourceDigest: latest.sourceDigest, ...(sourceCompatibility ? { sourceCompatibility } : {}) };
+        const typedPlan = reviewedPlanProposal(latest);
+        assert(typedPlan?.proposedFeatures?.some(feature => feature.projectId === project.id && feature.disposition === 'project-owned'),
+          'IMPLEMENTATION_TYPED_PLAN_REQUIRED', 'Approved implementation plan has no project-owned Feature proposal.');
+        approvedPlan = { projectId: latest.projectId, runId: latest.runId, planDigest: artifact.planDigest, artifactDigest: artifact.artifactDigest, sourceDigest: runSourceDigest, originalSourceDigest: latest.sourceDigest, typedPlan: structuredClone(typedPlan), ...(sourceCompatibility ? { sourceCompatibility } : {}) };
       }
       const pluginSet = pluginHost.snapshot();
       const installedCompositionDigest = digestJson({ plugins: pluginSet.manifests, extensions: extensionSet.installed });
@@ -679,7 +696,13 @@ export const createHarness = async ({ controlRoot: controlRootInput, dataRoot: d
         }
         await verifyHeadlessExecutionGrant({ adapter: trustedExecutionAuthorizationAdapter, grant: executionGrant, context, manifest: runtimeManifest, now: kernel.now });
       }
-      return kernel.startRun({ ...input, profileConfig, policyDigest, sourceDigest: runSourceDigest, pluginSetDigest: input.pluginSetDigest ?? installedCompositionDigest, metadata: { ...input.metadata, approvedPlan, ...(lifecycleExecution ? { lifecycleExecution } : {}), workspace: structuredClone(workspace), gateRecipes: structuredClone(project.gateRecipes ?? []), projectDescriptorDigest: project.descriptorDigest, extensionSetDigest: extensionSet.digest } }, command);
+      const projectOwnedCount = approvedPlan?.typedPlan.proposedFeatures.filter(item => item.projectId === project.id && item.disposition === 'project-owned').length ?? 0;
+      const implementationProgressRetries = Math.min(200, Math.max(20, projectOwnedCount * 20));
+      const features = approvedPlan ? input.features.map(feature => feature.metadata?.stage === 'implementation'
+        ? { ...feature, attemptLimit: Math.max(feature.attemptLimit ?? 3, implementationProgressRetries + 1),
+          metadata: { ...feature.metadata, approvedDeliveryPlan: structuredClone(approvedPlan.typedPlan), implementationProgressRetries } }
+        : feature) : input.features;
+      return kernel.startRun({ ...input, features, profileConfig, policyDigest, sourceDigest: runSourceDigest, pluginSetDigest: input.pluginSetDigest ?? installedCompositionDigest, metadata: { ...input.metadata, approvedPlan, ...(lifecycleExecution ? { lifecycleExecution } : {}), workspace: structuredClone(workspace), gateRecipes: structuredClone(project.gateRecipes ?? []), projectDescriptorDigest: project.descriptorDigest, extensionSetDigest: extensionSet.digest } }, command);
     },
 
     async dispatch(projectId, runId, input, command) {

@@ -1,4 +1,7 @@
+import { assert } from '../../../../common/errors.mjs';
+
 /** Build delivery Features from an explicitly installed business variant. */
+
 export const createDeliveryTemplates = ({ actionPaths, forbiddenPaths = ['.git', '.agent-harness-data'], qualityRootPrefix = 'delivery' } = {}) => {
   const safeForbidden = [...new Set(['.git', '.agent-harness-data', ...(forbiddenPaths ?? []).filter(p => !p.includes(':') && !p.startsWith('/'))])];
   const makeFeature = ({ action, target, stage, dependsOn = [], allowedPaths = [], sourcePolicy = 'write', qualityFindingPolicy = 'repair-and-rereview', ownerRole = 'operator', qualityReview = false, sourceDigest, knownFindingInventory = null, verificationOutputPaths = [] }) => ({
@@ -12,10 +15,11 @@ export const createDeliveryTemplates = ({ actionPaths, forbiddenPaths = ['.git',
       ? [{ id: 'review', title: `Review ${target} completely without workspace writes.` }, { id: 'report', title: 'Report every P0-P3 finding and supporting evidence.' }]
       : [{ id: 'execute', title: `Execute ${action} for ${target}.` }],
     dependsOn, allowedPaths: qualityReview ? [] : [...allowedPaths],
-    forbiddenPaths: qualityReview && qualityFindingPolicy === 'repair-and-rereview'
+    forbiddenPaths: verificationOutputPaths.length && (sourcePolicy === 'write' || qualityFindingPolicy === 'repair-and-rereview')
       ? safeForbidden.filter(path => !verificationOutputPaths.includes(path)) : [...safeForbidden],
     conflictKeys: [`${target}-${qualityReview ? 'quality-review' : action}`], gatePlan: [],
     metadata: { stage, sourcePolicy, target, version: target, allowDynamicDecomposition: stage === 'implementation' && !qualityReview && allowedPaths.length > 0,
+      ...(sourcePolicy === 'write' ? { verificationOutputPaths: structuredClone(verificationOutputPaths) } : {}),
       ...(qualityReview ? { qualityReview: true, qualityFindingPolicy, qualityRoot: `${qualityRootPrefix}:${target}`, reviewRound: 1, reviewSourceDigest: sourceDigest, ...(knownFindingInventory ? { knownFindingInventory: structuredClone(knownFindingInventory) } : {}), qualityContext: { target, version: target, verificationOutputPaths: structuredClone(verificationOutputPaths), ...(knownFindingInventory ? { knownFindingInventory: structuredClone(knownFindingInventory) } : {}) } } : {}),
     },
   });
@@ -31,6 +35,14 @@ export const createDeliveryTemplates = ({ actionPaths, forbiddenPaths = ['.git',
       qualityFindingPolicy: context.intent.sourcePolicy === 'read-only' ? 'record-only' : 'repair-and-rereview', sourceDigest: context.sourceDigest, knownFindingInventory: context.intent.knownFindingInventory ?? null,
       verificationOutputPaths: context.intent.sourcePolicy === 'read-only' ? [] : context.project?.policy?.qualityVerificationOutputs ?? [] });
     if (node.stage === 'quality-closeout') feature.metadata.qualityCloseout = structuredClone(context.intent.qualityCloseout);
+    if (node.stage === 'implementation' && !readOnly) {
+      const retries = context.project?.policy?.implementationVerificationRepairRetries ?? 0;
+      assert(Number.isInteger(retries) && retries >= 0 && retries <= 2, 'IMPLEMENTATION_VERIFICATION_RETRIES_INVALID', 'Implementation verification repair retries must be an integer from 0 to 2.');
+      feature.metadata.verificationRepairRetries = retries;
+      const progressRetries = 16;
+      feature.metadata.implementationProgressRetries = progressRetries;
+      feature.attemptLimit = Math.max(feature.attemptLimit ?? 3, progressRetries + 1);
+    }
     return feature;
   };
 

@@ -139,6 +139,8 @@ Extension 身份对象的字段是 `id`、`version`、可选或注册后必需�
 | `qualityReviewLimit` | `{mode:"bounded",maxRechecks:2}` | 质量目标跨 Run 的复审上限；初审不计入 `maxRechecks`。仅显式大版本准出可选无数值上限。 |
 | `majorReleaseTargets` | `[]` | 明确允许使用 `quality release-exhaustive` 的大版本目标清单。 |
 | `actionPaths` | 内置默认路径 | action 到允许写路径数组的映射。支持 `requirements`、`plan`、`implement`、`scope`、`docs`、`review`、`deliver` 等动作键。 |
+| `implementationVerificationRepairRetries` | `0` | `implement` 中的验证路径阻断可在同一 Feature 内自动重新派发的次数，范围 0–2；重试不增加 `allowedPaths` 或验证产物路径。 |
+| `planSourceAutoCompatiblePaths` | `[]` | 计划批准后可自动对账的项目相对路径。变化文件还必须同时落在已批准的本项目工作包路径及当前实施 Feature 路径内；Run 记录前后源码摘要、变化路径摘要和策略路径摘要。未声明或越界仍要求精确兼容性 Decision。 |
 | `release` | 无 | 可选的预发布策略：`documentationScopePath` 指向业务仓声明，`versionPaths` 限定版本元数据，`packageGateId` 指向实际打包 Gate，`artifactRoot` 与 `artifactIdentity` 指定候选制品。 |
 | `release.manifestPath` | 无 | 批次候选的制品清单路径，位于 `artifactRoot` 内；清单必须声明准确的批次和 item。 |
 | `release.manifestItemsKey` | `itemIds` | 批次制品清单中的 item 数组字段；业务变体可声明不同字段名。 |
@@ -212,6 +214,7 @@ Project Descriptor 是 Registry 中的规范化结果，通常由生成器产生
 | `policy.profileConfigs` | Profile ID 到 Profile 配置。 |
 | `policy.actionExecution` | action 级执行策略。 |
 | `policy.actionPaths` | action 级路径范围。 |
+| `policy.planSourceAutoCompatiblePaths` | 与已批准计划、当前实施范围取交集的自动来源对账路径；默认空。 |
 | `policy.gateBindings` | action 到 Gate ID 数组，或 `{pre,post,final}` 的映射。 |
 | `policy.knownFindingInventories` | 质量 Finding inventory。 |
 | `policy.qualityReviewLimit` | `mode` 与 `maxRechecks` 定义复审次数，默认两次。 |

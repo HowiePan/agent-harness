@@ -5,6 +5,7 @@ import { AGENT_PROMPT_CONTRACT_VERSION, compileAgentPrompt, createAgentPromptCod
 import { validatePluginInstance, validatePluginManifest } from '../src/platform/plugins/contracts.mjs';
 import { createDispatchResultContract } from '../src/platform/execution/result-contract.mjs';
 import { taskContract } from './test-support.mjs';
+import { implementNode } from '../src/flows/delivery-lifecycle/nodes/implement/index.mjs';
 
 const packet = () => ({
   protocolVersion: '1.0',
@@ -24,6 +25,19 @@ const packet = () => ({
   gates: [],
   workflowContext: { workflow: null, sourceManifest: null, memorySnapshot: null, upstreamOutputs: {}, taskInputs: [] },
   execution: { prompt: { pluginId: REFERENCE_AGENT_PROMPT_CODEC_MANIFEST.id, pluginVersion: REFERENCE_AGENT_PROMPT_CODEC_MANIFEST.version, contractVersion: AGENT_PROMPT_CONTRACT_VERSION }, result: createDispatchResultContract({ metadata: {} }) },
+});
+
+test('Implementation prompt requires a typed project-owned plan input', () => {
+  const implementation = packet();
+  implementation.feature = { ...implementation.feature, id: 'implementation', task: implementNode.task };
+  implementation.execution.result = createDispatchResultContract(implementation.feature);
+  implementation.workflowContext.taskInputs = [
+    { ...implementNode.task.inputs.find(input => input.id === 'approved-delivery-plan'), value: null },
+    { ...implementNode.task.inputs.find(input => input.id === 'upstream-delivery-plan'), values: [] },
+  ];
+  assert.throws(() => compileAgentPrompt(implementation), error => error.code === 'IMPLEMENTATION_TYPED_PLAN_INPUT_REQUIRED');
+  implementation.workflowContext.taskInputs[0].value = { proposedFeatures: [{ id: 'engine', projectId: 'project', disposition: 'project-owned' }] };
+  assert.ok(compileAgentPrompt(implementation).text);
 });
 
 test('Prompt Codec deterministically compiles immutable Dispatch data into the full quality contract', () => {
@@ -119,6 +133,22 @@ test('quality repair Prompt separates source edits from declared verification ar
   assert.match(compiled.text, /transient build and test artifacts/i);
   assert.match(compiled.text, /verification-path-prohibited/);
   assert.match(compiled.text, /Never edit source there or include those artifacts in changedFiles/);
+});
+
+test('implementation Prompt includes its declared verification output paths', () => {
+  const implementation = packet();
+  implementation.feature.id = 'implement/V-next';
+  implementation.feature.allowedPaths = ['src'];
+  implementation.feature.reopenReason = 'Previous check targeted another project.';
+  implementation.feature.metadata = { stage: 'implementation', verificationOutputPaths: ['.cardworld-local'] };
+  implementation.execution.runtime = { mode: 'conversation-visible', userVisible: true, hostOrchestrated: true };
+  implementation.execution.result = createDispatchResultContract(implementation.feature, { conversationVisible: true });
+  const compiled = compileAgentPrompt(implementation);
+  assert.match(compiled.text, /\.cardworld-local/);
+  assert.match(compiled.text, /verificationOutputPaths/);
+  assert.match(compiled.text, /repair that route within allowedPaths when possible/);
+  assert.match(compiled.text, /never run the unsafe check/);
+  assert.match(compiled.text, /Previous attempt blocker: Previous check targeted another project/);
 });
 
 test('Prompt Codec renders the fixed-schema typed output dialect without weakening the business contract', () => {

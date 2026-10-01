@@ -26,6 +26,7 @@ import { applyProjectInitializationPlan, createProjectInitializationPlan, loadPr
 import { verifyDevelopmentSourceManifest, writeDevelopmentSourceManifest } from '../../application/development-source.mjs';
 import { createDevelopmentPatchPlan, rollbackDevelopmentPatch } from '../../application/development-patch.mjs';
 import { recoverDevelopmentRun } from '../../application/development-run-recovery.mjs';
+import { recordDevelopmentPlanSourceCompatibility } from '../../application/development-plan-source-compatibility.mjs';
 import { createLocalDevelopmentInvocation } from '../../application/local-development-invocation.mjs';
 import { applySourcePatch, refreshLocalCodexBindings, syncDevelopmentSource } from './local-development-sync.mjs';
 import { ensurePlanApprovalArtifact, planApprovalSatisfied } from '../../flows/delivery-lifecycle/plan-approval.mjs';
@@ -76,6 +77,7 @@ agent-harness init validate [--config <project/harness.json>] [--project-root <p
 agent-harness init plan|execute --config <project/harness.json> [--project-root <path>]
 agent-harness init apply --plan <json|-> --command-id <id> --decision <json>
 agent-harness dev attach|rebind|execute --config <project/harness.json> [--project-root <path>] [--binding-id <id>] [--decision <json>]
+agent-harness dev plan-source-compatible --manifest <json> --run <plan-run-id> --decision <review.json> --command-id <id>
 agent-harness dev apply --plan <json|-> --manifest <json> [--command-id <id>] [--decision <json>]
 agent-harness dev verify|doctor --manifest <json>
 agent-harness dev sync --manifest <json> [--command-id <id>] [--decision <json>]
@@ -207,6 +209,12 @@ if (command === 'dev' && subject === 'sync') {
 }
 if (command === 'dev' && subject === 'recover-run') {
   const output = await recoverDevelopmentRun({ manifestFile: take('--manifest'), runId: take('--run'), commandId: take('--command-id') ?? newId('dev-recover-run') });
+  console.log(JSON.stringify({ ok: true, ...output }, null, 2));
+  process.exit(0);
+}
+if (command === 'dev' && subject === 'plan-source-compatible') {
+  const output = await recordDevelopmentPlanSourceCompatibility({ manifestFile: take('--manifest'), runId: take('--run'),
+    decision: await jsonFile(take('--decision')), commandId: take('--command-id') ?? newId('dev-plan-source-compatible') });
   console.log(JSON.stringify({ ok: true, ...output }, null, 2));
   process.exit(0);
 }

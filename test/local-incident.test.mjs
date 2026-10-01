@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { classifyLocalIncident } from '../src/application/local-incident.mjs';
+import { visibleLifecycleStopReason } from '../src/application/lifecycle-execution-service.mjs';
 
 test('source-linked Host failures classify identically across Workflow actions', () => {
   for (const [workflowId, action, target] of [
@@ -39,4 +40,24 @@ test('local incident classification separates patch impact, Authority integrity,
   assert.equal(environment.origin, 'environment');
   assert.equal(environment.severity, 'P2');
   assert.equal(environment.continuation, 'retry-preflight-with-captured-process-capability');
+  const sourceDrift = classifyLocalIncident({ error: 'IMPLEMENTATION_PLAN_SOURCE_MISMATCH', phase: 'start' });
+  assert.equal(sourceDrift.origin, 'project');
+  assert.equal(sourceDrift.severity, 'P2');
+  assert.equal(sourceDrift.disposition, 'review-exact-plan-source-delta');
+  assert.equal(sourceDrift.continuation, 'record-exact-source-compatibility-or-replan');
+});
+
+test('a blocked dependency chain reports a project blocker instead of a ready Harness incident', () => {
+  const state = { status: 'ready', features: [{ state: 'blocked' }, { state: 'pending' }] };
+  const reason = visibleLifecycleStopReason(state);
+  assert.equal(reason, 'blocked-dependencies');
+  assert.equal(visibleLifecycleStopReason({ status: 'all-remaining-blocked', features: [{ state: 'blocked' }] }), 'all-remaining-blocked');
+  for (const code of [reason, 'all-remaining-blocked']) {
+    const incident = classifyLocalIncident({ error: code, phase: 'execution' });
+    assert.equal(incident.origin, 'project');
+    assert.equal(incident.severity, 'P2');
+    assert.equal(incident.severityStatus, 'classified');
+    assert.equal(incident.disposition, 'resolve-feature-blockers');
+    assert.equal(incident.continuation, 'inspect-feature-blockers-then-resume');
+  }
 });

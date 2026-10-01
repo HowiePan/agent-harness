@@ -26,6 +26,13 @@ test('CardWorld consumer compiles one canonical requirement and project-owned de
   assert.equal(descriptor.gateRecipes.find(gate => gate.id === 'wasm-release-package')?.required, false);
   assert(descriptor.workspace.excluded.includes('.cardworld-local'));
   assert(descriptor.workspace.excluded.includes('tabletop-collection'));
+  assert(descriptor.policy.actionPaths.implement.includes('scripts'));
+  assert(descriptor.policy.actionPaths.implement.includes('card_world_engine'));
+  assert(descriptor.policy.actionPaths.implement.includes('docs/versions'));
+  assert(!descriptor.policy.actionPaths.implement.some(path => path.startsWith('tabletop-collection')));
+  assert(descriptor.workspace.excluded.includes('card_world_engine/pkg'));
+  assert(descriptor.workspace.excluded.includes('card_world_web/node_modules'));
+  assert.equal(descriptor.policy.implementationVerificationRepairRetries, 2);
   assert.equal(descriptor.workspace.rootSelector, 'git-worktree');
   assert.deepEqual(descriptor.gateRecipes.filter(gate => gate.required).slice(1).map(gate => gate.command.slice(3, 6)), [
     ['scripts/cardworld.ps1', '-Task', 'engine-fmt'],
@@ -69,6 +76,7 @@ test('CardWorld full lifecycle keeps every mutable stage before the final qualit
   assert.deepEqual(plan.run.features.map(feature => feature.metadata.stage), [
     'requirement-intake', 'requirement-expansion', 'canonical-requirement', 'version-planning', 'plan-review', 'implementation', 'scope-resolution', 'docs-closeout', 'quality', 'user-code-review', 'delivery-receipt',
   ]);
+  assert.equal(plan.run.features.find(feature => feature.metadata.stage === 'implementation').metadata.verificationRepairRetries, 2);
   const quality = plan.run.features.find(feature => feature.metadata.stage === 'quality');
   assert.deepEqual(quality.dependsOn, ['docs/V-next']);
   assert.deepEqual(quality.allowedPaths, []);

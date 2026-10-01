@@ -14,6 +14,43 @@ import { ensurePlanApprovalArtifact } from '../flows/delivery-lifecycle/plan-app
 import { performance } from 'node:perf_hooks';
 
 const recoverableResultCodes = new Set(['REPAIR_CHECKPOINT_REQUIRED', 'REPAIR_CHECKPOINT_EVIDENCE_REQUIRED', 'REPAIR_FINDING_CHECKPOINT_REQUIRED', 'QUALITY_DIAGNOSTIC_DISPOSITION_REQUIRED', 'PROFILE_RESULT_REJECTED']);
+export const visibleLifecycleStopReason = state => state.status === 'ready'
+  && state.features.some(feature => ['blocked', 'failed-budget'].includes(feature.state))
+  ? 'blocked-dependencies' : state.status;
+const safeProjectPath = path => typeof path === 'string' && path.length > 0 && !path.includes('\\')
+  && !path.includes(':') && !path.startsWith('/') && path.split('/').every(segment => segment && segment !== '.' && segment !== '..' && !segment.includes('*'));
+const insideScope = (scope, path) => path === scope || path.startsWith(`${scope}/`);
+export const shouldRetryImplementationVerificationPath = ({ feature, result, state }) => {
+  if (feature?.metadata?.stage !== 'implementation' || result?.status !== 'blocked' || result.failureClass !== 'verification-path-prohibited') return false;
+  const candidates = result.blocker?.repairCandidatePaths;
+  if (!Array.isArray(candidates) || !candidates.length || !candidates.every(path => safeProjectPath(path)
+    && feature.allowedPaths?.some(scope => safeProjectPath(scope) && insideScope(scope, path))
+    && !feature.forbiddenPaths?.some(scope => safeProjectPath(scope) && insideScope(scope, path)))) return false;
+  const retries = feature.metadata.verificationRepairRetries;
+  if (!Number.isInteger(retries) || retries < 1) return false;
+  const current = state.features.find(item => item.id === feature.id);
+  const attempt = state.attempts[`${feature.logicalRoot}:${result.failureClass}`];
+  return current?.state === 'blocked' && attempt && !attempt.exhausted && attempt.failures <= retries;
+};
+export const shouldContinueImplementationProgress = ({ feature, result, state, submission }) => {
+  if (feature?.metadata?.stage !== 'implementation' || result?.status !== 'blocked'
+    || !['implementation-incomplete', 'external-prerequisite-and-incomplete-implementation'].includes(result.failureClass)) return false;
+  const current = state.features.find(item => item.id === feature.id);
+  if (current?.state !== 'blocked' || !submission || submission.featureId !== feature.id
+    || submission.outputSourceDigest === submission.inputSourceDigest
+    || !Array.isArray(submission.changedFiles) || !submission.changedFiles.length) return false;
+  const seenSource = state.submissions.some(item => item.submissionId !== submission.submissionId
+    && item.featureId === feature.id
+    && [item.inputSourceDigest, item.outputSourceDigest].includes(submission.outputSourceDigest));
+  if (seenSource) return false;
+  const budget = feature.metadata.implementationProgressRetries;
+  if (!Number.isInteger(budget) || budget < 1) return false;
+  const continuations = state.submissions.filter(item => item.featureId === feature.id
+    && item.result?.status === 'blocked'
+    && ['implementation-incomplete', 'external-prerequisite-and-incomplete-implementation'].includes(item.result.failureClass)).length;
+  const attempt = state.attempts[`${feature.logicalRoot}:${result.failureClass}`];
+  return continuations <= budget && Boolean(attempt && !attempt.exhausted);
+};
 const previousFreshGates = (state, scope, ids) => {
   const results = ids.map(id => [...state.gates].reverse().find(gate => gate.id === id && gate.scope === scope && gate.status === 'passed' && gate.forcedFresh && gate.sourceDigest === state.sourceDigest));
   return results.every(Boolean) ? { results, state } : null;
@@ -135,8 +172,9 @@ const continueVisibleLifecyclePlan = async (context, api, planInput, { commandId
     const resumed = await continueVisibleLifecyclePlan(context, api, planInput, { commandId, preflightReport, maxConcurrency, maxRounds, forceFreshGates, onGateProgress, gateDiagnosticAttempts: gateDiagnosticAttempts + 1, continuedStart: started });
     return { ...resumed, rounds: [...rounds, ...(resumed.rounds ?? [])] };
   };
-  const coordinatorRoundLimit = plan.intent.preset === 'release-exhaustive' ? Infinity : maxRounds;
-  for (let round = 1; round <= coordinatorRoundLimit; round += 1) {
+  const coordinatorRoundLimit = plan.intent.preset === 'release-exhaustive' || plan.intent.action === 'implement' ? Infinity : maxRounds;
+  let completedRounds = 0;
+  while (completedRounds < coordinatorRoundLimit) {
     const roundStarted = performance.now();
     const timing = { spawnMs: 0, waitMs: 0, resultMs: 0 };
     state = await authorityStore.read(plan.project.id, activeRunId);
@@ -204,9 +242,11 @@ const continueVisibleLifecyclePlan = async (context, api, planInput, { commandId
     if (!leases.length) {
       if (state.features.every(feature => feature.state === 'completed')) break;
       if (featureGates && !featureGates.ok) return { status: 'attention-required', reason: 'feature-gates-not-passed', planDigest: plan.planDigest, rounds, gates: featureGates.results, state };
-      rounds.push({ round, status: 'attention-required', reason: state.status });
-      return { status: 'attention-required', reason: state.status, planDigest: plan.planDigest, rounds, blockedFeatures: blockedFeatures(state), state };
+      const reason = visibleLifecycleStopReason(state);
+      rounds.push({ round: completedRounds + 1, status: 'attention-required', reason });
+      return { status: 'attention-required', reason, planDigest: plan.planDigest, rounds, blockedFeatures: blockedFeatures(state), state };
     }
+    let terminalLeaseObserved = false;
     for (const lease of leases) {
       const dispatch = state.dispatches.find(item => item.dispatchId === lease.dispatchId);
       const waitStarted = performance.now();
@@ -216,6 +256,7 @@ const continueVisibleLifecyclePlan = async (context, api, planInput, { commandId
       const heartbeat = await api.recordHeartbeat(plan.project.id, activeRunId, { leaseId: lease.leaseId, dispatchId: lease.dispatchId, agentId: lease.agentId, progress: waited?.progress ?? waited?.status ?? 'completed' }, { expectedRevision: state.revision, commandId: `${commandId}.heartbeat.${lease.dispatchId}.${state.revision}` });
       state = heartbeat.state;
       if (!['completed', 'failed', 'blocked'].includes(waited?.status)) continue;
+      terminalLeaseObserved = true;
       const resultStarted = performance.now();
       const transported = await trustedAgentAdapter.result({ agentId: lease.agentId, dispatchId: lease.dispatchId, visibility: structuredClone(lease.runtimeReceipt.visibility), runtimeReceipt: structuredClone(lease.runtimeReceipt) });
       timing.resultMs += performance.now() - resultStarted;
@@ -253,9 +294,26 @@ const continueVisibleLifecyclePlan = async (context, api, planInput, { commandId
           reason: `${rejected.result.summary}. Reinspect the current source and correct the rejected result before reporting completion.`,
         }, { expectedRevision: state.revision, commandId: `${commandId}.reopen.${dispatch.dispatchId}` });
         state = reopened.state;
+      } else if (shouldRetryImplementationVerificationPath({ feature, result: businessResult, state })) {
+        const reopened = await api.kernel.reopenFeature(plan.project.id, activeRunId, {
+          featureId: feature.id,
+          reason: `The verification path is outside this Dispatch's output allowance. Inspect the check's output route and repair it only within allowedPaths, then retry the check. If no in-scope repair exists, report the exact path and blocker again. Prior evidence: ${businessResult.blocker?.summary ?? businessResult.summary}`,
+        }, { expectedRevision: state.revision, commandId: `${commandId}.verification-path-reopen.${dispatch.dispatchId}` });
+        state = reopened.state;
+      } else if (shouldContinueImplementationProgress({ feature, result: businessResult, state,
+        submission: state.submissions.find(item => item.dispatchId === dispatch.dispatchId) })) {
+        const reopened = await api.kernel.reopenFeature(plan.project.id, activeRunId, {
+          featureId: feature.id,
+          reason: `Verified source progress was submitted, but the approved project-owned implementation remains incomplete. Continue from the current source and prior Submission within the approved plan. Do not require cross-project integration evidence or release approval for this Feature. Prior progress: ${businessResult.summary}`,
+        }, { expectedRevision: state.revision, commandId: `${commandId}.implementation-progress-reopen.${dispatch.dispatchId}` });
+        state = reopened.state;
       }
     }
-    rounds.push({ round, status: 'progressed', revision: state.revision, physicalLimit, timing: Object.fromEntries(Object.entries(timing).map(([key, value]) => [key, Math.round(value)])), elapsedMs: Math.round(performance.now() - roundStarted) });
+    // A running Agent may require many Host waits. Only a terminal result
+    // consumes the coordination budget; heartbeats are not work rounds.
+    if (!terminalLeaseObserved) continue;
+    completedRounds += 1;
+    rounds.push({ round: completedRounds, status: 'progressed', revision: state.revision, physicalLimit, timing: Object.fromEntries(Object.entries(timing).map(([key, value]) => [key, Math.round(value)])), elapsedMs: Math.round(performance.now() - roundStarted) });
   }
   state = await authorityStore.read(plan.project.id, activeRunId);
   if (!state.features.every(feature => feature.state === 'completed')) return { status: 'attention-required', reason: 'visible-coordinator-round-limit', planDigest: plan.planDigest, rounds, state };

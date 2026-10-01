@@ -9,11 +9,13 @@ const latestOutput = (state, stage, port) => {
   return [...(state.submissions ?? [])].reverse().find(submission => ids.has(submission.featureId) && !submission.supersededAt && submission.result?.status === 'completed')?.result.outputs?.[port]?.value ?? null;
 };
 
+export const reviewedPlanProposal = state => latestOutput(state, 'version-planning', 'plan');
+
 const line = value => String(value ?? '').replace(/[\r\n\t]+/g, ' ').replace(/\\/g, '\\\\').replace(/([`*_{}\[\]()#+.!|<>])/g, '\\$1').trim();
 const list = (heading, values) => values?.length ? [`### ${heading}`, '', ...values.map(value => `- ${line(value)}`), ''] : [];
 
 export const planApprovalSnapshot = state => {
-  const plan = latestOutput(state, 'version-planning', 'plan');
+  const plan = reviewedPlanProposal(state);
   const review = latestOutput(state, 'plan-review', 'plan-review');
   if (!plan || !review) return null;
   const planDigest = digestJson({ projectId: state.projectId, runId: state.runId, sourceDigest: state.sourceDigest, plan, review });

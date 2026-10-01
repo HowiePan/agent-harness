@@ -41,12 +41,23 @@ export const assertDevelopmentRunRecoveryEffects = (state, effects) => {
       && effect.binding?.runId === state.runId && effect.binding?.dispatchId === dispatch?.dispatchId);
     assert(matches.length === 1, 'DEVELOPMENT_RUN_HOST_EFFECT_REQUIRED', 'Every active Lease must have one matching Codex Host Effect.', { leaseId: lease.leaseId });
     const effect = matches[0];
-    assert(effect.state === 'settled' && ['result-observed', 'result-rejected'].includes(effect.outcome?.disposition)
+    const terminalResult = effect.state === 'settled' && ['result-observed', 'result-rejected'].includes(effect.outcome?.disposition);
+    const hasDigests = (...values) => values.every(value => typeof value === 'string' && /^[a-f0-9]{64}$/.test(value));
+    const fenced = effect.state === 'contained' && effect.outcome?.reason === 'development-run-recovery' && (
+      (effect.outcome.disposition === 'absent-after-interrupt' && effect.outcome.target === lease.agentId
+        && hasDigests(effect.outcome.observationRequestDigest, effect.outcome.interruptRequestDigest,
+          effect.outcome.interruptResultDigest, effect.outcome.verificationRequestDigest))
+      || (effect.outcome.disposition === 'interrupted' && effect.outcome.target === lease.agentId
+        && hasDigests(effect.outcome.interruptRequestDigest, effect.outcome.interruptResultDigest,
+          effect.outcome.verificationRequestDigest))
+      || (effect.outcome.disposition === 'already-terminal' && effect.outcome.observedAgentName === lease.agentId
+        && hasDigests(effect.outcome.observationRequestDigest)));
+    assert((terminalResult || fenced)
       && effect.canonicalAgentName === lease.agentId && effect.nativeTaskName === spawn.nativeTaskName
       && effect.binding.packetDigest === dispatch.packetDigest
       && effect.binding.promptDigest === lease.runtimeReceipt?.prompt?.promptDigest
       && effect.sessionId === spawn.sessionId && effect.requestDigest === spawn.requestDigest,
-    'DEVELOPMENT_RUN_HOST_EFFECT_UNSETTLED', 'The active Lease has no terminal, identity-bound Host observation.', { leaseId: lease.leaseId, effectId: effect.effectId });
+    'DEVELOPMENT_RUN_HOST_EFFECT_UNSETTLED', 'The active Lease has no terminal result or identity-bound native absence fence.', { leaseId: lease.leaseId, effectId: effect.effectId });
   }
   assert(!effects.some(effect => effect.binding?.projectId === state.projectId && effect.binding?.runId === state.runId
     && !['settled', 'contained'].includes(effect.state)), 'DEVELOPMENT_RUN_HOST_EFFECT_PENDING', 'A Codex Host Effect for this Run is unresolved.');
@@ -87,13 +98,6 @@ export const recoverDevelopmentRun = async ({ manifestFile, runId, commandId, cw
   assert(state.status !== 'closed' && state.status !== 'superseded' && state.metadata?.lifecycleInvocationId,
     'DEVELOPMENT_RUN_NOT_RECOVERABLE', 'Only an unfinished, lifecycle-owned Run can be retired by source-link recovery.');
   const receipt = await currentPatchReceipt(manifest, state);
-  // Host Effects are created from Dispatches. A Run stopped before its first Dispatch has no Host contract to verify.
-  if (state.dispatches.length > 0 || state.leases.length > 0) {
-    const hostContract = state.leases.find(lease => lease.runtimeReceipt?.hostSpawnReceipt)?.runtimeReceipt.hostSpawnReceipt.contract;
-    assert(hostContract, 'DEVELOPMENT_RUN_HOST_CONTRACT_REQUIRED', 'Recovery requires the bound Host contract.');
-    const effects = new CodexHostEffectJournal({ controlRoot: manifest.controlRoot, dataRoot: manifest.dataRoot, contract: hostContract });
-    assertDevelopmentRunRecoveryEffects(state, await effects.list());
-  }
   const intent = state.metadata.commandIntent;
   assert(intent?.action && intent?.target && intent?.workflowId && intent?.profileId && intent?.preset,
     'DEVELOPMENT_RUN_INTENT_REQUIRED', 'Recovery requires the original lifecycle command intent.');
@@ -105,6 +109,14 @@ export const recoverDevelopmentRun = async ({ manifestFile, runId, commandId, cw
     arguments: intent.preset === 'default' ? [] : [intent.preset], executionWorkspaceRoot: state.metadata.workspace.root });
   assert(plan.logicalTaskKey === state.metadata.logicalTaskKey && plan.run.runId !== runId && plan.planDigest !== state.metadata.lifecyclePlanDigest,
     'DEVELOPMENT_RUN_REPLACEMENT_INVALID', 'The current source did not produce a distinct Plan for the same logical task.');
+  // Check the replacement Plan before fencing any Host effect. A source or
+  // scope mismatch must leave the old Agent and Run untouched.
+  if (state.dispatches.length > 0 || state.leases.length > 0) {
+    const hostContract = state.leases.find(lease => lease.runtimeReceipt?.hostSpawnReceipt)?.runtimeReceipt.hostSpawnReceipt.contract;
+    assert(hostContract, 'DEVELOPMENT_RUN_HOST_CONTRACT_REQUIRED', 'Recovery requires the bound Host contract.');
+    const effects = new CodexHostEffectJournal({ controlRoot: manifest.controlRoot, dataRoot: manifest.dataRoot, contract: hostContract });
+    assertDevelopmentRunRecoveryEffects(state, await effects.list());
+  }
   const retired = await harness.kernel.supersedeRun(projectId, runId, {
     replacementRunId: plan.run.runId, planDigest: plan.planDigest,
     reason: `development-${receipt.level.toLowerCase()}-recovery:${receipt.receiptDigest}`,

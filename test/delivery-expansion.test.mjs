@@ -58,6 +58,33 @@ test('implement command stays in one route through quality review', () => {
   const scope = resolveCommandIntent(createDeliveryCommandManifest(), { action: 'implement', target: 'V-next' }).scope;
   assert.equal(scope, 'implementation..quality');
   assert.deepEqual(planStages('implement', scope), ['implementation', 'scope-resolution', 'docs-closeout', 'quality']);
+  const verify = deliveryLifecycleWorkflowDefinition.routes.implement.find(node => node.stage === 'implementation').task.steps.find(step => step.id === 'verify');
+  assert.match(verify.instruction, /retry the exact check once with narrowly scoped host elevation/);
+  assert.match(verify.instruction, /Never skip the check or broaden write paths/);
+});
+
+test('writable delivery features declare verification outputs without granting source edits there', () => {
+  const scope = resolveCommandIntent(createDeliveryCommandManifest(), { action: 'implement', target: 'V-next' }).scope;
+  const project = createDeliveryProjectDescriptor({
+    workspaceRoot: process.cwd(),
+    actionPaths: { implement: ['src'] },
+    qualityVerificationOutputs: ['.cardworld-local'],
+    excluded: ['.git', '.cardworld-local'],
+  });
+  const plan = createDeliveryLifecyclePlan({
+    intent: { action: 'implement', target: 'V-next', scope, qualityTarget, knownFindingInventory },
+    project, runId: 'implement-verification-outputs', sourceDigest: 'a'.repeat(64),
+  });
+  const implementation = plan.run.features.find(feature => feature.metadata.stage === 'implementation');
+  assert.deepEqual(implementation.allowedPaths, ['src']);
+  assert.deepEqual(implementation.metadata.verificationOutputPaths, ['.cardworld-local']);
+  assert.ok(!implementation.forbiddenPaths.includes('.cardworld-local'));
+  assert.ok(implementation.forbiddenPaths.includes('.git'));
+  project.policy.implementationVerificationRepairRetries = 3;
+  assert.throws(() => createDeliveryLifecyclePlan({
+    intent: { action: 'implement', target: 'V-next', scope, qualityTarget, knownFindingInventory },
+    project, runId: 'invalid-verification-retries', sourceDigest: 'a'.repeat(64),
+  }), error => error.code === 'IMPLEMENTATION_VERIFICATION_RETRIES_INVALID');
 });
 
 test('planning proposals are typed and independently reviewed without write authority', () => {

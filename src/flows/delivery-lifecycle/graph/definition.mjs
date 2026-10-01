@@ -23,7 +23,7 @@ export const createDeliveryWorkflowDefinition = ({ id = 'delivery-lifecycle', pr
       canonicalNode,
       planNode,
       planReviewNode,
-      implementNode,
+      withDeps(implementNode, ['plan', 'plan-review']),
       scopeNode,
       docsNode,
       qualityNode,

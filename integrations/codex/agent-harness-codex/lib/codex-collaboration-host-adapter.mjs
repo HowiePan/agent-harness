@@ -172,10 +172,21 @@ export const createCodexCollaborationHostAdapter = ({ exchange, controlRoot, dat
     patch,
   })).effect;
 
-  const containEffect = async (effect, { reason = 'reconcile', snapshot = null } = {}) => {
+  const containEffect = async (effect, { reason = 'reconcile', snapshot = null, fenceMissing = false } = {}) => {
     if (effect.state === 'settled' || effect.state === 'contained') return effect;
     const listed = snapshot ?? await listAll({ effectId: effect.effectId, reason });
     const task = taskForEffect(listed.tasks, effect);
+    if (!task && fenceMissing) {
+      const target = nonEmpty(effect.canonicalAgentName, 'CODEX_COLLABORATION_AGENT_ID_REQUIRED', 'Recovery requires the original canonical Agent name.');
+      const interrupted = await hostRequest({ operation: 'interrupt', tool: 'collaboration.interrupt_agent', arguments: { target }, binding: { effectId: effect.effectId, reason } });
+      exactKeys(interrupted.result, ['previous_status'], 'CODEX_COLLABORATION_INTERRUPT_RESULT_INVALID', 'Recovery interrupt has an invalid native result.');
+      if (interrupted.result.previous_status !== 'not_found') throw Object.assign(new Error('Recovery could not prove the missing Agent is absent.'), { code: 'CODEX_COLLABORATION_AGENT_ABSENCE_UNVERIFIED', details: { effectId: effect.effectId, target } });
+      const verified = await listAll({ effectId: effect.effectId, reason: 'verify-missing-agent' });
+      if (taskForEffect(verified.tasks, effect)) throw Object.assign(new Error('The supposedly absent Agent appeared after interruption.'), { code: 'CODEX_COLLABORATION_AGENT_ABSENCE_UNVERIFIED', details: { effectId: effect.effectId, target } });
+      return transition(effect, 'contained', { outcome: { reason, disposition: 'absent-after-interrupt', target,
+        observationRequestDigest: listed.request.requestDigest, interruptRequestDigest: interrupted.request.requestDigest,
+        interruptResultDigest: digestJson(interrupted.result), verificationRequestDigest: verified.request.requestDigest } }, `contain.${effect.revision}`);
+    }
     if (!task || terminalNativeStatus(task.agent_status)) {
       return transition(effect, 'contained', { outcome: { reason, disposition: task ? 'already-terminal' : 'not-observed', observedAgentName: task?.agent_name ?? null, observationRequestDigest: listed.request.requestDigest } }, `contain.${effect.revision}`);
     }
@@ -282,7 +293,8 @@ export const createCodexCollaborationHostAdapter = ({ exchange, controlRoot, dat
       const receipt = input?.runtimeReceipt?.hostSpawnReceipt ?? input?.hostSpawnReceipt ?? receipts.get(input?.effectId);
       const effectId = receipt?.effectId ?? input?.effectId;
       const effect = await journal.read(nonEmpty(effectId, 'CODEX_HOST_EFFECT_ID_REQUIRED', 'Visible Agent containment requires a Host Effect ID.'), { required: true });
-      const contained = await containEffect(effect, { reason: input?.reason ?? 'lifecycle-failed' });
+      const reason = input?.reason ?? 'lifecycle-failed';
+      const contained = await containEffect(effect, { reason, fenceMissing: reason === 'development-run-recovery' });
       return { contained: true, effectId: contained.effectId, outcome: contained.outcome };
     },
     waitVisibleAgent: async input => {

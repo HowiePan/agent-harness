@@ -41,8 +41,9 @@ const setup = async (t, { spawnResult = undefined, interruptStops = true } = {})
     if (request.operation === 'wait') return { message: 'Agent completed.', timed_out: false };
     if (request.operation === 'interrupt') {
       assert.equal(request.tool, 'collaboration.interrupt_agent');
+      const previous_status = tasks.get(request.arguments.target) ?? 'not_found';
       if (interruptStops && tasks.has(request.arguments.target)) tasks.set(request.arguments.target, 'interrupted');
-      return { agent_name: request.arguments.target, previous_status: 'running' };
+      return { previous_status };
     }
     assert.equal(request.tool, 'collaboration.list_agents');
     assert.deepEqual(request.arguments, {});
@@ -173,6 +174,22 @@ test('preflight reconciliation contains a crash-window Agent before any later sp
   assert.equal(fixture.tasks.get(`/root/${taskName}`), 'interrupted');
   assert.equal((await restarted.journal.unresolved()).length, 0);
   assert.equal(fixture.requests.filter(item => item.operation === 'interrupt').length, 1);
+});
+
+test('development recovery fences an absent bound Agent with native interrupt and fresh absence observation', async t => {
+  const fixture = await setup(t);
+  const host = fixture.create('old-session');
+  const spawned = await host.adapter.spawn(spawnInput);
+  const runtimeReceipt = { visibility: spawned.visibility, hostSpawnReceipt: spawned.receipt };
+  await host.adapter.confirm({ ...spawnInput, agentId: spawned.agentId, runtimeReceipt });
+  fixture.tasks.delete(spawned.agentId);
+  const recovery = fixture.create('recovery-session');
+  const contained = await recovery.adapter.contain({ agentId: spawned.agentId, dispatchId: spawnInput.dispatchId,
+    runtimeReceipt, reason: 'development-run-recovery' });
+  assert.equal(contained.outcome.disposition, 'absent-after-interrupt');
+  assert.equal((await recovery.journal.read(spawned.receipt.effectId)).state, 'contained');
+  assert.equal(fixture.requests.filter(request => request.operation === 'interrupt').at(-1).arguments.target, spawned.agentId);
+  assert.equal(fixture.requests.slice(-3).map(request => request.operation).join(','), 'inspect,interrupt,inspect');
 });
 
 test('unverified containment blocks preflight and leaves the Host Effect unresolved', async t => {

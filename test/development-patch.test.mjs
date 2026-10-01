@@ -29,6 +29,17 @@ test('development Run recovery requires terminal, identity-bound Host effects fo
     sessionId: 'session', requestDigest: 'request', binding: { projectId: 'project', runId: 'run', dispatchId: 'dispatch',
       packetDigest: 'packet', promptDigest: 'prompt' } };
   assert.doesNotThrow(() => assertDevelopmentRunRecoveryEffects(state, [effect]));
+  const fenced = { ...effect, state: 'contained', outcome: { reason: 'development-run-recovery', disposition: 'absent-after-interrupt',
+    target: 'agent', observationRequestDigest: 'a'.repeat(64), interruptRequestDigest: 'b'.repeat(64),
+    interruptResultDigest: 'c'.repeat(64), verificationRequestDigest: 'd'.repeat(64) } };
+  assert.doesNotThrow(() => assertDevelopmentRunRecoveryEffects(state, [fenced]));
+  assert.doesNotThrow(() => assertDevelopmentRunRecoveryEffects(state, [{ ...fenced, outcome: {
+    reason: 'development-run-recovery', disposition: 'already-terminal', observedAgentName: 'agent', observationRequestDigest: 'a'.repeat(64),
+  } }]));
+  assert.throws(() => assertDevelopmentRunRecoveryEffects(state, [{ ...fenced, outcome: { ...fenced.outcome, interruptResultDigest: null } }]),
+    error => error.code === 'DEVELOPMENT_RUN_HOST_EFFECT_UNSETTLED');
+  assert.throws(() => assertDevelopmentRunRecoveryEffects(state, [{ ...fenced, outcome: { ...fenced.outcome, reason: 'preflight-reconciliation' } }]),
+    error => error.code === 'DEVELOPMENT_RUN_HOST_EFFECT_UNSETTLED');
   assert.throws(() => assertDevelopmentRunRecoveryEffects(state, [{ ...effect, state: 'lease-bound' }]),
     error => error.code === 'DEVELOPMENT_RUN_HOST_EFFECT_UNSETTLED');
   assert.throws(() => assertDevelopmentRunRecoveryEffects(state, [{ ...effect, canonicalAgentName: 'other' }]),

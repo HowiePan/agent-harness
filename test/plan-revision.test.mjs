@@ -61,6 +61,24 @@ test('replan requires a reviewed parent, pins its Authority, and accepts a decla
   assert.equal(resolution.reasonCode, 'PLAN_REVISION_REQUESTED');
   assert.equal(resolveRunLineage({ plan: planned({ action: 'replan', parent: { ...revision.planRevision, parentAuthorityDigest: 'f'.repeat(64) } }), states: [parent] }).action, 'block');
   assert.equal(resolveRunLineage({ plan: planned({ action: 'replan', parent: revision.planRevision }), states: [parent], currentLineage: { revision: 2, activeRunId: 'another-plan' } }).reasonCode, 'REPLAN_PARENT_STALE_OR_BUSY');
+  const recovered = { ...reviewed({ approved: false, status: 'superseded' }), runId: 'recovered-plan',
+    metadata: { ...parent.metadata, supersededByRunId: 'unstarted-replacement', supersededReason: `development-h3-recovery:${'f'.repeat(64)}` } };
+  const afterRecovery = resolveRunLineage({ plan: planned({ action: 'replan', parent: revision.planRevision }),
+    states: [parent, recovered], currentLineage: { revision: 2, activeRunId: recovered.runId } });
+  assert.equal(afterRecovery.action, 'supersede-and-start');
+  assert.equal(afterRecovery.reasonCode, 'PLAN_REVISION_REQUESTED');
+  const unverifiedRetirement = { ...recovered, metadata: { ...recovered.metadata, supersededReason: 'replacement-lifecycle-plan' } };
+  assert.equal(resolveRunLineage({ plan: planned({ action: 'replan', parent: revision.planRevision }),
+    states: [parent, unverifiedRetirement], currentLineage: { revision: 2, activeRunId: unverifiedRetirement.runId } }).reasonCode,
+  'REPLAN_PARENT_STALE_OR_BUSY');
+  const activeReplacement = { ...reviewed({ approved: false, status: 'running' }), runId: 'unstarted-replacement',
+    metadata: { ...parent.metadata, commandIntent: { ...parent.metadata.commandIntent, action: 'replan' } } };
+  assert.equal(resolveRunLineage({ plan: planned({ action: 'replan', parent: revision.planRevision }),
+    states: [parent, recovered, activeReplacement], currentLineage: { revision: 2, activeRunId: recovered.runId } }).reasonCode,
+  'REPLAN_PARENT_STALE_OR_BUSY');
+  const unrelated = { ...recovered, metadata: { ...recovered.metadata, logicalTaskKey: 'other-task' } };
+  assert.equal(resolveRunLineage({ plan: planned({ action: 'replan', parent: revision.planRevision }),
+    states: [parent, unrelated], currentLineage: { revision: 2, activeRunId: unrelated.runId } }).reasonCode, 'REPLAN_PARENT_STALE_OR_BUSY');
   const waiting = reviewed({ approved: true });
   const waitingRevision = preparePlanRevisionIntent({ intent, project, states: [waiting], sourceDigest: source });
   assert.equal(resolveRunLineage({ plan: planned({ action: 'replan', sourceDigest: source, parent: waitingRevision.planRevision }), states: [waiting] }).action, 'supersede-and-start');

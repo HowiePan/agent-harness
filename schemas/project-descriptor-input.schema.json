@@ -103,6 +103,7 @@
         "defaultRuntimePlugin": { "type": "string", "pattern": "^[a-z0-9][a-z0-9.-]+$" },
         "runtimePlugins": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "type": "string", "pattern": "^[a-z0-9][a-z0-9.-]+$" } },
         "promptCodecPlugin": { "type": "string", "pattern": "^[a-z0-9][a-z0-9.-]+$" },
+        "planSourceAutoCompatiblePaths": { "type": "array", "uniqueItems": true, "items": { "type": "string", "minLength": 1 } },
         "actionExecution": {
           "type": "object",
           "additionalProperties": { "$ref": "#/$defs/actionExecution" }

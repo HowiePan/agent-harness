@@ -108,13 +108,17 @@ export const resolveRunLineage = ({ plan, states, currentLineage = null, policy 
       const idle = candidate => candidate.activeLeaseCount === 0 && candidate.activeDispatchCount === 0;
       const revision = plan.intent.planRevision;
       const parent = revision && candidates.find(candidate => candidate.runId === revision.parentRunId);
+      const retiredActive = currentLineage?.activeRunId && states.find(state => state.runId === currentLineage.activeRunId
+        && state.status === 'superseded' && state.metadata?.supersededByRunId
+        && /^development-h[123]-recovery:[a-f0-9]{64}$/.test(state.metadata?.supersededReason ?? '')
+        && belongsToLogicalTask(state, plan));
       if (plan.intent.action === 'quality' && plan.intent.preset === 'release-exhaustive') {
         action = 'block';
         selectedRunId = null;
         reasonCode = 'EXHAUSTIVE_RELEASE_ALREADY_STARTED';
         blockers = [{ code: reasonCode, message: 'The major-release exhaustive review must continue its original Run and cannot start a second invocation.' }];
       } else if (plan.intent.action === 'replan' && parent && parent.authorityDigest === revision.parentAuthorityDigest
-        && (!currentLineage?.activeRunId || currentLineage.activeRunId === parent.runId)
+        && (!currentLineage?.activeRunId || currentLineage.activeRunId === parent.runId || retiredActive)
         && candidates.every(candidate => candidate.status === 'closed' || idle(candidate))
         && candidates.every(candidate => candidate.status === 'closed' || candidate.runId === parent.runId)) {
         action = 'supersede-and-start';

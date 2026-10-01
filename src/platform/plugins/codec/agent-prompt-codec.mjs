@@ -50,6 +50,13 @@ export const compileAgentPrompt = (packetInput, manifest = REFERENCE_AGENT_PROMP
   if (modern) assertDispatchResultContract(packet.execution?.result, feature, { conversationVisible: visible });
   const task = taskAware ? defineNodeTaskContract(feature.task) : null;
   if (taskAware) assert(Array.isArray(packet.workflowContext?.taskInputs), 'NODE_TASK_INPUTS_UNRESOLVED', 'Prompt compilation requires resolved Node Task inputs.');
+  if (task?.inputs.some(input => input.id === 'approved-delivery-plan')) {
+    const approved = packet.workflowContext.taskInputs.find(input => input.id === 'approved-delivery-plan')?.value;
+    const upstream = packet.workflowContext.taskInputs.find(input => input.id === 'upstream-delivery-plan')?.values ?? [];
+    assert(approved?.proposedFeatures?.some(proposal => proposal.projectId === packet.projectId && proposal.disposition === 'project-owned')
+      || upstream.some(item => item.value?.proposedFeatures?.some(proposal => proposal.projectId === packet.projectId && proposal.disposition === 'project-owned')),
+    'IMPLEMENTATION_TYPED_PLAN_INPUT_REQUIRED', 'Implementation Dispatch requires a typed project-owned delivery plan from the approved Feature or upstream planning Feature.');
+  }
   const typedOutputDialect = packet.execution?.runtime?.resultDialect === 'typed-output-envelope-v1'
     ? '\n- This Runtime uses typed-output-envelope-v1: do not return the business outputs object directly. Return the provider-required typedOutputs array instead. Each entry must contain portId, schemaId, valueJson, and evidenceRefs; valueJson must be a JSON string encoding the exact output value object. Return typedOutputs: [] when successful typed outputs are not required. Harness decodes this envelope back into outputs before business validation.'
     : '';
@@ -61,10 +68,10 @@ export const compileAgentPrompt = (packetInput, manifest = REFERENCE_AGENT_PROMP
   const diagnosticInstructions = feature.metadata?.diagnostics?.length
     ? `Inspect each carried diagnostic on the current source and return diagnosticDispositions for every ID: ${json(feature.metadata.diagnostics)}. A finding disposition must name an evidence-backed finding in findings; not-reproduced requires fresh check evidence.\n`
     : '';
-  const verificationOutputs = feature.metadata?.stage === 'quality-repair' ? feature.metadata?.verificationOutputPaths ?? [] : [];
+  const verificationOutputs = feature.metadata?.verificationOutputPaths ?? [];
   const writeBoundaryInstructions = verificationOutputs.length
-    ? `Edit source only within allowedPaths. You may write transient build and test artifacts only beneath these declared workspace-relative verificationOutputPaths: ${compactJson(verificationOutputs)}. Never edit source there or include those artifacts in changedFiles. Never write forbiddenPaths or any other path. If a required check writes elsewhere, report verification-path-prohibited with the exact path and do not run it.`
-    : 'Write only allowedPaths in the packet, never forbiddenPaths. If a required check writes outside allowedPaths, report verification-path-prohibited with the exact path and do not run it.';
+    ? `Edit source only within allowedPaths. You may write transient build and test artifacts only beneath these declared workspace-relative verificationOutputPaths: ${compactJson(verificationOutputs)}. Never edit source there or include those artifacts in changedFiles. Never write forbiddenPaths or any other path. Before running a check that writes elsewhere, inspect its output route. For a writable implementation Feature, repair that route within allowedPaths when possible, then run the check. Otherwise report verification-path-prohibited with the exact path; never run the unsafe check.`
+    : 'Write only allowedPaths in the packet, never forbiddenPaths. Before running a check that writes outside allowedPaths, repair its output route within allowedPaths when the Feature permits it. Otherwise report verification-path-prohibited with the exact path; never run the unsafe check.';
   const shortText = contractVersion === '1.5' && visible ? `# Agent Harness Dispatch Prompt
 
 Prompt-Contract-Version: 1.5
@@ -77,7 +84,7 @@ Complete only Feature ${JSON.stringify(feature.id)}. Do not delegate, change Har
 
 Read the exact UTF-8 Dispatch packet at ${JSON.stringify(`${packet.outputRef}.dispatch-packet.json`)}. Verify its SHA-256 equals Dispatch-Packet-Digest. Follow feature.task steps in order, using workflowContext.taskInputs. Read the exact result Schema at ${JSON.stringify(fileURLToPath(visibleSchemaUrl))} and verify its SHA-256 is ${sha256(visibleSchemaBytes)}.
 
-Edit source only within allowedPaths; never write forbiddenPaths. Transient build and test artifacts are allowed only in feature.metadata.verificationOutputPaths when declared${verificationOutputs.length ? `: ${compactJson(verificationOutputs)}` : ''}. Never edit source there or include those artifacts in changedFiles. If a required check writes elsewhere, return blocked with verification-path-prohibited. Inspect current state, make only necessary edits, verify changedFiles, and report observed evidence. Before editing, record the current file hashes within allowedPaths; changedFiles must list only files whose bytes differ from that starting state, including new files. A dirty Git status may contain work from an earlier Run and is not the changedFiles baseline. Quality review reports every current P0-P3 defect; repair needs passing focused checkpoints. Use external sources only through the pinned Source Manifest.
+${feature.reopenReason ? `Previous attempt blocker: ${feature.reopenReason}\n\n` : ''}Edit source only within allowedPaths; never write forbiddenPaths. Transient build and test artifacts go only in declared verificationOutputPaths${verificationOutputs.length ? `: ${compactJson(verificationOutputs)}` : ''}. Never edit source there or include those artifacts in changedFiles. Inspect check output routes; repair that route within allowedPaths when possible. Otherwise report verification-path-prohibited with exact path; never run the unsafe check. For an in-scope blocked fix, list blocker.repairCandidatePaths. Before editing, hash allowed files; changedFiles are only byte changes from that baseline, including new files. A dirty Git status may contain work from an earlier Run. Quality review reports current P0-P3 defects; repair needs passing focused checks. External sources: pinned Source Manifest only.
 
 Return exactly one JSON object matching the Schema, with no prose or Markdown. For completed status include every execution.result.outputPorts entry with schemaId, value, and evidenceRefs; validate values against execution.result.outputValueSchemas. If blocked or failed, include failureClass and blocker. Report exact changedFiles; read-only work returns []. Do not invent evidence.${typedOutputDialect}
 ` : null;

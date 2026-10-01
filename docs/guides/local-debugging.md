@@ -124,7 +124,13 @@ agent-harness dev recover-run --manifest <manifest.json> --run <run-id>
 
 `dev sync` 在一个命令内生成补丁计划、应用 H0–H3 变更、按需重新绑定 Project，并刷新默认本地 Codex 绑定。它保留 expected revision、命令 ID、制品摘要和 Receipt；H4 仍禁止热应用。需要审查固定计划时，仍可使用 `dev patch plan` 与 `dev patch apply`。H1 不允许重写已派发任务；当前协调进程保持原先已加载模块，新制品摘要用于后续编译和新 Run。
 
-H2/H3 导致 Coordinator 已退出时，`dev recover-run` 仅在项目 checkout 中使用当前 source-link 绑定。它核验覆盖原 Run 和活动 Lease 的补丁 Receipt、每个 Lease 对应的终态 Host Effect、原命令意图，以及同一逻辑任务的新 Plan；随后以预期 revision 将旧 Run 标记为 `superseded`。若有未决 Host Effect 或任一身份不符，它保持旧 Run 原状并返回错误。成功后由用户下一次 `h:local` 命令启动新 Plan；恢复命令本身不启动生命周期。
+实施 Agent 可以分批完成已批准的项目内工作。若本轮有经工作区快照核实的源码变更，但仍有项目内计划项，Agent 以 `implementation-incomplete` 返回阻塞结果；Coordinator 在同一 Run 内自动重新打开该 Feature，并让下一轮从当前源码和上次 Submission 继续。续接预算按项目内计划项计算，每项 20 轮、上限 200 轮；无源码进展、回到既有摘要、其他故障或预算耗尽时停止并报告具体阻断。跨项目集成证据、独立审查和发布批准不属于当前项目内实施 Feature 的完成条件。
+
+若实施 Run 因 H2/H3 补丁安全退出，新 Run 仅在相同项目、相同已批准计划、相同物理 checkout 和无活动 Lease 的前提下，接受旧 Run 中摘要连续且有 Submission/Evidence 的项目内源码进展。当前工作区摘要必须恰好等于旧 Run 的最终摘要；额外手工改动继续触发源码相容性阻断。
+
+H2/H3 导致 Coordinator 已退出时，`dev recover-run` 仅在项目 checkout 中使用当前 source-link 绑定。它核验覆盖原 Run 和活动 Lease 的补丁 Receipt、每个 Lease 对应的终态 Host Effect、原命令意图，以及同一逻辑任务的新 Plan；随后以预期 revision 将旧 Run 标记为 `superseded`。若有未决 Host Effect 或任一身份不符，它保持旧 Run 原状并返回错误。恢复命令本身不启动生命周期。
+
+项目对话仍在当前 Codex 会话、原命令允许内部接续且旧 Agent 无法通过原 Coordinator 观察时，可运行 `integrations/codex/agent-harness-codex/scripts/visible-development-recovery.mjs --manifest <manifest> --run <run-id>`。它先用原 Run 与补丁 Receipt 验证替代 Plan，再通过当前会话原生 `list_agents`、`interrupt_agent` 和再次 `list_agents` 为缺失 Agent 建立身份绑定的隔离证据；不把缺失的 Agent 文本冒充 Submission。随后调用 `dev recover-run` 的同一校验逻辑，启动原 action/target 的替代 Plan，并让新 Agent 从现有源码重新验证未提交改动。任一步身份、来源或宿主收据不可验证时停止，保留 Authority 供诊断。
 
 ## generation 与回滚
 
