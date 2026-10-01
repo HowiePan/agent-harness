@@ -12,6 +12,12 @@
 
 Collection Profile 的 `produce` 遇到单个引擎缺口时，仍要完成该款所有独立可做的场景。若提交 `blocked`，结果必须抄录该款 manifest 的 `requiredScenarios`，给出同集合的逐场景 `scenarioAudit`（passed/blocked、证据引用、阻塞类型）且 `readyRemaining=[]`；缺项或非引擎缺口拒绝进入已阻塞状态并按 Feature 预算重试。若 Feature 元数据另有固定场景清单，还须与之相等。已耗尽的旧 Run 只在源摘要变化、无活动 Lease/Dispatch 且 Descriptor 显式允许时，才能保留旧 Authority 并启动新的同批次 Run；未变化时按原 lineage 继续。
 
+Collection B1 的 `produce` 在游戏 Feature 前编译一个共享能力 owner；当前默认消费者为十款 B1 游戏，游戏写域仍为各自 Game Pack，owner 独占 `packages`、`apps`、`docs` 和 `scripts`，明确禁止改游戏目录、规则正文、引擎制品锁及引擎源码。owner 的 `collectionRemaining=[]` 只表示共享层可做工作已耗尽，须经 `collection-shared-verify` 的 `pnpm check:ci` Feature Gate 后消费者才能发车。Descriptor 可为其他批次显式声明 `sharedCapabilities`、消费者和路径；缺少新版门禁的旧 Descriptor 必须重新绑定，不能静默降级。
+
+游戏新发现共享缺口时，以 `batch-produce-v1` 的 `sharedCapabilityRequest` 提交已完成的阶段检查点：包含声明的能力键、受影响的必需场景、证据及空 `readyRemaining`。Collection Profile 由该权威提交生成共享 owner 续任务和同款游戏续任务；owner 修改共享代码后，为已经结束的其他消费者增加重审任务。单游戏最多三轮交接；owner 无源码进展或预算耗尽时终止为 `collection-attention-required`，不把 Collection 缺口伪装为引擎缺口。正常 `blocked` 仍只接受完整、逐场景、已验证的 `engine-artifact` 阻塞。
+
+十款最新场景结果与所有共享 owner 均符合上述边界后，Coordinator 再将最新逐场景审计与当前 Game Pack manifest 的 `requiredScenarios` 精确对账，执行 fresh `collection-produce-exhaustion-verify`（`pnpm check:ci`）最终 Gate，并报告 `engine-only-blocked` 与 `collectionExhaustion` 清单。这是开发能力耗尽结论，仍为 attention 状态，不构成游戏验收、批次关闭或发布。旧 Run 的提交只作历史证据，新 Run/续任务固定当前源码与制品摘要。
+
 ## 质量与发布闭环
 
 Harness 按每个 item 的质量根从 Run Authority 投影独立 `QualityTargetSnapshot` 和 Finding inventory；同一批次的复审预算分别计算。`quality review-only` 执行只读复审，`quality repair-known` 只处理当前 Authority 中已知 Finding，`quality closeout` 使用固定的 closeout 快照。修复和复审由公共质量机制生成，批次 Profile 仍负责 item 归属、Barrier、逐项验收和批次关闭。正式质量准出要求本周期 P0–P3 全部关闭；Gate 失败可以生成批次级诊断复审，但不会绕过预算或验收。

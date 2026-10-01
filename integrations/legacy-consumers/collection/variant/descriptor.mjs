@@ -1,6 +1,7 @@
 import { isAbsolute } from 'node:path';
 import { assert } from '../../../../src/common/errors.mjs';
 import { validateWorkGraph } from '../../../../src/kernel/work-graph.mjs';
+import { collectionSharedCapabilities } from './shared-capabilities.mjs';
 
 export const COLLECTION_FINAL_GATE_IDS = Object.freeze([
   'collection-typecheck',
@@ -16,7 +17,7 @@ export const COLLECTION_FINAL_GATE_IDS = Object.freeze([
   'collection-cleanroom',
 ]);
 
-const pnpmGate = (id, script, timeoutMs = 900000) => ({ id, executionClass: 'deterministic-process', scope: 'final', required: true, forceFresh: true, command: ['pnpm', script], cwd: '.', timeoutMs });
+const pnpmGate = (id, script, timeoutMs = 900000, scope = 'final') => ({ id, executionClass: 'deterministic-process', scope, required: true, forceFresh: true, command: ['pnpm', script], cwd: '.', timeoutMs });
 
 export const createTabletopCollectionProjectDescriptor = ({
   id = 'tabletop-collection',
@@ -42,6 +43,7 @@ export const createTabletopCollectionProjectDescriptor = ({
   const resolvedAgentExecutionMode = agentExecutionMode ?? 'conversation-visible';
   const gameIds = [...new Set(batches.flatMap(batch => batch.gameIds ?? []))];
   for (const gameId of gameIds) assert(/^[a-z0-9][a-z0-9-]*$/.test(gameId), 'COLLECTION_GAME_ID_INVALID', `Invalid Collection game ID: ${gameId}`);
+  for (const batch of batches) collectionSharedCapabilities(batch);
   const itemPaths = Object.fromEntries(gameIds.map(gameId => [gameId, [`games/presets/${gameId}`]]));
   const workspace = { root: workspaceRoot, rootSelector: 'git-worktree', excluded: [...new Set(['.git', '.cardworld-local', '.pnpm-store', 'node_modules', 'dist', 'build', 'coverage', 'runs', ...(release?.artifactRoot ? [release.artifactRoot] : [])])] };
   if (remote) workspace.remote = remote;
@@ -83,6 +85,8 @@ export const createTabletopCollectionProjectDescriptor = ({
       profileConfigs: { 'collection-batch': { maxLogicalGames, requireBlockedScenarioAudit: true } },
     },
     gateRecipes: [
+      pnpmGate('collection-shared-verify', 'check:ci', 1800000, 'feature'),
+      pnpmGate('collection-produce-exhaustion-verify', 'check:ci', 1800000),
       pnpmGate('collection-typecheck', 'typecheck'),
       pnpmGate('collection-test', 'test'),
       pnpmGate('collection-web-build', 'build:web'),

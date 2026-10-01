@@ -11,7 +11,7 @@ const project = () => {
     workspaceRoot: resolve(process.cwd(), '.tmp', 'collection-plan-workspace'),
     batches: [{ id: 'B1', status: 'active', ruleStatus: 'rule-ready', gameIds: games }],
   });
-  descriptor.gateRecipes = [];
+  descriptor.gateRecipes = descriptor.gateRecipes.filter(recipe => ['collection-shared-verify', 'collection-produce-exhaustion-verify'].includes(recipe.id));
   return descriptor;
 };
 
@@ -39,7 +39,8 @@ test('Collection quality plan expands B1 into ten independent read-only game rev
 
 test('Collection full plan builds a per-game rules-to-acceptance DAG and rejects undeclared selectors', () => {
   const full = createTabletopCollectionLifecyclePlan({ intent: intent('full'), project: project(), runId: 'full-b1', sourceDigest });
-  assert.equal(full.run.features.length, 50);
+  assert.equal(full.run.features.length, 51);
+  assert.equal(full.run.features.filter(feature => feature.metadata.capabilityOwner).length, 1);
   for (const gameId of games) {
     const stages = full.run.features.filter(feature => feature.metadata.gameId === gameId);
     assert.deepEqual(stages.map(feature => feature.metadata.stage), ['rules', 'produce', 'quality', 'review', 'accept']);

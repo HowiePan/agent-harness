@@ -10,13 +10,17 @@ import { validateBusinessResult, validateProfileResult } from '../platform/execu
 import { ensureVersionClearance } from './version-clearance.mjs';
 import { ensurePreReleaseCandidate } from './version-prerelease.mjs';
 import { ensureBatchPreReleaseCandidate } from './batch-prerelease.mjs';
+import { verifyCollectionScenarioInventories } from './collection-exhaustion.mjs';
 import { ensurePlanApprovalArtifact } from '../flows/delivery-lifecycle/plan-approval.mjs';
 import { performance } from 'node:perf_hooks';
 
 const recoverableResultCodes = new Set(['REPAIR_CHECKPOINT_REQUIRED', 'REPAIR_CHECKPOINT_EVIDENCE_REQUIRED', 'REPAIR_FINDING_CHECKPOINT_REQUIRED', 'QUALITY_DIAGNOSTIC_DISPOSITION_REQUIRED', 'PROFILE_RESULT_REJECTED']);
-export const visibleLifecycleStopReason = state => state.status === 'ready'
-  && state.features.some(feature => ['blocked', 'failed-budget'].includes(feature.state))
-  ? 'blocked-dependencies' : state.status;
+export const visibleLifecycleStopReason = state => {
+  if (state.profile?.id === 'collection-batch' && state.features.some(feature => ['blocked', 'failed-budget'].includes(feature.state)
+    && feature.blocker?.kind !== 'engine-artifact')) return 'collection-attention-required';
+  return state.status === 'ready' && state.features.some(feature => ['blocked', 'failed-budget'].includes(feature.state))
+    ? 'blocked-dependencies' : state.status;
+};
 const safeProjectPath = path => typeof path === 'string' && path.length > 0 && !path.includes('\\')
   && !path.includes(':') && !path.startsWith('/') && path.split('/').every(segment => segment && segment !== '.' && segment !== '..' && !segment.includes('*'));
 const insideScope = (scope, path) => path === scope || path.startsWith(`${scope}/`);
@@ -50,6 +54,19 @@ export const shouldContinueImplementationProgress = ({ feature, result, state, s
     && ['implementation-incomplete', 'external-prerequisite-and-incomplete-implementation'].includes(item.result.failureClass)).length;
   const attempt = state.attempts[`${feature.logicalRoot}:${result.failureClass}`];
   return continuations <= budget && Boolean(attempt && !attempt.exhausted);
+};
+export const shouldContinueCollectionProgress = ({ feature, result, state, submission }) => {
+  const expectedClass = feature?.metadata?.stage === 'shared-capability' ? 'collection-shared-incomplete'
+    : feature?.metadata?.stage === 'produce' && state.profile?.id === 'collection-batch' ? 'collection-game-incomplete' : null;
+  if (!expectedClass || result?.status !== 'blocked' || result.failureClass !== expectedClass) return false;
+  const current = state.features.find(item => item.id === feature.id);
+  if (current?.state !== 'blocked' || !submission || submission.featureId !== feature.id
+    || submission.outputSourceDigest === submission.inputSourceDigest || !submission.changedFiles?.length) return false;
+  const budget = feature.metadata.collectionProgressRetries;
+  const attempt = state.attempts[`${feature.logicalRoot}:${expectedClass}`];
+  if (!Number.isInteger(budget) || budget < 1 || !attempt || attempt.exhausted || attempt.failures > budget) return false;
+  return !state.submissions.some(item => item.submissionId !== submission.submissionId && item.featureId === feature.id
+    && [item.inputSourceDigest, item.outputSourceDigest].includes(submission.outputSourceDigest));
 };
 const previousFreshGates = (state, scope, ids) => {
   const results = ids.map(id => [...state.gates].reverse().find(gate => gate.id === id && gate.scope === scope && gate.status === 'passed' && gate.forcedFresh && gate.sourceDigest === state.sourceDigest));
@@ -104,9 +121,25 @@ const runHeadlessLifecyclePlan = async (context, api, planInput, { commandId, pr
   if (runtimePolicy.hostOrchestrated) return { status: 'attention-required', reason: 'user-visible-runtime-requires-host-orchestration', planDigest: plan.planDigest, state };
   const activeRunId = state.runId;
   const coordinator = new RunCoordinator({ harness: api, onGateProgress });
-  const execution = await coordinator.run({ projectId: plan.project.id, runId: activeRunId, runtimePluginId: plan.run.runtimePluginId, maxConcurrency, maxRounds: plan.intent.preset === 'release-exhaustive' ? Infinity : maxRounds });
+  const execution = await coordinator.run({ projectId: plan.project.id, runId: activeRunId, runtimePluginId: plan.run.runtimePluginId, maxConcurrency,
+    maxRounds: plan.intent.preset === 'release-exhaustive' || (plan.intent.action === 'produce' && state.profile.id === 'collection-batch') ? Infinity : maxRounds });
   state = await authorityStore.read(plan.project.id, activeRunId);
-  if (!state.features.every(feature => feature.state === 'completed')) return { status: execution.status, planDigest: plan.planDigest, execution, state };
+  if (!state.features.every(feature => feature.state === 'completed')) {
+    if (state.profile.id === 'collection-batch' && plan.intent.action === 'produce') {
+      const exhaustion = api.profileRegistry.get(state.profile.id).project(state).collectionExhaustion;
+      if (exhaustion?.onlyEngineRemaining && plan.stopCondition.requiredFinalGates?.includes('collection-produce-exhaustion-verify')) {
+        const inventory = await verifyCollectionScenarioInventories({ workspaceRoot: plan.run.executionWorkspaceRoot, state });
+        if (!inventory.ok) return { status: 'attention-required', reason: 'collection-scenario-inventory-mismatch', planDigest: plan.planDigest,
+          execution, collectionExhaustion: exhaustion, inventory, state };
+        const gateRunner = new ProjectGateRunner({ harness: api, onProgress: onGateProgress });
+        const gates = await gateRunner.run({ projectId: plan.project.id, runId: activeRunId, scope: 'final', forceFresh: true,
+          gateIds: plan.stopCondition.requiredFinalGates });
+        return { status: 'attention-required', reason: gates.results.every(gate => gate.status === 'passed') ? 'engine-only-blocked' : 'collection-exhaustion-gates-not-passed',
+          planDigest: plan.planDigest, execution, gates: gates.results, collectionExhaustion: exhaustion, inventory, state: gates.state };
+      }
+    }
+    return { status: execution.status, planDigest: plan.planDigest, execution, state };
+  }
   const gateRunner = new ProjectGateRunner({ harness: api, onProgress: onGateProgress });
   const featureGates = await runPendingFeatureGates({ harness: api, projectId: plan.project.id, runId: activeRunId, onProgress: onGateProgress });
   if (!featureGates.ok) return { status: 'attention-required', reason: 'feature-gates-not-passed', planDigest: plan.planDigest, execution, gates: featureGates.results, state: featureGates.state };
@@ -172,7 +205,8 @@ const continueVisibleLifecyclePlan = async (context, api, planInput, { commandId
     const resumed = await continueVisibleLifecyclePlan(context, api, planInput, { commandId, preflightReport, maxConcurrency, maxRounds, forceFreshGates, onGateProgress, gateDiagnosticAttempts: gateDiagnosticAttempts + 1, continuedStart: started });
     return { ...resumed, rounds: [...rounds, ...(resumed.rounds ?? [])] };
   };
-  const coordinatorRoundLimit = plan.intent.preset === 'release-exhaustive' || plan.intent.action === 'implement' ? Infinity : maxRounds;
+  const coordinatorRoundLimit = plan.intent.preset === 'release-exhaustive' || plan.intent.action === 'implement'
+    || (plan.intent.action === 'produce' && state.profile.id === 'collection-batch') ? Infinity : maxRounds;
   let completedRounds = 0;
   while (completedRounds < coordinatorRoundLimit) {
     const roundStarted = performance.now();
@@ -241,7 +275,29 @@ const continueVisibleLifecyclePlan = async (context, api, planInput, { commandId
     const leases = state.leases.filter(lease => lease.status === 'active');
     if (!leases.length) {
       if (state.features.every(feature => feature.state === 'completed')) break;
-      if (featureGates && !featureGates.ok) return { status: 'attention-required', reason: 'feature-gates-not-passed', planDigest: plan.planDigest, rounds, gates: featureGates.results, state };
+      if (featureGates && !featureGates.ok) {
+        if (state.profile.id === 'collection-batch' && plan.intent.action === 'produce') {
+          const retried = await retryFailedGates(featureGates.results);
+          if (retried) return retried;
+        }
+        return { status: 'attention-required', reason: 'feature-gates-not-passed', planDigest: plan.planDigest, rounds, gates: featureGates.results, state };
+      }
+      if (state.profile.id === 'collection-batch' && plan.intent.action === 'produce') {
+        const exhaustion = api.profileRegistry.get(state.profile.id).project(state).collectionExhaustion;
+        if (exhaustion?.onlyEngineRemaining && plan.stopCondition.requiredFinalGates?.includes('collection-produce-exhaustion-verify')) {
+          const inventory = await verifyCollectionScenarioInventories({ workspaceRoot: plan.run.executionWorkspaceRoot, state });
+          if (!inventory.ok) return { status: 'attention-required', reason: 'collection-scenario-inventory-mismatch', planDigest: plan.planDigest,
+            rounds, collectionExhaustion: exhaustion, inventory, blockedFeatures: blockedFeatures(state), state };
+          const gateRunner = new ProjectGateRunner({ harness: api, onProgress: onGateProgress });
+          const gates = await gateRunner.run({ projectId: plan.project.id, runId: activeRunId, scope: 'final', forceFresh: true,
+            gateIds: plan.stopCondition.requiredFinalGates });
+          state = gates.state;
+          if (!gates.results.every(gate => gate.status === 'passed')) return await retryFailedGates(gates.results)
+            ?? { status: 'attention-required', reason: 'collection-exhaustion-gates-not-passed', planDigest: plan.planDigest, rounds, gates: gates.results, state };
+          return { status: 'attention-required', reason: 'engine-only-blocked', planDigest: plan.planDigest,
+            rounds, gates: gates.results, collectionExhaustion: exhaustion, inventory, blockedFeatures: blockedFeatures(state), state };
+        }
+      }
       const reason = visibleLifecycleStopReason(state);
       rounds.push({ round: completedRounds + 1, status: 'attention-required', reason });
       return { status: 'attention-required', reason, planDigest: plan.planDigest, rounds, blockedFeatures: blockedFeatures(state), state };
@@ -306,6 +362,13 @@ const continueVisibleLifecyclePlan = async (context, api, planInput, { commandId
           featureId: feature.id,
           reason: `Verified source progress was submitted, but the approved project-owned implementation remains incomplete. Continue from the current source and prior Submission within the approved plan. Do not require cross-project integration evidence or release approval for this Feature. Prior progress: ${businessResult.summary}`,
         }, { expectedRevision: state.revision, commandId: `${commandId}.implementation-progress-reopen.${dispatch.dispatchId}` });
+        state = reopened.state;
+      } else if (shouldContinueCollectionProgress({ feature, result: businessResult, state,
+        submission: state.submissions.find(item => item.dispatchId === dispatch.dispatchId) })) {
+        const reopened = await api.kernel.reopenFeature(plan.project.id, activeRunId, {
+          featureId: feature.id,
+          reason: `Verified Collection source progress was submitted, and in-scope work remains. Continue from the current source and prior Submission. Prior progress: ${businessResult.summary}`,
+        }, { expectedRevision: state.revision, commandId: `${commandId}.collection-progress-reopen.${dispatch.dispatchId}` });
         state = reopened.state;
       }
     }

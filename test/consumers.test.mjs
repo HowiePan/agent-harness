@@ -128,7 +128,7 @@ test('CardWorld action plans use action-specific stages, paths, stop conditions,
 test('Collection consumer keeps ten game lanes, Feature dependencies, and one shared capability owner', () => {
   const descriptor = createTabletopCollectionProjectDescriptor({ workspaceRoot: process.cwd() });
   assert.equal(descriptor.workspace.rootSelector, 'git-worktree');
-  assert.deepEqual(descriptor.gateRecipes.map(gate => gate.id), COLLECTION_FINAL_GATE_IDS);
+  assert.deepEqual(descriptor.gateRecipes.map(gate => gate.id), ['collection-shared-verify', 'collection-produce-exhaustion-verify', ...COLLECTION_FINAL_GATE_IDS]);
   assert.deepEqual(descriptor.extensions.map(extension => extension.id), ['tabletop-collection-profile', 'codex-runtime']);
   assert.equal(descriptor.policy.maxConcurrency, 10);
   assert.equal(descriptor.policy.agentExecutionMode, 'conversation-visible');

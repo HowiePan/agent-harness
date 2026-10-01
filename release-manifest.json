@@ -22,8 +22,8 @@
     },
     {
       "path": "docs/flows/batch-production/design.md",
-      "sha256": "b759d1c6d418ad1e1c3465be6c2dc4fb064d613824b6a516d57e5c5d4493424d",
-      "size": 5250
+      "sha256": "c14b8b4eb703f178297536ede992005802f444361e9374216ba3dca9e96e42c0",
+      "size": 7056
     },
     {
       "path": "docs/flows/delivery-lifecycle/design.md",
@@ -467,8 +467,8 @@
     },
     {
       "path": "integrations/legacy-consumers/collection/extension.mjs",
-      "sha256": "df008f30eb2fefc82b3c827322eb5ae8305cd00281ac19ce6f507c3a476a248b",
-      "size": 3674
+      "sha256": "5cabdf14584fcd1dfdee5a3687481f2eac9203a69d01b89ccd5b345f72686530",
+      "size": 9828
     },
     {
       "path": "integrations/legacy-consumers/collection/importer.mjs",
@@ -482,13 +482,18 @@
     },
     {
       "path": "integrations/legacy-consumers/collection/variant/descriptor.mjs",
-      "sha256": "c75faab50728a90b1d0751225ebe0bc352f5de7c2f5fef0bf86717dabcde47a6",
-      "size": 8424
+      "sha256": "abc5ba061e30e43ce3399b3c6d42c4f1c2d5ffe2471c959085fbadfb88cc6145",
+      "size": 8727
     },
     {
       "path": "integrations/legacy-consumers/collection/variant/feature.mjs",
       "sha256": "2cd01e7746a5b95a043c0d4413bc77922977c314c79551edaf0c671f2bdc86a6",
       "size": 630
+    },
+    {
+      "path": "integrations/legacy-consumers/collection/variant/shared-capabilities.mjs",
+      "sha256": "f859d998175483dcab238f8af60bee18a88d32485c19c81236d9bdcb75785a04",
+      "size": 15131
     },
     {
       "path": "integrations/legacy-consumers/legacy-compat.mjs",
@@ -742,8 +747,8 @@
     },
     {
       "path": "schemas/tabletop-collection-project-input.schema.json",
-      "sha256": "73e21401a32b9ed5cd757f15430a2ebd12424fdc6c8d62cbabde82173a9b9e25",
-      "size": 2380
+      "sha256": "6cf779d67be1f523e985ef8c89515a18f009e8a56a5826480dcb2a659a3e940c",
+      "size": 3068
     },
     {
       "path": "schemas/user-execution-constraints.schema.json",
@@ -806,6 +811,11 @@
       "size": 6660
     },
     {
+      "path": "src/application/collection-exhaustion.mjs",
+      "sha256": "a9a125294e112749560a3fe12b540853ca6e7d7a3ba6f959e5d388d25e9f9b97",
+      "size": 1681
+    },
+    {
       "path": "src/application/development-patch.mjs",
       "sha256": "a6d3de40d9640ec55880ae1f91d5a065a52271124592bd4e8f027c568409602d",
       "size": 13997
@@ -852,8 +862,8 @@
     },
     {
       "path": "src/application/lifecycle-execution-service.mjs",
-      "sha256": "0b0580923fce2c71f02ce35a8e870348055115da6b44f386faab8794acd2b3dc",
-      "size": 29594
+      "sha256": "ec76473719ba868e225d5470842916f6d0e0580432f5cf6c4665c1202e731385",
+      "size": 35074
     },
     {
       "path": "src/application/lineage.mjs",
@@ -1087,8 +1097,8 @@
     },
     {
       "path": "src/flows/batch-production/planner.mjs",
-      "sha256": "c2de91931d559e6cfe268a62a680464a55f024d3c8045bb8046907be81991360",
-      "size": 7891
+      "sha256": "4f553d8e63565aede59c629e29def4b908a2c43e630964c595e76cc1f1f8ecf2",
+      "size": 8058
     },
     {
       "path": "src/flows/batch-production/policy/batch-production.mjs",
@@ -1771,7 +1781,7 @@
       "size": 19877
     }
   ],
-  "packageDigest": "fa1ac2b8986c565577aa7573337404e786308fd04eb75170e2e44411583b6825",
+  "packageDigest": "bb16cf1343087580ec017ea30dc55aeb995f97b69ca49e38ee17a4a3031ad397",
   "metadataFiles": [
     "release-manifest.json",
     "sbom.spdx.json"

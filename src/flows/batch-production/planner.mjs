@@ -16,6 +16,7 @@ export const createBatchProductionLifecyclePlanner = ({
   defaultConflictPrefix = 'item',
   defaultQualityRootPrefix = 'batch',
   extendProfileConfig = () => ({}),
+  extendFeatures = ({ features }) => features,
   selectorErrorCode = 'BATCH_ITEM_NOT_FOUND',
 } = {}) => ({ intent, project, runId, sourceDigest }) => {
   const finalGateIds = (project.gateRecipes ?? []).filter(recipe => recipe.scope === 'final' && recipe.required !== false).map(recipe => recipe.id);
@@ -76,7 +77,7 @@ export const createBatchProductionLifecyclePlanner = ({
     itemPaths: typeof itemPaths === 'function' ? itemPaths : (id => itemPaths[id] ?? [`items/${id}`]),
     forbiddenPaths,
   });
-  const features = repairOnly && !closeoutOnly ? itemIds.flatMap(itemId => {
+  const plannedFeatures = repairOnly && !closeoutOnly ? itemIds.flatMap(itemId => {
     const inventory = intent.qualityRepairInventories[itemId];
     if (!inventory.findings.length) return [];
     const root = intent.qualityTargets[itemId].scopeRoot;
@@ -100,6 +101,7 @@ export const createBatchProductionLifecyclePlanner = ({
     context: { intent, sourceDigest, project },
     items: itemIds,
   });
+  const features = extendFeatures({ intent, project, batch, itemIds, features: plannedFeatures, sourceDigest });
   const gateBindings = project.policy?.gateBindings ?? {};
   for (const feature of features) {
     const stageGates = resolveStageGates(gateBindings, feature.kind);
