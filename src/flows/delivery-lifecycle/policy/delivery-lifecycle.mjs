@@ -47,6 +47,26 @@ export const createDeliveryLifecycleProfile = (id = 'delivery-lifecycle') => Obj
   },
 
   validateResult({ state, feature, result }) {
+    if (feature.metadata?.approvedProposal && result.status === 'completed') {
+      const proposal = feature.metadata.approvedProposal;
+      const output = result.outputs?.implement?.value;
+      const contracts = proposal.contracts ?? [];
+      const verification = proposal.verification ?? [];
+      const reported = output?.verificationResults;
+      const verified = Array.isArray(reported) && reported.length === verification.length
+        && verification.every(item => {
+          const matches = reported.filter(entry => entry?.item === item);
+          return matches.length === 1 && (matches[0].status === 'completed'
+            ? Array.isArray(matches[0].evidenceRefs) && matches[0].evidenceRefs.length > 0
+            : matches[0].status === 'deferred' && (proposal.externalPrerequisites ?? []).includes(matches[0].externalPrerequisite)
+              && typeof matches[0].reason === 'string' && matches[0].reason.trim().length > 0);
+        });
+      const completedContracts = output?.completedContracts;
+      return { ok: output?.proposalId === proposal.id
+        && Array.isArray(completedContracts) && completedContracts.length === contracts.length
+        && contracts.every(item => completedContracts.includes(item))
+        && verified, reason: 'approved-proposal-completion-evidence-mismatch' };
+    }
     if (feature.metadata?.stage === 'version-planning' && result.status === 'completed' && Array.isArray(result.followUpFeatures) && result.followUpFeatures.length > 0) {
       return { ok: false, reason: 'planning-proposals-must-use-typed-plan-output' };
     }

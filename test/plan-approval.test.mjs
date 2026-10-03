@@ -163,6 +163,7 @@ test('a verified prior implementation submission carries the same approved plan 
 
 test('recovery carries only a fenced abandoned Dispatch delta as unverified implementation input', async () => {
   const planRun = reviewedRun(true);
+  planRun.submissions[0].result.outputs.plan.value.proposedFeatures[0].allowedPaths = ['src/first.rs'];
   planRun.metadata.workflow = { id: 'engine-delivery' };
   const artifact = planApprovalSnapshot(planRun);
   const before = 'b'.repeat(64);

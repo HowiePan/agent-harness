@@ -6,6 +6,8 @@
 
 独立的 `implement` 命令在已批准计划上连续执行 `implement → scope → docs → quality`，包括质量修复、复审和最终 Gate，不能在实现 Feature 完成时结束。它与 `full` 路线共享质量收口规则，并从 Target 取得当前源码的 `QualityInventorySnapshot@2.0`。
 
+独立 `implement` Run 启动时，将批准的 `proposedFeatures` 中本项目 `project-owned` 条目编译成逐包实施 Feature。编译器校验 ID、依赖和环，并按批准顺序串行执行；每包保留完整计划与当前提案，完成结果必须绑定提案 ID、逐条合同和验证证据。跨项目提案不获引擎写权限，外部制品与受保护发布证据可明确延后到对应集成或发布阶段。项目 Descriptor 的动作路径仍是写权限上界；提案路径提供实施指引，不因同一项目内必要的相邻源码文件改动要求用户重新规划。`scope` 等后续阶段仅在所有本项目实施包完成后开始。
+
 适用于一个版本/功能的需求到交付闭环。输入是动作、目标版本、Feature、已批准的项目 Descriptor、执行模式、Gate Recipe，以及 Harness 从 Run Authority 派生的 `QualityTargetSnapshot`。`full` 路由顺序为 `intake → expansion → canonical → plan → implement → scope → docs → quality → review → deliver`。`requirements` 动作有四个 preset：`full`（默认，`intake → expansion → canonical`）、`expand-to-plan`（`intake → expansion → canonical → plan`）、`direct`（不扩展，`intake → canonical → plan`）、`plan-only`（`plan`）；`deliver` 可选择部分路线，其他阶段动作也可独立启动。端口依次使用 `delivery-intake-v1`、`delivery-expansion-v1`、`canonical-requirement-v1`、`delivery-plan-v1`、`delivery-implementation-v1`、`delivery-scope-v1`、`delivery-docs-v1`、`delivery-quality-v1`、`delivery-review-v1` 与 `delivery-receipt-v1`。节点由 `graph/definition.mjs` 声明，`nodes/delivery/` 生成 Feature，`policy/` 固定质量、评审和关闭规则。
 
 结果须符合 Feature/Profile 合同并附来源和变更文件证据。`quality` 是质量检查点，`review`/`deliver` 是只读阶段；当前周期 P0–P3 必须关闭，必要人工 Decision 与最终 Gate Receipt 齐全才能关闭 Run。失败按 Attempt 预算处理；恢复只能遵守固定 Run 身份和 Epoch 规则。

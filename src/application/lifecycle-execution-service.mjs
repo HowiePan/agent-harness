@@ -199,7 +199,11 @@ const continueVisibleLifecyclePlan = async (context, api, planInput, { commandId
     if (plan.intent.action === 'prerelease') return null;
     if (gateDiagnosticAttempts >= 5 || !results.some(gate => gate.status === 'failed')) return null;
     state = await authorityStore.read(plan.project.id, activeRunId);
-    if (!api.profileRegistry.get(state.profile.id).createGateDiagnosticReview) return null;
+    const profile = api.profileRegistry.get(state.profile.id);
+    if (!profile.createGateDiagnosticReview) return null;
+    if (state.leases.some(lease => lease.status === 'active')
+      || state.dispatches.some(dispatch => ['requested', 'assigned'].includes(dispatch.status))) return null;
+    if (!state.features.every(feature => feature.state === 'completed')) return null;
     const scheduled = await api.kernel.scheduleGateDiagnosticReview(plan.project.id, activeRunId, { gateResults: results }, { expectedRevision: state.revision, commandId: `${commandId}.gate-diagnostic.${state.revision}` });
     if (!scheduled.result.scheduled) return null;
     const resumed = await continueVisibleLifecyclePlan(context, api, planInput, { commandId, preflightReport, maxConcurrency, maxRounds, forceFreshGates, onGateProgress, gateDiagnosticAttempts: gateDiagnosticAttempts + 1, continuedStart: started });

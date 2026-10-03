@@ -112,9 +112,6 @@ export const assessVerifiedImplementationContinuation = ({ planRun, planArtifact
 /** Carry an abandoned Dispatch's in-scope source delta as unverified work for a new Run. */
 export const assessRecoveredImplementationContinuation = async ({ planRun, planArtifact, priorRuns, currentSnapshot,
   workspaceRoot, implementationFeatures, evidenceStore, controlRoot, dataRoot, readHostEffect = null }) => {
-  const approvedPaths = (reviewedPlanProposal(planRun)?.proposedFeatures ?? [])
-    .filter(feature => feature.projectId === planRun.projectId && feature.disposition === 'project-owned')
-    .flatMap(feature => feature.allowedPaths ?? []).filter(safePath);
   const implementationPaths = (implementationFeatures ?? [])
     .filter(feature => feature.metadata?.stage === 'implementation' && feature.metadata?.sourcePolicy !== 'read-only')
     .flatMap(feature => feature.allowedPaths ?? []).filter(safePath);
@@ -148,7 +145,6 @@ export const assessRecoveredImplementationContinuation = async ({ planRun, planA
     const changedFiles = diffWorkspaceSnapshots(baseline, currentSnapshot);
     if (!changedFiles.length || !changedFiles.every(path => safePath(path)
       && feature.allowedPaths?.some(scope => safePath(scope) && containsPath(scope, path))
-      && approvedPaths.some(scope => containsPath(scope, path))
       && implementationPaths.some(scope => containsPath(scope, path)))) continue;
     return { mode: 'verified-prior-implementation-with-abandoned-dispatch', priorRunId: run.runId,
       fromSourceDigest: verified.fromSourceDigest, toSourceDigest: currentSnapshot.digest,

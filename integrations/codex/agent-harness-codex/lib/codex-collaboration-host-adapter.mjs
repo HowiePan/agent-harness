@@ -18,7 +18,7 @@ const contractBody = Object.freeze({
       tool: 'collaboration.list_agents',
       result: Object.freeze(['agents']),
       agent: Object.freeze(['agent_name', 'agent_status']),
-      statuses: Object.freeze(['pending', 'running', 'waiting', 'idle', 'blocked', 'interrupted', 'failed', 'completed', '{failed:string}', '{completed:string}']),
+      statuses: Object.freeze(['pending', 'running', 'waiting', 'idle', 'blocked', 'interrupted', 'failed', 'completed', '{failed:string}', '{errored:string}', '{completed:string}']),
     }),
     wait: Object.freeze({ tool: 'collaboration.wait_agent', result: Object.freeze(['message', 'timed_out']) }),
     interrupt: Object.freeze({ tool: 'collaboration.interrupt_agent', arguments: Object.freeze(['target']) }),
@@ -33,10 +33,11 @@ export const CODEX_COLLABORATION_NATIVE_CONTRACT = Object.freeze({
 
 const completedStatus = value => value && typeof value === 'object' && !Array.isArray(value) && typeof value.completed === 'string';
 const failedStatus = value => value && typeof value === 'object' && !Array.isArray(value) && typeof value.failed === 'string';
-const terminalNativeStatus = value => completedStatus(value) || failedStatus(value) || ['idle', 'failed', 'completed', 'interrupted'].includes(value);
+const erroredStatus = value => value && typeof value === 'object' && !Array.isArray(value) && typeof value.errored === 'string';
+const terminalNativeStatus = value => completedStatus(value) || failedStatus(value) || erroredStatus(value) || ['idle', 'failed', 'completed', 'interrupted'].includes(value);
 const normalizedStatus = value => {
   if (completedStatus(value)) return 'completed';
-  if (failedStatus(value)) return 'failed';
+  if (failedStatus(value) || erroredStatus(value)) return 'failed';
   if (value === 'pending') return 'queued';
   if (value === 'running' || value === 'waiting') return 'running';
   if (value === 'idle' || value === 'blocked') return 'blocked';
@@ -120,6 +121,9 @@ const parseTerminalResult = (task, agentId) => {
   }
   if (failedStatus(task.agent_status)) {
     return hostFailureResult({ agentId, status: 'failed', summary: task.agent_status.failed || `Codex collaboration Agent failed: ${agentId}`, failureClass: 'runtime-provider', code: 'CODEX_COLLABORATION_AGENT_FAILED' });
+  }
+  if (erroredStatus(task.agent_status)) {
+    return hostFailureResult({ agentId, status: 'failed', summary: task.agent_status.errored || `Codex collaboration Agent errored: ${agentId}`, failureClass: 'runtime-provider', code: 'CODEX_COLLABORATION_AGENT_FAILED' });
   }
   if (task.agent_status === 'interrupted') {
     return hostFailureResult({ agentId, status: 'failed', summary: `Codex collaboration Agent was interrupted: ${agentId}`, failureClass: 'runtime-interrupted', code: 'CODEX_COLLABORATION_AGENT_INTERRUPTED' });

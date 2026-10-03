@@ -39,10 +39,17 @@ test('one B1 produce plan schedules a single shared owner before ten scoped game
   assert(owner.forbiddenPaths.includes('engine-artifact.lock.json'));
   assert(owner.forbiddenPaths.includes('docs/rules'));
   assert.deepEqual(owner.gatePlan, ['collection-shared-verify']);
+  assert.deepEqual(owner.metadata.verificationOutputPaths, planned.run.features.find(feature => feature.metadata.gameId === 'texas-holdem').metadata.verificationOutputPaths);
+  assert(owner.metadata.verificationOutputPaths.includes('.cardworld-local'));
+  assert(owner.metadata.verificationOutputPaths.includes('apps/web/dist'));
+  assert(owner.metadata.verificationOutputPaths.includes('apps/mobile/dist'));
+  assert(!owner.forbiddenPaths.includes('.cardworld-local'));
+  assert(owner.forbiddenPaths.includes('node_modules'));
   assert.deepEqual(planned.stopCondition.requiredFinalGates, ['collection-produce-exhaustion-verify']);
   for (const game of features.filter(feature => feature.metadata.stage === 'produce')) {
     assert.deepEqual(game.allowedPaths, [`games/presets/${game.metadata.gameId}`]);
     assert(game.dependsOn.includes(owner.id));
+    assert.deepEqual(game.metadata.verificationOutputPaths, owner.metadata.verificationOutputPaths);
   }
 });
 
@@ -52,6 +59,14 @@ test('B1 refuses an old Descriptor without the shared verification gates', () =>
   assert.throws(() => createTabletopCollectionLifecyclePlan({ intent: { action: 'produce', target: 'B1', scope: 'round-production' },
     project: stale, runId: 'stale-shared-plan', sourceDigest: 'a'.repeat(64) }),
   error => error.code === 'COLLECTION_SHARED_DESCRIPTOR_STALE');
+});
+
+test('B1 refuses a Descriptor without declared check:ci verification outputs', () => {
+  const stale = project();
+  delete stale.policy.qualityVerificationOutputs;
+  assert.throws(() => createTabletopCollectionLifecyclePlan({ intent: { action: 'produce', target: 'B1', scope: 'round-production' },
+    project: stale, runId: 'stale-verification-plan', sourceDigest: 'a'.repeat(64) }),
+  error => error.code === 'COLLECTION_VERIFICATION_OUTPUTS_REQUIRED');
 });
 
 test('a Collection handoff appends an owner and a dependent same-run game continuation', () => {
@@ -66,6 +81,8 @@ test('a Collection handoff appends an owner and a dependent same-run game contin
   assert.deepEqual(followUps[0].dependsOn, [game.id]);
   assert.deepEqual(followUps[1].dependsOn, [followUps[0].id]);
   assert.deepEqual(followUps[1].allowedPaths, game.allowedPaths);
+  assert.deepEqual(followUps[0].metadata.verificationOutputPaths, game.metadata.verificationOutputPaths);
+  assert.deepEqual(followUps[1].metadata.verificationOutputPaths, game.metadata.verificationOutputPaths);
   validateWorkGraph([...features, ...followUps]);
 });
 

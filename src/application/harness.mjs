@@ -46,6 +46,7 @@ import { sealExecutionReadinessReport, verifyExecutionReadinessReport } from './
 import { readActiveRelease, resolveActiveRuntimeRoot } from '../platform/registry/active-generation.mjs';
 import { RunLineageStore, resolveRunLineage, verifyRunLineageResolution } from './lineage.mjs';
 import { ensurePlanApprovalArtifact, planApprovalSatisfied, planApprovalSnapshot, reviewedPlanProposal } from '../flows/delivery-lifecycle/plan-approval.mjs';
+import { expandApprovedImplementation } from '../flows/delivery-lifecycle/approved-implementation.mjs';
 import { assessAutomaticPlanSourceCompatibility, assessPlanSourceCompatibility, assessRecoveredImplementationContinuation, assessVerifiedImplementationContinuation, matchingPlanSourceCompatibilityDecision } from './plan-source-compatibility.mjs';
 import { preparePlanRevisionIntent } from './plan-revision.mjs';
 import {
@@ -696,12 +697,13 @@ export const createHarness = async ({ controlRoot: controlRootInput, dataRoot: d
         }
         await verifyHeadlessExecutionGrant({ adapter: trustedExecutionAuthorizationAdapter, grant: executionGrant, context, manifest: runtimeManifest, now: kernel.now });
       }
-      const projectOwnedCount = approvedPlan?.typedPlan.proposedFeatures.filter(item => item.projectId === project.id && item.disposition === 'project-owned').length ?? 0;
-      const implementationProgressRetries = Math.min(200, Math.max(20, projectOwnedCount * 20));
-      const features = approvedPlan ? input.features.map(feature => feature.metadata?.stage === 'implementation'
-        ? { ...feature, attemptLimit: Math.max(feature.attemptLimit ?? 3, implementationProgressRetries + 1),
-          metadata: { ...feature.metadata, approvedDeliveryPlan: structuredClone(approvedPlan.typedPlan), implementationProgressRetries } }
-        : feature) : input.features;
+      const implementationFeature = input.features.find(feature => feature.metadata?.stage === 'implementation');
+      const features = approvedPlan && implementationFeature?.task && implementationFeature.metadata?.workflow?.nodeId === 'implement'
+        ? expandApprovedImplementation({ features: input.features, typedPlan: approvedPlan.typedPlan, projectId: project.id })
+        : approvedPlan ? input.features.map(feature => feature.metadata?.stage === 'implementation'
+          ? { ...feature, attemptLimit: Math.max(feature.attemptLimit ?? 3, 21),
+            metadata: { ...feature.metadata, approvedDeliveryPlan: structuredClone(approvedPlan.typedPlan), implementationProgressRetries: 20 } }
+          : feature) : input.features;
       return kernel.startRun({ ...input, features, profileConfig, policyDigest, sourceDigest: runSourceDigest, pluginSetDigest: input.pluginSetDigest ?? installedCompositionDigest, metadata: { ...input.metadata, approvedPlan, ...(lifecycleExecution ? { lifecycleExecution } : {}), workspace: structuredClone(workspace), gateRecipes: structuredClone(project.gateRecipes ?? []), projectDescriptorDigest: project.descriptorDigest, extensionSetDigest: extensionSet.digest } }, command);
     },
 

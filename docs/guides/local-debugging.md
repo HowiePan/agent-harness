@@ -101,6 +101,8 @@ Hook 在绑定、同步或路由失败时仍用 `decision:block` 阻止无可信
 
 隔离合成项目已通过真实 Codex Agent 的审查、P1 修复、独立复审和固定最终 Gate，并由 Authority 关闭 Run。该证据证明当前本地源码路径可完成合成质量闭环。下游项目 checkout 的对话主动发起已绑定的本地命令，不适用 Harness 对话跨项目调用下游的授权禁令；Harness 对话要调用 CardWorld 等下游真实 Run，仍需用户针对目标和动作明确授权。Coordinator 重启后的真实宿主恢复与加密 Prompt 字节级证明仍是单独的可靠性跟踪项。
 
+若用户要求修复 Harness 并把旧 Run 退役到可重新发命令的状态，但明确不要求继续业务执行，可使用源码 Host 协调器 `visible-development-recovery.mjs --manifest <manifest.json> --run <run-id> --retire-only`。它仍须以原生 Host 观察/中断回执隔离活动 Effect、验证 H2/H3 补丁 Receipt，并通过 Kernel Authority 退役旧 Run；发出 `run-retired` 后立即停止，不执行替代 Run 的预检、启动或调度。随后由用户重新提交 `h:local ...`。
+
 ## 变化检测与应用
 
 ```text

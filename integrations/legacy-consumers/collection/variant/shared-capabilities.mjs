@@ -39,6 +39,17 @@ const taskWithInstructions = (task, extra) => {
   return defineNodeTaskContract({ ...body, instructions: [...body.instructions, ...extra] });
 };
 
+const withVerificationOutputs = (feature, outputs) => {
+  if (!outputs.length) return feature;
+  feature.forbiddenPaths = feature.forbiddenPaths.filter(path => !outputs.some(output => output === path || output.startsWith(`${path}/`)));
+  if (feature.metadata?.qualityReview) {
+    feature.metadata.qualityContext = { ...feature.metadata.qualityContext, verificationOutputPaths: [...outputs] };
+  } else if (feature.metadata?.sourcePolicy !== 'read-only') {
+    feature.metadata.verificationOutputPaths = [...outputs];
+  }
+  return feature;
+};
+
 const ownerTask = (capability, ticket = null) => defineNodeTaskContract({
   role: { id: 'capability-owner', description: 'Owns reusable Collection capabilities consumed by multiple game packs.' },
   objective: `Resolve Collection-owned shared capability ${capability.key} for its declared batch consumers.`,
@@ -62,9 +73,9 @@ const ownerTask = (capability, ticket = null) => defineNodeTaskContract({
   evidenceRequirements: ['Cite current-source verification and exact changed files.', 'Cite public-artifact black-box evidence for each remaining engine gap.'],
 });
 
-const ownerFeature = ({ batchId, capability, dependsOn = [], round = 0, ticket = null, forbiddenPaths = [] }) => {
+const ownerFeature = ({ batchId, capability, dependsOn = [], round = 0, ticket = null, forbiddenPaths = [], verificationOutputPaths = [] }) => {
   const task = ownerTask(capability, ticket);
-  return {
+  return withVerificationOutputs({
     id: `shared/${batchId}/${capability.key}/${round}`,
     executionClass: 'agent-reasoning', kind: 'shared-capability', ownerRole: task.role.id,
     attemptLimit: 12,
@@ -83,7 +94,7 @@ const ownerFeature = ({ batchId, capability, dependsOn = [], round = 0, ticket =
         collectionRemaining: { type: 'array', items: { type: 'string', minLength: 1 } },
       }, additionalProperties: true } },
     },
-  };
+  }, verificationOutputPaths);
 };
 
 export const extendCollectionFeatures = ({ intent, project, batch, itemIds, features }) => {
@@ -94,11 +105,18 @@ export const extendCollectionFeatures = ({ intent, project, batch, itemIds, feat
   assert(gateIds.has('collection-shared-verify') && gateIds.has('collection-produce-exhaustion-verify'),
     'COLLECTION_SHARED_DESCRIPTOR_STALE', 'The Collection Project Descriptor must be rebound with shared and exhaustion verification gates.');
   const forbiddenPaths = project.workspace?.excluded ?? ['.git', 'runs'];
+  const verificationOutputPaths = project.policy?.qualityVerificationOutputs ?? [];
+  assert(['.cardworld-local', 'apps/web/dist', 'apps/web/dist-ts', 'apps/mobile/dist',
+    '.expo', 'apps/mobile/.expo']
+    .every(path => verificationOutputPaths.includes(path)), 'COLLECTION_VERIFICATION_OUTPUTS_REQUIRED',
+  'Collection Descriptor must declare the project check:ci and cleanroom verification output paths.');
   const owners = capabilities.map(capability => ownerFeature({
     batchId: batch.id, capability,
     dependsOn: features.filter(feature => feature.metadata.stage === 'rules' && capability.consumers.includes(feature.metadata.gameId)).map(feature => feature.id),
     forbiddenPaths,
+    verificationOutputPaths,
   }));
+  for (const feature of features) withVerificationOutputs(feature, verificationOutputPaths);
   for (const feature of features.filter(item => item.metadata.stage === 'produce')) {
     const uses = capabilities.filter(capability => capability.consumers.includes(feature.metadata.gameId));
     feature.dependsOn = [...new Set([...feature.dependsOn, ...uses.map(capability => `shared/${batch.id}/${capability.key}/0`)])];
@@ -158,7 +176,7 @@ export const collectionCapabilityFollowUps = ({ state, feature, result }) => {
     .map(item => item.metadata.sharedRound ?? 0));
   const ticket = { ...structuredClone(request), gameId: feature.metadata.gameId };
   const owner = ownerFeature({ batchId: feature.metadata.batchId, capability: scope, dependsOn: [feature.id], round,
-    ticket, forbiddenPaths: feature.forbiddenPaths });
+    ticket, forbiddenPaths: feature.forbiddenPaths, verificationOutputPaths: feature.metadata.verificationOutputPaths ?? [] });
   owner.id = `shared/${feature.metadata.batchId}/${scope.key}/${ownerRound}`;
   owner.logicalRoot = `shared:${feature.metadata.batchId}:${scope.key}:${ownerRound}`;
   owner.metadata.sharedRound = ownerRound;

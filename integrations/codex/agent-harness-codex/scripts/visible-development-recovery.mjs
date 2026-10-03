@@ -10,13 +10,16 @@ import { createCodexCollaborationHostAdapter } from '../lib/codex-collaboration-
 import { createHostExchangeDiagnosticWriter } from '../lib/host-exchange-diagnostics.mjs';
 import { assertLocalProcessGateHost } from '../lib/local-process-gate-readiness.mjs';
 import { digestJson } from '../../../../src/common/canonical.mjs';
+import { createLifecycleCommandPlan } from '../../../../src/application/lifecycle-command-plan.mjs';
+import { expandApprovedImplementation } from '../../../../src/flows/delivery-lifecycle/approved-implementation.mjs';
 
 const emit = value => process.stdout.write(`${JSON.stringify({ protocolVersion: '1.0', ...value })}\n`);
 const fail = (code, message) => { throw Object.assign(new Error(message), { code }); };
 
 const main = async () => {
-  if (process.argv.length !== 6 || process.argv[2] !== '--manifest' || process.argv[4] !== '--run')
-    fail('VISIBLE_DEVELOPMENT_RECOVERY_ARGUMENTS_INVALID', 'Usage: visible-development-recovery.mjs --manifest <source-link-manifest> --run <run-id>');
+  const retireOnly = process.argv.length === 7 && process.argv[6] === '--retire-only';
+  if (![6, 7].includes(process.argv.length) || process.argv[2] !== '--manifest' || process.argv[4] !== '--run' || (process.argv.length === 7 && !retireOnly))
+    fail('VISIBLE_DEVELOPMENT_RECOVERY_ARGUMENTS_INVALID', 'Usage: visible-development-recovery.mjs --manifest <source-link-manifest> --run <run-id> [--retire-only]');
   const manifestFile = resolve(process.argv[3]);
   const runId = process.argv[5];
   const sessionId = process.env.CODEX_SESSION_ID;
@@ -38,8 +41,8 @@ const main = async () => {
       releaseIdentity, extensions, strictProjectIdentity: false,
       agentAdapters: { 'codex-conversation-runtime': host.adapter } });
     const old = await harness.authorityStore.read(projectId, runId);
-    if (old.metadata?.commandIntent?.action !== 'implement' || !old.metadata?.lifecycleInvocationId)
-      fail('VISIBLE_DEVELOPMENT_RECOVERY_SCOPE_INVALID', 'Recovery only continues an existing authorized implementation lifecycle.');
+    if (!['implement', 'produce'].includes(old.metadata?.commandIntent?.action) || !old.metadata?.lifecycleInvocationId)
+      fail('VISIBLE_DEVELOPMENT_RECOVERY_SCOPE_INVALID', 'Recovery only continues an existing authorized implementation or production lifecycle.');
     const commandId = `${old.metadata.lifecycleInvocationId}.development-recover.${runId}`;
     let recovery;
     if (old.status === 'superseded') {
@@ -77,18 +80,47 @@ const main = async () => {
       }
     }
     emit({ kind: 'codex-visible-development-recovery', phase: 'run-retired', ...recovery });
+    // Maintenance may prepare lineage for a later user-submitted command
+    // without exercising the original command's continuation authority now.
+    if (retireOnly) return;
     const intent = old.metadata.commandIntent;
     const project = await harness.projectRegistry.get(projectId);
     const extension = selectDevelopmentRecoveryExtension({ state: old, intent, project, installedExtensions: extensions });
-    const plan = await harness.createLifecyclePlan({ projectId, extensionId: extension.id, workflowId: intent.workflowId,
+    let plan = await harness.createLifecyclePlan({ projectId, extensionId: extension.id, workflowId: intent.workflowId,
       profileId: intent.profileId, action: intent.action, target: intent.target,
       arguments: intent.preset === 'default' ? [] : [intent.preset], executionWorkspaceRoot: old.metadata.workspace.root });
     if (plan.run.runId !== recovery.replacementRunId || plan.planDigest !== recovery.replacementPlanDigest) {
       const intended = await harness.authorityStore.read(projectId, recovery.replacementRunId, { required: false });
+      if (intended && intended.status !== 'closed' && intended.status !== 'superseded'
+        && intended.metadata?.lifecyclePlanDigest === recovery.replacementPlanDigest
+        && intended.metadata?.logicalTaskKey === old.metadata.logicalTaskKey
+        && intended.metadata?.lifecycleInvocationId === `${old.metadata.lifecycleInvocationId}.development-continue.${runId}`) {
+        const pinnedSourceDigest = intended.metadata?.lifecycleExecution?.authorizationSourceDigest;
+        const reconstructed = createLifecycleCommandPlan({ intent: plan.intent, project, extension, releaseIdentity,
+          sourceDigest: pinnedSourceDigest, executionWorkspaceRoot: intended.metadata.workspace.root,
+          workspaceIdentity: intended.metadata.workspace.identity,
+          executionConstraintDigest: plan.run.executionConstraintDigest,
+          sourceToolBinding: plan.run.metadata?.sourceToolBinding ?? null,
+          compiler: extension.operations?.createLifecyclePlan });
+        if (reconstructed.run.runId === intended.runId
+          && reconstructed.planDigest === recovery.replacementPlanDigest
+          && reconstructed.logicalTaskKey === intended.metadata.logicalTaskKey) {
+          plan = reconstructed;
+          emit({ kind: 'codex-visible-development-recovery', phase: 'replacement-reattached', projectId,
+            runId: intended.runId, planDigest: reconstructed.planDigest });
+        }
+      }
+    }
+    if (plan.run.runId !== recovery.replacementRunId || plan.planDigest !== recovery.replacementPlanDigest) {
+      const intended = await harness.authorityStore.read(projectId, recovery.replacementRunId, { required: false });
       const scope = features => features.map(feature => ({ id: feature.id, allowedPaths: feature.allowedPaths,
         forbiddenPaths: feature.forbiddenPaths, dependsOn: feature.dependsOn })).sort((left, right) => left.id.localeCompare(right.id));
+      const approvedPlan = old.metadata?.approvedPlan;
+      const candidateFeatures = approvedPlan?.projectId === projectId && approvedPlan.typedPlan
+        ? expandApprovedImplementation({ features: plan.run.features, typedPlan: approvedPlan.typedPlan, projectId })
+        : plan.run.features;
       if (intended || plan.logicalTaskKey !== old.metadata.logicalTaskKey
-        || digestJson(scope(plan.run.features)) !== digestJson(scope(old.features))
+        || digestJson(scope(candidateFeatures)) !== digestJson(scope(old.features))
         || digestJson(plan.stopCondition) !== digestJson(old.metadata.stopCondition))
         fail('VISIBLE_DEVELOPMENT_RECOVERY_PLAN_CHANGED', 'The replacement Plan changed outside the retired Run ledger.');
       emit({ kind: 'codex-visible-development-recovery', phase: 'replacement-replanned', projectId,

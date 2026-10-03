@@ -81,6 +81,7 @@ test('Codex collaboration adapter binds the real native envelope, canonical task
 test('native failed, interrupted, blocked, and output-less completed states become committable terminal results', async t => {
   for (const [nativeStatus, expected] of [
     [{ failed: 'provider failed the child task' }, { status: 'failed', failureClass: 'runtime-provider', code: 'CODEX_COLLABORATION_AGENT_FAILED' }],
+    [{ errored: 'provider exhausted its usage limit' }, { status: 'failed', failureClass: 'runtime-provider', code: 'CODEX_COLLABORATION_AGENT_FAILED' }],
     ['interrupted', { status: 'failed', failureClass: 'runtime-interrupted', code: 'CODEX_COLLABORATION_AGENT_INTERRUPTED' }],
     ['blocked', { status: 'blocked', failureClass: 'runtime-blocked', code: 'CODEX_COLLABORATION_AGENT_BLOCKED' }],
     ['completed', { status: 'failed', failureClass: 'runtime-contract', code: 'CODEX_COLLABORATION_RESULT_UNAVAILABLE' }],
@@ -190,6 +191,21 @@ test('development recovery fences an absent bound Agent with native interrupt an
   assert.equal((await recovery.journal.read(spawned.receipt.effectId)).state, 'contained');
   assert.equal(fixture.requests.filter(request => request.operation === 'interrupt').at(-1).arguments.target, spawned.agentId);
   assert.equal(fixture.requests.slice(-3).map(request => request.operation).join(','), 'inspect,interrupt,inspect');
+});
+
+test('development recovery contains an errored bound Agent without another interrupt', async t => {
+  const fixture = await setup(t);
+  const host = fixture.create('old-session');
+  const spawned = await host.adapter.spawn(spawnInput);
+  const runtimeReceipt = { visibility: spawned.visibility, hostSpawnReceipt: spawned.receipt };
+  await host.adapter.confirm({ ...spawnInput, agentId: spawned.agentId, runtimeReceipt });
+  fixture.tasks.set(spawned.agentId, { errored: 'provider exhausted its usage limit' });
+  const recovery = fixture.create('recovery-session');
+  const contained = await recovery.adapter.contain({ agentId: spawned.agentId, dispatchId: spawnInput.dispatchId,
+    runtimeReceipt, reason: 'development-run-recovery' });
+  assert.equal(contained.outcome.disposition, 'already-terminal');
+  assert.equal((await recovery.journal.read(spawned.receipt.effectId)).state, 'contained');
+  assert.equal(fixture.requests.filter(request => request.operation === 'interrupt').length, 0);
 });
 
 test('unverified containment blocks preflight and leaves the Host Effect unresolved', async t => {

@@ -76,6 +76,26 @@ test('Gate Executor separates product failure from an executable receipt', async
   assert(progress.some(event => event.phase === 'finished' && event.status === 'passed'));
 });
 
+test('Gate Executor launches a Windows command shim and rejects shell control arguments', { skip: process.platform !== 'win32' }, async t => {
+  const fixture = await makeFixture(); t.after(() => fixture.cleanup());
+  const shim = resolve(fixture.root, 'gate-shim.cmd');
+  await writeFile(shim, '@echo off\r\necho shim:%1\r\n');
+  const manifest = { id: 'windows-shim-gate', kind: 'gate-executor', version: '1.0.0', capabilities: ['process', 'managed-outputs'], permissions: ['gate.execute'], execution: { outputs: DEFAULT_PROCESS_OUTPUTS, sandbox: { mode: 'optional' } } };
+  const executor = createProcessGateExecutor({ manifest, workspaceRoot: process.cwd(), temporaryRoot: resolve(fixture.dataRoot, 'tmp', 'windows-shim-gate'), allowlist: [{ id: 'shim', executable: shim }], onProgress: () => {} });
+  const passed = await executor.execute({ id: 'shim-pass', commandId: 'shim', args: ['check:ci'] });
+  assert.equal(passed.payload.status, 'passed');
+  assert.match(passed.payload.stdout, /shim:check:ci/);
+  const rejected = await executor.execute({ id: 'shim-rejected', commandId: 'shim', args: ['check:ci & echo injected'] });
+  assert.equal(rejected.payload.status, 'environment-failed');
+  assert.equal(rejected.payload.environmentError.code, 'GATE_WINDOWS_COMMAND_UNSAFE');
+  const pnpmShim = resolve(fixture.root, 'pnpm.cmd');
+  await writeFile(pnpmShim, '@echo off\r\necho pnpm:%1\r\n');
+  const packageGate = createProcessGateExecutor({ manifest, workspaceRoot: process.cwd(), temporaryRoot: resolve(fixture.dataRoot, 'tmp', 'windows-pnpm-gate'), allowlist: [{ id: 'package', executable: 'pnpm', args: ['check:ci'], environment: { PATH: `${fixture.root};${process.env.PATH}` } }], onProgress: () => {} });
+  const packageResult = await packageGate.execute({ id: 'package-pass', commandId: 'package' });
+  assert.equal(packageResult.payload.status, 'passed');
+  assert.match(packageResult.payload.stdout, /pnpm:check:ci/);
+});
+
 test('Gate Executor enforces declared output budgets and cleans before returning', async t => {
   const fixture = await makeFixture(); t.after(() => fixture.cleanup());
   const outputs = [{ id: 'gate-build', retention: 'ephemeral', environment: ['GATE_OUTPUT'], maxBytes: 16, maxFiles: 10 }];

@@ -7,7 +7,13 @@ import { envelope } from '../contracts.mjs';
 import { createManagedOutputSession, DEFAULT_PROCESS_OUTPUTS, prepareSandboxLaunch, replaceOutputTokens } from '../execution/managed-output.mjs';
 
 const run = ({ executable, args, cwd, env, timeoutMs, onSpawn, onProgress = null }) => new Promise(resolveRun => {
-  const child = spawn(executable, args, { cwd, env, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
+  // Windows cannot launch npm-style .cmd shims through spawn without a shell.
+  const windowsCommand = process.platform === 'win32' && (/\.(?:cmd|bat)$/i.test(executable) || /^(?:npm|npx|pnpm|yarn)$/i.test(executable));
+  if (windowsCommand && [executable, ...args].some(value => /["&|<>^%!()\r\n]/.test(value))) {
+    resolveRun({ exitCode: null, signal: null, stdout: '', stderr: '', environmentError: { code: 'GATE_WINDOWS_COMMAND_UNSAFE', message: 'Windows command shim contains a shell control character.' } });
+    return;
+  }
+  const child = spawn(executable, args, { cwd, env, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'], shell: windowsCommand });
   onSpawn(child);
   onProgress?.({ phase: 'process-started', processId: child.pid ?? null });
   let stdout = '';
