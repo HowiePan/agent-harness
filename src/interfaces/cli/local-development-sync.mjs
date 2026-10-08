@@ -2,6 +2,9 @@ import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { newId } from '../../common/canonical.mjs';
 import { applyDevelopmentPatchPlan, createDevelopmentPatchPlan, verifyDevelopmentPatchPlan } from '../../application/development-patch.mjs';
+import { recoverDevelopmentRun, refreshPendingDevelopmentCarryover } from '../../application/development-run-recovery.mjs';
+import { previewDevelopmentH4Migration } from '../../application/development-h4-preflight.mjs';
+import { assert } from '../../common/errors.mjs';
 import { createLocalDevelopmentInvocation } from '../../application/local-development-invocation.mjs';
 import { applyProjectInitializationPlan, createProjectInitializationPlan, loadProjectHarnessConfig } from '../../application/project-initialization.mjs';
 
@@ -40,20 +43,38 @@ const rebind = async (manifest, { commandId, decision, developmentInvocation }) 
   return applyProjectInitializationPlan(initPlan, { controlRoot: manifest.controlRoot, dataRoot: manifest.dataRoot, releaseIdentity, commandId: `${commandId}.rebind`, authorityDecision: decision, developmentInvocation });
 };
 
-export const applySourcePatch = async (plan, { decision, commandId, cwd = process.cwd() }) => {
+export const applySourcePatch = async (plan, { decision, commandId, cwd = process.cwd(), h4MigrationRunId = null }) => {
   const patchManifest = JSON.parse(await readFile(resolve(plan.manifestFile), 'utf8'));
   await readLocalCodexBindings(plan.manifestFile, patchManifest);
   const developmentInvocation = decision ? null : await createLocalDevelopmentInvocation({ projectRoot: patchManifest.projectRoot, configPath: patchManifest.configPath, controlRoot: plan.controlRoot, dataRoot: plan.dataRoot, cwd });
-  const patched = await applyDevelopmentPatchPlan(plan, { commandId, authorityDecision: decision, developmentInvocation });
+  const patched = await applyDevelopmentPatchPlan(plan, { commandId, authorityDecision: decision, developmentInvocation, h4MigrationRunId });
   const initialization = plan.disposition.requiresRebind ? await rebind(patched.manifest, { commandId, decision, developmentInvocation }) : null;
   const bindingFile = await refreshLocalCodexBindings(plan.manifestFile, patched.manifest, initialization);
-  return { ...patched, initialization, bindingFile, continuation: plan.disposition.requiresNewRun ? 'internal-recovery-required' : 'continue-same-run' };
+  const carryoverRefresh = await refreshPendingDevelopmentCarryover({ manifestFile: plan.manifestFile,
+    commandId: `${commandId}.carryover`, cwd });
+  return { ...patched, initialization, bindingFile, carryoverRefresh,
+    continuation: plan.disposition.requiresNewRun ? 'internal-recovery-required' : 'continue-same-run' };
+};
+
+/** Explicit H4 new-Run migration; ordinary dev sync never enters this route. */
+export const migrateDevelopmentSource = async (manifestFile, { runId, decision = null,
+  commandId, cwd = process.cwd() } = {}) => {
+  assert(commandId && runId, 'DEVELOPMENT_H4_MIGRATION_INPUT_REQUIRED', 'H4 migration requires an exact Run ID and stable command ID.');
+  const plan = await createDevelopmentPatchPlan(manifestFile);
+  assert(plan.level === 'H4' && plan.changes.length > 0, 'DEVELOPMENT_H4_MIGRATION_NOT_REQUIRED', 'The current source has no pending H4 migration.');
+  const manifest = JSON.parse(await readFile(resolve(manifestFile), 'utf8'));
+  const preview = await previewDevelopmentH4Migration({ plan, manifest, runId });
+  const patched = await applySourcePatch(plan, { decision, commandId, cwd, h4MigrationRunId: runId });
+  const recovery = await recoverDevelopmentRun({ manifestFile, runId, commandId: `${commandId}.recover`, cwd });
+  return { plan, preview, ...patched, recovery, continuation: 'replacement-lifecycle-command-ready' };
 };
 
 export const syncDevelopmentSource = async (manifestFile, { decision = null, commandId = newId('dev-sync'), forceRebind = false, cwd = process.cwd() } = {}) => {
   const plan = await createDevelopmentPatchPlan(manifestFile);
   if (plan.changes.length) return { plan, ...await applySourcePatch(plan, { decision, commandId, cwd }) };
-  if (!forceRebind) return { unchanged: true, planDigest: plan.planDigest, continuation: 'continue-same-run' };
+  if (!forceRebind) return { unchanged: true, planDigest: plan.planDigest,
+    carryoverRefresh: await refreshPendingDevelopmentCarryover({ manifestFile, commandId: `${commandId}.carryover`, cwd }),
+    continuation: 'continue-same-run' };
   const { manifest } = await verifyDevelopmentPatchPlan(plan);
   await readLocalCodexBindings(plan.manifestFile, manifest);
   const developmentInvocation = decision ? null : await createLocalDevelopmentInvocation({ projectRoot: manifest.projectRoot, configPath: manifest.configPath, controlRoot: manifest.controlRoot, dataRoot: manifest.dataRoot, cwd });

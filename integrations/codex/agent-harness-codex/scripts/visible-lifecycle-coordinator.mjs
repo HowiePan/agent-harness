@@ -16,6 +16,7 @@ import { createPlannedLifecycleEvent, createPreflightLifecycleEvent, preRunProce
 import { captureSourceManifest } from '../../../../src/platform/workflow/source-manifest.mjs';
 import { classifyLocalIncident } from '../../../../src/application/local-incident.mjs';
 import { resolveCommandIntent } from '../../../../src/platform/extensions/command-contract.mjs';
+import { selectImplementationContinuationRun } from '../../../../src/application/lifecycle-resume.mjs';
 
 const samePath = (left, right) => process.platform === 'win32'
   ? resolve(left).toLowerCase() === resolve(right).toLowerCase()
@@ -112,22 +113,40 @@ const main = async () => {
       const target = workspace.executionTargets.find(item => item.id === intent.project.executionTargetId);
       if (workspace.alias !== intent.project.workspaceAlias || !bound || bound.executionTargetId !== intent.project.executionTargetId || !target || !samePath(target.root, intent.executionWorkspaceRoot)) throw Object.assign(new Error('Visible lifecycle Workspace binding differs from the approved Registry.'), { code: 'VISIBLE_LIFECYCLE_WORKSPACE_IDENTITY_MISMATCH' });
     }
-    let workflowInput = intent.project.workflowId ? renderWorkflowInput(descriptor.policy?.workflowInputs?.[intent.project.workflowId] ?? null, intent) : null;
-    if (!intent.project.workspaceId && workflowInput?.sourceDeclarations) {
-      workflowInput.sourceManifest = await captureSourceManifest({ projectId: descriptor.id, sources: workflowInput.sourceDeclarations });
-      delete workflowInput.sourceDeclarations;
+    let resume = null;
+    let plan;
+    if (intent.command.action === 'implement') {
+      const extension = extensions.find(item => item.id === intent.project.extensionId);
+      const resolved = extension?.commandManifest && resolveCommandIntent(extension.commandManifest, intent.command);
+      if (resolved?.action !== 'implement') throw Object.assign(new Error('Implement requires the bound implementation action.'), { code: 'VISIBLE_LIFECYCLE_IMPLEMENT_COMMAND_INVALID' });
+      const continuation = selectImplementationContinuationRun(await harness.authorityStore.list(descriptor.id), resolved);
+      if (continuation) {
+        resume = await harness.createLifecycleResumePlan({ projectId: descriptor.id, runId: continuation.runId, executionWorkspaceRoot: intent.executionWorkspaceRoot });
+        plan = resume.plan;
+        if (plan.run.profileId !== intent.project.profileId || plan.extension.id !== intent.project.extensionId
+          || plan.intent.action !== 'implement' || plan.intent.target !== resolved.target
+          || plan.intent.workflowId !== resolved.workflowId || plan.intent.preset !== resolved.preset)
+          throw Object.assign(new Error('Implementation Run differs from the verified Project binding.'), { code: 'VISIBLE_LIFECYCLE_IMPLEMENT_BINDING_MISMATCH' });
+      }
     }
-    const plan = await harness.createLifecyclePlan({
-      ...(intent.project.workspaceId ? { workspaceId: intent.project.workspaceId, workspaceAlias: intent.project.workspaceAlias, projectIds: intent.project.projectIds, executionTargetId: intent.project.executionTargetId } : { projectId: intent.project.projectId }),
-      profileId: intent.project.profileId,
-      extensionId: intent.project.extensionId,
-      ...(intent.project.workflowId ? { workflowId: intent.project.workflowId } : {}),
-      ...(workflowInput ? { workflowInput } : {}),
-      action: intent.command.action,
-      target: intent.command.target,
-      arguments: intent.command.arguments,
-      executionWorkspaceRoot: intent.executionWorkspaceRoot,
-    });
+    if (!plan) {
+      let workflowInput = intent.project.workflowId ? renderWorkflowInput(descriptor.policy?.workflowInputs?.[intent.project.workflowId] ?? null, intent) : null;
+      if (!intent.project.workspaceId && workflowInput?.sourceDeclarations) {
+        workflowInput.sourceManifest = await captureSourceManifest({ projectId: descriptor.id, sources: workflowInput.sourceDeclarations });
+        delete workflowInput.sourceDeclarations;
+      }
+      plan = await harness.createLifecyclePlan({
+        ...(intent.project.workspaceId ? { workspaceId: intent.project.workspaceId, workspaceAlias: intent.project.workspaceAlias, projectIds: intent.project.projectIds, executionTargetId: intent.project.executionTargetId } : { projectId: intent.project.projectId }),
+        profileId: intent.project.profileId,
+        extensionId: intent.project.extensionId,
+        ...(intent.project.workflowId ? { workflowId: intent.project.workflowId } : {}),
+        ...(workflowInput ? { workflowInput } : {}),
+        action: intent.command.action,
+        target: intent.command.target,
+        arguments: intent.command.arguments,
+        executionWorkspaceRoot: intent.executionWorkspaceRoot,
+      });
+    }
     if (localIncidentContext) localIncidentContext = { ...localIncidentContext, phase: 'planned', runId: plan.run.runId, planDigest: plan.planDigest };
     if (intent.project.workflowId && (plan.workflow?.id !== intent.project.workflowId || plan.workflow.version !== intent.project.workflowVersion || plan.workflow.artifactDigest !== intent.project.workflowDigest)) throw Object.assign(new Error('Visible lifecycle Plan differs from the verified Workflow binding.'), { code: 'VISIBLE_LIFECYCLE_WORKFLOW_IDENTITY_MISMATCH' });
     emit(createPlannedLifecycleEvent({ commandId: intent.commandId, intentDigest: intent.intentDigest, plan }));
@@ -158,7 +177,7 @@ const main = async () => {
     if (preflightOnly) return;
     if (localIncidentContext) localIncidentContext = { ...localIncidentContext, phase: 'execution' };
     runCreationAttempted = true;
-    const result = await harness.executeVisibleLifecyclePlan(plan, { commandId: intent.commandId, preflightReport: preflight, onGateProgress });
+    const result = await harness.executeVisibleLifecyclePlan(plan, { commandId: intent.commandId, preflightReport: preflight, onGateProgress, ...(resume ? { resume } : {}) });
     if (result.planApprovalArtifact) emit({ kind: 'codex-visible-lifecycle-event', phase: 'plan-review-ready', commandId: intent.commandId,
       status: result.planApprovalArtifact.reviewApproved ? 'awaiting-user-approval' : 'independent-review-rejected',
       artifact: result.planApprovalArtifact });

@@ -110,7 +110,7 @@ export const resolveRunLineage = ({ plan, states, currentLineage = null, policy 
       const parent = revision && candidates.find(candidate => candidate.runId === revision.parentRunId);
       const retiredActive = currentLineage?.activeRunId && states.find(state => state.runId === currentLineage.activeRunId
         && state.status === 'superseded' && state.metadata?.supersededByRunId
-        && /^development-h[123]-recovery:[a-f0-9]{64}$/.test(state.metadata?.supersededReason ?? '')
+        && /^development-h[1234]-recovery:[a-f0-9]{64}$/.test(state.metadata?.supersededReason ?? '')
         && belongsToLogicalTask(state, plan));
       if (plan.intent.action === 'quality' && plan.intent.preset === 'release-exhaustive') {
         action = 'block';

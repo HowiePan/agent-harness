@@ -11,6 +11,7 @@ import { assertArtifactRebaseDecision } from '../platform/maintenance/upgrade-au
 import { buildRunReceipt, writeRunReceipt } from './receipts.mjs';
 import { scheduleFeatures, validateWorkGraph } from './work-graph.mjs';
 import { assertDispatchResultContract, validateBusinessResult, validateProfileResult } from '../platform/execution/result-contract.mjs';
+import { completionCarryoverDigest, verifyCompletionCarryover } from './completion-carryover.mjs';
 
 const activeLease = lease => ['requested', 'active'].includes(lease.status);
 const activeDispatch = dispatch => ['requested', 'assigned'].includes(dispatch.status);
@@ -105,6 +106,24 @@ export class HarnessKernel {
   async startRun(input, command) {
     const profile = this.profile(input.profileId);
     const features = validateWorkGraph(input.features);
+    let priorCarryover = null;
+    if (input.completionCarryover) {
+      const { priorRunId, carryoverDigest } = input.completionCarryover;
+      const prior = await this.authorityStore.read(input.projectId, priorRunId);
+      const approved = prior.metadata?.completionCarryover;
+      assert(prior.status === 'superseded' && prior.metadata?.supersededByRunId === input.runId
+        && prior.metadata?.supersedePlanDigest === input.metadata?.lifecyclePlanDigest
+        && approved?.plan?.carryoverDigest === carryoverDigest
+        && approved?.plan?.replacementRunId === input.runId
+        && approved?.plan?.replacementPlanDigest === input.metadata.lifecyclePlanDigest,
+      'CARRYOVER_REPLACEMENT_AUTHORITY_MISMATCH', 'Replacement Run is not bound to the retired Run and exact carry-over plan.');
+      await verifyCompletionCarryover({ plan: approved.plan, prior, replacementFeatures: features,
+        evidenceStore: this.evidenceStore, authorityStore: this.authorityStore });
+      assert(approved.plan.replacementWorkflowDigest === (input.metadata?.workflow?.artifactDigest ?? null),
+        'CARRYOVER_REPLACEMENT_WORKFLOW_MISMATCH', 'Replacement Run does not bind the verified Workflow artifact.');
+      assert(prior.sourceDigest === input.sourceDigest, 'CARRYOVER_SOURCE_CHANGED', 'Replacement source differs from the retired Run.');
+      priorCarryover = { prior, plan: approved.plan };
+    }
     const profileConfig = profile.validateConfig(structuredClone(input.profileConfig ?? {}), features);
     if (input.initialFindings?.length) {
       assert(profileConfig.repairOnly === true && input.metadata?.qualityRepairInventory?.findings && digestJson(input.initialFindings) === digestJson(input.metadata.qualityRepairInventory.findings), 'INITIAL_FINDINGS_AUTHORITY_REQUIRED', 'Initial Findings require an exact pinned repair-only Authority inventory.');
@@ -137,6 +156,33 @@ export class HarnessKernel {
       events: [{ sequence: 1, type: 'run.started', at, epoch: 1, generation: 1, profileId: profile.id }],
     };
     assert(state.sourceDigest && state.pluginSetDigest, 'RUN_DIGESTS_REQUIRED', 'Run requires source and plugin-set digests.');
+    if (priorCarryover) {
+      const { prior, plan } = priorCarryover;
+      const completedIds = new Set(plan.completedSubmissions.map(item => item.featureId));
+      for (const feature of state.features.filter(item => completedIds.has(item.id))) {
+        const source = prior.features.find(item => item.id === feature.id);
+        feature.state = 'completed';
+        feature.submissionId = source.submissionId;
+      }
+      state.submissions = plan.completedSubmissions.map(item => structuredClone(prior.submissions.find(submission => submission.submissionId === item.submissionId)));
+      state.evidenceRefs = [...new Set(plan.completedSubmissions.flatMap(item => item.evidenceRefs))];
+      const roots = new Set(prior.features.filter(item => item.metadata?.stage === 'implementation').map(item => item.logicalRoot));
+      state.attempts = Object.fromEntries(Object.entries(prior.attempts).filter(([key]) => [...roots].some(root => key.startsWith(`${root}:`))));
+      const pending = prior.features.find(item => item.id === plan.firstPendingFeatureId);
+      const lastPendingSubmission = [...prior.submissions].reverse().find(item => item.featureId === pending.id);
+      if (lastPendingSubmission) {
+        const resumed = state.features.find(item => item.id === pending.id);
+        resumed.reopenReason = `Continue ${pending.id} from retired Run ${prior.runId}. Prior attempt: ${lastPendingSubmission.result?.summary ?? 'no summary'}. Recheck its blocker against the current Feature authority and source before acting.`;
+      }
+      state.metadata.completionCarryover = { priorRunId: prior.runId, priorAuthorityDigest: prior.authorityDigest,
+        carryoverDigest: plan.carryoverDigest, completedFeatureIds: [...completedIds], firstPendingFeatureId: pending.id,
+        ...(lastPendingSubmission ? { pendingHistory: { failureClass: lastPendingSubmission.result?.failureClass ?? null,
+          summary: lastPendingSubmission.result?.summary ?? null, blocker: structuredClone(lastPendingSubmission.result?.blocker ?? null),
+          evidenceRefs: [...(lastPendingSubmission.evidenceRefs ?? [])] } } : {}) };
+      event(state, 'feature.completion-carried-over', { priorRunId: prior.runId,
+        carryoverDigest: plan.carryoverDigest, completedFeatureIds: [...completedIds] }, this.now);
+      state.status = deriveStatus(state, profile);
+    }
     profile.validateRun(state);
     return this.authorityStore.create(state, { commandId: command.commandId, payload: input });
   }
@@ -567,10 +613,21 @@ export class HarnessKernel {
     return this.authorityStore.transact(projectId, runId, { expectedRevision: command.expectedRevision, commandId: command.commandId, payload: input }, state => {
       assert(state.status !== 'closed' && state.status !== 'superseded', 'RUN_NOT_SUPERSEDABLE', `Run cannot be superseded from status ${state.status}.`);
       assert(input.replacementRunId && input.planDigest, 'RUN_SUPERSEDE_CONTEXT_REQUIRED', 'Run supersede requires a replacement Run ID and Command Plan digest.');
+      if (input.completionCarryover) {
+        const carried = input.completionCarryover;
+        assert(carried.plan?.carryoverDigest === completionCarryoverDigest(carried.plan)
+          && carried.plan.priorRunId === runId && carried.plan.projectId === projectId
+          && carried.plan.priorAuthorityDigest === state.authorityDigest && carried.plan.priorRevision === state.revision
+          && carried.plan.replacementRunId === input.replacementRunId && carried.plan.replacementPlanDigest === input.planDigest
+          && carried.replacementPlan?.planDigest === input.planDigest
+          && carried.replacementPlan?.run?.runId === input.replacementRunId,
+        'CARRYOVER_SUPERSEDE_MISMATCH', 'Carry-over does not bind the exact prior and replacement Plans.');
+      }
       for (const lease of state.leases.filter(activeLease)) { lease.status = 'superseded'; lease.supersededAt = this.now(); lease.supersededReason = 'run-superseded'; }
       for (const dispatch of state.dispatches.filter(activeDispatch)) { dispatch.status = 'superseded'; dispatch.supersededAt = this.now(); dispatch.supersededReason = 'run-superseded'; }
       state.status = 'superseded';
-      state.metadata = { ...(state.metadata ?? {}), supersededByRunId: input.replacementRunId, supersedePlanDigest: input.planDigest, supersededReason: input.reason ?? 'replacement-lifecycle-plan' };
+      state.metadata = { ...(state.metadata ?? {}), supersededByRunId: input.replacementRunId, supersedePlanDigest: input.planDigest, supersededReason: input.reason ?? 'replacement-lifecycle-plan',
+        ...(input.completionCarryover ? { completionCarryover: structuredClone(input.completionCarryover) } : {}) };
       event(state, 'run.superseded', { replacementRunId: input.replacementRunId, planDigest: input.planDigest }, this.now);
       return { runId, replacementRunId: input.replacementRunId, planDigest: input.planDigest, status: state.status };
     });

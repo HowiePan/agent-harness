@@ -1,4 +1,5 @@
 import { assert } from '../common/errors.mjs';
+import { selectBlockedResumeFeature } from './lifecycle-resume.mjs';
 import { AUTO_CONCURRENCY, AUTO_CONCURRENCY_LIMIT, resolveConcurrencyLimit } from '../common/concurrency.mjs';
 import { RunCoordinator } from '../platform/workflow/coordinator/run-coordinator.mjs';
 import { ProjectGateRunner, runPendingFeatureGates } from '../platform/workflow/gates/project-gate-runner.mjs';
@@ -37,8 +38,13 @@ export const shouldRetryImplementationVerificationPath = ({ feature, result, sta
   return current?.state === 'blocked' && attempt && !attempt.exhausted && attempt.failures <= retries;
 };
 export const shouldContinueImplementationProgress = ({ feature, result, state, submission }) => {
-  if (feature?.metadata?.stage !== 'implementation' || result?.status !== 'blocked'
-    || !['implementation-incomplete', 'external-prerequisite-and-incomplete-implementation'].includes(result.failureClass)) return false;
+  if (feature?.metadata?.stage !== 'implementation' || result?.status !== 'blocked') return false;
+  // A project-owned verification failure can still be active implementation
+  // work. The source-progress and cycle checks below make this a bounded
+  // continuation, while authority/scope/external blockers remain terminal.
+  const failure = `${result.failureClass ?? ''} ${result.blocker?.kind ?? ''}`;
+  if (/(?:permission|authority|out-of-scope|scope-violation|policy|forbidden|external|approval|security|host|environment|dependency)/i.test(failure)
+    && result.failureClass !== 'external-prerequisite-and-incomplete-implementation') return false;
   const current = state.features.find(item => item.id === feature.id);
   if (current?.state !== 'blocked' || !submission || submission.featureId !== feature.id
     || submission.outputSourceDigest === submission.inputSourceDigest
@@ -50,8 +56,7 @@ export const shouldContinueImplementationProgress = ({ feature, result, state, s
   const budget = feature.metadata.implementationProgressRetries;
   if (!Number.isInteger(budget) || budget < 1) return false;
   const continuations = state.submissions.filter(item => item.featureId === feature.id
-    && item.result?.status === 'blocked'
-    && ['implementation-incomplete', 'external-prerequisite-and-incomplete-implementation'].includes(item.result.failureClass)).length;
+    && item.result?.status === 'blocked' && item.outputSourceDigest !== item.inputSourceDigest).length;
   const attempt = state.attempts[`${feature.logicalRoot}:${result.failureClass}`];
   return continuations <= budget && Boolean(attempt && !attempt.exhausted);
 };
@@ -159,17 +164,22 @@ const runHeadlessLifecyclePlan = async (context, api, planInput, { commandId, pr
   return { status: 'closed', planDigest: plan.planDigest, execution, gates, state: closed.state, ...await completionReceipts(api, authorityStore.root, plan, closed.state) };
 };
 
-const continueVisibleLifecyclePlan = async (context, api, planInput, { commandId, preflightReport, maxConcurrency, maxRounds = 100, forceFreshGates = true, onGateProgress = null, gateDiagnosticAttempts = 0, continuedStart = null } = {}) => {
+const continueVisibleLifecyclePlan = async (context, api, planInput, { commandId, preflightReport, maxConcurrency, maxRounds = 100, forceFreshGates = true, onGateProgress = null, gateDiagnosticAttempts = 0, continuedStart = null, resume = null } = {}) => {
   const { authorityStore, projectRegistry, pluginHost, resolveVisibleHostAdapter } = context;
   assert(commandId, 'COMMAND_ID_REQUIRED', 'Visible lifecycle execution requires a command ID.');
   let started = continuedStart;
   if (!started) {
-    try { started = await api.startLifecyclePlan(planInput, { commandId, preflightReport }); }
+    if (resume) {
+      const observed = await authorityStore.read(planInput.project.id, resume.runId);
+      assert(observed.revision === resume.authorityRevision && observed.authorityDigest === resume.authorityDigest,
+        'LIFECYCLE_RESUME_AUTHORITY_STALE', 'Run Authority changed after resume planning.');
+    }
+    try { started = await api.startLifecyclePlan(planInput, { commandId, preflightReport, resumeRunId: resume?.runId ?? null }); }
     catch (error) {
       if (error.code !== 'EXECUTION_READINESS_EXPIRED') throw error;
       const refreshed = await api.createExecutionReadinessReport(planInput, { onGateProgress });
       if (!refreshed.executionReady) return { status: 'attention-required', reason: 'refreshed-execution-readiness-not-ready', preflightReport: refreshed };
-      started = await api.startLifecyclePlan(planInput, { commandId, preflightReport: refreshed });
+      started = await api.startLifecyclePlan(planInput, { commandId, preflightReport: refreshed, resumeRunId: resume?.runId ?? null });
     }
   }
   if (started.status === 'attention-required') return started;
@@ -185,6 +195,20 @@ const continueVisibleLifecyclePlan = async (context, api, planInput, { commandId
   const physicalLimit = runtimeManifest.capabilities.includes('workspace-shared') ? 1 : requestedLimit;
   let state = started.state;
   const activeRunId = state.runId;
+  if (resume) {
+    assert(activeRunId === resume.runId, 'LIFECYCLE_RESUME_RUN_MISMATCH', 'Lifecycle execution selected a different Run.');
+    assert(selectBlockedResumeFeature(state) === resume.blockedFeatureId,
+      'LIFECYCLE_RESUME_FEATURE_MISMATCH', 'The blocked Feature set changed after resume planning.');
+    if (resume.blockedFeatureId) {
+      const blocked = state.features.find(feature => feature.id === resume.blockedFeatureId);
+      assert(blocked?.state === 'blocked', 'LIFECYCLE_RESUME_FEATURE_STALE', 'The selected blocked Feature changed before reopening.');
+      assert(!state.leases.some(lease => lease.status === 'active') && !state.dispatches.some(dispatch => ['requested', 'assigned'].includes(dispatch.status)),
+        'LIFECYCLE_RESUME_TRANSPORT_ACTIVE', 'Blocked Feature cannot be reopened while transport is active.');
+      state = (await api.kernel.reopenFeature(plan.project.id, activeRunId,
+        { featureId: blocked.id, reason: 'implement-automatic-continuation' },
+        { expectedRevision: state.revision, commandId: `${commandId}.resume.reopen.${blocked.id}` })).state;
+    }
+  }
   const rounds = [];
   const blockedFeatures = current => current.features
     .filter(feature => ['blocked', 'failed-budget'].includes(feature.state))

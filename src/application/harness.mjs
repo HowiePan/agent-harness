@@ -5,6 +5,7 @@ import { atomicWriteJson } from '../kernel/atomic-io.mjs';
 import { AuthorityStore } from '../kernel/authority-store.mjs';
 import { EvidenceStore } from '../kernel/evidence-store.mjs';
 import { buildDispatchPacket, HarnessKernel, leaseHealth } from '../kernel/kernel.mjs';
+import { selectCompletionCarryoverSource } from '../kernel/completion-carryover.mjs';
 import { digestJson, newId, sha256 } from '../common/canonical.mjs';
 import { assert } from '../common/errors.mjs';
 import { PluginHost } from '../platform/plugins/host.mjs';
@@ -23,6 +24,7 @@ import { RecoveryCoordinator } from '../platform/recovery/coordinator.mjs';
 import { installExtensionPacks } from '../platform/extensions/contract.mjs';
 import { resolveCommandIntent } from '../platform/extensions/command-contract.mjs';
 import { createLifecycleCommandPlan, validateLifecycleCommandPlan } from './lifecycle-command-plan.mjs';
+import { selectBlockedResumeFeature } from './lifecycle-resume.mjs';
 import { createExecutionReadinessReport as buildExecutionReadinessReport } from './execution-readiness-service.mjs';
 import { executeHeadlessLifecyclePlan, executeVisibleLifecyclePlan as runVisibleLifecyclePlan } from './lifecycle-execution-service.mjs';
 import { loadReleaseIdentity } from './release-identity.mjs';
@@ -48,7 +50,7 @@ import { RunLineageStore, resolveRunLineage, verifyRunLineageResolution } from '
 import { ensurePlanApprovalArtifact, planApprovalSatisfied, planApprovalSnapshot, reviewedPlanProposal } from '../flows/delivery-lifecycle/plan-approval.mjs';
 import { expandApprovedImplementation } from '../flows/delivery-lifecycle/approved-implementation.mjs';
 import { assessAutomaticPlanSourceCompatibility, assessPlanSourceCompatibility, assessRecoveredImplementationContinuation, assessVerifiedImplementationContinuation, matchingPlanSourceCompatibilityDecision } from './plan-source-compatibility.mjs';
-import { preparePlanRevisionIntent } from './plan-revision.mjs';
+import { preparePlanRevisionIntent, selectPlanRevisionParent } from './plan-revision.mjs';
 import {
   buildExecutionGrantContext,
   createAgentRuntimeLaunchCapability,
@@ -290,7 +292,7 @@ export const createHarness = async ({ controlRoot: controlRootInput, dataRoot: d
       return planWorkspaceLifecycle(input);
     },
 
-    async createLifecyclePlan(input) {
+    async createLifecyclePlan(input, { ignorePendingCompletionCarryover = false } = {}) {
       if (input.workspaceId || input.workspaceAlias) return api.createWorkspaceLifecyclePlan(input);
       if (parseWorkspaceProjectionId(input.projectId)) assert(input[workspacePlanToken] === true, 'WORKSPACE_PLAN_ENTRY_REQUIRED', 'Workspace plans must resolve bindings through createWorkspaceLifecyclePlan.');
       else assert(!input.workspaceRef, 'WORKSPACE_PLAN_ENTRY_REQUIRED', 'Workspace identity requires a Workspace Project.');
@@ -327,10 +329,67 @@ export const createHarness = async ({ controlRoot: controlRootInput, dataRoot: d
       assert(required.version === extension.version && required.digest === extension.digest, 'PROJECT_EXTENSION_IDENTITY_MISMATCH', `Project ${project.id} does not bind the active Extension ${extension.id}.`);
       if (strictProjectIdentity) assert(project.harness?.version === currentReleaseIdentity.version && project.harness?.artifactDigest === currentReleaseIdentity.artifactDigest, 'PROJECT_HARNESS_IDENTITY_MISMATCH', `Project ${project.id} does not bind the active Harness release.`);
       const snapshot = await captureWorkspace(workspace.root, { excluded: project.workspace.excluded ?? [] });
+      if (intent.action === 'implement' && !workflowInput) {
+        const states = await authorityStore.list(project.id);
+        const claims = states.filter(run => run.status === 'superseded'
+          && run.metadata?.completionCarryover?.replacementPlan
+          && run.metadata?.commandIntent?.action === 'implement'
+          && run.metadata.commandIntent.target === intent.target
+          && run.metadata.commandIntent.workflowId === intent.workflowId
+          && run.metadata.commandIntent.preset === intent.preset);
+        const pendingClaims = claims.filter(prior => {
+          const replacement = states.find(run => run.runId === prior.metadata.supersededByRunId);
+          if (!replacement) return true;
+          assert(replacement.metadata?.lifecyclePlanDigest === prior.metadata.supersedePlanDigest
+            && replacement.metadata?.logicalTaskKey === prior.metadata.completionCarryover.replacementPlan.logicalTaskKey,
+          'CARRYOVER_REPLACEMENT_RUN_MISMATCH', 'The recorded replacement Run does not match its sealed Plan.');
+          return false;
+        });
+        assert(pendingClaims.length <= 1, 'CARRYOVER_REPLACEMENT_AMBIGUOUS', 'More than one retired implementation Run has an unstarted replacement.');
+        if (pendingClaims.length && !ignorePendingCompletionCarryover) {
+          const prior = pendingClaims[0];
+          const carry = prior.metadata.completionCarryover;
+          const pinned = validateLifecycleCommandPlan(carry.replacementPlan);
+          const scope = value => ({ action: value.action, target: value.target, preset: value.preset,
+            arguments: value.arguments ?? [], selector: value.selector ?? null,
+            workflowId: value.workflowId, profileId: value.profileId });
+          assert(digestJson(scope(pinned.intent)) === digestJson(scope(intent))
+            && pinned.project.id === project.id && pinned.project.descriptorDigest === project.descriptorDigest
+            && pinned.extension.id === extension.id && pinned.extension.digest === extension.digest
+            && pinned.harness.artifactDigest === currentReleaseIdentity.artifactDigest
+            && pinned.run.executionConstraintDigest === executionConstraints.constraintDigest
+            && pinned.run.executionWorkspaceRoot === workspace.root
+            && pinned.run.sourceDigest === snapshot.digest && prior.sourceDigest === snapshot.digest
+            && prior.metadata.supersededByRunId === pinned.run.runId
+            && prior.metadata.supersedePlanDigest === pinned.planDigest
+            && carry.plan?.replacementRunId === pinned.run.runId
+            && carry.plan?.replacementPlanDigest === pinned.planDigest,
+          'CARRYOVER_REPLACEMENT_IDENTITY_STALE', 'Sealed replacement Plan no longer matches the requested implementation and current identities.');
+          return pinned;
+        }
+      }
       if (intent.action === 'replan') {
         const released = await api.readVersionRelease(project.id, intent.target);
         assert(released?.state?.status !== 'released', 'REPLAN_VERSION_RELEASED', 'A released version requires a new target or a separately authorized patch release.');
-        intent = preparePlanRevisionIntent({ intent, project, states: await authorityStore.list(project.id), sourceDigest: snapshot.digest });
+        const states = await authorityStore.list(project.id);
+        const parent = selectPlanRevisionParent({ intent, states });
+        let sourceChanges = null;
+        if (parent && parent.sourceDigest !== snapshot.digest) {
+          const sourceSnapshotRef = parent.dispatches.find(dispatch => dispatch.sourceDigest === parent.sourceDigest && dispatch.sourceSnapshotRef)?.sourceSnapshotRef;
+          if (sourceSnapshotRef) {
+            const record = await evidenceStore.read(sourceSnapshotRef);
+            assert(record.metadata.projectId === project.id && record.metadata.runId === parent.runId
+              && record.metadata.sourceDigest === parent.sourceDigest,
+            'REPLAN_SOURCE_EVIDENCE_MISMATCH', 'Prior source snapshot does not belong to the selected plan Run.');
+            const before = JSON.parse(record.bytes.toString('utf8'));
+            assert(before.digest === parent.sourceDigest, 'REPLAN_SOURCE_EVIDENCE_MISMATCH', 'Prior source snapshot differs from the selected plan source.');
+            const changedPaths = diffWorkspaceSnapshots(before, snapshot);
+            const basis = { fromSourceDigest: parent.sourceDigest, toSourceDigest: snapshot.digest,
+              changedPaths, snapshotEvidenceRef: sourceSnapshotRef, parentRunId: parent.runId };
+            sourceChanges = { ...basis, changeDigest: digestJson(basis) };
+          }
+        }
+        intent = preparePlanRevisionIntent({ intent, project, states, sourceDigest: snapshot.digest, sourceChanges });
       }
       if (intent.action === 'prerelease') {
         intent = await preparePrereleaseIntent({ intent, extension, project, snapshot, workspace, authorityStore, evidenceStore });
@@ -414,7 +473,41 @@ export const createHarness = async ({ controlRoot: controlRootInput, dataRoot: d
       return plan;
     },
 
-    async startLifecyclePlan(planInput, { commandId, preflightReport } = {}) {
+    async createLifecycleResumePlan({ projectId, runId, executionWorkspaceRoot }) {
+      const state = await authorityStore.read(projectId, runId);
+      assert(state.status !== 'closed' && state.status !== 'superseded', 'LIFECYCLE_RESUME_RUN_TERMINAL', 'Only an unfinished Run can be resumed.');
+      const metadata = state.metadata ?? {};
+      const execution = metadata.lifecycleExecution;
+      assert(metadata.lifecyclePlanDigest && metadata.commandIntent && execution?.authorizationSourceDigest,
+        'LIFECYCLE_RESUME_PLAN_UNAVAILABLE', 'Run Authority does not contain its original lifecycle plan binding.');
+      assert(state.profile.id === metadata.commandIntent.profileId, 'LIFECYCLE_RESUME_PROFILE_MISMATCH', 'Run Profile differs from its original command.');
+      const project = await projectRegistry.get(projectId);
+      const workspace = await resolveProjectWorkspace(project, executionWorkspaceRoot);
+      assert(resolve(workspace.root) === resolve(metadata.workspace?.root ?? ''), 'LIFECYCLE_RESUME_WORKSPACE_MISMATCH', 'Resume must use the original execution workspace.');
+      const extension = [...extensionPacks.values()].find(pack => pack.digest === execution.extensionDigest && pack.commandManifest?.id === metadata.commandIntent.manifestId);
+      assert(extension, 'LIFECYCLE_RESUME_EXTENSION_MISMATCH', 'The original Extension is not installed.');
+      assert(project.descriptorDigest === metadata.projectDescriptorDigest && currentReleaseIdentity.artifactDigest === execution.harnessArtifactDigest
+        && executionConstraints.constraintDigest === execution.executionConstraintDigest,
+      'LIFECYCLE_RESUME_IDENTITY_STALE', 'Project, Harness release, or execution constraints changed since the original plan.');
+      const plan = createLifecycleCommandPlan({
+        intent: metadata.commandIntent, project, extension, releaseIdentity: { ...currentReleaseIdentity, verified: true },
+        sourceDigest: execution.authorizationSourceDigest, executionWorkspaceRoot: workspace.root,
+        workspaceIdentity: metadata.workspace.identity, workspaceRef: metadata.workspaceRef ?? null,
+        executionConstraintDigest: execution.executionConstraintDigest, executionGrant: execution.executionGrant,
+        sourceToolBinding: metadata.sourceToolBinding ?? null, compiler: extension.operations?.createLifecyclePlan,
+      });
+      assert(plan.run.runId === runId && plan.planDigest === metadata.lifecyclePlanDigest && plan.logicalTaskKey === metadata.logicalTaskKey,
+        'LIFECYCLE_RESUME_PLAN_MISMATCH', 'The original immutable plan cannot be reconstructed from current trusted definitions.');
+      const plannedFeatures = metadata.approvedPlan?.typedPlan
+        ? expandApprovedImplementation({ features: plan.run.features, typedPlan: metadata.approvedPlan.typedPlan, projectId })
+        : plan.run.features;
+      assert(state.features.every(feature => plannedFeatures.some(planned => planned.id === feature.id
+        && planned.logicalRoot === feature.logicalRoot && digestJson(planned.allowedPaths) === digestJson(feature.allowedPaths))
+        || feature.metadata?.stage === 'gate-diagnostic'), 'LIFECYCLE_RESUME_FEATURE_MISMATCH', 'Run has Features outside the original lifecycle plan.');
+      return { plan, runId, blockedFeatureId: selectBlockedResumeFeature(state), authorityRevision: state.revision, authorityDigest: state.authorityDigest };
+    },
+
+    async startLifecyclePlan(planInput, { commandId, preflightReport, resumeRunId = null } = {}) {
       assert(commandId, 'COMMAND_ID_REQUIRED', 'Lifecycle start requires a command ID.');
       const plan = validateLifecycleCommandPlan(planInput);
       if (plan.intent.workflowInput?.sourceManifest) await assertSourceManifestCurrent(plan.intent.workflowInput.sourceManifest);
@@ -487,6 +580,9 @@ export const createHarness = async ({ controlRoot: controlRootInput, dataRoot: d
         lineageResolution = resolveRunLineage({ plan, states, currentLineage: observedLineage, policy: project.policy?.recovery ?? {}, now: kernel.now });
       }
       assert(lineageResolution.action !== 'block', 'RUN_LINEAGE_BLOCKED', 'Lifecycle Plan has no safe automatic Run lineage action.', { blockers: lineageResolution.blockers ?? [] });
+      if (resumeRunId) assert(resumeRunId === plan.run.runId && lineageResolution.selectedRunId === resumeRunId
+        && ['continue', 'reattach', 'ordinary-resume'].includes(lineageResolution.action),
+      'LIFECYCLE_RESUME_LINEAGE_MISMATCH', 'Resume must continue the exact unfinished Run and immutable plan.');
       if (plan.intent.action === 'replan') {
         for (const affected of plan.intent.planRevision.affectedImplementationRuns ?? []) {
           const current = await authorityStore.read(plan.project.id, affected.runId);
@@ -502,7 +598,7 @@ export const createHarness = async ({ controlRoot: controlRootInput, dataRoot: d
       }
       const selectedRunId = lineageResolution.selectedRunId ?? plan.run.runId;
       const existing = await authorityStore.read(plan.project.id, selectedRunId, { required: false });
-      if (existing && existing.status !== 'closed' && existing.metadata?.lifecycleInvocationId && existing.metadata.lifecycleInvocationId !== commandId) {
+      if (existing && existing.status !== 'closed' && existing.metadata?.lifecycleInvocationId && existing.metadata.lifecycleInvocationId !== commandId && resumeRunId !== existing.runId) {
         return { status: 'attention-required', reason: 'lifecycle-invocation-already-started', planDigest: plan.planDigest, state: existing };
       }
       if (runtimePolicy.hostOrchestrated && !isVisibleHostAdapter(trustedAgentAdapter)) {
@@ -515,6 +611,7 @@ export const createHarness = async ({ controlRoot: controlRootInput, dataRoot: d
       }
       if (lineageResolution.action === 'supersede-and-start') state = null;
       if (!state) {
+        const carryoverSource = selectCompletionCarryoverSource(states, plan);
         const started = await api.startRun({
           projectId: plan.project.id,
           runId: plan.run.runId,
@@ -526,6 +623,8 @@ export const createHarness = async ({ controlRoot: controlRootInput, dataRoot: d
           artifactDigest: plan.run.artifactDigest,
           sourceDigest: plan.run.sourceDigest,
           executionWorkspaceRoot: plan.run.executionWorkspaceRoot,
+          ...(carryoverSource ? { completionCarryover: { priorRunId: carryoverSource.runId,
+            carryoverDigest: carryoverSource.metadata.completionCarryover.plan.carryoverDigest } } : {}),
           metadata: { ...(plan.run.metadata ?? {}), logicalTaskKey: plan.logicalTaskKey, lifecyclePlanDigest: plan.planDigest, lifecycleInvocationId: commandId, commandIntent: plan.intent, lifecycleExecution: { runtimePluginId: plan.run.runtimePluginId, agentExecutionMode: plan.run.agentExecutionMode, executionConstraintDigest: plan.run.executionConstraintDigest, executionGrant: plan.run.executionGrant, authorizationSourceDigest: plan.run.sourceDigest, harnessArtifactDigest: plan.harness.artifactDigest, extensionDigest: plan.extension.digest }, stopCondition: plan.stopCondition },
         }, { commandId: `${commandId}.start` });
         state = started.state;
@@ -627,8 +726,11 @@ export const createHarness = async ({ controlRoot: controlRootInput, dataRoot: d
         ...(input.profileConfig ?? {}),
         ...(input.profileConfig?.requiredFinalGates === undefined ? { requiredFinalGates } : {}),
       };
-      const snapshot = input.sourceDigest ? null : await captureWorkspace(workspace.root, { excluded: project.workspace.excluded ?? [] });
+      const snapshot = !input.sourceDigest || input.completionCarryover
+        ? await captureWorkspace(workspace.root, { excluded: project.workspace.excluded ?? [] }) : null;
       const runSourceDigest = input.sourceDigest ?? snapshot.digest;
+      if (input.completionCarryover) assert(snapshot.digest === runSourceDigest,
+        'CARRYOVER_WORKSPACE_SOURCE_STALE', 'Workspace changed since the replacement carry-over Plan was captured.');
       let approvedPlan = null;
       if (input.metadata?.commandIntent?.action === 'implement' && input.features.some(feature => feature.metadata?.stage === 'implementation') && !input.features.some(feature => feature.metadata?.stage === 'plan-review')) {
         const target = input.metadata?.commandIntent?.target;
@@ -901,10 +1003,38 @@ export const createHarness = async ({ controlRoot: controlRootInput, dataRoot: d
       const actualChangedFiles = cumulativeChangedFiles.filter(path => !interveningFiles.has(path));
       const claimedChangedFiles = [...new Set(validatedResult.changedFiles)].map(path => String(path).replaceAll('\\', '/')).sort();
       const rejection = runtimeEvidence?.resultRejection;
+      const hostTerminalFailure = runtimeEvidence?.hostTerminalFailure;
+      assert(!(rejection && hostTerminalFailure), 'RESULT_HOST_TERMINAL_RECEIPT_CONFLICT', 'A result cannot have both a rejection and a native terminal failure Receipt.');
       if (rejection) {
         const { receiptDigest, ...rejectionBody } = rejection;
         assert(validatedResult.status === 'failed' && validatedResult.failureClass === 'runtime-contract' && rejection.kind === 'result-rejected-receipt' && rejection.version === '1.0' && receiptDigest === digestJson(rejectionBody), 'RESULT_REJECTION_RECEIPT_INVALID', 'Host result rejection is not a valid failed-result receipt.');
         assert(rejection.agentId === lease.agentId && rejection.dispatchId === dispatchId && rejection.packetDigest === dispatch.packetDigest && rejection.resultContractDigest === dispatch.execution?.result?.contractDigest && rejection.promptDigest === lease.runtimeReceipt?.prompt?.promptDigest && runtimeEvidence.hostResultReceipt?.rejectionDigest === receiptDigest, 'RESULT_REJECTION_RECEIPT_BINDING_MISMATCH', 'Host result rejection is not bound to this Lease, Dispatch, result contract, and Host observation.');
+      } else if (hostTerminalFailure) {
+        const { receiptDigest, ...body } = hostTerminalFailure;
+        assert(conversationVisible && hostTerminalFailure.kind === 'host-terminal-failure-receipt'
+          && hostTerminalFailure.version === '1.0' && receiptDigest === digestJson(body)
+          && /^[a-f0-9]{64}$/.test(hostTerminalFailure.nativeStatusDigest)
+          && /^[a-f0-9]{64}$/.test(hostTerminalFailure.observationRequestDigest)
+          && ['failed', 'blocked'].includes(validatedResult.status)
+          && ['runtime-provider', 'runtime-interrupted', 'runtime-blocked', 'runtime-contract'].includes(validatedResult.failureClass)
+          && typeof hostTerminalFailure.code === 'string' && /^[A-Z][A-Z0-9_]+$/.test(hostTerminalFailure.code)
+          && hostTerminalFailure.code === validatedResult.blocker?.code
+          && hostTerminalFailure.resultDigest === digestJson(validatedResult)
+          && claimedChangedFiles.length === 0,
+        'RESULT_HOST_TERMINAL_RECEIPT_INVALID', 'Native terminal failure Receipt does not describe a synthetic failed result.');
+        assert(hostTerminalFailure.agentId === lease.agentId && hostTerminalFailure.dispatchId === dispatchId
+          && hostTerminalFailure.packetDigest === dispatch.packetDigest
+          && hostTerminalFailure.promptDigest === lease.runtimeReceipt?.prompt?.promptDigest
+          && hostTerminalFailure.resultContractDigest === dispatch.execution?.result?.contractDigest
+          && runtimeEvidence.hostResultReceipt?.provider === lease.runtimeReceipt?.hostSpawnReceipt?.provider
+          && runtimeEvidence.hostResultReceipt?.operation === 'result'
+          && runtimeEvidence.hostResultReceipt?.agentId === lease.agentId
+          && runtimeEvidence.hostResultReceipt?.dispatchId === dispatchId
+          && runtimeEvidence.hostResultReceipt?.effectId === lease.runtimeReceipt?.hostSpawnReceipt?.effectId
+          && runtimeEvidence.hostResultReceipt?.resultDigest === hostTerminalFailure.resultDigest
+          && runtimeEvidence.hostResultReceipt?.observationRequestDigest === hostTerminalFailure.observationRequestDigest
+          && runtimeEvidence.hostResultReceipt?.terminalFailureDigest === receiptDigest,
+        'RESULT_HOST_TERMINAL_RECEIPT_BINDING_MISMATCH', 'Native terminal failure Receipt is not bound to the Lease, Dispatch, and Host observation.');
       } else {
         assert(digestJson(claimedChangedFiles) === digestJson(actualChangedFiles), 'RESULT_CHANGED_FILES_MISMATCH', 'Runtime changed-files claim does not match the workspace snapshot diff.', { claimedChangedFiles, actualChangedFiles });
       }

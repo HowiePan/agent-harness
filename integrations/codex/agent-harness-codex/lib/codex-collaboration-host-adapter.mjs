@@ -338,10 +338,24 @@ export const createCodexCollaborationHostAdapter = ({ exchange, controlRoot, dat
         });
       }
       const resultDigest = digestJson(result);
+      // Native terminal failures have no Agent-authored changedFiles claim. Bind
+      // that fact to the exact Host observation so the Harness can preserve a
+      // failed Agent's source edits without treating them as completed work.
+      const terminalFailureBody = !completedStatus(observed.task.agent_status) && !resultRejection ? {
+        kind: 'host-terminal-failure-receipt', version: '1.0',
+        agentId: input.agentId, dispatchId: input.dispatchId,
+        packetDigest: receipt.packetDigest, promptDigest: receipt.promptDigest,
+        resultContractDigest: input.runtimeReceipt?.resultContractDigest ?? null,
+        code: result.blocker.code, resultDigest,
+        nativeStatusDigest: digestJson(observed.task.agent_status),
+        observationRequestDigest: observed.request.requestDigest,
+      } : null;
+      const hostTerminalFailure = terminalFailureBody
+        ? { ...terminalFailureBody, receiptDigest: digestJson(terminalFailureBody) } : null;
       let effect = await journal.read(receipt.effectId, { required: true });
-      if (effect.state === 'lease-bound') effect = await transition(effect, 'settled', { outcome: { disposition: resultRejection ? 'result-rejected' : 'result-observed', resultDigest, observationRequestDigest: observed.request.requestDigest, ...(resultRejection ? { rejectionDigest: resultRejection.receiptDigest } : {}) } }, 'settled');
+      if (effect.state === 'lease-bound') effect = await transition(effect, 'settled', { outcome: { disposition: resultRejection ? 'result-rejected' : 'result-observed', resultDigest, observationRequestDigest: observed.request.requestDigest, ...(resultRejection ? { rejectionDigest: resultRejection.receiptDigest } : {}), ...(hostTerminalFailure ? { terminalFailureDigest: hostTerminalFailure.receiptDigest } : {}) } }, 'settled');
       const verificationReceipts = Array.isArray(result?.checkpoints) ? result.checkpoints.map(checkpoint => ({ provider: 'codex-host', agentId: input.agentId, dispatchId: input.dispatchId, checkpointId: checkpoint?.id ?? null, status: checkpoint?.status ?? null, evidence: structuredClone(checkpoint?.evidence ?? []), resultDigest, observationRequestDigest: observed.request.requestDigest })) : [];
-      return { result, runtimeEvidence: { verificationReceipts, ...(resultRejection ? { resultRejection } : {}) }, receipt: { provider: 'codex-host', operation: 'result', agentId: input.agentId, dispatchId: input.dispatchId, effectId: effect.effectId, resultDigest, observationRequestDigest: observed.request.requestDigest, ...(resultRejection ? { rejectionDigest: resultRejection.receiptDigest } : {}) } };
+      return { result, runtimeEvidence: { verificationReceipts, ...(resultRejection ? { resultRejection } : {}), ...(hostTerminalFailure ? { hostTerminalFailure } : {}) }, receipt: { provider: 'codex-host', operation: 'result', agentId: input.agentId, dispatchId: input.dispatchId, effectId: effect.effectId, resultDigest, observationRequestDigest: observed.request.requestDigest, ...(resultRejection ? { rejectionDigest: resultRejection.receiptDigest } : {}), ...(hostTerminalFailure ? { terminalFailureDigest: hostTerminalFailure.receiptDigest } : {}) } };
     },
     interruptVisibleAgent: async input => {
       const receipt = input?.runtimeReceipt?.hostSpawnReceipt ?? input?.hostSpawnReceipt;

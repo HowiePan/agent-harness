@@ -29,6 +29,7 @@ import { recoverDevelopmentRun } from '../../application/development-run-recover
 import { recordDevelopmentPlanSourceCompatibility } from '../../application/development-plan-source-compatibility.mjs';
 import { createLocalDevelopmentInvocation } from '../../application/local-development-invocation.mjs';
 import { applySourcePatch, refreshLocalCodexBindings, syncDevelopmentSource } from './local-development-sync.mjs';
+import { migrateDevelopmentSource } from './local-development-sync.mjs';
 import { ensurePlanApprovalArtifact, planApprovalSatisfied } from '../../flows/delivery-lifecycle/plan-approval.mjs';
 
 const argv = process.argv.slice(2);
@@ -81,6 +82,7 @@ agent-harness dev plan-source-compatible --manifest <json> --run <plan-run-id> -
 agent-harness dev apply --plan <json|-> --manifest <json> [--command-id <id>] [--decision <json>]
 agent-harness dev verify|doctor --manifest <json>
 agent-harness dev sync --manifest <json> [--command-id <id>] [--decision <json>]
+agent-harness dev migrate --manifest <json> --run <id> --command-id <id> [--decision <json>]
 agent-harness dev recover-run --manifest <json> --run <id> [--command-id <id>]
 agent-harness dev patch plan|status --manifest <json>
 agent-harness dev patch apply --manifest <json> --plan <json|-> [--command-id <id>] [--decision <json>]
@@ -204,6 +206,13 @@ if (command === 'dev' && subject === 'patch' && ['plan', 'status'].includes(argv
 if (command === 'dev' && subject === 'sync') {
   const decision = await externalDevelopmentDecision(take('--decision'));
   const result = await syncDevelopmentSource(take('--manifest'), { decision, commandId: take('--command-id') ?? newId('dev-sync') });
+  console.log(JSON.stringify({ ok: true, ...result }, null, 2));
+  process.exit(0);
+}
+if (command === 'dev' && subject === 'migrate') {
+  const result = await migrateDevelopmentSource(take('--manifest'), { runId: take('--run'),
+    decision: await externalDevelopmentDecision(take('--decision')),
+    commandId: take('--command-id') });
   console.log(JSON.stringify({ ok: true, ...result }, null, 2));
   process.exit(0);
 }

@@ -9,14 +9,16 @@ const planOutput = state => {
     && submission.result?.status === 'completed' && !submission.supersededAt)?.result.outputs?.plan?.value ?? null;
 };
 
-export const preparePlanRevisionIntent = ({ intent, project, states, sourceDigest }) => {
+export const selectPlanRevisionParent = ({ intent, states }) => states.filter(state => state.status !== 'superseded'
+  && ['plan', 'replan'].includes(state.metadata?.commandIntent?.action)
+  && state.metadata.commandIntent.target === intent.target
+  && state.metadata.commandIntent.workflowId === intent.workflowId
+  && state.features.some(feature => feature.metadata?.stage === 'plan-review'))
+  .sort((left, right) => String(right.updatedAt).localeCompare(String(left.updatedAt)))[0] ?? null;
+
+export const preparePlanRevisionIntent = ({ intent, project, states, sourceDigest, sourceChanges = null }) => {
   if (intent.action !== 'replan') return intent;
-  const candidates = states.filter(state => state.status !== 'superseded'
-    && ['plan', 'replan'].includes(state.metadata?.commandIntent?.action)
-    && state.metadata.commandIntent.target === intent.target
-    && state.metadata.commandIntent.workflowId === intent.workflowId
-    && state.features.some(feature => feature.metadata?.stage === 'plan-review'));
-  const parent = candidates.sort((left, right) => String(right.updatedAt).localeCompare(String(left.updatedAt)))[0];
+  const parent = selectPlanRevisionParent({ intent, states });
   assert(parent, 'REPLAN_PARENT_REQUIRED', 'Replan requires an existing plan for the same project, workflow, and target.');
   const snapshot = planApprovalSnapshot(parent);
   const previousPlan = planOutput(parent);
@@ -33,6 +35,22 @@ export const preparePlanRevisionIntent = ({ intent, project, states, sourceDiges
   assert(declaration || parent.sourceDigest !== sourceDigest || snapshot.reviewApproved === false,
     'REPLAN_NO_CHANGE', 'Replan requires a registered change request, changed project source, or a rejected prior review.');
   const changeRequest = declaration ? { id: intent.selector, ...structuredClone(declaration), digest: digestJson(declaration) } : null;
+  if (sourceChanges) assert(parent.sourceDigest !== sourceDigest && sourceChanges.fromSourceDigest === parent.sourceDigest
+    && sourceChanges.toSourceDigest === sourceDigest && sourceChanges.parentRunId === parent.runId
+    && sourceChanges.snapshotEvidenceRef && Array.isArray(sourceChanges.changedPaths)
+    && sourceChanges.changedPaths.length > 0 && sourceChanges.changedPaths.every(path => typeof path === 'string' && path.length > 0)
+    && sourceChanges.changeDigest === digestJson({ fromSourceDigest: sourceChanges.fromSourceDigest,
+      toSourceDigest: sourceChanges.toSourceDigest, changedPaths: sourceChanges.changedPaths,
+      snapshotEvidenceRef: sourceChanges.snapshotEvidenceRef, parentRunId: sourceChanges.parentRunId }),
+  'REPLAN_SOURCE_CHANGE_INVALID', 'Source change basis does not bind the parent and current workspace snapshots.');
+  assert(changeRequest || snapshot.reviewApproved === false || sourceChanges,
+    'REPLAN_SOURCE_EVIDENCE_REQUIRED', 'A source-only plan revision requires a verified file delta from the prior plan snapshot.');
+  const revisionBasis = [
+    ...(changeRequest ? [{ kind: 'registered-change-request', id: changeRequest.id, digest: changeRequest.digest }] : []),
+    ...(snapshot.reviewApproved === false ? [{ kind: 'rejected-plan-review', parentRunId: parent.runId,
+      authorityDigest: parent.authorityDigest, findingsDigest: digestJson([...parent.submissions].reverse().find(submission => submission.result?.outputs?.['plan-review'])?.result.outputs['plan-review'].value.findings ?? []) }] : []),
+    ...(sourceChanges ? [{ kind: 'verified-source-delta', ...structuredClone(sourceChanges) }] : []),
+  ];
   const implementationRuns = states.filter(state => !['closed', 'superseded'].includes(state.status)
     && state.metadata?.commandIntent?.target === intent.target
     && state.metadata?.workflow?.id === intent.workflowId
@@ -54,6 +72,7 @@ export const preparePlanRevisionIntent = ({ intent, project, states, sourceDiges
       parentReviewApproved: snapshot.reviewApproved,
       parentPlan: previousPlan,
       parentReviewFindings: [...parent.submissions].reverse().find(submission => submission.result?.outputs?.['plan-review'])?.result.outputs['plan-review'].value.findings ?? [],
+      revisionBasis,
       affectedImplementationRuns: implementationRuns.map(state => ({ runId: state.runId, revision: state.revision, authorityDigest: state.authorityDigest })),
     },
   };

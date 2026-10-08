@@ -1,11 +1,13 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { writeFile } from 'node:fs/promises';
 import { extensionPack as codexRuntimeExtension } from '../integrations/codex/extensions/codex-runtime.mjs';
 import { RunCoordinator } from '../src/platform/workflow/coordinator/run-coordinator.mjs';
 import { assertAgentRuntimeCompatible, assertRuntimeTransportReceipt, resolveLifecycleExecutionPolicy } from '../src/platform/plugins/runtime/execution-policy.mjs';
 import { createVisibleHostAdapter } from '../src/platform/plugins/runtime/visible-host-adapter.mjs';
 import { validatePluginManifest } from '../src/platform/plugins/contracts.mjs';
 import { command, feature, makeFixture, startRun } from './test-support.mjs';
+import { digestJson } from '../src/common/canonical.mjs';
 
 const visibleManifest = {
   id: 'visible-runtime',
@@ -143,6 +145,56 @@ test('host-orchestrated visible Runtime schedules work but never falls back to a
     blocker: null,
   };
   await assert.rejects(() => fixture.harness.recordResult(fixture.projectId, 'run', dispatch.dispatchId, visibleResult, { commandId: command().commandId }), error => error.code === 'VISIBLE_AGENT_HEARTBEAT_REQUIRED');
+});
+
+test('native Host failure preserves observed edits without accepting a forged changed-files claim', async t => {
+  const adapter = createVisibleHostAdapter({
+    inspectVisibleAgent: async input => ({ verified: true, status: 'running', assertionId: 'native-failure-observed',
+      observedAt: new Date().toISOString(), agentId: input.agentId, dispatchId: input.dispatchId,
+      packetDigest: input.packetDigest, promptDigest: input.promptDigest,
+      visibility: { mode: 'user-visible', surface: input.surface, inspectRef: input.inspectRef } }),
+  });
+  const fixture = await makeFixture({ extensions: [codexRuntimeExtension], agentAdapter: adapter,
+    policy: { agentExecutionMode: 'conversation-visible', runtimePlugins: ['codex-conversation-runtime'], defaultRuntimePlugin: 'codex-conversation-runtime' } });
+  t.after(() => fixture.cleanup());
+  await startRun(fixture, { features: [feature('native-failure', {}, { allowedPaths: ['README.md'] })] });
+  const scheduled = await fixture.harness.dispatch(fixture.projectId, 'run', { maxConcurrency: 1,
+    runtimePluginId: 'codex-conversation-runtime' }, command(await fixture.harness.authorityStore.read(fixture.projectId, 'run')));
+  const dispatch = scheduled.result.dispatches[0];
+  const packet = await fixture.harness.readDispatchPacket(fixture.projectId, 'run', dispatch.dispatchId);
+  const agentId = 'native-failure-agent';
+  const effectId = 'native-failure-effect';
+  const bound = await fixture.harness.bindDispatch(fixture.projectId, 'run', { dispatchId: dispatch.dispatchId, agentId,
+    runtimeReceipt: { runtimePluginId: 'codex-conversation-runtime', agentId, dispatchId: dispatch.dispatchId,
+      packetDigest: dispatch.packetDigest, resultContractDigest: dispatch.execution.result.contractDigest,
+      prompt: { contractVersion: packet.prompt.contractVersion, codecPluginId: packet.prompt.codecPluginId,
+        codecPluginVersion: packet.prompt.codecPluginVersion, packetDigest: packet.prompt.packetDigest,
+        promptDigest: packet.prompt.promptDigest },
+      visibility: { mode: 'user-visible', surface: 'codex-task', inspectRef: agentId },
+      hostSpawnReceipt: { effectId, provider: 'test-host' } } }, command(scheduled.state));
+  await fixture.harness.recordHeartbeat(fixture.projectId, 'run', { leaseId: bound.result.lease.leaseId,
+    dispatchId: dispatch.dispatchId, agentId, progress: 'provider-failed' }, command(bound.state));
+  await writeFile(`${fixture.workspace}/README.md`, '# Edited before provider failure\n', 'utf8');
+  const result = { status: 'failed', summary: 'Model at capacity', changedFiles: [], failureClass: 'runtime-provider',
+    blocker: { kind: 'runtime-provider', summary: 'Model at capacity', code: 'CODEX_COLLABORATION_AGENT_FAILED' } };
+  const observationRequestDigest = 'a'.repeat(64);
+  const body = { kind: 'host-terminal-failure-receipt', version: '1.0', agentId, dispatchId: dispatch.dispatchId,
+    packetDigest: dispatch.packetDigest, promptDigest: packet.prompt.promptDigest,
+    resultContractDigest: dispatch.execution.result.contractDigest, code: result.blocker.code,
+    resultDigest: digestJson(result), nativeStatusDigest: 'b'.repeat(64), observationRequestDigest };
+  const receipt = { ...body, receiptDigest: digestJson(body) };
+  const runtimeEvidence = { hostTerminalFailure: receipt,
+    hostResultReceipt: { provider: 'test-host', operation: 'result', agentId, dispatchId: dispatch.dispatchId,
+      effectId, resultDigest: body.resultDigest, observationRequestDigest, terminalFailureDigest: receipt.receiptDigest } };
+  await assert.rejects(() => fixture.harness.recordResult(fixture.projectId, 'run', dispatch.dispatchId, result,
+    { commandId: command().commandId, runtimeEvidence: { ...runtimeEvidence,
+      hostResultReceipt: { ...runtimeEvidence.hostResultReceipt, terminalFailureDigest: 'f'.repeat(64) } } }),
+  error => error.code === 'RESULT_HOST_TERMINAL_RECEIPT_BINDING_MISMATCH');
+  const submitted = await fixture.harness.recordResult(fixture.projectId, 'run', dispatch.dispatchId, result,
+    { commandId: command().commandId, runtimeEvidence });
+  assert.deepEqual(submitted.state.submissions.at(-1).changedFiles, ['README.md']);
+  assert.equal(submitted.state.submissions.at(-1).result.status, 'failed');
+  assert.equal(submitted.state.features[0].state, 'blocked');
 });
 
 test('explicit visible Feature dispatch binds the visible result schema', async t => {

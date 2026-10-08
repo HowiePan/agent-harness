@@ -9,6 +9,9 @@ import { planApprovalSnapshot, planApprovalSatisfied } from '../src/flows/delive
 const source = 'a'.repeat(64);
 const nextSource = 'b'.repeat(64);
 const oldDigest = 'c'.repeat(64);
+const sourceDeltaBody = { fromSourceDigest: source, toSourceDigest: nextSource, parentRunId: 'old-plan',
+  snapshotEvidenceRef: 'evidence:prior-snapshot', changedPaths: ['src/view.rs'] };
+const sourceChanges = { ...sourceDeltaBody, changeDigest: digestJson(sourceDeltaBody) };
 const currentPlan = { proposedFeatures: [{ id: 'F04', projectId: 'engine', disposition: 'project-owned', allowedPaths: ['src/view.rs'], dependsOn: [], contracts: ['private projection'], verification: ['privacy test'] }] };
 const reviewed = ({ approved = false, status = 'closure-blocked', leases = [], dispatches = [] } = {}) => {
   const body = {
@@ -56,6 +59,7 @@ test('replan requires a reviewed parent, pins its Authority, and accepts a decla
   assert.equal(revision.planRevision.parentRunId, parent.runId);
   assert.equal(revision.changeRequest.id, 'CR-1');
   assert.equal(revision.changeRequest.digest, digestJson(project.policy.planChangeRequests['CR-1']));
+  assert.deepEqual(revision.planRevision.revisionBasis, [{ kind: 'registered-change-request', id: 'CR-1', digest: revision.changeRequest.digest }]);
   const resolution = resolveRunLineage({ plan: planned({ action: 'replan', sourceDigest: source, parent: revision.planRevision }), states: [parent], currentLineage: { revision: 1, activeRunId: parent.runId } });
   assert.equal(resolution.action, 'supersede-and-start');
   assert.equal(resolution.reasonCode, 'PLAN_REVISION_REQUESTED');
@@ -94,12 +98,16 @@ test('replan captures idle implementation for retirement and blocks an active Le
     metadata: { commandIntent: { action: 'implement', target: 'V1' }, workflow: { id: 'engine-delivery' } },
     features: [{ id: 'implement/V1', metadata: { stage: 'implementation' } }], submissions: [] };
   implementation.authorityDigest = digestJson(Object.fromEntries(Object.entries(implementation).filter(([key]) => key !== 'authorityDigest')));
-  const revision = preparePlanRevisionIntent({ intent, project: { policy: {} }, states: [parent, implementation], sourceDigest: nextSource });
+  const revision = preparePlanRevisionIntent({ intent, project: { policy: {} }, states: [parent, implementation], sourceDigest: nextSource, sourceChanges });
   assert.deepEqual(revision.planRevision.affectedImplementationRuns.map(run => run.runId), ['implement-old']);
+  assert.equal(revision.planRevision.revisionBasis[0].kind, 'verified-source-delta');
+  assert.deepEqual(revision.planRevision.revisionBasis[0].changedPaths, ['src/view.rs']);
+  assert.throws(() => preparePlanRevisionIntent({ intent, project: { policy: {} }, states: [parent], sourceDigest: nextSource }),
+    error => error.code === 'REPLAN_SOURCE_EVIDENCE_REQUIRED');
   const live = { ...implementation, leases: [{ status: 'active' }] };
-  assert.throws(() => preparePlanRevisionIntent({ intent, project: { policy: {} }, states: [parent, live], sourceDigest: nextSource }), error => error.code === 'REPLAN_IMPLEMENTATION_BUSY');
+  assert.throws(() => preparePlanRevisionIntent({ intent, project: { policy: {} }, states: [parent, live], sourceDigest: nextSource, sourceChanges }), error => error.code === 'REPLAN_IMPLEMENTATION_BUSY');
   const unresolved = { ...implementation, findings: [{ id: 'P2-open', status: 'open' }] };
-  assert.throws(() => preparePlanRevisionIntent({ intent, project: { policy: {} }, states: [parent, unresolved], sourceDigest: nextSource }), error => error.code === 'REPLAN_OPEN_FINDINGS');
+  assert.throws(() => preparePlanRevisionIntent({ intent, project: { policy: {} }, states: [parent, unresolved], sourceDigest: nextSource, sourceChanges }), error => error.code === 'REPLAN_OPEN_FINDINGS');
 });
 
 test('revision artifact shows complete feature delta and old approval cannot approve the new plan', () => {
@@ -113,11 +121,14 @@ test('revision artifact shows complete feature delta and old approval cannot app
   assert.deepEqual(diffPlanFeatures(currentPlan, { proposedFeatures: [{ ...currentPlan.proposedFeatures[0], projectId: 'other-project' }] }).map(change => change.disposition), ['removed', 'added']);
   const next = structuredClone(parent);
   next.runId = 'next-plan';
-  next.metadata = { ...next.metadata, planRevision: { parentRunId: parent.runId, parentPlanDigest: old.planDigest, parentPlan: currentPlan } };
+  next.metadata = { ...next.metadata, planRevision: { parentRunId: parent.runId, parentPlanDigest: old.planDigest,
+    parentPlan: currentPlan, revisionBasis: [{ kind: 'verified-source-delta', ...sourceChanges }] } };
   next.submissions[0].result.outputs.plan.value = revisedPlan;
   next.decisions = [{ id: 'implementation-plan-approved', actor: 'user', decision: 'approved', projectId: parent.projectId, runId: parent.runId, planDigest: old.planDigest, artifactDigest: old.artifactDigest }];
   const newArtifact = planApprovalSnapshot(next);
   assert.match(newArtifact.markdown, /相对上一版的修订/);
   assert.match(newArtifact.markdown, /modified.*F04/);
+  assert.match(newArtifact.markdown, /已核验源码差异/);
+  assert.match(newArtifact.markdown, /src\/view\\\.rs/);
   assert.equal(planApprovalSatisfied(next), false);
 });

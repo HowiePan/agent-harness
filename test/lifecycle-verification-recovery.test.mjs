@@ -72,3 +72,20 @@ test('implementation continuation rejects source cycles and unrelated blockers',
   assert.equal(shouldContinueImplementationProgress({ feature: progressive, result: partial, submission: current, state }), false);
   assert.equal(shouldContinueImplementationProgress({ feature: progressive, result: { ...partial, failureClass: 'permission-denied' }, submission: current, state }), false);
 });
+
+test('project verification blockers continue only after verified source progress', () => {
+  const progressive = { ...feature, metadata: { ...feature.metadata, implementationProgressRetries: 20 } };
+  const result = { status: 'blocked', failureClass: 'quality-gate-failed',
+    blocker: { kind: 'in-scope-performance-gate', summary: 'The frozen WASM latency gate still fails.' } };
+  const submission = { submissionId: 'f06-2', featureId: progressive.id, inputSourceDigest: 'before',
+    outputSourceDigest: 'after', changedFiles: ['scripts/cardworld.ps1'], result };
+  const active = { features: [{ ...progressive, state: 'blocked' }], submissions: [submission],
+    attempts: { 'implement:V-next:quality-gate-failed': { failures: 1, limit: 21, exhausted: false } } };
+  assert.equal(shouldContinueImplementationProgress({ feature: progressive, result, state: active, submission }), true);
+  assert.equal(shouldContinueImplementationProgress({ feature: progressive, result, state: active,
+    submission: { ...submission, outputSourceDigest: 'before' } }), false);
+  assert.equal(shouldContinueImplementationProgress({ feature: progressive, result: { ...result, failureClass: 'external-dependency' },
+    state: active, submission }), false);
+  assert.equal(shouldContinueImplementationProgress({ feature: progressive, result,
+    state: { ...active, attempts: { 'implement:V-next:quality-gate-failed': { exhausted: true } } }, submission }), false);
+});

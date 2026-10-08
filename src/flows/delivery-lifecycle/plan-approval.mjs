@@ -41,6 +41,15 @@ export const planApprovalSnapshot = state => {
       `- 上一版规划摘要：${line(revision.parentPlanDigest)}`,
       `- 变更单：${line(state.metadata.changeRequest?.id ?? '无；根据源码或上次审查修订')}`,
       `- 差异摘要：${digestJson(changes)}`, '');
+    if (revision.revisionBasis?.length) {
+      rows.push('### 修订依据', '');
+      for (const basis of revision.revisionBasis) {
+        if (basis.kind === 'registered-change-request') rows.push(`- 登记变更单 ${line(basis.id)}；摘要 ${line(basis.digest)}`);
+        else if (basis.kind === 'rejected-plan-review') rows.push(`- 上次审查未通过；Authority ${line(basis.authorityDigest)}；发现摘要 ${line(basis.findingsDigest)}`);
+        else if (basis.kind === 'verified-source-delta') rows.push(`- 已核验源码差异 ${line(basis.fromSourceDigest)} → ${line(basis.toSourceDigest)}；快照证据 ${line(basis.snapshotEvidenceRef)}；差异摘要 ${line(basis.changeDigest)}；路径 ${basis.changedPaths.map(line).join('、')}`);
+      }
+      rows.push('');
+    }
     if (state.metadata.changeRequest) {
       rows.push(`- 变更类型：${line(state.metadata.changeRequest.kind)}`,
         `- 变更摘要：${line(state.metadata.changeRequest.summary)}`,

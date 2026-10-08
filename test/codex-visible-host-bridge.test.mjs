@@ -98,6 +98,9 @@ test('native failed, interrupted, blocked, and output-less completed states beco
     assert.equal(transported.result.status, expected.status);
     assert.equal(transported.result.failureClass, expected.failureClass);
     assert.equal(transported.result.blocker.code, expected.code);
+    assert.equal(transported.runtimeEvidence.hostTerminalFailure.kind, 'host-terminal-failure-receipt');
+    assert.equal(transported.runtimeEvidence.hostTerminalFailure.receiptDigest, transported.receipt.terminalFailureDigest);
+    assert.equal(transported.runtimeEvidence.hostTerminalFailure.resultDigest, digestJson(transported.result));
     assert.equal((await host.journal.read(spawned.receipt.effectId)).state, 'settled');
   }
 });

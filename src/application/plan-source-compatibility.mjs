@@ -116,7 +116,7 @@ export const assessRecoveredImplementationContinuation = async ({ planRun, planA
     .filter(feature => feature.metadata?.stage === 'implementation' && feature.metadata?.sourcePolicy !== 'read-only')
     .flatMap(feature => feature.allowedPaths ?? []).filter(safePath);
   for (const run of priorRuns ?? []) {
-    if (run.status !== 'superseded' || !/^development-h[23]-recovery:[a-f0-9]{64}$/.test(run.metadata?.supersededReason ?? '')) continue;
+    if (run.status !== 'superseded' || !/^development-h[234]-recovery:[a-f0-9]{64}$/.test(run.metadata?.supersededReason ?? '')) continue;
     const verified = assessVerifiedImplementationContinuation({ planRun, planArtifact, priorRuns: [run],
       currentSourceDigest: run.sourceDigest, workspaceRoot, implementationFeatures });
     if (!verified) continue;

@@ -35,7 +35,6 @@ export const batchProductionCommandManifest = defineCommandManifest({
     prerelease: { targetKind: 'batch-id', presets: { default: { scope: 'batch-release-preparation', stateChanging: true } } },
     release: { targetKind: 'batch-id', presets: { default: { scope: 'batch-release-promotion', stateChanging: true, effectClasses: ['formal-batch-release'] } } },
     status: { targetKind: 'batch-id-or-run-id', presets: { default: { scope: 'status', stateChanging: false } } },
-    resume: { targetKind: 'batch-id-or-run-id', presets: { default: { scope: 'ordinary-resume', stateChanging: true } } },
     recover: {
       targetKind: 'run-id', defaultPreset: 'assess', presets: {
         assess: { scope: 'recovery-assessment', stateChanging: false },

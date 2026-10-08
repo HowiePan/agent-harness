@@ -456,6 +456,26 @@ test('visible lifecycle refreshes expired readiness for the same Plan before ope
   assert.equal(fixture.host.stats.spawnCount, 3);
 });
 
+test('internal continuation runs the original Plan through quality closure with a new command ID', async t => {
+  const fixture = await setup();
+  t.after(() => rm(fixture.root, { recursive: true, force: true }));
+  const first = await fixture.harness.createExecutionReadinessReport(fixture.plan);
+  assert.equal(first.executionReady, true);
+  const started = await fixture.harness.startLifecyclePlan(fixture.plan, { commandId: 'original-invocation', preflightReport: first });
+  assert.equal(started.state.runId, fixture.plan.run.runId);
+  const resume = await fixture.harness.createLifecycleResumePlan({ projectId: fixture.plan.project.id,
+    runId: started.state.runId, executionWorkspaceRoot: fixture.workspace });
+  assert.equal(resume.plan.planDigest, fixture.plan.planDigest);
+  const readiness = await fixture.harness.createExecutionReadinessReport(resume.plan);
+  assert.equal(readiness.executionReady, true);
+  const completed = await fixture.harness.executeVisibleLifecyclePlan(resume.plan,
+    { commandId: 'explicit-resume-invocation', preflightReport: readiness, resume });
+  assert.equal(completed.status, 'closed');
+  assert.equal(completed.state.runId, started.state.runId);
+  assert.equal(fixture.host.stats.spawnCount, 3);
+  assert.equal((await fixture.harness.authorityStore.list(fixture.plan.project.id)).filter(run => run.runId === started.state.runId).length, 1);
+});
+
 test('review-only quality records findings without scheduling repairs or changing source', async t => {
   const fixture = await setup({ preset: 'review-only' });
   t.after(() => rm(fixture.root, { recursive: true, force: true }));

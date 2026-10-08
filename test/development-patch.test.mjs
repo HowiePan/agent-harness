@@ -5,6 +5,7 @@ import { resolve } from 'node:path';
 import { atomicWriteJson } from '../src/kernel/atomic-io.mjs';
 import { harnessProjectRoot } from '../src/common/write-boundary.mjs';
 import { createDevelopmentPatchPlan, applyDevelopmentPatchPlan, diffDevelopmentFiles } from '../src/application/development-patch.mjs';
+import { AuthorityStore } from '../src/kernel/authority-store.mjs';
 import { developmentSourceManifestDigest, writeDevelopmentSourceManifest } from '../src/application/development-source.mjs';
 import { syncDevelopmentSource } from '../src/interfaces/cli/local-development-sync.mjs';
 import { assertDevelopmentRunRecoveryEffects, hasRejectedPlanReview, selectDevelopmentRecoveryExtension } from '../src/application/development-run-recovery.mjs';
@@ -73,6 +74,42 @@ test('development changes are classified by active-run compatibility', () => {
     const [change] = diffDevelopmentFiles([record(path)], [record(path, 'b'.repeat(64))]);
     assert.equal(change.level, level, path);
   }
+});
+
+test('explicit H4 migration accepts only the exact idle Run; ordinary patch apply remains blocked', async () => {
+  const controlRoot = harnessProjectRoot();
+  const dataRoot = resolve(controlRoot, '.tmp', 'development-patch-tests', `h4-${process.pid}-${Date.now()}`);
+  await mkdir(dataRoot, { recursive: true });
+  try {
+    const created = await writeDevelopmentSourceManifest({ bindingId: 'h4-test', sourceRoot: controlRoot,
+      controlRoot, dataRoot, configPath: resolve(controlRoot, 'examples', 'project-harness.json'),
+      projectRoot: controlRoot });
+    const store = new AuthorityStore({ root: dataRoot, controlRoot });
+    await store.create({ projectId: 'project', runId: 'implementation', status: 'ready', epoch: 1,
+      generation: 1, leases: [], dispatches: [] }, { commandId: 'h4-run-start' });
+    const manifest = structuredClone(created.manifest);
+    const altered = files => files.map(item => item.path === 'src/kernel/kernel.mjs'
+      ? { ...item, sha256: '0'.repeat(64) } : item);
+    manifest.files = altered(manifest.files);
+    manifest.sourceIdentity.runtimeFiles = altered(manifest.sourceIdentity.runtimeFiles);
+    manifest.release.artifactDigest = '1'.repeat(64);
+    manifest.sourceIdentity.runtimeDigest = '1'.repeat(64);
+    manifest.sourceIdentity.sourceDigest = '2'.repeat(64);
+    delete manifest.manifestDigest;
+    manifest.manifestDigest = developmentSourceManifestDigest(manifest);
+    await atomicWriteJson(created.file, manifest, { root: dataRoot });
+    const plan = await createDevelopmentPatchPlan(created.file);
+    assert.equal(plan.level, 'H4');
+    await assert.rejects(() => applyDevelopmentPatchPlan(plan, { commandId: 'h4-denied',
+      authorityDecision: { actor: 'test', decision: 'approved' } }), error => error.code === 'DEVELOPMENT_PATCH_INCOMPATIBLE');
+    await assert.rejects(() => applyDevelopmentPatchPlan(plan, { commandId: 'h4-wrong-run',
+      authorityDecision: { actor: 'test', decision: 'approved' }, h4MigrationRunId: 'unrelated' }),
+    error => error.code === 'DEVELOPMENT_H4_MIGRATION_RUN_CHANGED');
+    const result = await applyDevelopmentPatchPlan(plan, { commandId: 'h4-exact-run',
+      authorityDecision: { actor: 'test', decision: 'approved' }, h4MigrationRunId: 'implementation' });
+    assert.equal(result.receipt.level, 'H4');
+    assert.equal(result.receipt.migrationRunId, 'implementation');
+  } finally { await rm(dataRoot, { recursive: true, force: true }); }
 });
 
 test('H1 source patch records a new generation and preserves same-run continuation', async () => {

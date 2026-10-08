@@ -38,7 +38,6 @@ export const createDeliveryCommandManifest = ({ id = 'delivery-lifecycle-command
     review: { targetKind: 'version', presets: { default: { scope: 'user-code-review', stateChanging: true, sourcePolicy: 'read-only' } } },
     deliver: { targetKind: 'version', presets: { default: { scope: 'delivery-receipt', stateChanging: true } } },
     status: { targetKind: 'version-or-run-id', presets: { default: { scope: 'status', stateChanging: false } } },
-    resume: { targetKind: 'version-or-run-id', presets: { default: { scope: 'ordinary-resume', stateChanging: true } } },
     recover: {
       targetKind: 'run-id', defaultPreset: 'assess', presets: {
         assess: { scope: 'recovery-assessment', stateChanging: false },

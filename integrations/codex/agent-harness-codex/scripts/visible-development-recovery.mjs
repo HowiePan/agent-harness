@@ -10,7 +10,7 @@ import { createCodexCollaborationHostAdapter } from '../lib/codex-collaboration-
 import { createHostExchangeDiagnosticWriter } from '../lib/host-exchange-diagnostics.mjs';
 import { assertLocalProcessGateHost } from '../lib/local-process-gate-readiness.mjs';
 import { digestJson } from '../../../../src/common/canonical.mjs';
-import { createLifecycleCommandPlan } from '../../../../src/application/lifecycle-command-plan.mjs';
+import { createLifecycleCommandPlan, validateLifecycleCommandPlan } from '../../../../src/application/lifecycle-command-plan.mjs';
 import { expandApprovedImplementation } from '../../../../src/flows/delivery-lifecycle/approved-implementation.mjs';
 
 const emit = value => process.stdout.write(`${JSON.stringify({ protocolVersion: '1.0', ...value })}\n`);
@@ -44,9 +44,44 @@ const main = async () => {
     if (!['implement', 'produce'].includes(old.metadata?.commandIntent?.action) || !old.metadata?.lifecycleInvocationId)
       fail('VISIBLE_DEVELOPMENT_RECOVERY_SCOPE_INVALID', 'Recovery only continues an existing authorized implementation or production lifecycle.');
     const commandId = `${old.metadata.lifecycleInvocationId}.development-recover.${runId}`;
+    const salvageTerminalFailure = async () => {
+      const active = old.leases.filter(item => item.status === 'active');
+      if (active.length !== 1 || old.dispatches.filter(item => ['requested', 'assigned'].includes(item.status)).length !== 1)
+        fail('VISIBLE_DEVELOPMENT_RECOVERY_TERMINAL_SCOPE_INVALID', 'Source-drift recovery requires exactly one active bound Dispatch.');
+      const lease = active[0];
+      const dispatch = old.dispatches.find(item => item.dispatchId === lease.dispatchId);
+      const feature = old.features.find(item => item.id === dispatch?.featureId);
+      const effectId = lease.runtimeReceipt?.hostSpawnReceipt?.effectId;
+      const effect = effectId ? await host.journal.read(effectId, { required: true }) : null;
+      if (feature?.metadata?.stage !== 'implementation' || effect?.state !== 'settled'
+        || effect.outcome?.disposition !== 'result-observed' || effect.canonicalAgentName !== lease.agentId
+        || effect.binding?.dispatchId !== dispatch.dispatchId || effect.binding?.packetDigest !== dispatch.packetDigest)
+        fail('VISIBLE_DEVELOPMENT_RECOVERY_TERMINAL_UNVERIFIED', 'Source-drift recovery requires the original terminal Host Effect and implementation Dispatch.');
+      let state = await harness.authorityStore.read(projectId, runId);
+      state = (await harness.recordHeartbeat(projectId, runId, { leaseId: lease.leaseId,
+        dispatchId: dispatch.dispatchId, agentId: lease.agentId, progress: 'terminal-failure-recovery' },
+      { expectedRevision: state.revision, commandId: `${commandId}.terminal-heartbeat.${dispatch.dispatchId}` })).state;
+      const transported = await host.adapter.result({ agentId: lease.agentId, dispatchId: dispatch.dispatchId,
+        visibility: structuredClone(lease.runtimeReceipt.visibility), runtimeReceipt: structuredClone(lease.runtimeReceipt) });
+      if (!transported.runtimeEvidence?.hostTerminalFailure
+        || transported.result?.status !== 'failed' || transported.result.changedFiles?.length !== 0
+        || transported.receipt?.resultDigest !== effect.outcome.resultDigest)
+        fail('VISIBLE_DEVELOPMENT_RECOVERY_TERMINAL_UNVERIFIED', 'The original Agent has no matching native terminal failure Receipt.');
+      state = await harness.authorityStore.read(projectId, runId);
+      state = (await harness.recordHeartbeat(projectId, runId, { leaseId: lease.leaseId,
+        dispatchId: dispatch.dispatchId, agentId: lease.agentId, progress: 'terminal-result-observed' },
+      { expectedRevision: state.revision, commandId: `${commandId}.terminal-result-heartbeat.${dispatch.dispatchId}` })).state;
+      const submitted = await harness.recordResult(projectId, runId, dispatch.dispatchId, transported.result,
+        { commandId: `${commandId}.terminal-submit.${dispatch.dispatchId}`,
+          runtimeEvidence: { ...transported.runtimeEvidence, hostResultReceipt: transported.receipt } });
+      const submission = submitted.state.submissions.find(item => item.dispatchId === dispatch.dispatchId);
+      emit({ kind: 'codex-visible-development-recovery', phase: 'terminal-failure-recorded', projectId, runId,
+        dispatchId: dispatch.dispatchId, submissionId: submission?.submissionId,
+        changedFiles: submission?.changedFiles ?? [], sourceDigest: submitted.state.sourceDigest });
+    };
     let recovery;
     if (old.status === 'superseded') {
-      if (!old.metadata?.supersededReason?.startsWith('development-h3-recovery:')
+      if (!/^development-h[234]-recovery:[a-f0-9]{64}$/.test(old.metadata?.supersededReason ?? '')
         || !old.metadata?.supersededByRunId || !old.metadata?.supersedePlanDigest)
         fail('VISIBLE_DEVELOPMENT_RECOVERY_SCOPE_INVALID', 'The old Run was superseded by another operation.');
       recovery = { projectId, priorRunId: runId, replacementRunId: old.metadata.supersededByRunId,
@@ -54,29 +89,34 @@ const main = async () => {
     } else {
       try { recovery = await recoverDevelopmentRun({ manifestFile, runId, commandId }); }
       catch (error) {
-        if (!['DEVELOPMENT_RUN_HOST_EFFECT_UNSETTLED', 'DEVELOPMENT_RUN_HOST_EFFECT_PENDING'].includes(error.code)) throw error;
-        for (const lease of old.leases.filter(item => item.status === 'active')) {
-          const effectId = lease.runtimeReceipt?.hostSpawnReceipt?.effectId;
-          const effect = effectId ? await host.journal.read(effectId, { required: true }) : null;
-          if (effect?.state === 'lease-bound') {
-            const fenced = await host.adapter.contain({ agentId: lease.agentId, dispatchId: lease.dispatchId,
-              runtimeReceipt: lease.runtimeReceipt, reason: 'development-run-recovery' });
-            emit({ kind: 'codex-visible-development-recovery', phase: 'host-fenced', projectId, runId,
-              effectId, disposition: fenced.outcome?.disposition });
+        if (error.code === 'CARRYOVER_SOURCE_CHANGED') {
+          await salvageTerminalFailure();
+          recovery = await recoverDevelopmentRun({ manifestFile, runId, commandId });
+        } else {
+          if (!['DEVELOPMENT_RUN_HOST_EFFECT_UNSETTLED', 'DEVELOPMENT_RUN_HOST_EFFECT_PENDING'].includes(error.code)) throw error;
+          for (const lease of old.leases.filter(item => item.status === 'active')) {
+            const effectId = lease.runtimeReceipt?.hostSpawnReceipt?.effectId;
+            const effect = effectId ? await host.journal.read(effectId, { required: true }) : null;
+            if (effect?.state === 'lease-bound') {
+              const fenced = await host.adapter.contain({ agentId: lease.agentId, dispatchId: lease.dispatchId,
+                runtimeReceipt: lease.runtimeReceipt, reason: 'development-run-recovery' });
+              emit({ kind: 'codex-visible-development-recovery', phase: 'host-fenced', projectId, runId,
+                effectId, disposition: fenced.outcome?.disposition });
+            }
           }
+          for (const effect of await host.journal.unresolved()) {
+            if (effect.binding?.projectId !== projectId || effect.binding?.runId !== runId) continue;
+            const dispatch = old.dispatches.find(item => item.dispatchId === effect.binding.dispatchId);
+            if (!dispatch || dispatch.packetDigest !== effect.binding.packetDigest)
+              fail('VISIBLE_DEVELOPMENT_RECOVERY_EFFECT_MISMATCH', 'An unresolved Host Effect does not match the original Run dispatch.');
+            if (old.leases.some(item => item.dispatchId === dispatch.dispatchId))
+              fail('VISIBLE_DEVELOPMENT_RECOVERY_LEASE_UNSETTLED', 'An existing Lease still has an unresolved Host Effect.');
+            const fenced = await host.adapter.contain({ effectId: effect.effectId, reason: 'development-run-recovery-unleased' });
+            emit({ kind: 'codex-visible-development-recovery', phase: 'host-fenced', projectId, runId,
+              effectId: effect.effectId, disposition: fenced.outcome?.disposition });
+          }
+          recovery = await recoverDevelopmentRun({ manifestFile, runId, commandId });
         }
-        for (const effect of await host.journal.unresolved()) {
-          if (effect.binding?.projectId !== projectId || effect.binding?.runId !== runId) continue;
-          const dispatch = old.dispatches.find(item => item.dispatchId === effect.binding.dispatchId);
-          if (!dispatch || dispatch.packetDigest !== effect.binding.packetDigest)
-            fail('VISIBLE_DEVELOPMENT_RECOVERY_EFFECT_MISMATCH', 'An unresolved Host Effect does not match the original Run dispatch.');
-          if (old.leases.some(item => item.dispatchId === dispatch.dispatchId))
-            fail('VISIBLE_DEVELOPMENT_RECOVERY_LEASE_UNSETTLED', 'An existing Lease still has an unresolved Host Effect.');
-          const fenced = await host.adapter.contain({ effectId: effect.effectId, reason: 'development-run-recovery-unleased' });
-          emit({ kind: 'codex-visible-development-recovery', phase: 'host-fenced', projectId, runId,
-            effectId: effect.effectId, disposition: fenced.outcome?.disposition });
-        }
-        recovery = await recoverDevelopmentRun({ manifestFile, runId, commandId });
       }
     }
     emit({ kind: 'codex-visible-development-recovery', phase: 'run-retired', ...recovery });
@@ -86,10 +126,17 @@ const main = async () => {
     const intent = old.metadata.commandIntent;
     const project = await harness.projectRegistry.get(projectId);
     const extension = selectDevelopmentRecoveryExtension({ state: old, intent, project, installedExtensions: extensions });
-    let plan = await harness.createLifecyclePlan({ projectId, extensionId: extension.id, workflowId: intent.workflowId,
-      profileId: intent.profileId, action: intent.action, target: intent.target,
-      arguments: intent.preset === 'default' ? [] : [intent.preset], executionWorkspaceRoot: old.metadata.workspace.root });
-    if (plan.run.runId !== recovery.replacementRunId || plan.planDigest !== recovery.replacementPlanDigest) {
+    const retired = await harness.authorityStore.read(projectId, runId);
+    const sealedReplacement = retired.metadata?.completionCarryover?.replacementPlan;
+    let plan = sealedReplacement ? validateLifecycleCommandPlan(sealedReplacement)
+      : await harness.createLifecyclePlan({ projectId, extensionId: extension.id, workflowId: intent.workflowId,
+        profileId: intent.profileId, action: intent.action, target: intent.target,
+        arguments: intent.preset === 'default' ? [] : [intent.preset], executionWorkspaceRoot: old.metadata.workspace.root });
+    if (sealedReplacement && (plan.run.runId !== recovery.replacementRunId
+      || plan.planDigest !== recovery.replacementPlanDigest || plan.logicalTaskKey !== old.metadata.logicalTaskKey
+      || plan.extension.id !== extension.id || plan.project.id !== projectId))
+      fail('VISIBLE_DEVELOPMENT_RECOVERY_PLAN_CHANGED', 'The sealed replacement Plan does not match the retired Run and project binding.');
+    if (!sealedReplacement && (plan.run.runId !== recovery.replacementRunId || plan.planDigest !== recovery.replacementPlanDigest)) {
       const intended = await harness.authorityStore.read(projectId, recovery.replacementRunId, { required: false });
       if (intended && intended.status !== 'closed' && intended.status !== 'superseded'
         && intended.metadata?.lifecyclePlanDigest === recovery.replacementPlanDigest
@@ -111,7 +158,7 @@ const main = async () => {
         }
       }
     }
-    if (plan.run.runId !== recovery.replacementRunId || plan.planDigest !== recovery.replacementPlanDigest) {
+    if (!sealedReplacement && (plan.run.runId !== recovery.replacementRunId || plan.planDigest !== recovery.replacementPlanDigest)) {
       const intended = await harness.authorityStore.read(projectId, recovery.replacementRunId, { required: false });
       const scope = features => features.map(feature => ({ id: feature.id, allowedPaths: feature.allowedPaths,
         forbiddenPaths: feature.forbiddenPaths, dependsOn: feature.dependsOn })).sort((left, right) => left.id.localeCompare(right.id));
