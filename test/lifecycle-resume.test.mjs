@@ -6,7 +6,7 @@ import { createHarness } from '../src/application/harness.mjs';
 import { loadExtensionPack } from '../src/platform/extensions/contract.mjs';
 import { createCardWorldProjectDescriptor } from '../integrations/legacy-consumers/cardworld/index.mjs';
 import { harnessTemporaryRoot } from '../src/common/write-boundary.mjs';
-import { selectBlockedResumeFeature, selectImplementationContinuationRun } from '../src/application/lifecycle-resume.mjs';
+import { selectBlockedResumeFeature, selectImplementationContinuationRun, selectQualityContinuationRun } from '../src/application/lifecycle-resume.mjs';
 import { createDeliveryCommandManifest } from '../src/flows/delivery-lifecycle/commands.mjs';
 import { batchProductionCommandManifest } from '../src/flows/batch-production/commands.mjs';
 
@@ -28,6 +28,17 @@ test('implement selects one unfinished Run by command identity despite source pr
   assert.equal(selectImplementationContinuationRun([state('retired', { status: 'superseded' })], intent), null);
   assert.throws(() => selectImplementationContinuationRun([candidate, state('second-run')], intent),
     error => error.code === 'LIFECYCLE_IMPLEMENT_RUN_AMBIGUOUS');
+});
+
+test('quality continues the matching unfinished preset and ignores terminal review history', () => {
+  const intent = { action: 'quality', target: 'V3.8.5', preset: 'full', workflowId: 'engine-delivery', profileId: 'engine-delivery' };
+  const run = (runId, status, preset = 'full') => ({ runId, status,
+    metadata: { commandIntent: { ...intent, preset } } });
+  assert.equal(selectQualityContinuationRun([run('prior', 'incomplete'), run('other', 'closure-blocked', 'review-only'),
+    run('current', 'running')], intent)?.runId, 'current');
+  assert.equal(selectQualityContinuationRun([run('prior', 'incomplete')], intent), null);
+  assert.throws(() => selectQualityContinuationRun([run('one', 'ready'), run('two', 'running')], intent),
+    error => error.code === 'LIFECYCLE_QUALITY_RUN_AMBIGUOUS');
 });
 
 const releaseIdentity = { version: '1.0.0', artifactDigest: 'a'.repeat(64), verified: true };

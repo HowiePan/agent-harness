@@ -15,6 +15,8 @@ import { completionCarryoverDigest, verifyCompletionCarryover } from './completi
 
 const activeLease = lease => ['requested', 'active'].includes(lease.status);
 const activeDispatch = dispatch => ['requested', 'assigned'].includes(dispatch.status);
+const terminalRun = state => ['closed', 'incomplete', 'failed', 'superseded'].includes(state.status);
+const assertMutableRun = state => assert(!terminalRun(state), 'RUN_TERMINAL', 'A terminal Run cannot be mutated.');
 
 export const leaseHealth = (state, now = Date.now()) => state.leases.filter(activeLease).map(lease => {
   const elapsedMs = Math.max(0, now - Date.parse(lease.lastHeartbeatAt));
@@ -80,7 +82,7 @@ const event = (state, type, payload, now) => {
 };
 
 const deriveStatus = (state, profile) => {
-  if (state.status === 'closed') return 'closed';
+  if (terminalRun(state)) return state.status;
   if (state.leases.some(activeLease) || state.dispatches.some(activeDispatch)) return 'running';
   if (state.features.every(feature => feature.state === 'completed')) return profile.canClose(state).ok && qualityCanClose(state.findings) ? 'ready-to-close' : 'closure-blocked';
   const remaining = state.features.filter(feature => feature.state !== 'completed');
@@ -193,6 +195,7 @@ export class HarnessKernel {
     assert(Object.values(input.executionByFeatureId ?? {}).every(execution => execution.prompt?.pluginId && execution.prompt?.pluginVersion && execution.prompt?.contractVersion), 'AGENT_PROMPT_BINDING_REQUIRED', 'Scheduling requires an exact Prompt Codec and contract binding for every candidate Feature.');
     const snapshotEvidence = await this.evidenceStore.read(input.sourceSnapshotRef);
     return this.authorityStore.transact(projectId, runId, { expectedRevision: command.expectedRevision, commandId: command.commandId, payload: input }, state => {
+      assert(!terminalRun(state), 'RUN_TERMINAL', 'A terminal Run cannot schedule new work.');
       assert(snapshotEvidence.metadata.projectId === projectId && snapshotEvidence.metadata.runId === runId && snapshotEvidence.metadata.epoch === state.epoch && snapshotEvidence.metadata.generation === state.generation && snapshotEvidence.metadata.sourceDigest === state.sourceDigest, 'SOURCE_SNAPSHOT_CONTEXT_MISMATCH', 'Scheduling requires a workspace snapshot bound to the current Authority source.');
       const profile = this.profile(state.profile.id);
       const activeFeatures = [...new Set([...state.leases.filter(activeLease).map(lease => lease.featureId), ...state.dispatches.filter(activeDispatch).map(dispatch => dispatch.featureId)])];
@@ -220,6 +223,7 @@ export class HarnessKernel {
 
   async bindLease(projectId, runId, input, command) {
     return this.authorityStore.transact(projectId, runId, { expectedRevision: command.expectedRevision, commandId: command.commandId, payload: input }, state => {
+      assertMutableRun(state);
       const dispatch = state.dispatches.find(item => item.dispatchId === input.dispatchId);
       assert(dispatch, 'DISPATCH_NOT_FOUND', `Dispatch not found: ${input.dispatchId}`);
       assert(dispatch.status === 'requested', 'DISPATCH_NOT_BINDABLE', 'Only a requested Dispatch can be bound.');
@@ -252,6 +256,7 @@ export class HarnessKernel {
 
   async heartbeat(projectId, runId, input, command) {
     return this.authorityStore.transact(projectId, runId, { expectedRevision: command.expectedRevision, commandId: command.commandId, payload: input }, state => {
+      assertMutableRun(state);
       const lease = state.leases.find(item => item.leaseId === input.leaseId);
       assert(lease?.status === 'active', 'LEASE_NOT_ACTIVE', 'Heartbeat requires an active Lease.');
       assert(lease.agentId === input.agentId && lease.epoch === state.epoch && lease.generation === state.generation, 'LEASE_IDENTITY_MISMATCH', 'Heartbeat identity does not match the active Lease.');
@@ -267,6 +272,7 @@ export class HarnessKernel {
     const evidenceRecords = [];
     for (const ref of input.evidenceRefs ?? []) evidenceRecords.push(await this.evidenceStore.read(ref));
     return this.authorityStore.transact(projectId, runId, { expectedRevision: command.expectedRevision, commandId: command.commandId, payload: input }, state => {
+      assertMutableRun(state);
       const profile = this.profile(state.profile.id);
       const dispatch = state.dispatches.find(item => item.dispatchId === input.dispatchId);
       const lease = state.leases.find(item => item.dispatchId === input.dispatchId && item.status === 'active');
@@ -406,6 +412,7 @@ export class HarnessKernel {
       evidence.push(record);
     }
     return this.authorityStore.transact(projectId, runId, { expectedRevision: command.expectedRevision, commandId: command.commandId, payload: input }, state => {
+      assertMutableRun(state);
       assert(input.id && ['passed', 'failed', 'environment-failed', 'budget-exceeded'].includes(input.status), 'GATE_RESULT_INVALID', 'Gate result requires id and a valid status.');
       const gate = { id: input.id, scope: input.scope ?? 'run', featureId: input.featureId ?? null, specDigest: input.specDigest, sourceDigest: input.sourceDigest, toolchainDigest: input.toolchainDigest, status: input.status, evidenceRefs: [...new Set(input.evidenceRefs ?? [])], forcedFresh: Boolean(input.forcedFresh), recordedAt: this.now() };
       assert(gate.specDigest && gate.sourceDigest && gate.toolchainDigest && gate.evidenceRefs.length > 0, 'GATE_EVIDENCE_INCOMPLETE', 'Gate results require spec, source, toolchain, and evidence digests.');
@@ -434,6 +441,7 @@ export class HarnessKernel {
 
   async recordFinding(projectId, runId, input, command) {
     return this.authorityStore.transact(projectId, runId, { expectedRevision: command.expectedRevision, commandId: command.commandId, payload: input }, state => {
+      assertMutableRun(state);
       assert(!state.findings.some(item => item.id === input.id), 'FINDING_DUPLICATE', `Finding already exists: ${input.id}`);
       const finding = validateFinding({ ...input, openedAt: this.now(), status: 'open' });
       state.findings.push(finding);
@@ -446,6 +454,7 @@ export class HarnessKernel {
   async resolveFinding(projectId, runId, input, command) {
     for (const ref of input.evidenceRefs ?? []) await this.evidenceStore.read(ref);
     return this.authorityStore.transact(projectId, runId, { expectedRevision: command.expectedRevision, commandId: command.commandId, payload: input }, state => {
+      assertMutableRun(state);
       const finding = state.findings.find(item => item.id === input.id);
       assert(finding?.status === 'open', 'FINDING_NOT_OPEN', `Finding is not open: ${input.id}`);
       assert((input.evidenceRefs ?? []).length > 0, 'FINDING_RESOLUTION_EVIDENCE_REQUIRED', 'Finding resolution requires evidence.');
@@ -461,6 +470,7 @@ export class HarnessKernel {
 
   async recordDecision(projectId, runId, input, command) {
     return this.authorityStore.transact(projectId, runId, { expectedRevision: command.expectedRevision, commandId: command.commandId, payload: input }, state => {
+      assertMutableRun(state);
       assert(input.id && input.actor && input.decision, 'DECISION_INVALID', 'Decision requires id, actor, and decision.');
       assert(!state.decisions.some(item => item.id === input.id), 'DECISION_DUPLICATE', `Decision already exists: ${input.id}`);
       const decision = { ...structuredClone(input), recordedAt: this.now(), digest: digestJson(input) };
@@ -493,6 +503,7 @@ export class HarnessKernel {
       }
     }
     return this.authorityStore.transact(projectId, runId, { expectedRevision: command.expectedRevision, commandId: command.commandId, payload: input }, state => {
+      assertMutableRun(state);
       assert(['ordinary-resume', 'hard-recovery'].includes(input.mode), 'RECOVERY_MODE_INVALID', 'Recovery mode must be ordinary-resume or hard-recovery.');
       if (input.mode === 'hard-recovery') {
         assert(recoveryVerification.authorityEpoch === state.epoch && recoveryVerification.authorityGeneration === state.generation && recoveryVerification.targetEpoch === state.epoch + 1, 'RECOVERY_VERIFICATION_CONTEXT_MISMATCH', 'Recovery verification Receipt does not match the current Authority epoch and generation.');
@@ -547,6 +558,7 @@ export class HarnessKernel {
     const snapshot = JSON.parse(record.bytes.toString('utf8'));
     assert(snapshot.projectId === projectId && snapshot.runId === runId && snapshot.authorityDigest, 'RECOVERY_ROLLBACK_SNAPSHOT_INVALID', 'Recovery rollback Evidence is not an Authority snapshot.');
     return this.authorityStore.transact(projectId, runId, { expectedRevision: command.expectedRevision, commandId: command.commandId, payload: input }, state => {
+      assertMutableRun(state);
       const archive = state.recoveryArchives.find(item => item.rollbackSnapshotRef === input.rollbackSnapshotRef);
       assert(archive, 'RECOVERY_ROLLBACK_NOT_LINKED', 'Snapshot is not linked to a recovery archive in the current run.');
       const previous = { epoch: state.epoch, generation: state.generation, authorityDigest: state.authorityDigest };
@@ -579,6 +591,7 @@ export class HarnessKernel {
 
   async reopenFeature(projectId, runId, input, command) {
     return this.authorityStore.transact(projectId, runId, { expectedRevision: command.expectedRevision, commandId: command.commandId, payload: input }, state => {
+      assertMutableRun(state);
       const feature = state.features.find(item => item.id === input.featureId);
       assert(feature?.state === 'blocked', 'FEATURE_NOT_REOPENABLE', 'Only a blocked Feature with remaining budget can be reopened.');
       feature.state = 'pending';
@@ -593,6 +606,7 @@ export class HarnessKernel {
 
   async scheduleGateDiagnosticReview(projectId, runId, input, command) {
     return this.authorityStore.transact(projectId, runId, { expectedRevision: command.expectedRevision, commandId: command.commandId, payload: input }, state => {
+      assertMutableRun(state);
       const profile = this.profile(state.profile.id);
       assert(typeof profile.createGateDiagnosticReview === 'function', 'GATE_DIAGNOSTIC_REVIEW_UNSUPPORTED', 'The Run profile does not support Gate diagnostic review.');
       assert(state.features.every(feature => feature.state === 'completed') && !state.leases.some(activeLease), 'GATE_DIAGNOSTIC_REVIEW_NOT_READY', 'Gate diagnosis requires completed Features and no active Lease.');
@@ -611,7 +625,7 @@ export class HarnessKernel {
 
   async supersedeRun(projectId, runId, input, command) {
     return this.authorityStore.transact(projectId, runId, { expectedRevision: command.expectedRevision, commandId: command.commandId, payload: input }, state => {
-      assert(state.status !== 'closed' && state.status !== 'superseded', 'RUN_NOT_SUPERSEDABLE', `Run cannot be superseded from status ${state.status}.`);
+      assert(!terminalRun(state), 'RUN_NOT_SUPERSEDABLE', `Run cannot be superseded from status ${state.status}.`);
       assert(input.replacementRunId && input.planDigest, 'RUN_SUPERSEDE_CONTEXT_REQUIRED', 'Run supersede requires a replacement Run ID and Command Plan digest.');
       if (input.completionCarryover) {
         const carried = input.completionCarryover;
@@ -635,6 +649,7 @@ export class HarnessKernel {
 
   async rebaseArtifact(projectId, runId, input, command) {
     return this.authorityStore.transact(projectId, runId, { expectedRevision: command.expectedRevision, commandId: command.commandId, payload: input }, state => {
+      assertMutableRun(state);
       assert(input.artifactDigest && input.artifactDigest !== state.artifactDigest, 'ARTIFACT_REBASE_INVALID', 'Artifact rebase requires a new artifact digest.');
       const impacted = new Set(input.impactedFeatureIds ?? []);
       assert(impacted.size > 0 && [...impacted].every(id => state.features.some(feature => feature.id === id)), 'ARTIFACT_IMPACT_SET_INVALID', 'Artifact rebase requires a valid non-empty Feature impact set.');
@@ -662,6 +677,7 @@ export class HarnessKernel {
   async closeRun(projectId, runId, input, command) {
     const current = await this.authorityStore.read(projectId, runId);
     assert(current.revision === command.expectedRevision, 'REVISION_CONFLICT', 'Authority revision changed before closure.', { expected: command.expectedRevision, actual: current.revision });
+    assert(!terminalRun(current), 'RUN_TERMINAL', 'A terminal Run cannot be closed again.');
     const profile = this.profile(current.profile.id);
     const closure = profile.canClose(current);
     assert(current.features.every(feature => feature.state === 'completed'), 'FEATURES_INCOMPLETE', 'All Features must be completed before closure.');
@@ -684,6 +700,30 @@ export class HarnessKernel {
       state.receipts.push({ kind: receipt.kind, digest: receipt.receiptDigest, file: receiptFile });
       event(state, 'run.closed', { receiptDigest: receipt.receiptDigest }, this.now);
       return { receipt, receiptFile };
+    });
+  }
+
+  async finishRun(projectId, runId, input, command) {
+    const evidence = [];
+    for (const ref of input.evidenceRefs ?? []) evidence.push(await this.evidenceStore.read(ref));
+    return this.authorityStore.transact(projectId, runId, { expectedRevision: command.expectedRevision, commandId: command.commandId, payload: input }, state => {
+      assert(!terminalRun(state), 'RUN_TERMINAL', 'Run already has a terminal outcome.');
+      assert(!state.leases.some(activeLease) && !state.dispatches.some(activeDispatch), 'RUN_ACTIVE_EFFECT', 'Run cannot finish while an Agent Lease or Dispatch is active.');
+      assert(['incomplete', 'failed'].includes(input.status) && typeof input.reason === 'string' && input.reason.length > 0,
+        'RUN_FINISH_INVALID', 'Run finish requires an incomplete or failed outcome and a reason.');
+      if (input.status === 'incomplete') {
+        assert(input.reason === 'quality-review-limit-reached' && state.features.every(feature => feature.state === 'completed')
+          && this.profile(state.profile.id).canClose(state).reason === 'quality-review-limit-reached',
+        'RUN_QUALITY_INCOMPLETE_UNVERIFIED', 'A bounded quality outcome requires completed Features and an exhausted current-source review budget.');
+      } else {
+        assert(evidence.length > 0 && evidence.every(record => record.metadata.projectId === projectId && record.metadata.runId === runId),
+          'RUN_FAILURE_EVIDENCE_REQUIRED', 'An unrecoverable execution failure requires evidence references.');
+      }
+      state.status = input.status;
+      state.metadata = { ...(state.metadata ?? {}), terminalOutcome: { status: input.status, reason: input.reason,
+        evidenceRefs: [...new Set(input.evidenceRefs ?? [])], sourceDigest: state.sourceDigest, at: this.now() } };
+      event(state, input.status === 'failed' ? 'run.failed' : 'run.incomplete', state.metadata.terminalOutcome, this.now);
+      return { runId, status: state.status, terminalOutcome: state.metadata.terminalOutcome };
     });
   }
 }

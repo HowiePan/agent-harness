@@ -60,7 +60,7 @@ export const runWorkflowInstanceSet = async ({ harness, instances, commandId, ma
       } catch (error) {
         if (acquired) {
           const current = plan ? await harness.authorityStore.read(input.projectId, plan.run.runId, { required: false }) : null;
-          if (!current || ['closed', 'superseded'].includes(current.status)) await admission.release(requestId, 'failed-before-run');
+          if (!current || ['closed', 'incomplete', 'failed', 'superseded'].includes(current.status)) await admission.release(requestId, 'failed-before-run');
         }
         throw error;
       } finally { if (heartbeatTimer) clearInterval(heartbeatTimer); }

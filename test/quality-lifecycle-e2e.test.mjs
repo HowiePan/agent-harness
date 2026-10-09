@@ -10,6 +10,7 @@ import { harnessTemporaryRoot } from '../src/common/write-boundary.mjs';
 import { digestJson, sha256 } from '../src/common/canonical.mjs';
 import { createQualityFollowUpFeatures, createQualityGateDiagnosticReview, validateQualityReviewPolicies } from '../src/flow-kit/profiles/quality-loop.mjs';
 import { qualityReviewBudgetExhausted } from '../src/flow-kit/profiles/quality-budget.mjs';
+import { retireUnresumableQualityRun } from '../src/application/quality-run-retirement.mjs';
 
 const releaseIdentity = { version: '1.0.0', artifactDigest: 'a'.repeat(64), verified: true };
 
@@ -51,6 +52,17 @@ test('batch quality budgets count reviews separately for each quality root', () 
   state.features.push({ metadata: { qualityReview: true, qualityRoot: 'item:0' } }, { metadata: { qualityReview: true, qualityRoot: 'item:0' } });
   assert.equal(qualityReviewBudgetExhausted(state, 'item:0'), true);
   assert.equal(qualityReviewBudgetExhausted(state, 'item:1'), false);
+});
+
+test('new Run budget ignores audit history while a legacy immutable Run keeps target-scoped accounting', () => {
+  const state = { profile: { config: { qualityReviewLimit: { mode: 'bounded', maxRechecks: 2 },
+    priorQualityReviews: 3, qualityBudgetScope: 'run' } }, features: [{ metadata: { qualityReview: true } }] };
+  assert.equal(qualityReviewBudgetExhausted(state), false);
+  state.features.push({ metadata: { qualityReview: true } }, { metadata: { qualityReview: true } });
+  assert.equal(qualityReviewBudgetExhausted(state), true);
+  delete state.profile.config.qualityBudgetScope;
+  state.features.length = 0;
+  assert.equal(qualityReviewBudgetExhausted(state), true);
 });
 
 const result = ({ summary, findings = [], changedFiles = [], checkpoint = 'review', knownFindingDispositions = undefined, diagnosticDispositions = undefined, diagnostics = undefined, outputs = undefined }) => ({
@@ -619,19 +631,59 @@ test('a finding repeated by re-review is reopened, repaired in a new round, and 
   assert.equal(completed.state.findings[0].history.length, 1);
 });
 
-test('default quality budget stops after two re-reviews and survives a new plan', async t => {
+test('default quality budget ends one Run after two re-reviews and permits a new bounded quality Run', async t => {
   const fixture = await setup({ repeatFindingCount: 2 });
   t.after(() => rm(fixture.root, { recursive: true, force: true }));
   const preflight = await fixture.harness.createExecutionReadinessReport(fixture.plan);
   const stopped = await fixture.harness.executeVisibleLifecyclePlan(fixture.plan, { commandId: 'quality-budget-default', preflightReport: preflight });
-  assert.equal(stopped.status, 'attention-required');
+  assert.equal(stopped.status, 'incomplete');
   assert.equal(stopped.reason, 'quality-review-limit-reached');
+  assert.equal(stopped.state.status, 'incomplete');
+  assert.equal(stopped.state.metadata.terminalOutcome.reason, 'quality-review-limit-reached');
+  assert.equal(stopped.versionClearance, undefined);
+  await assert.rejects(() => fixture.harness.kernel.closeRun(stopped.state.projectId, stopped.state.runId, {},
+    { expectedRevision: stopped.state.revision, commandId: 'quality-incomplete-cannot-close' }),
+  error => error.code === 'RUN_TERMINAL');
   assert.equal(stopped.state.features.filter(feature => feature.metadata?.qualityReview === true).length, 3);
   assert.equal(fixture.host.stats.spawnCount, 6);
-  await assert.rejects(
-    () => fixture.harness.createLifecyclePlan({ projectId: stopped.state.projectId, action: 'quality', target: 'V3.8.4', arguments: ['full'], extensionId: 'cardworld-engine-profile', executionWorkspaceRoot: fixture.workspace }),
-    error => error.code === 'QUALITY_REVIEW_LIMIT_REACHED',
-  );
+  const next = await fixture.harness.createLifecyclePlan({ projectId: stopped.state.projectId, action: 'quality', target: 'V3.8.4', arguments: ['full'], extensionId: 'cardworld-engine-profile', executionWorkspaceRoot: fixture.workspace });
+  assert.equal(next.run.profileConfig.priorQualityReviews, 3);
+  assert.equal(next.run.profileConfig.qualityBudgetScope, 'run');
+  assert.notEqual(next.run.runId, stopped.state.runId);
+  assert.equal((await fixture.harness.createExecutionReadinessReport(next)).executionReady, true);
+  const completed = await fixture.harness.executeVisibleLifecyclePlan(next, { commandId: 'quality-budget-next-run',
+    preflightReport: await fixture.harness.createExecutionReadinessReport(next) });
+  assert.equal(completed.status, 'closed');
+  assert.equal(completed.state.features.filter(feature => feature.metadata?.qualityReview === true).length <= 3, true);
+  assert.equal(completed.versionClearance.receipt.status, 'development-complete');
+});
+
+test('an idle quality Run with an unreconstructable plan records failure evidence before a new round', async t => {
+  const fixture = await setup({ preset: 'review-only' });
+  t.after(() => rm(fixture.root, { recursive: true, force: true }));
+  const prior = await fixture.harness.executeVisibleLifecyclePlan(fixture.plan, { commandId: 'quality-prior-plan',
+    preflightReport: await fixture.harness.createExecutionReadinessReport(fixture.plan) });
+  assert.equal(prior.state.status, 'closure-blocked');
+  const stalePlan = Object.assign(new Error('Pinned plan identity changed.'), { code: 'LIFECYCLE_RESUME_IDENTITY_STALE' });
+  const assessed = await retireUnresumableQualityRun({ harness: fixture.harness, state: prior.state,
+    error: stalePlan, commandId: 'quality-read-only-assessment', dryRun: true });
+  assert.equal(assessed.status, 'failed');
+  assert.equal((await fixture.harness.authorityStore.read(prior.state.projectId, prior.state.runId)).revision,
+    prior.state.revision);
+  const result = await retireUnresumableQualityRun({ harness: fixture.harness, state: prior.state,
+    error: stalePlan,
+    commandId: 'quality-next-request' });
+  assert.equal(result.state.status, 'failed');
+  assert.equal(result.state.metadata.terminalOutcome.reason, 'LIFECYCLE_RESUME_IDENTITY_STALE');
+  assert.equal(result.state.metadata.terminalOutcome.evidenceRefs.length, 1);
+  const next = await fixture.harness.createLifecyclePlan({ projectId: result.state.projectId, action: 'quality',
+    target: 'V3.8.4', arguments: ['review-only'], extensionId: 'cardworld-engine-profile', executionWorkspaceRoot: fixture.workspace });
+  assert.equal(next.run.profileConfig.qualityBudgetScope, 'run');
+  assert.notEqual(next.run.runId, result.state.runId);
+  await assert.rejects(() => retireUnresumableQualityRun({ harness: fixture.harness,
+    state: { ...result.state, status: 'running', leases: [{ status: 'active' }] },
+    error: Object.assign(new Error('Pinned plan identity changed.'), { code: 'LIFECYCLE_RESUME_IDENTITY_STALE' }),
+    commandId: 'quality-active-request' }), error => error.code === 'QUALITY_FAILURE_ACTIVE_EFFECT');
 });
 
 test('repair-known fixes the frozen open ledger without dispatching a reviewer', async t => {

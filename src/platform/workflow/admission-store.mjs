@@ -91,7 +91,7 @@ export class WorkflowAdmissionStore {
     for (const lease of [...state.leases]) {
       if (Date.parse(lease.expiresAt) > Date.parse(this.now())) continue;
       const run = lease.runId ? await this.authorityStore.read(lease.projectId, lease.runId, { required: false }) : null;
-      if (run && !['closed', 'superseded'].includes(run.status)) continue;
+      if (run && !['closed', 'incomplete', 'failed', 'superseded'].includes(run.status)) continue;
       state.leases = state.leases.filter(item => item.requestId !== lease.requestId);
       const request = state.queue.find(item => item.requestId === lease.requestId);
       request.status = 'released'; request.releaseStatus = 'expired'; request.releasedAt = this.now();

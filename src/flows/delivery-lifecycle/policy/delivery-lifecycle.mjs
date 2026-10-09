@@ -30,6 +30,7 @@ export const createDeliveryLifecycleProfile = (id = 'delivery-lifecycle') => Obj
       requiredFinalGates: [...new Set(config.requiredFinalGates ?? [])],
       requireFinalQualityReview: config.requireFinalQualityReview === true,
       qualityReviewLimit: normalizeQualityReviewLimit(config.qualityReviewLimit),
+      qualityBudgetScope: config.qualityBudgetScope === 'run' ? 'run' : 'target',
       priorQualityReviews: config.priorQualityReviews ?? 0,
       repairOnly: config.repairOnly === true,
       closeoutOnly: config.closeoutOnly === true,

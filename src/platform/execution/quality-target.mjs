@@ -3,6 +3,8 @@ import { assert } from '../../common/errors.mjs';
 
 const digestPattern = /^[a-f0-9]{64}$/;
 const terminalRun = run => run?.status === 'closed'
+  || run?.status === 'incomplete'
+  || run?.status === 'failed'
   || run?.status === 'superseded'
   || (Array.isArray(run?.features) && run.features.length > 0 && run.features.every(feature => feature.state === 'completed'));
 const workflowIdOf = run => run?.metadata?.workflow?.id ?? run?.metadata?.commandIntent?.workflowId ?? null;

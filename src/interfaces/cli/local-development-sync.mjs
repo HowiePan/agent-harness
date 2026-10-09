@@ -66,7 +66,9 @@ export const migrateDevelopmentSource = async (manifestFile, { runId, decision =
   const preview = await previewDevelopmentH4Migration({ plan, manifest, runId });
   const patched = await applySourcePatch(plan, { decision, commandId, cwd, h4MigrationRunId: runId });
   const recovery = await recoverDevelopmentRun({ manifestFile, runId, commandId: `${commandId}.recover`, cwd });
-  return { plan, preview, ...patched, recovery, continuation: 'replacement-lifecycle-command-ready' };
+  return { plan, preview, ...patched, recovery,
+    continuation: recovery.continuation === 'new-quality-command-ready'
+      ? 'new-quality-command-ready' : 'replacement-lifecycle-command-ready' };
 };
 
 export const syncDevelopmentSource = async (manifestFile, { decision = null, commandId = newId('dev-sync'), forceRebind = false, cwd = process.cwd() } = {}) => {

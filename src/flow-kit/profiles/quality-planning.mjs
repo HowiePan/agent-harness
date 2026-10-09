@@ -21,7 +21,6 @@ export const prepareQualityPlanning = ({ intent, project, sourceDigest, profileC
   if (actions.includes(intent.action) && !repairOnly && !closeoutOnly) assert(configuredLimit.mode !== 'unbounded' || exhaustive, 'QUALITY_UNBOUNDED_MODE_DENIED', 'Unbounded quality review is available only to the explicit major-release exhaustive preset.');
   const qualityReviewLimit = exhaustive ? { mode: 'unbounded' } : configuredLimit;
   const priorQualityReviews = intent.qualityTarget.reviewHistory?.length ?? 0;
-  if (!repairOnly && !closeoutOnly && actions.includes(intent.action)) assert(qualityReviewLimit.mode === 'unbounded' || priorQualityReviews < 1 + qualityReviewLimit.maxRechecks, 'QUALITY_REVIEW_LIMIT_REACHED', 'The target has exhausted its configured quality review budget.');
   return { repairOnly, closeoutOnly, exhaustive, qualityReviewLimit, priorQualityReviews };
 };
 
@@ -39,7 +38,6 @@ export const prepareScopedQualityPlanning = ({ intent, project, sourceDigest, sc
     priorQualityReviews[target.scopeRoot] = target.reviewHistory?.length ?? 0;
     if (actions.includes(intent.action) && !repairOnly && !closeoutOnly) {
       assert(intent.knownFindingInventories?.[id]?.targetDigest === target.targetDigest, 'QUALITY_INVENTORY_SNAPSHOT_REQUIRED', `Quality scope ${id} requires an Authority-derived inventory.`);
-      assert(priorQualityReviews[target.scopeRoot] < 1 + qualityReviewLimit.maxRechecks, 'QUALITY_REVIEW_LIMIT_REACHED', `Quality scope ${id} has exhausted its review budget.`);
     }
     if (repairOnly) {
       const inventory = assertQualityRepairInventorySnapshot(intent.qualityRepairInventories?.[id]);

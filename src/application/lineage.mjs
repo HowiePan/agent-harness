@@ -12,6 +12,7 @@ const resolutionSchema = JSON.parse(readFileSync(new URL('../../schemas/run-line
 const lineageSchema = JSON.parse(readFileSync(new URL('../../schemas/run-lineage.schema.json', import.meta.url), 'utf8'));
 const activeLease = lease => lease.status === 'active';
 const activeDispatch = dispatch => ['requested', 'assigned'].includes(dispatch.status);
+const terminalStatus = status => ['closed', 'incomplete', 'failed', 'superseded'].includes(status);
 const rejectedPlanReview = state => state.status === 'closure-blocked' && state.submissions?.some(submission =>
   state.features?.some(feature => feature.id === submission.featureId && feature.metadata?.stage === 'plan-review')
   && submission.result?.status === 'completed' && submission.result.outputs?.['plan-review']?.value?.approved === false);
@@ -93,6 +94,11 @@ export const resolveRunLineage = ({ plan, states, currentLineage = null, policy 
     if (exact.status === 'closed') {
       action = 'return-closed';
       reasonCode = 'EXACT_PLAN_ALREADY_CLOSED';
+    } else if (terminalStatus(exact.status)) {
+      action = 'block';
+      selectedRunId = null;
+      reasonCode = 'TERMINAL_RUN_REQUIRES_NEW_PLAN';
+      blockers = [{ code: reasonCode, message: 'A terminal incomplete or failed Run cannot be resumed under its old Plan.', runId: exact.runId }];
     } else if (exact.activeLeaseCount > 0 && exact.expiredLeaseCount < exact.activeLeaseCount && plan.run.agentExecutionMode === 'conversation-visible') {
       action = 'reattach';
       reasonCode = 'EXACT_PLAN_ACTIVE_LEASE';
@@ -133,6 +139,9 @@ export const resolveRunLineage = ({ plan, states, currentLineage = null, policy 
         && candidates.every(candidate => candidate.status === 'closed' || (candidate.rejectedPlanReview && idle(candidate)))) {
         action = 'supersede-and-start';
         reasonCode = 'REJECTED_PLAN_SOURCE_REPLANNED';
+      } else if (plan.intent.action === 'quality' && candidates.every(candidate => terminalStatus(candidate.status))) {
+        action = 'start';
+        reasonCode = 'PREVIOUS_QUALITY_RUNS_TERMINAL';
       } else if (policy.automaticBlockedRunReplacement === true
         && plan.intent.action === 'produce'
         && candidates.every(candidate => ['closed', 'all-remaining-blocked'].includes(candidate.status))

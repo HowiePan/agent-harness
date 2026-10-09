@@ -13,7 +13,9 @@ export const normalizeQualityReviewLimit = input => {
 };
 
 export const qualityReviewCount = (state, qualityRoot = null) => {
-  const history = state?.profile?.config?.priorQualityReviews ?? 0;
+  // Historical reviews remain in the pinned target for audit. Only reviews
+  // scheduled by this command consume a run-scoped budget.
+  const history = state?.profile?.config?.qualityBudgetScope === 'run' ? 0 : state?.profile?.config?.priorQualityReviews ?? 0;
   const prior = Number(typeof history === 'object' ? history[qualityRoot] ?? 0 : history);
   return prior + (state?.features ?? []).filter(feature => feature.metadata?.qualityReview === true && (!qualityRoot || feature.metadata.qualityRoot === qualityRoot)).length;
 };

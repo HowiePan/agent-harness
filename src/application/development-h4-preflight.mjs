@@ -63,6 +63,15 @@ export const previewDevelopmentH4Migration = async ({ plan, manifest, runId }) =
       action: intent.action, target: intent.target,
       arguments: intent.preset === 'default' ? [] : [intent.preset],
       executionWorkspaceRoot: prior.metadata.workspace.root });
+    assert(replacement.run.sourceDigest === prior.sourceDigest,
+      'DEVELOPMENT_H4_SOURCE_CHANGED', 'H4 migration requires the exact authoritative project source.');
+    if (prior.features.every(feature => feature.state === 'completed')
+      && harness.profileRegistry.get(prior.profile.id).canClose(prior).reason === 'quality-review-limit-reached') {
+      return { projectId: prior.projectId, priorRunId: runId, priorRevision: prior.revision,
+        priorAuthorityDigest: prior.authorityDigest, sourceDigest: prior.sourceDigest,
+        completedFeatureIds: prior.features.filter(feature => feature.metadata?.stage === 'implementation').map(feature => feature.id),
+        terminalOutcome: { status: 'incomplete', reason: 'quality-review-limit-reached' } };
+    }
     const replacementFeatures = expandApprovedImplementation({ features: replacement.run.features,
       typedPlan: prior.metadata.approvedPlan.typedPlan, projectId: prior.projectId });
     const carryover = createCompletionCarryoverPlan({ prior, replacementFeatures,

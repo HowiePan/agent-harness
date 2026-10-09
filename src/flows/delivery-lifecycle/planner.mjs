@@ -57,6 +57,7 @@ export const createDeliveryLifecyclePlanner = ({
     requireUserCodeReview: full || intent.action === 'deliver' || exhaustive,
     requireFinalQualityReview: full || quality || intent.action === 'implement' || intent.action === 'deliver',
     qualityReviewLimit,
+    qualityBudgetScope: 'run',
     priorQualityReviews,
     repairOnly,
     closeoutOnly,

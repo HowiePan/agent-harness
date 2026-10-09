@@ -331,6 +331,13 @@ export const createHarness = async ({ controlRoot: controlRootInput, dataRoot: d
       const snapshot = await captureWorkspace(workspace.root, { excluded: project.workspace.excluded ?? [] });
       if (intent.action === 'implement' && !workflowInput) {
         const states = await authorityStore.list(project.id);
+        assert(!states.some(run => ['closed', 'incomplete', 'failed'].includes(run.status)
+          && run.metadata?.commandIntent?.action === 'implement'
+          && run.metadata.commandIntent.target === intent.target
+          && run.metadata.commandIntent.workflowId === intent.workflowId
+          && run.features?.some(feature => feature.metadata?.stage === 'implementation')
+          && run.features.filter(feature => feature.metadata?.stage === 'implementation').every(feature => feature.state === 'completed')),
+        'IMPLEMENTATION_ALREADY_FINISHED', 'Implementation Features are complete; use quality or closeout for further version work.');
         const claims = states.filter(run => run.status === 'superseded'
           && run.metadata?.completionCarryover?.replacementPlan
           && run.metadata?.commandIntent?.action === 'implement'
@@ -475,7 +482,7 @@ export const createHarness = async ({ controlRoot: controlRootInput, dataRoot: d
 
     async createLifecycleResumePlan({ projectId, runId, executionWorkspaceRoot }) {
       const state = await authorityStore.read(projectId, runId);
-      assert(state.status !== 'closed' && state.status !== 'superseded', 'LIFECYCLE_RESUME_RUN_TERMINAL', 'Only an unfinished Run can be resumed.');
+      assert(!['closed', 'incomplete', 'failed', 'superseded'].includes(state.status), 'LIFECYCLE_RESUME_RUN_TERMINAL', 'Only an unfinished Run can be resumed.');
       const metadata = state.metadata ?? {};
       const execution = metadata.lifecycleExecution;
       assert(metadata.lifecyclePlanDigest && metadata.commandIntent && execution?.authorizationSourceDigest,
@@ -562,15 +569,24 @@ export const createHarness = async ({ controlRoot: controlRootInput, dataRoot: d
       }
       verifyExecutionReadinessReport(preflightReport, { plan, now: kernel.now });
       const states = await authorityStore.list(plan.project.id);
-      const replacedQualityRuns = plan.intent.action === 'quality' && ['repair-known', 'closeout'].includes(plan.intent.preset)
-        ? states.filter(candidate => candidate.status !== 'closed' && candidate.status !== 'superseded'
+      const replacedQualityRuns = plan.intent.action === 'quality'
+        ? states.filter(candidate => !['closed', 'incomplete', 'failed', 'superseded'].includes(candidate.status)
           && candidate.metadata?.commandIntent?.action === 'quality'
           && candidate.metadata.commandIntent.target === plan.intent.target
           && (candidate.metadata?.workflow?.id ?? candidate.metadata.commandIntent.workflowId) === plan.intent.workflowId
-          && candidate.metadata.commandIntent.preset !== plan.intent.preset)
+          && candidate.runId !== plan.run.runId)
         : [];
       for (const candidate of replacedQualityRuns) {
-        assert(!candidate.leases.some(lease => lease.status === 'active'), 'QUALITY_MODE_SWITCH_LIVE_LEASE', 'Repair-only quality cannot replace a review Run with an active Agent Lease.', { runId: candidate.runId });
+        assert(candidate.metadata.commandIntent.preset !== plan.intent.preset, 'LIFECYCLE_QUALITY_CONTINUATION_REQUIRED', 'An unfinished quality Run with the same preset must be continued.');
+        const awaitingDecision = profileRegistry.get(candidate.profile.id).canClose(candidate).reason;
+        const repairToCloseout = plan.intent.preset === 'closeout' && candidate.metadata.commandIntent.preset === 'repair-known'
+          && candidate.findings.every(finding => finding.status === 'resolved');
+        assert(candidate.metadata.commandIntent.preset !== 'release-exhaustive'
+          && (repairToCloseout || !['routine-version-exit-decision-required', 'user-code-review-required'].includes(awaitingDecision)),
+        'QUALITY_MODE_SWITCH_DECISION_REQUIRED', 'A quality Run awaiting a protected decision cannot be replaced by another preset.');
+        assert(!candidate.leases.some(lease => lease.status === 'active')
+          && !candidate.dispatches.some(dispatch => ['requested', 'assigned'].includes(dispatch.status)),
+        'QUALITY_MODE_SWITCH_LIVE_LEASE', 'A quality mode switch cannot replace a Run with an active Agent or Dispatch.', { runId: candidate.runId });
       }
       let lineageResolution;
       try {
@@ -633,7 +649,7 @@ export const createHarness = async ({ controlRoot: controlRootInput, dataRoot: d
       }
       state = await commitCommandDecisions(state);
       for (const candidate of lineageResolution.candidates) {
-        if (candidate.runId === state.runId || candidate.status === 'closed' || candidate.status === 'superseded') continue;
+        if (candidate.runId === state.runId || ['closed', 'incomplete', 'failed', 'superseded'].includes(candidate.status)) continue;
         const current = await authorityStore.read(plan.project.id, candidate.runId);
         if (current.status === 'superseded') continue;
         await kernel.supersedeRun(plan.project.id, candidate.runId, { replacementRunId: state.runId, planDigest: plan.planDigest, reason: lineageResolution.reasonCode }, { expectedRevision: current.revision, commandId: `${commandId}.lineage.supersede.${candidate.runId}.${lineageResolution.resolutionDigest}` });
@@ -641,9 +657,11 @@ export const createHarness = async ({ controlRoot: controlRootInput, dataRoot: d
       for (const candidate of replacedQualityRuns) {
         if (candidate.runId === state.runId) continue;
         const current = await authorityStore.read(plan.project.id, candidate.runId);
-        if (current.status === 'closed' || current.status === 'superseded') continue;
-        assert(!current.leases.some(lease => lease.status === 'active'), 'QUALITY_MODE_SWITCH_LIVE_LEASE', 'Repair-only quality cannot replace a review Run with an active Agent Lease.', { runId: current.runId });
-        await kernel.supersedeRun(plan.project.id, current.runId, { replacementRunId: state.runId, planDigest: plan.planDigest, reason: 'quality-mode-switch-to-repair-known' }, { expectedRevision: current.revision, commandId: `${commandId}.quality-mode-switch.${current.runId}` });
+        if (['closed', 'incomplete', 'failed', 'superseded'].includes(current.status)) continue;
+        assert(!current.leases.some(lease => lease.status === 'active')
+          && !current.dispatches.some(dispatch => ['requested', 'assigned'].includes(dispatch.status)),
+        'QUALITY_MODE_SWITCH_LIVE_LEASE', 'A quality mode switch cannot replace a Run with an active Agent or Dispatch.', { runId: current.runId });
+        await kernel.supersedeRun(plan.project.id, current.runId, { replacementRunId: state.runId, planDigest: plan.planDigest, reason: `quality-mode-switch-to-${plan.intent.preset}` }, { expectedRevision: current.revision, commandId: `${commandId}.quality-mode-switch.${current.runId}` });
       }
       const currentLineage = await lineageStore.read(plan.project.id, plan.logicalTaskKey);
       await lineageStore.activate({ projectId: plan.project.id, logicalTaskKey: plan.logicalTaskKey, activeRunId: state.runId, planDigest: plan.planDigest, resolutionDigest: lineageResolution.resolutionDigest }, { expectedRevision: currentLineage?.revision ?? 0, commandId: activationCommandId });

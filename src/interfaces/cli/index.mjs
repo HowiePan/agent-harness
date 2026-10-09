@@ -133,6 +133,7 @@ agent-harness run artifact-rebase --project <id> --run <id> --artifact-digest <d
 agent-harness run recover --project <id> --run <id> [--mode <auto|ordinary-resume|hard-recovery>] [--capsule-verification <evidence-ref>] [--resolution-ref <evidence-ref>] [--expected-revision <n>] [--command-id <id>] [--dispositions <json>] [--verified-evidence <json>]
 agent-harness run recovery-rollback --project <id> --run <id> --snapshot-ref <evidence-ref>
 agent-harness run close --project <id> --run <id>
+agent-harness run finish-quality --project <id> --run <id> --expected-revision <n> --source-digest <sha256> --command-id <id>
 agent-harness run supersede --project <id> --run <id> --replacement-run <id> --plan-digest <digest> [--reason <text>]
 agent-harness lifecycle plan --input <json|-> [--control-root <path>] [--data-root <path>]
 agent-harness lifecycle preflight|start --workspace-id <id> ...
@@ -628,6 +629,16 @@ if (command === 'features' && subject === 'compile') {
   } else if (command === 'run' && subject === 'close') {
     const state = await harness.authorityStore.read(take('--project'), take('--run'));
     const output = await harness.kernel.closeRun(state.projectId, state.runId, {}, { expectedRevision: state.revision, commandId: take('--command-id') ?? newId('command') });
+    console.log(JSON.stringify({ ok: true, ...output.result, revision: output.state.revision }, null, 2));
+  } else if (command === 'run' && subject === 'finish-quality') {
+    const state = await harness.authorityStore.read(take('--project'), take('--run'));
+    const expectedRevision = Number(take('--expected-revision'));
+    const expectedSourceDigest = take('--source-digest');
+    if (!Number.isInteger(expectedRevision) || state.revision !== expectedRevision || state.sourceDigest !== expectedSourceDigest)
+      throw Object.assign(new Error('Quality finish requires the exact observed Authority revision and source digest.'), { code: 'RUN_QUALITY_FINISH_IDENTITY_STALE' });
+    const output = await harness.kernel.finishRun(state.projectId, state.runId,
+      { status: 'incomplete', reason: 'quality-review-limit-reached', evidenceRefs: [...new Set(state.submissions.flatMap(item => item.evidenceRefs ?? []))] },
+      { expectedRevision, commandId: take('--command-id') });
     console.log(JSON.stringify({ ok: true, ...output.result, revision: output.state.revision }, null, 2));
   } else if (command === 'run' && subject === 'supersede') {
     const state = await harness.authorityStore.read(take('--project'), take('--run'));

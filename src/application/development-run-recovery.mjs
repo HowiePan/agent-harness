@@ -1,6 +1,7 @@
 import { readdir } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { assert } from '../common/errors.mjs';
+import { captureWorkspace } from '../common/workspace-snapshot.mjs';
 import { digestJson, withoutKeys } from '../common/canonical.mjs';
 import { readJson } from '../kernel/atomic-io.mjs';
 import { verifyDevelopmentSourceManifest } from './development-source.mjs';
@@ -161,6 +162,26 @@ export const recoverDevelopmentRun = async ({ manifestFile, runId, commandId, cw
     arguments: intent.preset === 'default' ? [] : [intent.preset], executionWorkspaceRoot: state.metadata.workspace.root });
   assert(plan.logicalTaskKey === state.metadata.logicalTaskKey && plan.run.runId !== runId && plan.planDigest !== state.metadata.lifecyclePlanDigest,
     'DEVELOPMENT_RUN_REPLACEMENT_INVALID', 'The current source did not produce a distinct Plan for the same logical task.');
+  if (receipt.level === 'H4' && intent.action === 'implement'
+    && state.features.every(feature => feature.state === 'completed')
+    && harness.profileRegistry.get(state.profile.id).canClose(state).reason === 'quality-review-limit-reached') {
+    const snapshot = await captureWorkspace(state.metadata.workspace.root, { excluded: project.workspace.excluded ?? [] });
+    assert(snapshot.digest === state.sourceDigest && plan.run.sourceDigest === state.sourceDigest,
+      'DEVELOPMENT_H4_SOURCE_CHANGED', 'H4 quality terminalization requires the exact authoritative project source.');
+    if (state.dispatches.length > 0 || state.leases.length > 0) {
+      const hostContract = state.leases.find(lease => lease.runtimeReceipt?.hostSpawnReceipt)?.runtimeReceipt.hostSpawnReceipt.contract;
+      assert(hostContract, 'DEVELOPMENT_RUN_HOST_CONTRACT_REQUIRED', 'Recovery requires the bound Host contract.');
+      const effects = new CodexHostEffectJournal({ controlRoot: manifest.controlRoot, dataRoot: manifest.dataRoot, contract: hostContract });
+      assertDevelopmentRunRecoveryEffects(state, await effects.list());
+    }
+    const finished = await harness.kernel.finishRun(projectId, runId,
+      { status: 'incomplete', reason: 'quality-review-limit-reached',
+        evidenceRefs: [...new Set(state.submissions.flatMap(item => item.evidenceRefs ?? []))] },
+      { expectedRevision: state.revision, commandId });
+    return { projectId, priorRunId: runId, priorRevision: finished.state.revision,
+      patchReceiptDigest: receipt.receiptDigest, status: finished.state.status,
+      continuation: 'new-quality-command-ready' };
+  }
   const completedImplementation = state.metadata?.commandIntent?.action === 'implement'
     && state.features.some(feature => feature.metadata?.stage === 'implementation' && feature.state === 'completed');
   let completionCarryover = null;

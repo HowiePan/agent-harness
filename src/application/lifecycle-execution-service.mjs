@@ -88,6 +88,14 @@ const completionReceipts = async (api, dataRoot, plan, state) => ({
     : {}),
 });
 
+const finishExhaustedQualityRun = async (api, plan, state, commandId, reason) => {
+  if (reason !== 'quality-review-limit-reached') return null;
+  const finished = await api.kernel.finishRun(plan.project.id, state.runId,
+    { status: 'incomplete', reason, evidenceRefs: [...new Set(state.submissions.flatMap(item => item.evidenceRefs ?? []))] },
+    { expectedRevision: state.revision, commandId: `${commandId}.quality-incomplete` });
+  return { status: 'incomplete', reason, planDigest: plan.planDigest, state: finished.state };
+};
+
 const rejectVisibleResult = ({ error, result, receipt, runtimeReceipt, agentId, dispatchId, packetDigest }) => {
   const summary = `Agent result rejected by ${error.code}: ${error.message}${error.details?.reason ? ` (${error.details.reason})` : ''}`;
   const body = {
@@ -159,7 +167,8 @@ const runHeadlessLifecyclePlan = async (context, api, planInput, { commandId, pr
   state = await authorityStore.read(plan.project.id, activeRunId);
   if (!gates.results.every(gate => gate.status === 'passed')) return { status: 'attention-required', reason: 'final-gates-not-passed', planDigest: plan.planDigest, execution, gates, state };
   const closure = api.profileRegistry.get(state.profile.id).canClose(state);
-  if (!closure.ok) return { status: 'attention-required', reason: closure.reason, planDigest: plan.planDigest, execution, gates, state };
+  if (!closure.ok) return { ...(await finishExhaustedQualityRun(api, plan, state, commandId, closure.reason)
+    ?? { status: 'attention-required', reason: closure.reason, planDigest: plan.planDigest, state }), execution, gates };
   const closed = await api.kernel.closeRun(plan.project.id, activeRunId, {}, { expectedRevision: state.revision, commandId: `${commandId}.close` });
   return { status: 'closed', planDigest: plan.planDigest, execution, gates, state: closed.state, ...await completionReceipts(api, authorityStore.root, plan, closed.state) };
 };
@@ -422,7 +431,8 @@ const continueVisibleLifecyclePlan = async (context, api, planInput, { commandId
   state = await authorityStore.read(plan.project.id, activeRunId);
   if (!gates.results.every(gate => gate.status === 'passed')) return await retryFailedGates(gates.results) ?? { status: 'attention-required', reason: 'final-gates-not-passed', planDigest: plan.planDigest, rounds, gates, state };
   const closure = api.profileRegistry.get(state.profile.id).canClose(state);
-  if (!closure.ok) return { status: 'attention-required', reason: closure.reason, planDigest: plan.planDigest, rounds, gates, state };
+  if (!closure.ok) return { ...(await finishExhaustedQualityRun(api, plan, state, commandId, closure.reason)
+    ?? { status: 'attention-required', reason: closure.reason, planDigest: plan.planDigest, state }), rounds, gates };
   const closed = await api.kernel.closeRun(plan.project.id, activeRunId, {}, { expectedRevision: state.revision, commandId: `${commandId}.close` });
   return { status: 'closed', planDigest: plan.planDigest, rounds, gates, state: closed.state, ...await completionReceipts(api, authorityStore.root, plan, closed.state) };
 };

@@ -16,13 +16,24 @@ import { createPlannedLifecycleEvent, createPreflightLifecycleEvent, preRunProce
 import { captureSourceManifest } from '../../../../src/platform/workflow/source-manifest.mjs';
 import { classifyLocalIncident } from '../../../../src/application/local-incident.mjs';
 import { resolveCommandIntent } from '../../../../src/platform/extensions/command-contract.mjs';
-import { selectImplementationContinuationRun } from '../../../../src/application/lifecycle-resume.mjs';
+import { selectImplementationContinuationRun, selectQualityContinuationRun } from '../../../../src/application/lifecycle-resume.mjs';
+import { retireUnresumableQualityRun } from '../../../../src/application/quality-run-retirement.mjs';
 
 const samePath = (left, right) => process.platform === 'win32'
   ? resolve(left).toLowerCase() === resolve(right).toLowerCase()
   : resolve(left) === resolve(right);
 
 const emit = value => process.stdout.write(`${JSON.stringify({ protocolVersion: '1.0', ...value })}\n`);
+const emitRetirementPreflight = (intent, state, code, message) => {
+  emit({ kind: 'codex-visible-lifecycle-event', phase: 'preflight', commandId: intent.commandId,
+    intentDigest: intent.intentDigest, executionReady: false,
+    checks: [{ id: 'quality-prior-run', ready: false, issueCount: 1,
+      issues: [{ code, message, runId: state.runId }], omittedIssues: 0 }],
+    checkSummary: { total: 1, ready: 0, blockers: 1, omittedBlockers: 0 },
+    writeProbe: { attempted: false, ready: true, cleaned: true },
+    lineage: { action: 'block', reasonCode: code } });
+  process.exitCode = 2;
+};
 let localIncidentContext = null;
 let runCreationAttempted = false;
 const renderWorkflowInput = (value, intent) => {
@@ -115,18 +126,50 @@ const main = async () => {
     }
     let resume = null;
     let plan;
-    if (intent.command.action === 'implement') {
+    if (intent.command.action === 'implement' || intent.command.action === 'quality') {
       const extension = extensions.find(item => item.id === intent.project.extensionId);
       const resolved = extension?.commandManifest && resolveCommandIntent(extension.commandManifest, intent.command);
-      if (resolved?.action !== 'implement') throw Object.assign(new Error('Implement requires the bound implementation action.'), { code: 'VISIBLE_LIFECYCLE_IMPLEMENT_COMMAND_INVALID' });
-      const continuation = selectImplementationContinuationRun(await harness.authorityStore.list(descriptor.id), resolved);
+      if (resolved?.action !== intent.command.action) throw Object.assign(new Error('Lifecycle continuation requires the bound action.'), { code: 'VISIBLE_LIFECYCLE_CONTINUATION_COMMAND_INVALID' });
+      let states = await harness.authorityStore.list(descriptor.id);
+      let continuation = resolved.action === 'implement'
+        ? selectImplementationContinuationRun(states, resolved) : selectQualityContinuationRun(states, resolved);
+      if (resolved.action === 'quality' && continuation?.features.every(feature => feature.state === 'completed')
+        && !continuation.leases.some(lease => lease.status === 'active')
+        && !continuation.dispatches.some(dispatch => ['requested', 'assigned'].includes(dispatch.status))
+        && harness.profileRegistry.get(continuation.profile.id).canClose(continuation).reason === 'quality-review-limit-reached') {
+        if (preflightOnly) {
+          emitRetirementPreflight(intent, continuation, 'QUALITY_PRIOR_RUN_INCOMPLETE',
+            'The prior quality Run must be terminalized before a fresh quality Plan can be checked.');
+          return;
+        }
+        await harness.kernel.finishRun(descriptor.id, continuation.runId,
+          { status: 'incomplete', reason: 'quality-review-limit-reached', evidenceRefs: [...new Set(continuation.submissions.flatMap(item => item.evidenceRefs ?? []))] },
+          { expectedRevision: continuation.revision, commandId: `${intent.commandId}.quality-prior-incomplete` });
+        states = await harness.authorityStore.list(descriptor.id);
+        continuation = selectQualityContinuationRun(states, resolved);
+      }
       if (continuation) {
-        resume = await harness.createLifecycleResumePlan({ projectId: descriptor.id, runId: continuation.runId, executionWorkspaceRoot: intent.executionWorkspaceRoot });
-        plan = resume.plan;
+        try {
+          resume = await harness.createLifecycleResumePlan({ projectId: descriptor.id, runId: continuation.runId, executionWorkspaceRoot: intent.executionWorkspaceRoot });
+          plan = resume.plan;
+        } catch (error) {
+          if (resolved.action !== 'quality') throw error;
+          const retired = await retireUnresumableQualityRun({ harness, state: continuation, error,
+            commandId: intent.commandId, dryRun: preflightOnly });
+          if (!retired) throw error;
+          if (preflightOnly) {
+            emitRetirementPreflight(intent, continuation, 'QUALITY_PRIOR_RUN_FAILED',
+              'The prior quality Run cannot be safely reconstructed and must be recorded as failed before a fresh quality Plan can be checked.');
+            return;
+          }
+          continuation = null;
+        }
+      }
+      if (continuation) {
         if (plan.run.profileId !== intent.project.profileId || plan.extension.id !== intent.project.extensionId
-          || plan.intent.action !== 'implement' || plan.intent.target !== resolved.target
+          || plan.intent.action !== resolved.action || plan.intent.target !== resolved.target
           || plan.intent.workflowId !== resolved.workflowId || plan.intent.preset !== resolved.preset)
-          throw Object.assign(new Error('Implementation Run differs from the verified Project binding.'), { code: 'VISIBLE_LIFECYCLE_IMPLEMENT_BINDING_MISMATCH' });
+          throw Object.assign(new Error('Continuation Run differs from the verified Project binding.'), { code: 'VISIBLE_LIFECYCLE_CONTINUATION_BINDING_MISMATCH' });
       }
     }
     if (!plan) {

@@ -40,6 +40,7 @@ export const createBatchProductionProfile = ({
       requireBatchLaunchDecision: config.requireBatchLaunchDecision !== false,
       requireFinalQualityReview: config.requireFinalQualityReview === true,
       qualityReviewLimit,
+      qualityBudgetScope: config.qualityBudgetScope === 'run' ? 'run' : 'target',
       priorQualityReviews: structuredClone(config.priorQualityReviews ?? {}),
       repairOnly: config.repairOnly === true,
       closeoutOnly: config.closeoutOnly === true,

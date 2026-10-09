@@ -6,11 +6,23 @@ export const selectImplementationContinuationRun = (states, intent) => {
   assert(intent?.action === 'implement', 'LIFECYCLE_IMPLEMENT_INTENT_REQUIRED', 'Implementation continuation requires an implement intent.');
   const candidates = states.filter(state => {
     const prior = state.metadata?.commandIntent;
-    return !['closed', 'superseded'].includes(state.status) && prior?.action === 'implement'
+    return !['closed', 'incomplete', 'failed', 'superseded'].includes(state.status) && prior?.action === 'implement'
       && prior.target === intent.target && prior.preset === intent.preset
       && prior.workflowId === intent.workflowId && prior.profileId === intent.profileId;
   });
   assert(candidates.length <= 1, 'LIFECYCLE_IMPLEMENT_RUN_AMBIGUOUS', 'More than one unfinished implementation Run matches this command.');
+  return candidates[0] ?? null;
+};
+
+export const selectQualityContinuationRun = (states, intent) => {
+  assert(intent?.action === 'quality', 'LIFECYCLE_QUALITY_INTENT_REQUIRED', 'Quality continuation requires a quality intent.');
+  const candidates = states.filter(state => {
+    const prior = state.metadata?.commandIntent;
+    return !['closed', 'incomplete', 'failed', 'superseded'].includes(state.status) && prior?.action === 'quality'
+      && prior.target === intent.target && prior.preset === intent.preset
+      && prior.workflowId === intent.workflowId && prior.profileId === intent.profileId;
+  });
+  assert(candidates.length <= 1, 'LIFECYCLE_QUALITY_RUN_AMBIGUOUS', 'More than one unfinished quality Run matches this command.');
   return candidates[0] ?? null;
 };
 
@@ -21,12 +33,13 @@ export const selectBlockedResumeFeature = state => {
   assert(blocked.length <= 1, 'LIFECYCLE_RESUME_AMBIGUOUS', 'Resume requires a single blocked Feature in the selected Run.');
   const feature = blocked[0] ?? null;
   if (!feature) return null;
-  assert(feature.metadata?.stage === 'implementation', 'LIFECYCLE_RESUME_BLOCKED_STAGE', 'The blocked Feature is not an implementation stage.');
+  assert(['implementation', 'quality', 'quality-repair', 'quality-recheck', 'quality-closeout'].includes(feature.metadata?.stage),
+    'LIFECYCLE_RESUME_BLOCKED_STAGE', 'The blocked Feature is not a resumable implementation or quality stage.');
   const submission = [...state.submissions].reverse().find(item => item.featureId === feature.id);
   const inScopeFix = submission?.result?.status === 'blocked' && submission.result.blocker?.kind === 'in-scope-fix-blocked';
   const providerFailure = submission?.result?.status === 'failed' && submission.result.failureClass === 'runtime-provider'
     && submission.result.blocker?.kind === 'runtime-provider';
-  assert(inScopeFix || providerFailure,
+  assert((feature.metadata?.stage === 'implementation' && inScopeFix) || providerFailure,
     'LIFECYCLE_RESUME_BLOCKER_REQUIRES_REVIEW', 'The blocked Feature is not an in-scope fix or a retryable provider failure.');
   const attempt = state.attempts[`${feature.logicalRoot}:${submission.result.failureClass}`];
   assert(attempt && !attempt.exhausted, 'LIFECYCLE_RESUME_BUDGET_EXHAUSTED', 'The blocked Feature has exhausted its attempt budget.');

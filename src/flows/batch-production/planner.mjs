@@ -59,6 +59,7 @@ export const createBatchProductionLifecyclePlanner = ({
     requireBatchLaunchDecision: ['full', 'produce'].includes(intent.action),
     requireFinalQualityReview: ['full', 'quality'].includes(intent.action) && !repairOnly && !closeoutOnly,
     qualityReviewLimit: qualityPlanning?.qualityReviewLimit ?? project.policy?.qualityReviewLimit ?? { mode: 'bounded', maxRechecks: 2 },
+    qualityBudgetScope: 'run',
     priorQualityReviews: qualityPlanning?.priorQualityReviews ?? {},
     repairOnly,
     closeoutOnly,

@@ -14,7 +14,7 @@ import {
 } from './development-source.mjs';
 
 const levels = Object.freeze({ H0: 0, H1: 1, H2: 2, H3: 3, H4: 4 });
-const terminalRunStates = new Set(['closed', 'superseded']);
+const terminalRunStates = new Set(['closed', 'incomplete', 'failed', 'superseded']);
 
 const classifyPath = path => {
   if (path === 'README.md' || /^(?:docs|examples|test)\//.test(path)) return { level: 'H0', impact: 'support-only' };
