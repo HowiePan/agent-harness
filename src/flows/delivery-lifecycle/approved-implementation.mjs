@@ -1,9 +1,9 @@
 import { assert } from '../../common/errors.mjs';
 import { defineNodeTaskContract, taskFeatureProjection } from '../../common/task-contract.mjs';
 import { validateWorkGraph } from '../../kernel/work-graph.mjs';
+import { uniqueProposalIds } from './proposal-id.mjs';
 
 const packageId = (parent, proposal) => `${parent.id}/${proposal.id}`;
-const validId = id => /^[A-Za-z0-9][A-Za-z0-9._-]{0,95}$/.test(id);
 
 /** Compile approved, project-owned proposals into serial, auditable Features. */
 export const expandApprovedImplementation = ({ features, typedPlan, projectId }) => {
@@ -14,7 +14,7 @@ export const expandApprovedImplementation = ({ features, typedPlan, projectId })
   assert(Array.isArray(proposed), 'IMPLEMENTATION_TYPED_PLAN_REQUIRED', 'The approved plan has no typed proposals.');
   const owned = proposed.filter(item => item.projectId === projectId && item.disposition === 'project-owned');
   assert(owned.length > 0 && owned.length <= 100, 'IMPLEMENTATION_PROPOSAL_COUNT_INVALID', 'The approved plan must have 1–100 project-owned proposals.');
-  assert(owned.every(item => validId(item.id)) && new Set(owned.map(item => item.id)).size === owned.length,
+  assert(uniqueProposalIds(owned),
     'IMPLEMENTATION_PROPOSAL_ID_INVALID', 'Project-owned proposal IDs must be unique, safe Feature segments.');
   const byId = new Map(owned.map(item => [item.id, item]));
   for (const item of owned) {

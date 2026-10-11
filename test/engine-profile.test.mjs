@@ -5,7 +5,16 @@ import { resolve } from 'node:path';
 import { buildDispatchPacket } from '../src/kernel/kernel.mjs';
 import { RunCoordinator } from '../src/platform/workflow/coordinator/run-coordinator.mjs';
 import { engineDeliveryProfile } from '../integrations/legacy-consumers/cardworld/index.mjs';
+import { CARDWORLD_ACTION_PATHS } from '../integrations/legacy-consumers/cardworld/variant/feature.mjs';
 import { command, dispatchAndBind, feature, makeFixture, recordResult, startRun } from './test-support.mjs';
+
+test('engine implementation owns engine docs but not downstream applications', () => {
+  assert(CARDWORLD_ACTION_PATHS.implement.includes('docs/requirements'));
+  assert(CARDWORLD_ACTION_PATHS.implement.includes('docs/testing'));
+  assert(CARDWORLD_ACTION_PATHS.implement.includes('card_world_engine'));
+  assert(CARDWORLD_ACTION_PATHS.implement.every(path =>
+    !path.startsWith('card_world_web') && !path.startsWith('card_world_desktop')));
+});
 
 test('quality Finding policy cannot grant workspace writes to the review Feature', () => {
   const review = feature('quality/full-sweep', { stage: 'quality', sourcePolicy: 'review-and-repair', qualityReview: true, qualityFindingPolicy: 'repair-and-rereview' }, { ownerRole: 'reviewer', allowedPaths: [] });

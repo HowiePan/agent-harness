@@ -41,8 +41,8 @@ const main = async () => {
       releaseIdentity, extensions, strictProjectIdentity: false,
       agentAdapters: { 'codex-conversation-runtime': host.adapter } });
     const old = await harness.authorityStore.read(projectId, runId);
-    if (!['implement', 'produce', 'quality'].includes(old.metadata?.commandIntent?.action) || !old.metadata?.lifecycleInvocationId)
-      fail('VISIBLE_DEVELOPMENT_RECOVERY_SCOPE_INVALID', 'Recovery only continues an existing authorized implementation, production, or quality lifecycle.');
+    if (!['plan', 'replan', 'implement', 'produce', 'quality'].includes(old.metadata?.commandIntent?.action) || !old.metadata?.lifecycleInvocationId)
+      fail('VISIBLE_DEVELOPMENT_RECOVERY_SCOPE_INVALID', 'Recovery only continues an existing authorized planning, implementation, production, or quality lifecycle.');
     const commandId = `${old.metadata.lifecycleInvocationId}.development-recover.${runId}`;
     const salvageTerminalFailure = async () => {
       const active = old.leases.filter(item => item.status === 'active');

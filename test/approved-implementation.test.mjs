@@ -29,6 +29,27 @@ test('approved implementation schedules project-owned proposals serially and exc
   assert.match(features[0].task.instructions.join(' '), /fresh final Gates after all proposals/);
 });
 
+test('approved implementation preserves hierarchical proposal IDs and dependencies', () => {
+  const typedPlan = { proposedFeatures: [proposal('V3.9.0/F-00'), proposal('V3.9.0/F-13-core', ['V3.9.0/F-00'])] };
+  const features = expandApprovedImplementation({ features: [parent], typedPlan, projectId: 'engine' });
+  assert.deepEqual(features.map(item => item.id), ['implement/V1/V3.9.0/F-00', 'implement/V1/V3.9.0/F-13-core']);
+  assert.deepEqual(features[1].dependsOn, ['implement/V1/V3.9.0/F-00']);
+  assert.equal(features[0].metadata.approvedProposal.id, 'V3.9.0/F-00');
+});
+
+test('proposal IDs reject ambiguous segments and duplicates during planning', () => {
+  const planning = { metadata: { stage: 'version-planning' } };
+  const completed = proposedFeatures => ({ status: 'completed', outputs: { plan: { value: { proposedFeatures } } } });
+  const validate = proposedFeatures => deliveryLifecycleProfile.validateResult({
+    state: { projectId: 'engine' }, feature: planning, result: completed(proposedFeatures),
+  });
+  assert.equal(validate([proposal('V3.9.0/F-00')]).ok, true);
+  for (const id of ['V3.9.0//F-00', 'V3.9.0/../F-00', '/F-00', 'F-00/', 'F\\00']) {
+    assert.deepEqual(validate([proposal(id)]), { ok: false, reason: 'planning-proposal-id-invalid' });
+  }
+  assert.deepEqual(validate([proposal('F-00'), proposal('F-00')]), { ok: false, reason: 'planning-proposal-id-invalid' });
+});
+
 test('proposal completion requires its exact identity and contract verification evidence', () => {
   const feature = expandApprovedImplementation({ features: [parent], typedPlan: { proposedFeatures: [proposal('F00')] }, projectId: 'engine' })[0];
   const result = { status: 'completed', outputs: { implement: { value: { proposalId: 'F00', completedContracts: ['F00 contract'],

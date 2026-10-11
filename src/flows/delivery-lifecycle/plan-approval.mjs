@@ -11,7 +11,9 @@ const latestOutput = (state, stage, port) => {
 
 export const reviewedPlanProposal = state => latestOutput(state, 'version-planning', 'plan');
 
-const line = value => String(value ?? '').replace(/[\r\n\t]+/g, ' ').replace(/\\/g, '\\\\').replace(/([`*_{}\[\]()#+.!|<>])/g, '\\$1').trim();
+// Values follow fixed Markdown prefixes. Keep inline punctuation literal so
+// validation expressions and paths remain readable in the review source.
+const line = value => String(value ?? '').replace(/[\r\n\t]+/g, ' ').trim();
 const list = (heading, values) => values?.length ? [`### ${heading}`, '', ...values.map(value => `- ${line(value)}`), ''] : [];
 
 export const planApprovalSnapshot = state => {

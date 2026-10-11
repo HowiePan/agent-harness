@@ -2,10 +2,9 @@ import { createDeliveryTemplates } from '../../../../src/flows/delivery-lifecycl
 
 const implementationAllowedPaths = Object.freeze([
   'card_world_engine',
-  'card_world_web/src', 'card_world_web/tests', 'card_world_web/public/wasm',
-  'card_world_web/package.json', 'card_world_web/yarn.lock', 'card_world_web/vite.config.ts',
   'scripts', 'docs/versions', 'docs/schemas', 'docs/integration_guide.md',
-  'docs/benchmarks.md', 'docs/requirements.md', 'docs/project_plan.md', 'docs/engine_design', 'CHANGELOG.md',
+  'docs/benchmarks.md', 'docs/requirements.md', 'docs/requirements',
+  'docs/project_plan.md', 'docs/engine_design', 'docs/testing', 'CHANGELOG.md',
 ]);
 export const CARDWORLD_ACTION_PATHS = Object.freeze({
   requirements: ['docs/requirements.md', 'docs/versions'],

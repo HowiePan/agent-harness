@@ -48,7 +48,7 @@ export const createCardWorldProjectDescriptor = ({
   assert(actionExecution && typeof actionExecution === 'object' && !Array.isArray(actionExecution), 'CARDWORLD_ACTION_EXECUTION_INVALID', 'CardWorld actionExecution must be an object.');
   if (runtimePluginId !== 'codex-conversation-runtime') assert(agentExecutionMode, 'HEADLESS_EXECUTION_MODE_EXPLICIT_REQUIRED', 'Selecting a non-default Runtime requires an explicit agentExecutionMode; headless execution is never inferred from a Runtime ID.');
   const resolvedAgentExecutionMode = agentExecutionMode ?? 'conversation-visible';
-  const workspace = { root: workspaceRoot, rootSelector: 'git-worktree', excluded: ['.git', 'tabletop-collection', ...qualityVerificationOutputs, 'card_world_engine/target', 'card_world_engine/pkg', 'card_world_web/node_modules', 'card_world_web/dist', 'node_modules'] };
+  const workspace = { root: workspaceRoot, rootSelector: 'git-worktree', excluded: ['.git', 'tabletop-collection', 'card_world_web', 'card_world_desktop', ...qualityVerificationOutputs, 'card_world_engine/target', 'card_world_engine/pkg', 'node_modules'] };
   if (remote) workspace.remote = remote;
   const runtimePlugins = [...new Set(runtimePluginIds)];
   assert(runtimePlugins.includes(runtimePluginId), 'PROJECT_RUNTIME_ALLOWLIST_INVALID', 'runtimePluginIds must include the default Runtime.');
@@ -84,7 +84,7 @@ export const createCardWorldProjectDescriptor = ({
       planSourceAutoCompatiblePaths: ['scripts/cardworld.ps1'],
       release: { documentationScopePath: 'release/docs-scope.json', versionPaths: ['card_world_engine/Cargo.toml', 'card_world_engine/Cargo.lock'], packageGateId: 'wasm-release-package', artifactRoot: 'card_world_engine/pkg', artifactIdentity: { path: 'package.json', versionField: 'version' } },
       qualityVerificationOutputs: [...qualityVerificationOutputs],
-      qualityFindingPaths: ['card_world_engine', 'card_world_web/src', 'card_world_web/tests', 'scripts'],
+      qualityFindingPaths: ['card_world_engine', 'scripts'],
       qualityReviewLimit: structuredClone(qualityReviewLimit),
       majorReleaseTargets: [...majorReleaseTargets],
       ...(versionPredecessors ? { versionPredecessors: structuredClone(versionPredecessors) } : {}),

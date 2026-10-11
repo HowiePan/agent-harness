@@ -102,6 +102,16 @@ test('replan can use a reviewed plan retired by development recovery before its 
   assert.equal(selectPlanRevisionParent({ intent, states: [parent, { runId: 'replacement-plan' }] }), null);
   assert.equal(selectPlanRevisionParent({ intent, states: [{ ...parent, metadata: { ...parent.metadata,
     supersededReason: 'replacement-lifecycle-plan' } }] }), null);
+  const rejected = reviewed({ approved: false, status: 'superseded' });
+  rejected.metadata = { ...rejected.metadata, supersededReason: `development-h3-recovery:${'f'.repeat(64)}`,
+    supersededByRunId: 'unstarted-replacement', supersedePlanDigest: 'e'.repeat(64) };
+  rejected.authorityDigest = digestJson(Object.fromEntries(Object.entries(rejected).filter(([key]) => key !== 'authorityDigest')));
+  const revision = preparePlanRevisionIntent({ intent, project: { policy: {} }, states: [rejected], sourceDigest: source });
+  const olderClosed = { ...reviewed({ approved: true, status: 'closed' }), runId: 'older-closed-plan' };
+  const resolution = resolveRunLineage({ plan: planned({ action: 'replan', sourceDigest: source, parent: revision.planRevision }),
+    states: [rejected, olderClosed], currentLineage: { revision: 2, activeRunId: rejected.runId } });
+  assert.equal(resolution.action, 'supersede-and-start');
+  assert.equal(resolution.reasonCode, 'PLAN_REVISION_REQUESTED');
 });
 
 test('replan captures idle implementation for retirement and blocks an active Lease', () => {
@@ -142,6 +152,6 @@ test('revision artifact shows complete feature delta and old approval cannot app
   assert.match(newArtifact.markdown, /相对上一版的修订/);
   assert.match(newArtifact.markdown, /modified.*F04/);
   assert.match(newArtifact.markdown, /已核验源码差异/);
-  assert.match(newArtifact.markdown, /src\/view\\\.rs/);
+  assert.match(newArtifact.markdown, /src\/view\.rs/);
   assert.equal(planApprovalSatisfied(next), false);
 });

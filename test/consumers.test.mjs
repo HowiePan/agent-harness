@@ -40,9 +40,14 @@ test('CardWorld consumer compiles one canonical requirement and project-owned de
   assert(descriptor.policy.actionPaths.implement.includes('scripts'));
   assert(descriptor.policy.actionPaths.implement.includes('card_world_engine'));
   assert(descriptor.policy.actionPaths.implement.includes('docs/versions'));
+  assert(descriptor.policy.actionPaths.implement.includes('docs/requirements'));
+  assert(descriptor.policy.actionPaths.implement.includes('docs/testing'));
+  assert(!descriptor.policy.actionPaths.implement.some(path => path.startsWith('card_world_web') || path.startsWith('card_world_desktop')));
+  assert(!descriptor.policy.qualityFindingPaths.some(path => path.startsWith('card_world_web') || path.startsWith('card_world_desktop')));
   assert(!descriptor.policy.actionPaths.implement.some(path => path.startsWith('tabletop-collection')));
   assert(descriptor.workspace.excluded.includes('card_world_engine/pkg'));
-  assert(descriptor.workspace.excluded.includes('card_world_web/node_modules'));
+  assert(descriptor.workspace.excluded.includes('card_world_web'));
+  assert(descriptor.workspace.excluded.includes('card_world_desktop'));
   assert.equal(descriptor.policy.implementationVerificationRepairRetries, 2);
   assert.equal(descriptor.workspace.rootSelector, 'git-worktree');
   assert.deepEqual(descriptor.gateRecipes.filter(gate => gate.required).slice(1).map(gate => gate.command.slice(3, 6)), [

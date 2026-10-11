@@ -4,6 +4,8 @@ import { approvalSatisfied } from '../../../flow-kit/primitives.mjs';
 import { createQualityFollowUpFeatures, createQualityGateDiagnosticReview, hasCurrentCleanQualityReview, qualityReviewNoProgress, validateQualityReviewPolicies } from '../../../flow-kit/profiles/quality-loop.mjs';
 import { normalizeQualityReviewLimit, qualityReviewBudgetExhausted } from '../../../flow-kit/profiles/quality-budget.mjs';
 import { planApprovalSatisfied } from '../plan-approval.mjs';
+import { createPlanReviewFollowUps, DEFAULT_PLAN_REVIEW_LIMIT } from '../plan-review-loop.mjs';
+import { uniqueProposalIds } from '../proposal-id.mjs';
 
 export const DELIVERY_STAGES = Object.freeze([
   'requirement-intake', 'requirement-expansion', 'canonical-requirement', 'version-planning', 'plan-review', 'implementation',
@@ -24,7 +26,10 @@ export const createDeliveryLifecycleProfile = (id = 'delivery-lifecycle') => Obj
 
   validateConfig(config) {
     assert(config.priorQualityReviews === undefined || (Number.isInteger(config.priorQualityReviews) && config.priorQualityReviews >= 0), 'QUALITY_REVIEW_HISTORY_INVALID', 'Prior quality review count must be a non-negative integer.');
+    assert(config.planReviewLimit === undefined || (Number.isInteger(config.planReviewLimit) && config.planReviewLimit >= 1 && config.planReviewLimit <= 20),
+      'PLAN_REVIEW_LIMIT_INVALID', 'Plan review limit must be an integer from 1 to 20.');
     return {
+      planReviewLimit: config.planReviewLimit ?? DEFAULT_PLAN_REVIEW_LIMIT,
       requireCanonicalDecision: config.requireCanonicalDecision !== false,
       requireUserCodeReview: config.requireUserCodeReview !== false,
       requiredFinalGates: [...new Set(config.requiredFinalGates ?? [])],
@@ -85,6 +90,9 @@ export const createDeliveryLifecycleProfile = (id = 'delivery-lifecycle') => Obj
       if (proposals.some(item => (item.projectId === state.projectId) !== (item.disposition === 'project-owned'))) {
         return { ok: false, reason: 'planning-proposal-project-disposition-mismatch' };
       }
+      if (!uniqueProposalIds(proposals.filter(item => item.projectId === state.projectId))) {
+        return { ok: false, reason: 'planning-proposal-id-invalid' };
+      }
     }
     // A negative review is a valid decision. Preserve its findings instead of
     // rejecting the result and retrying the same unchanged plan.
@@ -127,8 +135,9 @@ export const createDeliveryLifecycleProfile = (id = 'delivery-lifecycle') => Obj
 
   createFollowUpFeatures(input) {
     const { feature, result } = input;
+    const planRevisions = createPlanReviewFollowUps(input);
     const qualityRepairs = createQualityFollowUpFeatures(input);
-    if (feature.metadata?.stage !== 'implementation' || !feature.metadata?.allowDynamicDecomposition || !Array.isArray(result?.followUpFeatures)) return qualityRepairs;
+    if (feature.metadata?.stage !== 'implementation' || !feature.metadata?.allowDynamicDecomposition || !Array.isArray(result?.followUpFeatures)) return [...planRevisions, ...qualityRepairs];
     const planned = result.followUpFeatures.map(item => {
       assert(item && typeof item === 'object' && !Array.isArray(item), 'FOLLOW_UP_FEATURE_INVALID', 'Every follow-up Feature must be an object.');
       assert(typeof item.id === 'string' && item.id.length > 0, 'FOLLOW_UP_FEATURE_INVALID', 'Every follow-up Feature requires an ID.');
@@ -174,7 +183,7 @@ export const createDeliveryLifecycleProfile = (id = 'delivery-lifecycle') => Obj
         },
       };
     });
-    return [...qualityRepairs, ...planned];
+    return [...planRevisions, ...qualityRepairs, ...planned];
   },
 
   createGateDiagnosticReview(input) {

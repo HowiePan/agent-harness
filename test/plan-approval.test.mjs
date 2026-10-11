@@ -57,6 +57,32 @@ test('negative independent review still produces a Markdown finding and cannot b
   assert.equal(planApprovalSatisfied({ ...state, decisions: [{ id: 'implementation-plan-approved', actor: 'user', decision: 'approved', ...artifact }] }), false);
 });
 
+test('plan review keeps version IDs and validation paths literal in Markdown', async t => {
+  const root = await mkdtemp(join(tmpdir(), 'harness-plan-readable-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const state = reviewedRun(false);
+  state.metadata.commandIntent.target = 'V3.9.0';
+  const item = state.submissions[0].result.outputs.plan.value.proposedFeatures[0];
+  item.id = 'V3.9.0/F-00';
+  item.allowedPaths = ['docs/requirements/world-simulation.md', 'card_world_engine/src/state.rs'];
+  item.verification = ['Check AdvanceTicks(n), engine-f07-schema and docs/requirements/world-simulation.md'];
+  state.submissions[1].result.outputs['plan-review'].value.findings = [
+    'F-00 must cover docs/requirements/world-simulation.md',
+  ];
+  const artifact = await ensurePlanApprovalArtifact(root, state);
+  const markdown = await readFile(artifact.path, 'utf8');
+  assert.match(markdown, /^# V3\.9\.0 实施计划审阅稿$/m);
+  assert.ok(markdown.includes('V3.9.0/F-00'));
+  assert.ok(markdown.includes('docs/requirements/world-simulation.md'));
+  assert.ok(markdown.includes('card_world_engine/src/state.rs'));
+  assert.ok(markdown.includes('engine-f07-schema'));
+  assert.ok(markdown.includes('AdvanceTicks(n)'));
+  assert.equal(markdown.includes('V3\\.9\\.0'), false);
+  assert.equal(markdown.includes('world-simulation\\.md'), false);
+  assert.equal(markdown.includes('card\\_world\\_engine'), false);
+  assert.equal(markdown.includes('AdvanceTicks\\(n\\)'), false);
+});
+
 test('reviewed plan is archived in project docs and only its exact generated delta is compatible', async t => {
   const workspaceRoot = await mkdtemp(join(tmpdir(), 'harness-plan-archive-'));
   t.after(() => rm(workspaceRoot, { recursive: true, force: true }));
