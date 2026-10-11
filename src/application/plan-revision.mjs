@@ -9,7 +9,13 @@ const planOutput = state => {
     && submission.result?.status === 'completed' && !submission.supersededAt)?.result.outputs?.plan?.value ?? null;
 };
 
-export const selectPlanRevisionParent = ({ intent, states }) => states.filter(state => state.status !== 'superseded'
+const unstartedDevelopmentReplacement = (state, states) => state.status === 'superseded'
+  && /^development-h[1234]-recovery:[a-f0-9]{64}$/.test(state.metadata?.supersededReason ?? '')
+  && Boolean(state.metadata?.supersededByRunId && state.metadata?.supersedePlanDigest)
+  && !states.some(candidate => candidate.runId === state.metadata.supersededByRunId);
+
+export const selectPlanRevisionParent = ({ intent, states }) => states.filter(state => (state.status !== 'superseded'
+  || unstartedDevelopmentReplacement(state, states))
   && ['plan', 'replan'].includes(state.metadata?.commandIntent?.action)
   && state.metadata.commandIntent.target === intent.target
   && state.metadata.commandIntent.workflowId === intent.workflowId

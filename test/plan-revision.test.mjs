@@ -3,7 +3,7 @@ import test from 'node:test';
 import { digestJson } from '../src/common/canonical.mjs';
 import { deriveLogicalTaskKey } from '../src/application/lifecycle-command-plan.mjs';
 import { resolveRunLineage } from '../src/application/lineage.mjs';
-import { diffPlanFeatures, preparePlanRevisionIntent } from '../src/application/plan-revision.mjs';
+import { diffPlanFeatures, preparePlanRevisionIntent, selectPlanRevisionParent } from '../src/application/plan-revision.mjs';
 import { planApprovalSnapshot, planApprovalSatisfied } from '../src/flows/delivery-lifecycle/plan-approval.mjs';
 
 const source = 'a'.repeat(64);
@@ -89,6 +89,19 @@ test('replan requires a reviewed parent, pins its Authority, and accepts a decla
   assert.throws(() => preparePlanRevisionIntent({ intent: { ...intent, selector: 'missing' }, project, states: [parent], sourceDigest: source }), error => error.code === 'REPLAN_CHANGE_REQUEST_UNKNOWN');
   assert.throws(() => preparePlanRevisionIntent({ intent: { ...intent, selector: undefined }, project, states: [parent], sourceDigest: source }), error => error.code === 'REPLAN_NO_CHANGE');
   assert.throws(() => preparePlanRevisionIntent({ intent, project, states: [], sourceDigest: source }), error => error.code === 'REPLAN_PARENT_REQUIRED');
+});
+
+test('replan can use a reviewed plan retired by development recovery before its replacement starts', () => {
+  const parent = reviewed({ approved: true, status: 'superseded' });
+  parent.metadata = { ...parent.metadata, supersededReason: `development-h3-recovery:${'f'.repeat(64)}`,
+    supersededByRunId: 'replacement-plan', supersedePlanDigest: 'e'.repeat(64) };
+  const intent = { action: 'replan', target: 'V1', workflowId: 'engine-delivery', profileId: 'engine-delivery', preset: 'default' };
+  assert.equal(selectPlanRevisionParent({ intent, states: [parent] })?.runId, parent.runId);
+  assert.equal(preparePlanRevisionIntent({ intent, project: { policy: {} }, states: [parent],
+    sourceDigest: nextSource, sourceChanges }).planRevision.parentRunId, parent.runId);
+  assert.equal(selectPlanRevisionParent({ intent, states: [parent, { runId: 'replacement-plan' }] }), null);
+  assert.equal(selectPlanRevisionParent({ intent, states: [{ ...parent, metadata: { ...parent.metadata,
+    supersededReason: 'replacement-lifecycle-plan' } }] }), null);
 });
 
 test('replan captures idle implementation for retirement and blocks an active Lease', () => {
