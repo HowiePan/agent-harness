@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { deliveryLifecycleProfile } from '../src/flows/delivery-lifecycle/policy/delivery-lifecycle.mjs';
 import { ensurePlanApprovalArtifact, planApprovalSatisfied, planApprovalSnapshot } from '../src/flows/delivery-lifecycle/plan-approval.mjs';
+import { assessPlanArchiveSourceCompatibility, ensureProjectPlanArchive } from '../src/application/plan-archive.mjs';
 import { assessAutomaticPlanSourceCompatibility, assessPlanSourceCompatibility, assessRecoveredImplementationContinuation, assessVerifiedImplementationContinuation, planSourceCompatibilityDecisionId, planSourceCompatibilitySatisfied } from '../src/application/plan-source-compatibility.mjs';
 import { assertCurrentPlanLineage, assertReviewedSourceDecision } from '../src/application/development-plan-source-compatibility.mjs';
 import { captureWorkspace } from '../src/common/workspace-snapshot.mjs';
@@ -54,6 +55,45 @@ test('negative independent review still produces a Markdown finding and cannot b
   assert.match(await readFile(artifact.path, 'utf8'), /Missing path/);
   assert.equal(artifact.reviewApproved, false);
   assert.equal(planApprovalSatisfied({ ...state, decisions: [{ id: 'implementation-plan-approved', actor: 'user', decision: 'approved', ...artifact }] }), false);
+});
+
+test('reviewed plan is archived in project docs and only its exact generated delta is compatible', async t => {
+  const workspaceRoot = await mkdtemp(join(tmpdir(), 'harness-plan-archive-'));
+  t.after(() => rm(workspaceRoot, { recursive: true, force: true }));
+  const state = reviewedRun(true);
+  state.metadata.commandIntent.target = 'V3.9.0';
+  const project = { policy: { planArchiveRoot: 'docs/versions' } };
+  const archive = await ensureProjectPlanArchive({ project, state, workspaceRoot });
+  assert.equal(archive.relativePath, 'docs/versions/v3/v3.9.0-execution-plan-review.md');
+  assert.equal(await readFile(archive.path, 'utf8'), planApprovalSnapshot(state).markdown);
+  const current = await captureWorkspace(workspaceRoot);
+  const assessment = { fromSourceDigest: state.sourceDigest, toSourceDigest: current.digest,
+    changedFilesDigest: 'b'.repeat(64), changedFiles: [archive.relativePath] };
+  assert.equal(assessPlanArchiveSourceCompatibility({ project, planRun: state, assessment, currentSnapshot: current })?.mode,
+    'verified-plan-archive');
+  assert.equal(assessPlanArchiveSourceCompatibility({ project, planRun: state,
+    assessment: { ...assessment, changedFiles: [archive.relativePath, 'src/lib.rs'] }, currentSnapshot: current }), null);
+  await writeFile(archive.path, 'changed');
+  const altered = await captureWorkspace(workspaceRoot);
+  assert.equal(assessPlanArchiveSourceCompatibility({ project, planRun: state, assessment, currentSnapshot: altered }), null);
+  await assert.rejects(ensureProjectPlanArchive({ project, state, workspaceRoot }), error => error.code === 'PLAN_ARCHIVE_CONFLICT');
+});
+
+test('a revised plan replaces only a verified previous generated archive', async t => {
+  const workspaceRoot = await mkdtemp(join(tmpdir(), 'harness-plan-rearchive-'));
+  t.after(() => rm(workspaceRoot, { recursive: true, force: true }));
+  const project = { policy: { planArchiveRoot: 'docs/versions' } };
+  const prior = reviewedRun(true);
+  prior.metadata.commandIntent.target = 'V3.9.0';
+  const original = await ensureProjectPlanArchive({ project, state: prior, workspaceRoot });
+  const revised = structuredClone(prior);
+  revised.runId = 'plan-2';
+  revised.submissions[0].result.outputs.plan.value.proposedFeatures[0].contracts = ['Changed contract'];
+  await assert.rejects(ensureProjectPlanArchive({ project, state: revised, workspaceRoot }),
+    error => error.code === 'PLAN_ARCHIVE_CONFLICT');
+  const replacement = await ensureProjectPlanArchive({ project, state: revised, workspaceRoot, previousPlanRuns: [prior] });
+  assert.equal(replacement.path, original.path);
+  assert.equal(await readFile(replacement.path, 'utf8'), planApprovalSnapshot(revised).markdown);
 });
 
 test('approved plan can bind an audited source delta while later engine edits still invalidate it', () => {

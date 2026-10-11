@@ -13,11 +13,36 @@ import { loadReleaseIdentity } from '../src/application/release-identity.mjs';
 import { activeReleaseFile } from '../src/platform/registry/active-generation.mjs';
 import { harnessTemporaryRoot } from '../src/common/write-boundary.mjs';
 import { createTestExecutionAuthorizationAdapter } from './test-support.mjs';
+
 import { projectExecutionPolicyDecisionContext } from '../src/platform/registry/project-registry.mjs';
 import { digestJson, sha256, withoutKeys } from '../src/common/canonical.mjs';
 
 const releaseIdentity = { version: '1.0.0', artifactDigest: 'a'.repeat(64), verified: true };
 const knownFindingInventories = { 'V3.8.4': { version: '1.0', sources: [{ path: 'README.md', sha256: sha256('fixture\n') }], findings: [] } };
+
+test('CardWorld planning entry consults the formal predecessor release before building a plan', async t => {
+  const controlRoot = resolve(process.cwd());
+  const root = await mkdtemp(resolve(harnessTemporaryRoot(), 'predecessor-entry-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const workspaceRoot = resolve(root, 'CardWorld');
+  await mkdir(resolve(workspaceRoot, '.git'), { recursive: true });
+  await writeFile(resolve(workspaceRoot, 'README.md'), 'fixture\n');
+  const extension = await loadExtensionPack('./integrations/legacy-consumers/cardworld/index.mjs', { cwd: controlRoot, controlRoot });
+  const runtime = await loadExtensionPack('./integrations/codex/extensions/codex-runtime.mjs', { cwd: controlRoot, controlRoot });
+  const harness = await createHarness({ controlRoot, dataRoot: resolve(root, 'data'), releaseIdentity, strictProjectIdentity: false, extensions: [extension, runtime] });
+  const descriptor = createCardWorldProjectDescriptor({ workspaceRoot, harness: releaseIdentity,
+    versionPredecessors: { 'V3.9.0': 'V3.8.5' } });
+  descriptor.extensions = descriptor.extensions.map(item => ({ ...item, digest: item.id === extension.id ? extension.digest : runtime.digest }));
+  await harness.projectRegistry.register(descriptor, { expectedRevision: 0, commandId: 'register-predecessor-project' });
+  harness.readVersionRelease = async (projectId, target) => {
+    assert.equal(projectId, descriptor.id);
+    assert.equal(target, 'V3.8.5');
+    return { state: { status: 'prereleased' }, formalReleaseStatus: 'not-approved' };
+  };
+  for (const action of ['requirements', 'plan', 'replan']) await assert.rejects(
+    harness.createLifecyclePlan({ projectId: descriptor.id, action, target: 'V3.9.0', extensionId: extension.id, executionWorkspaceRoot: workspaceRoot }),
+    error => error.code === 'PLANNING_PREDECESSOR_NOT_RELEASED');
+});
 
 test('delivery compiler requires an Authority-derived Quality Target instead of Project configuration', () => {
   assert.throws(

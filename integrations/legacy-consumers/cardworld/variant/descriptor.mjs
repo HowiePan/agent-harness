@@ -42,6 +42,7 @@ export const createCardWorldProjectDescriptor = ({
   planChangeRequests,
   qualityReviewLimit = { mode: 'bounded', maxRechecks: 2 },
   majorReleaseTargets = [],
+  versionPredecessors,
 } = {}) => {
   assert(workspaceRoot && isAbsolute(workspaceRoot), 'CARDWORLD_WORKSPACE_REQUIRED', 'CardWorld descriptor requires an absolute workspaceRoot.');
   assert(actionExecution && typeof actionExecution === 'object' && !Array.isArray(actionExecution), 'CARDWORLD_ACTION_EXECUTION_INVALID', 'CardWorld actionExecution must be an object.');
@@ -86,6 +87,8 @@ export const createCardWorldProjectDescriptor = ({
       qualityFindingPaths: ['card_world_engine', 'card_world_web/src', 'card_world_web/tests', 'scripts'],
       qualityReviewLimit: structuredClone(qualityReviewLimit),
       majorReleaseTargets: [...majorReleaseTargets],
+      ...(versionPredecessors ? { versionPredecessors: structuredClone(versionPredecessors) } : {}),
+      planArchiveRoot: 'docs/versions',
       ...(Object.keys(actionExecution).length ? { actionExecution: structuredClone(actionExecution) } : {}),
       ...(knownFindingInventories && Object.keys(knownFindingInventories).length ? { knownFindingInventories: structuredClone(knownFindingInventories) } : {}),
       ...(planChangeRequests && Object.keys(planChangeRequests).length ? { planChangeRequests: structuredClone(planChangeRequests) } : {}),

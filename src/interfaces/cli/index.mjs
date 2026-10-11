@@ -28,7 +28,7 @@ import { verifyDevelopmentSourceManifest, writeDevelopmentSourceManifest } from 
 import { createDevelopmentPatchPlan, rollbackDevelopmentPatch } from '../../application/development-patch.mjs';
 import { recoverDevelopmentRun } from '../../application/development-run-recovery.mjs';
 import { recordDevelopmentPlanSourceCompatibility } from '../../application/development-plan-source-compatibility.mjs';
-import { assertDevelopmentCloseoutDecisionScope } from '../../application/development-closeout-decision.mjs';
+import { assertDevelopmentCloseoutDecisionScope, assertDevelopmentPlanDecisionScope } from '../../application/development-closeout-decision.mjs';
 import { createLocalDevelopmentInvocation } from '../../application/local-development-invocation.mjs';
 import { ensureVersionClearance } from '../../application/version-clearance.mjs';
 import { applySourcePatch, refreshLocalCodexBindings, syncDevelopmentSource } from './local-development-sync.mjs';
@@ -347,7 +347,7 @@ if (development) {
   if (!samePath(controlRoot, development.manifest.controlRoot) || !samePath(dataRoot, development.manifest.dataRoot)) throw Object.assign(new Error('Development manifest does not match the selected control and data roots.'), { code: 'DEVELOPMENT_MANIFEST_ROOT_MISMATCH' });
   if (take('--harness-digest') && take('--harness-digest') !== development.releaseIdentity.artifactDigest) throw Object.assign(new Error('Development manifest does not match --harness-digest.'), { code: 'DEVELOPMENT_MANIFEST_RELEASE_MISMATCH' });
   const developmentCommandAllowed = (command === 'workflow' && subject === 'list') || (command === 'lifecycle' && ['plan', 'preflight'].includes(subject)) || (command === 'project' && subject === 'list') || (command === 'extension' && subject === 'list') || (command === 'run' && subject === 'decision') || (['version-release', 'release-candidate'].includes(command) && ['status', 'promote'].includes(subject)) || command === 'doctor';
-  if (!developmentCommandAllowed) throw Object.assign(new Error('Development manifest is limited to inspection, planning, preflight, exact closeout decisions, and frozen version release status/promotion. Use the dev commands for source binding changes.'), { code: 'DEVELOPMENT_MANIFEST_COMMAND_UNSUPPORTED' });
+  if (!developmentCommandAllowed) throw Object.assign(new Error('Development manifest is limited to inspection, planning, preflight, exact reviewed-plan or closeout decisions, and frozen version release status/promotion. Use the dev commands for source binding changes.'), { code: 'DEVELOPMENT_MANIFEST_COMMAND_UNSUPPORTED' });
   if (['version-release', 'release-candidate'].includes(command) && subject === 'promote') await createLocalDevelopmentInvocation({
     projectRoot: development.manifest.projectRoot,
     configPath: development.manifest.configPath,
@@ -608,20 +608,23 @@ if (command === 'features' && subject === 'compile') {
         && samePath(state.metadata.workspace.root, project.workspace.root);
       const currentSourceDigest = workspaceMatch
         ? (await captureWorkspace(project.workspace.root, { excluded: project.workspace.excluded ?? [] })).digest : null;
-      decisionScope = assertDevelopmentCloseoutDecisionScope({ state, decision, projectId: config.request.binding.projectId,
+      const scopeInput = { state, decision, projectId: config.request.binding.projectId,
         expectedRevision: Number(take('--expected-revision')), commandId: take('--command-id'),
-        profile: harness.profileRegistry.get(state.profile.id), currentSourceDigest, workspaceMatch });
+        profile: harness.profileRegistry.get(state.profile.id), workspaceMatch };
+      decisionScope = decision?.id === 'implementation-plan-approved'
+        ? { ...assertDevelopmentPlanDecisionScope(scopeInput), kind: 'plan' }
+        : { ...assertDevelopmentCloseoutDecisionScope({ ...scopeInput, currentSourceDigest }), kind: 'closeout' };
     }
     const output = decisionScope?.recorded
-      ? { result: { decision: state.decisions.find(item => item.id === 'routine-version-exit') }, state }
+      ? { result: { decision: state.decisions.find(item => item.id === decision.id) }, state }
       : await harness.kernel.recordDecision(state.projectId, state.runId, decision, { expectedRevision: state.revision, commandId: take('--command-id') ?? newId('command') });
     if (development) {
       const closed = output.state.status === 'closed' ? { result: { receipt: null }, state: output.state }
         : await harness.kernel.closeRun(state.projectId, state.runId, {},
           { expectedRevision: output.state.revision, commandId: `${take('--command-id')}.close` });
-      const versionClearance = await ensureVersionClearance(dataRoot, closed.state);
+      const versionClearance = decisionScope.kind === 'closeout' ? await ensureVersionClearance(dataRoot, closed.state) : null;
       console.log(JSON.stringify({ ok: true, decision: output.result.decision, closure: closed.result,
-        versionClearance, revision: closed.state.revision }, null, 2));
+        ...(versionClearance ? { versionClearance } : {}), revision: closed.state.revision }, null, 2));
     } else console.log(JSON.stringify({ ok: true, decision: output.result.decision, revision: output.state.revision }, null, 2));
   } else if (command === 'run' && subject === 'gate') {
     throw Object.assign(new Error('Submit Gate results through run gates, which executes the pinned Recipe and verifies its Receipt.'), { code: 'DIRECT_GATE_RESULT_DENIED' });

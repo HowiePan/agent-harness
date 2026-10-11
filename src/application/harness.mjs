@@ -30,6 +30,8 @@ import { executeHeadlessLifecyclePlan, executeVisibleLifecyclePlan as runVisible
 import { loadReleaseIdentity } from './release-identity.mjs';
 import { preparePrereleaseIntent, readReleaseForKind, promoteReleaseForKind } from './release-variant.mjs';
 import { publishVersionRelease, readPortableVersionRelease } from './version-prerelease.mjs';
+import { verifyPlanningPredecessor } from './version-predecessor-gate.mjs';
+import { assessPlanArchiveSourceCompatibility, ensureProjectPlanArchive } from './plan-archive.mjs';
 import { captureWorkspace, diffWorkspaceSnapshots } from '../common/workspace-snapshot.mjs';
 import { resolveProjectWorkspace } from '../common/workspace-identity.mjs';
 import { MemoryStore } from '../platform/resources/memory/memory-store.mjs';
@@ -255,16 +257,15 @@ export const createHarness = async ({ controlRoot: controlRootInput, dataRoot: d
     async readVersionRelease(projectId, target) {
       const project = await projectRegistry.get(projectId);
       const local = await readReleaseForKind({ kind: 'version', dataRoot: authorityStore.root, projectId, target });
-      if (local.state.status !== 'none') return { ...local,
-        formalReleaseStatus: local.state.status === 'released'
-          ? (local.state.publication?.remoteVerified ? 'git-published' : 'approval-recorded-local-only')
-          : 'not-approved' };
+      if (local.state.status === 'released' && local.state.publication?.remoteVerified)
+        return { ...local, formalReleaseStatus: 'git-published' };
       const workspace = await resolveProjectWorkspace(project);
       try {
         const portable = await readPortableVersionRelease({ dataRoot: authorityStore.root, project, target, workspaceRoot: workspace.root });
-        return { ...portable, formalReleaseStatus: portable.state.source === 'verified-git-release' ? 'git-published' : 'not-approved' };
+        return { ...portable, formalReleaseStatus: portable.state.source === 'verified-git-release' ? 'git-published'
+          : portable.state.status === 'released' ? 'approval-recorded-local-only' : 'not-approved' };
       } catch (error) {
-        if (error.code === 'RELEASE_GIT_TAG_READ_FAILED') return { ...local, formalReleaseStatus: 'not-approved' };
+        if (error.code === 'RELEASE_GIT_TAG_READ_FAILED') return { ...local, formalReleaseStatus: local.state.status === 'released' ? 'approval-recorded-local-only' : 'not-approved' };
         throw error;
       }
     },
@@ -347,6 +348,7 @@ export const createHarness = async ({ controlRoot: controlRootInput, dataRoot: d
       assert(required, 'PROJECT_EXTENSION_NOT_BOUND', `Project ${project.id} does not bind Extension ${extension.id}.`);
       assert(required.version === extension.version && required.digest === extension.digest, 'PROJECT_EXTENSION_IDENTITY_MISMATCH', `Project ${project.id} does not bind the active Extension ${extension.id}.`);
       if (strictProjectIdentity) assert(project.harness?.version === currentReleaseIdentity.version && project.harness?.artifactDigest === currentReleaseIdentity.artifactDigest, 'PROJECT_HARNESS_IDENTITY_MISMATCH', `Project ${project.id} does not bind the active Harness release.`);
+      await verifyPlanningPredecessor({ project, intent, readVersionRelease: (projectId, target) => api.readVersionRelease(projectId, target) });
       const snapshot = await captureWorkspace(workspace.root, { excluded: project.workspace.excluded ?? [] });
       if (intent.action === 'implement' && !workflowInput) {
         const states = await authorityStore.list(project.id);
@@ -804,7 +806,8 @@ export const createHarness = async ({ controlRoot: controlRootInput, dataRoot: d
           if (reviewedDecision) {
             sourceCompatibility = { mode: 'reviewed-decision', decisionId: reviewedDecision.id, changedFilesDigest: assessment.changedFilesDigest };
           } else {
-            sourceCompatibility = assessVerifiedImplementationContinuation({ planRun: latest, planArtifact: artifact,
+            sourceCompatibility = assessPlanArchiveSourceCompatibility({ project, planRun: latest, assessment, currentSnapshot: current })
+              ?? assessVerifiedImplementationContinuation({ planRun: latest, planArtifact: artifact,
               priorRuns: projectRuns, currentSourceDigest: runSourceDigest, workspaceRoot: workspace.root,
               implementationFeatures: input.features })
               ?? await assessRecoveredImplementationContinuation({ planRun: latest, planArtifact: artifact,
@@ -1096,7 +1099,11 @@ export const createHarness = async ({ controlRoot: controlRootInput, dataRoot: d
       }
       const evidence = await evidenceStore.put({ result: verifiedResult, runtimeEvidence: preservedRuntimeEvidence, inputSourceDigest: dispatch.sourceDigest, outputSourceDigest: resultingSnapshot.digest, sourceSnapshotRef: dispatch.sourceSnapshotRef }, { ...evidenceMetadata, mediaType: 'application/json', projectId, ...(state.metadata?.workspaceRef ? { workspaceRef: state.metadata.workspaceRef } : {}), runId, epoch: state.epoch, generation: state.generation, featureId: dispatch.featureId, dispatchId, sourceDigest: dispatch.sourceDigest, artifactDigest: state.artifactDigest, policyDigest: state.policyDigest, pluginSetDigest: state.pluginSetDigest, labels: ['agent-result'] });
       const submitted = await kernel.submit(projectId, runId, { dispatchId, outputRef: dispatch.outputRef, agentId: lease.agentId, packetDigest: dispatch.packetDigest, epoch: state.epoch, generation: state.generation, result: verifiedResult, resultingSourceDigest: resultingSnapshot.digest, evidenceRefs: [evidence.ref] }, { expectedRevision: state.revision, commandId });
-      if (feature?.metadata?.stage === 'plan-review' && verifiedResult.status === 'completed') await ensurePlanApprovalArtifact(authorityStore.root, submitted.state);
+      if (feature?.metadata?.stage === 'plan-review' && verifiedResult.status === 'completed') {
+        await ensurePlanApprovalArtifact(authorityStore.root, submitted.state);
+        await ensureProjectPlanArchive({ project, state: submitted.state, workspaceRoot,
+          previousPlanRuns: (await authorityStore.list(projectId)).filter(run => run.runId !== runId) });
+      }
       return submitted;
     },
 

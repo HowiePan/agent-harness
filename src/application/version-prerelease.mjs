@@ -100,7 +100,7 @@ export const readVersionRelease = async ({ dataRoot, projectId, target }) => rea
 /** On a new machine, reconstruct released status only from a verified remote Git tag. */
 export const readPortableVersionRelease = async ({ dataRoot, project, target, workspaceRoot }) => {
   const local = await readVersionRelease({ dataRoot, projectId: project.id, target });
-  if (local.state.status !== 'none') return local;
+  if (local.state.status === 'released' && local.state.publication?.remoteVerified) return local;
   const publication = await verifyGitVersionRelease({ workspaceRoot, projectId: project.id, target,
     remote: project.policy?.release?.gitRemote ?? 'origin' });
   if (!publication) return local;
