@@ -6,7 +6,8 @@ import { assertInside, assertNoLinkPath, safeSegment, slash } from '../common/pa
 import { captureWorkspace, diffWorkspaceSnapshots } from '../common/workspace-snapshot.mjs';
 import { currentFeatureSubmission } from '../common/feature-submission.mjs';
 import { loadReleaseDocumentationScope } from './release-documentation-scope.mjs';
-import { freezeReleaseCandidate, promoteReleaseCandidate, readReleaseCandidate } from '../platform/release/candidate-store.mjs';
+import { freezeReleaseCandidate, promoteReleaseCandidate, readReleaseCandidate, recordReleasePublication } from '../platform/release/candidate-store.mjs';
+import { publishGitVersionRelease, verifyGitVersionRelease } from '../platform/release/git-version-record.mjs';
 import { inventoryReleaseArtifacts, safeReleaseRelativePath } from '../platform/release/artifacts.mjs';
 
 const digestPattern = /^[a-f0-9]{64}$/;
@@ -96,6 +97,20 @@ export const ensurePreReleaseCandidate = async ({ dataRoot, project, state, work
 
 export const readVersionRelease = async ({ dataRoot, projectId, target }) => readReleaseCandidate({ dataRoot, namespace: 'version-releases', projectId, target });
 
+/** On a new machine, reconstruct released status only from a verified remote Git tag. */
+export const readPortableVersionRelease = async ({ dataRoot, project, target, workspaceRoot }) => {
+  const local = await readVersionRelease({ dataRoot, projectId: project.id, target });
+  if (local.state.status !== 'none') return local;
+  const publication = await verifyGitVersionRelease({ workspaceRoot, projectId: project.id, target,
+    remote: project.policy?.release?.gitRemote ?? 'origin' });
+  if (!publication) return local;
+  return { state: { revision: publication.record.receipt.toRevision, status: 'released',
+    candidateDigest: publication.record.candidate.candidateDigest, releasedAt: publication.record.receipt.releasedAt,
+    publication: { kind: 'git-version-release', ref: publication.ref, tagOid: publication.tagOid,
+      commit: publication.commit, recordDigest: publication.record.recordDigest, remoteVerified: true },
+    source: 'verified-git-release' }, candidate: publication.record.candidate, receipt: publication.record.receipt };
+};
+
 export const promoteVersionRelease = async ({ dataRoot, project, target, workspaceRoot, candidateDigest, expectedRevision, commandId, approval }) => {
   assert(digestPattern.test(candidateDigest ?? '') && commandId && Number.isInteger(expectedRevision), 'RELEASE_PROMOTION_INPUT_INVALID', 'Promotion requires a candidate digest, command ID, and expected revision.');
   assert(approval?.id === 'formal-version-release' && approval.actor && approval.actor !== 'project-local-invocation'
@@ -103,4 +118,19 @@ export const promoteVersionRelease = async ({ dataRoot, project, target, workspa
     'RELEASE_PROMOTION_DECISION_REQUIRED', 'Formal release approval must bind the exact candidate.');
   return promoteReleaseCandidate({ dataRoot, namespace: 'version-releases', project, target, workspaceRoot,
     candidateDigest, expectedRevision, commandId, approval, promotionKind: 'version-release-promotion' });
+};
+
+/** Complete Git publication for a previously approved version, including a legacy local-only release. */
+export const publishVersionRelease = async ({ dataRoot, project, target, workspaceRoot, candidateDigest }) => {
+  const { state, candidate } = await readVersionRelease({ dataRoot, projectId: project.id, target });
+  assert(state.status === 'released' && candidate?.candidateDigest === candidateDigest,
+    'RELEASE_GIT_APPROVAL_REQUIRED', 'Git publication requires the exact locally approved release.');
+  const receipts = Object.values(state.commands ?? {}).filter(item => item.kind === 'version-release-promotion' && item.candidateDigest === candidateDigest);
+  assert(receipts.length === 1, 'RELEASE_GIT_RECEIPT_REQUIRED', 'Git publication requires one exact formal approval receipt.');
+  const receipt = receipts[0];
+  const publication = await publishGitVersionRelease({ workspaceRoot, temporaryRoot: dataRoot, project, target, candidate, receipt,
+    remote: project.policy?.release?.gitRemote ?? 'origin' });
+  const next = await recordReleasePublication({ dataRoot, namespace: 'version-releases', projectId: project.id, target,
+    candidateDigest, receiptDigest: receipt.receiptDigest, publication });
+  return { state: next, candidate, receipt, publication: next.publication };
 };

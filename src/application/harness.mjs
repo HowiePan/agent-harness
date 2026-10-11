@@ -29,6 +29,7 @@ import { createExecutionReadinessReport as buildExecutionReadinessReport } from 
 import { executeHeadlessLifecyclePlan, executeVisibleLifecyclePlan as runVisibleLifecyclePlan } from './lifecycle-execution-service.mjs';
 import { loadReleaseIdentity } from './release-identity.mjs';
 import { preparePrereleaseIntent, readReleaseForKind, promoteReleaseForKind } from './release-variant.mjs';
+import { publishVersionRelease, readPortableVersionRelease } from './version-prerelease.mjs';
 import { captureWorkspace, diffWorkspaceSnapshots } from '../common/workspace-snapshot.mjs';
 import { resolveProjectWorkspace } from '../common/workspace-identity.mjs';
 import { MemoryStore } from '../platform/resources/memory/memory-store.mjs';
@@ -252,8 +253,20 @@ export const createHarness = async ({ controlRoot: controlRootInput, dataRoot: d
     releaseIdentity: Object.freeze(structuredClone(currentReleaseIdentity)),
 
     async readVersionRelease(projectId, target) {
-      await projectRegistry.get(projectId);
-      return readReleaseForKind({ kind: 'version', dataRoot: authorityStore.root, projectId, target });
+      const project = await projectRegistry.get(projectId);
+      const local = await readReleaseForKind({ kind: 'version', dataRoot: authorityStore.root, projectId, target });
+      if (local.state.status !== 'none') return { ...local,
+        formalReleaseStatus: local.state.status === 'released'
+          ? (local.state.publication?.remoteVerified ? 'git-published' : 'approval-recorded-local-only')
+          : 'not-approved' };
+      const workspace = await resolveProjectWorkspace(project);
+      try {
+        const portable = await readPortableVersionRelease({ dataRoot: authorityStore.root, project, target, workspaceRoot: workspace.root });
+        return { ...portable, formalReleaseStatus: portable.state.source === 'verified-git-release' ? 'git-published' : 'not-approved' };
+      } catch (error) {
+        if (error.code === 'RELEASE_GIT_TAG_READ_FAILED') return { ...local, formalReleaseStatus: 'not-approved' };
+        throw error;
+      }
     },
 
     async promoteVersionRelease({ projectId, target, candidateDigest, expectedRevision, commandId, approval }) {
@@ -261,6 +274,12 @@ export const createHarness = async ({ controlRoot: controlRootInput, dataRoot: d
       const workspace = await resolveProjectWorkspace(project);
       return promoteReleaseForKind({ kind: 'version', dataRoot: authorityStore.root, project, target, workspaceRoot: workspace.root,
         candidateDigest, expectedRevision, commandId, approval });
+    },
+
+    async publishVersionRelease({ projectId, target, candidateDigest }) {
+      const project = await projectRegistry.get(projectId);
+      const workspace = await resolveProjectWorkspace(project);
+      return publishVersionRelease({ dataRoot: authorityStore.root, project, target, workspaceRoot: workspace.root, candidateDigest });
     },
 
     async readScopedRelease(projectId, target) {

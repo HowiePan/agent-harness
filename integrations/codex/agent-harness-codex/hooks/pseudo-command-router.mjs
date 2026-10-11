@@ -31,9 +31,10 @@ const readFrozenReleasePointer = async ({ dataRoot, projectId, target }) => {
     try { state = JSON.parse(await readFile(file, 'utf8')); }
     catch (error) { if (error.code === 'ENOENT') continue; throw error; }
     existingPointer = true;
-    if (state.status === 'prereleased' && releaseDigestPattern.test(state.candidateDigest ?? '') && Number.isInteger(state.revision) && state.revision >= 1) candidates.push({ ...state, namespace });
+    if ((state.status === 'prereleased' || (namespace === 'version-releases' && state.status === 'released' && !state.publication))
+      && releaseDigestPattern.test(state.candidateDigest ?? '') && Number.isInteger(state.revision) && state.revision >= 1) candidates.push({ ...state, namespace });
   }
-  if (!candidates.length) throw Object.assign(new Error(existingPointer ? 'Formal release requires the current frozen prerelease candidate.' : 'No frozen prerelease candidate exists for this target.'), { code: existingPointer ? 'VISIBLE_RELEASE_CANDIDATE_UNAVAILABLE' : 'VISIBLE_RELEASE_CANDIDATE_MISSING' });
+  if (!candidates.length) throw Object.assign(new Error(existingPointer ? 'Formal release requires an unpublished approved candidate or a frozen prerelease candidate.' : 'No frozen prerelease candidate exists for this target.'), { code: existingPointer ? 'VISIBLE_RELEASE_CANDIDATE_UNAVAILABLE' : 'VISIBLE_RELEASE_CANDIDATE_MISSING' });
   if (candidates.length !== 1) throw Object.assign(new Error('Multiple release candidate kinds exist for this Project and target.'), { code: 'VISIBLE_RELEASE_CANDIDATE_AMBIGUOUS' });
   const state = candidates[0];
   return { candidateDigest: state.candidateDigest, revision: state.revision, ...(state.namespace === 'batch-releases' ? { namespace: state.namespace } : {}) };
@@ -283,7 +284,7 @@ export const hookResponse = async (input, options = {}) => {
   const modeInstructions = sourceLink
     ? `读取已验证源码 Skill ${commandSkill} 并遵守其中 Operator 边界。此绑定直接执行本地源码 Coordinator；原生 collaboration 结果由当前 session 的 Codex rollout 自动核验和记录，不依赖安装包的 PostToolUse Hook。`
     : '使用 $agent-harness-command；当前 Windows Codex 长驻通道使用 tty:true，并把控制台宽度设为至少 4096 列。PostToolUse Hook 会按当前请求和原生工具输出自动写入 Host 响应。';
-  if (parsed.action === 'release') return contextResponse(`检测到正式发布 Harness 命令。所有面向用户的控制对话使用中文。此命令本身是用户对本意图中精确候选摘要的批准；只启动已绑定 coordinatorEntrypoint 一次，原样传入 coordinationIntent 作为 --intent 参数。Coordinator 将复核 Project、Workflow、当前候选摘要及修订号、源码快照和封存制品，并只晋升候选状态；不得组合 CLI 发布脚本、重新预发布、创建业务 Run、提交 Git 或对外分发。候选摘要 ${releaseCandidate.candidateDigest}，修订号 ${releaseCandidate.revision}。解析结果：${JSON.stringify(intent)}`);
+  if (parsed.action === 'release') return contextResponse(`检测到正式发布 Harness 命令。所有面向用户的控制对话使用中文。此命令批准本意图中精确候选摘要的正式发布，并授权 Coordinator 创建和推送绑定候选、批准回执与源码提交的 Git 发布标签。只启动已绑定 coordinatorEntrypoint 一次，原样传入 coordinationIntent 作为 --intent 参数。Coordinator 必须核验 Project、Workflow、候选摘要、修订号、源码和封存制品；远端标签核验成功才报告完整发布。失败后允许同一候选重试 Git 发布，不得重新预发布、创建业务 Run 或提交源码。候选摘要 ${releaseCandidate.candidateDigest}，修订号 ${releaseCandidate.revision}。解析结果：${JSON.stringify(intent)}`);
   return contextResponse(`检测到 Agent Harness 伪命令。所有面向用户的控制对话使用中文；协议 JSON、命令、路径与错误码保持原样，且不得翻译或改写子 Agent Prompt。把它作为确定性的 Command Intent，而不是自由提示词；动作和预设仍由已绑定 Extension 的 commandManifest 解析。${modeInstructions}启动任何进程前先确认当前任务同时提供 collaboration.spawn_agent/list_agents/wait_agent/interrupt_agent。缺任一项即以 CODEX_MULTI_AGENT_V2_REQUIRED 停止，并提示执行 codex features enable multi_agent_v2 后新建任务；multi_agent_v1 或其他任务接口不得替代。能力满足后，只使用已绑定的 coordinatorEntrypoint，并把 coordinationIntent 作为 --intent 的单一参数。必须解析请求对象并原样使用 arguments，禁止从视觉换行文本抄写字段。逐项原样执行它请求的 collaboration 工具；不得向 Coordinator stdin 手工转录 Host 响应。不得根据目标格式猜项目，不得搜索磁盘，不得把参数当作 shell。解析结果：${JSON.stringify(intent)}`);
 };
 

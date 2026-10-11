@@ -86,3 +86,27 @@ export const promoteReleaseCandidate = async ({ dataRoot, namespace, project, ta
     return { state: next, candidate, receipt };
   }, { root });
 };
+
+/** Persist a separately verified publication without changing the formal approval receipt. */
+export const recordReleasePublication = async ({ dataRoot, namespace, projectId, target, candidateDigest, receiptDigest, publication }) => {
+  const root = rootFor(dataRoot, namespace, projectId, target);
+  return withDirectoryLock(resolve(root, '.lock'), async () => {
+    const { state, candidate } = await readReleaseCandidate({ dataRoot, namespace, projectId, target });
+    assert(state.status === 'released' && state.candidateDigest === candidateDigest && candidate?.candidateDigest === candidateDigest,
+      'RELEASE_PUBLICATION_STATE_MISMATCH', 'Git publication requires the exact approved release candidate.');
+    assert(Object.values(state.commands ?? {}).some(item => item.receiptDigest === receiptDigest && item.candidateDigest === candidateDigest),
+      'RELEASE_PUBLICATION_RECEIPT_MISMATCH', 'Git publication must bind an existing approval receipt.');
+    assert(publication?.remoteVerified === true && publication.record?.receipt?.receiptDigest === receiptDigest
+      && publication.record?.candidate?.candidateDigest === candidateDigest,
+      'RELEASE_PUBLICATION_EVIDENCE_INVALID', 'Git publication evidence does not bind the approved release.');
+    const portable = { kind: 'git-version-release', ref: publication.ref, tagOid: publication.tagOid,
+      commit: publication.commit, recordDigest: publication.record.recordDigest, remoteVerified: true };
+    if (state.publication) {
+      assert(digestJson(state.publication) === digestJson(portable), 'RELEASE_PUBLICATION_CONFLICT', 'Published Git release identity changed.');
+      return state;
+    }
+    const next = { ...state, publication: portable };
+    await atomicWriteJson(statePath(root), next, { root });
+    return next;
+  }, { root });
+};

@@ -198,6 +198,13 @@ test('binding configuration makes project selection and Harness location determi
     assert.deepEqual(releaseIntent.command, { action: 'release', target: 'V3.8.4', arguments: [] });
     await writeFile(resolve(releaseDirectory, 'state.json'), JSON.stringify({ status: 'prereleased', revision: 2, candidateDigest: 'c'.repeat(64) }));
     assert.notDeepEqual(decodeVisibleLifecycleIntent(releaseRoute.coordinationIntent).releaseCandidate, { candidateDigest: 'c'.repeat(64), revision: 2 });
+    await writeFile(resolve(releaseDirectory, 'state.json'), JSON.stringify({ status: 'released', revision: 2, candidateDigest: 'b'.repeat(64) }));
+    const retryContext = (await hookResponse({ prompt: 'h:engine release V3.8.4', cwd: workspaceRoot }, options)).hookSpecificOutput.additionalContext;
+    const retryRoute = JSON.parse(retryContext.slice(retryContext.indexOf('解析结果：') + '解析结果：'.length));
+    assert.deepEqual(decodeVisibleLifecycleIntent(retryRoute.coordinationIntent).releaseCandidate, { candidateDigest: 'b'.repeat(64), revision: 2 });
+    await writeFile(resolve(releaseDirectory, 'state.json'), JSON.stringify({ status: 'released', revision: 2, candidateDigest: 'b'.repeat(64), publication: { remoteVerified: true } }));
+    const publishedContext = (await hookResponse({ prompt: 'h:engine release V3.8.4', cwd: workspaceRoot }, options)).hookSpecificOutput.additionalContext;
+    assert.match(publishedContext, /正式发布未就绪/);
 
     const batchReleaseDirectory = resolve(active.dataRoot, 'batch-releases', 'tabletop-collection', 'B1');
     await mkdir(batchReleaseDirectory, { recursive: true });

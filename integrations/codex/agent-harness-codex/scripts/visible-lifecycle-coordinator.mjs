@@ -80,7 +80,8 @@ const main = async () => {
       || (batchRelease ? intent.releaseCandidate.namespace !== 'batch-releases' : intent.releaseCandidate.namespace !== undefined)) throw Object.assign(new Error('Formal release action is not declared by the bound Workflow or candidate namespace.'), { code: 'VISIBLE_RELEASE_ACTION_MISMATCH' });
     const current = batchRelease ? await harness.readScopedRelease(intent.project.projectId, intent.command.target)
       : await harness.readVersionRelease(intent.project.projectId, intent.command.target);
-    if (current.state.status !== 'prereleased' || current.state.candidateDigest !== intent.releaseCandidate.candidateDigest
+    const retryGitPublication = !batchRelease && current.state.status === 'released' && !current.state.publication;
+    if ((current.state.status !== 'prereleased' && !retryGitPublication) || current.state.candidateDigest !== intent.releaseCandidate.candidateDigest
       || current.state.revision !== intent.releaseCandidate.revision || current.candidate?.candidateDigest !== intent.releaseCandidate.candidateDigest) throw Object.assign(new Error('Frozen release candidate changed after the user command.'), { code: 'VISIBLE_RELEASE_CANDIDATE_STALE' });
     emit({ kind: 'codex-visible-lifecycle-event', phase: 'preflight', commandId: intent.commandId, intentDigest: intent.intentDigest,
       executionReady: true, candidateDigest: intent.releaseCandidate.candidateDigest, revision: intent.releaseCandidate.revision });
@@ -88,9 +89,11 @@ const main = async () => {
     const approval = { id: batchRelease ? 'formal-batch-release' : 'formal-version-release', actor: 'codex-user-command', decision: 'approved',
       projectId: intent.project.projectId, target: intent.command.target, candidateDigest: intent.releaseCandidate.candidateDigest,
       authorityBasis: 'explicit-harness-command', commandId: intent.commandId, intentDigest: intent.intentDigest };
-    const result = await (batchRelease ? harness.promoteScopedRelease : harness.promoteVersionRelease)({ projectId: intent.project.projectId, target: intent.command.target,
+    const promoted = retryGitPublication ? current : await (batchRelease ? harness.promoteScopedRelease : harness.promoteVersionRelease)({ projectId: intent.project.projectId, target: intent.command.target,
       candidateDigest: intent.releaseCandidate.candidateDigest, expectedRevision: intent.releaseCandidate.revision,
       commandId: intent.commandId, approval });
+    const result = batchRelease ? promoted : await harness.publishVersionRelease({ projectId: intent.project.projectId,
+      target: intent.command.target, candidateDigest: intent.releaseCandidate.candidateDigest });
     emit({ kind: 'codex-visible-lifecycle-event', phase: 'complete', commandId: intent.commandId, intentDigest: intent.intentDigest,
       status: result.state.status, result });
     return;
