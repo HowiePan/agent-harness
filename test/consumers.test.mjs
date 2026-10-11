@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { readFileSync } from 'node:fs';
 import {
   CARDWORLD_FINAL_GATE_IDS,
   cardWorldCommandManifest,
@@ -16,10 +17,19 @@ import {
 import { resolveLifecycleExecutionPolicy } from '../src/platform/plugins/runtime/execution-policy.mjs';
 import { sealKnownFindingInventory } from '../src/platform/execution/known-finding-inventory.mjs';
 import { createQualityRepairInventorySnapshot, deriveQualityTargetSnapshot } from '../src/platform/execution/quality-target.mjs';
+import { validateJsonSchema } from '../src/common/json-schema.mjs';
 
 const knownFindingInventory = sealKnownFindingInventory({ projectId: 'cardworld-engine', target: 'V-next', declaration: { version: '1.0', sources: [{ path: 'docs/version.md', sha256: 'b'.repeat(64) }], findings: [] }, snapshot: { digest: 'a'.repeat(64), files: [{ path: 'docs/version.md', sha256: 'b'.repeat(64) }] } });
 const qualityTarget = deriveQualityTargetSnapshot({ projectId: 'cardworld-engine', workflowId: 'engine-delivery', target: 'V-next', sourceDigest: 'a'.repeat(64) });
 const qualityRepairInventory = createQualityRepairInventorySnapshot(qualityTarget);
+
+test('CardWorld project input accepts a version predecessor policy', () => {
+  const schema = JSON.parse(readFileSync(new URL('../schemas/cardworld-project-input.schema.json', import.meta.url), 'utf8'));
+  const input = { id: 'cardworld-engine', workspaceRoot: process.cwd(), versionPredecessors: { 'V3.9.0': 'V3.8.5' } };
+  assert.equal(validateJsonSchema(input, schema).valid, true);
+  assert.deepEqual(createCardWorldProjectDescriptor(input).policy.versionPredecessors, input.versionPredecessors);
+  assert.equal(validateJsonSchema({ ...input, versionPredecessors: { 'V3.9.0': '3.8.5' } }, schema).valid, false);
+});
 
 test('CardWorld consumer compiles one canonical requirement and project-owned delivery Features', () => {
   const descriptor = createCardWorldProjectDescriptor({ workspaceRoot: process.cwd(), remote: 'https://github.com/HowiePan/CardWorld.git' });

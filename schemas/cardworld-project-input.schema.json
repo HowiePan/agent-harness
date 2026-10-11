@@ -18,6 +18,7 @@
     "model": { "type": "string", "minLength": 1 },
     "contextBudgetCommand": { "type": "array", "minItems": 1, "items": { "type": "string" } },
     "maxConcurrency": { "anyOf": [{ "const": "auto" }, { "type": "integer", "minimum": 1 }] },
+    "versionPredecessors": { "type": "object", "additionalProperties": { "type": "string", "pattern": "^V\\d+\\.\\d+\\.\\d+$" } },
     "actionExecution": { "type": "object", "additionalProperties": { "$ref": "project-descriptor-input.schema.json#/$defs/actionExecution" } },
     "knownFindingInventories": { "type": "object", "additionalProperties": { "type": "object" } },
     "planChangeRequests": { "type": "object", "additionalProperties": { "type": "object", "required": ["target", "kind", "summary", "requirements", "acceptance"], "properties": {
