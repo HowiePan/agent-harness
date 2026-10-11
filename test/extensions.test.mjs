@@ -37,10 +37,12 @@ test('production Project Registry requires exact Harness and Extension artifact 
     () => registry.register({ id: 'strict-project', workspace: { root: fixture.workspace }, profiles: ['feature-delivery'] }, { commandId: 'strict-project' }),
     error => error.code === 'PROJECT_HARNESS_IDENTITY_REQUIRED',
   );
-  const input = { id: 'strict-project', harness: { version: '1.0.0', artifactDigest: 'a'.repeat(64) }, workspace: { root: fixture.workspace }, profiles: ['feature-delivery'], extensions: [], policy: { agentExecutionMode: 'headless', defaultRuntimePlugin: 'test-runtime', runtimePlugins: ['test-runtime'], promptCodecPlugin: 'reference-agent-prompt-codec' } };
+  const input = { id: 'strict-project', harness: { version: '1.0.0', artifactDigest: 'a'.repeat(64) }, workspace: { root: fixture.workspace }, profiles: ['feature-delivery'], extensions: [], policy: { agentExecutionMode: 'headless', defaultRuntimePlugin: 'test-runtime', runtimePlugins: ['test-runtime'], promptCodecPlugin: 'reference-agent-prompt-codec', versionPredecessors: { 'V3.9.0': 'V3.8.5' } } };
   const record = await registry.register(input, { commandId: 'strict-project-valid', authorityDecision: { actor: 'test-user', decision: 'approved', action: 'project-execution-policy-change', expiresAt: '2099-09-15T00:00:00.000Z', context: projectExecutionPolicyDecisionContext({ input, expectedRevision: 0 }) } });
   assert.equal(validateJsonSchema(input, projectDescriptorSchemas.input).valid, true);
   assert.equal(validateJsonSchema(record, projectDescriptorSchemas.record).valid, true);
+  assert.deepEqual(record.policy.versionPredecessors, { 'V3.9.0': 'V3.8.5' });
+  assert.equal(validateJsonSchema({ ...record, policy: { ...record.policy, versionPredecessors: { 'V3.9.0': '3.8.5' } } }, projectDescriptorSchemas.record).valid, false);
   await assert.rejects(() => registry.register({ ...input, protocolVersion: '9.9' }, { expectedRevision: record.revision, commandId: 'override-protocol' }), error => error.code === 'PROJECT_DESCRIPTOR_ADDITIONAL_PROPERTY');
 });
 
