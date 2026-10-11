@@ -25,9 +25,13 @@ export const previewDevelopmentH4Migration = async ({ plan, manifest, runId }) =
   const implementation = prior.metadata?.commandIntent?.action === 'implement'
     && prior.metadata?.approvedPlan?.typedPlan;
   const quality = prior.metadata?.commandIntent?.action === 'quality';
+  const reviewedPlan = ['plan', 'replan'].includes(prior.metadata?.commandIntent?.action)
+    && prior.status === 'closure-blocked'
+    && prior.features.some(feature => feature.metadata?.stage === 'plan-review' && feature.state === 'completed')
+    && prior.features.every(feature => feature.state === 'completed');
   assert(prior.revision === plan.activeRuns[0].revision && prior.status === plan.activeRuns[0].status
-    && (implementation || quality),
-  'DEVELOPMENT_H4_MIGRATION_RUN_CHANGED', 'H4 preview requires the unchanged approved implementation or quality Run.');
+    && (implementation || quality || reviewedPlan),
+  'DEVELOPMENT_H4_MIGRATION_RUN_CHANGED', 'H4 preview requires an unchanged reviewed Plan, approved implementation, or quality Run.');
   if (quality) assertH4QualityRestartable(prior);
   if (prior.dispatches.length || prior.leases.length) {
     const contract = prior.leases.find(lease => lease.runtimeReceipt?.hostSpawnReceipt)?.runtimeReceipt.hostSpawnReceipt.contract;
@@ -57,6 +61,13 @@ export const previewDevelopmentH4Migration = async ({ plan, manifest, runId }) =
     const copy = structuredClone(prior);
     delete copy.authorityDigest; delete copy.commands; delete copy.revision;
     await harness.authorityStore.create(copy, { commandId: 'h4-preview-prior' });
+    if (reviewedPlan) {
+      for (const ref of new Set(prior.dispatches.map(dispatch => dispatch.sourceSnapshotRef).filter(Boolean))) {
+        const record = await evidenceStore.read(ref);
+        const stored = await harness.evidenceStore.put(record.bytes, record.metadata);
+        assert(stored.ref === ref, 'DEVELOPMENT_H4_PLAN_EVIDENCE_MISMATCH', 'H4 Plan preview could not preserve the original source snapshot evidence.');
+      }
+    }
     const intent = prior.metadata.commandIntent;
     const extension = extensions.find(item => item.workflows?.some(workflow => workflow.id === intent.workflowId)
       && item.commandManifest?.id === intent.manifestId);
@@ -66,8 +77,13 @@ export const previewDevelopmentH4Migration = async ({ plan, manifest, runId }) =
       action: intent.action, target: intent.target,
       arguments: intent.preset === 'default' ? [] : [intent.preset],
       executionWorkspaceRoot: prior.metadata.workspace.root });
-    assert(replacement.run.sourceDigest === prior.sourceDigest,
+    if (!reviewedPlan) assert(replacement.run.sourceDigest === prior.sourceDigest,
       'DEVELOPMENT_H4_SOURCE_CHANGED', 'H4 migration requires the exact authoritative project source.');
+    if (reviewedPlan) return { projectId: prior.projectId, priorRunId: runId,
+      priorRevision: prior.revision, priorAuthorityDigest: prior.authorityDigest,
+      sourceDigest: prior.sourceDigest, replacementSourceDigest: replacement.run.sourceDigest,
+      replacementRunId: replacement.run.runId, replacementPlanDigest: replacement.planDigest,
+      terminalOutcome: { status: 'superseded', reason: 'development-h4-plan-revision' } };
     if (prior.metadata.commandIntent.action === 'quality') {
       assertH4QualityRestartable(prior);
       const evidenceRefs = [...new Set(prior.submissions.flatMap(item => item.evidenceRefs ?? []))];
