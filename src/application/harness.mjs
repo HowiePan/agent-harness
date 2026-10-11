@@ -415,7 +415,7 @@ export const createHarness = async ({ controlRoot: controlRootInput, dataRoot: d
           const knownFindingInventories = {};
           for (const scope of scopes) {
             const target = deriveQualityTargetSnapshot({ projectId: project.id, workflowId: intent.workflowId, target: intent.target,
-              sourceDigest: snapshot.digest, runs, scopeRoot: scope.root,
+              sourceDigest: snapshot.digest, runs, scopeRoot: scope.root, findingScopePaths: project.policy?.qualityFindingPaths ?? [],
               includeNonterminal: intent.action === 'quality' && ['repair-known', 'closeout'].includes(intent.preset) });
             qualityTargets[scope.id] = target;
             if (intent.action === 'quality' && intent.preset === 'repair-known') {
@@ -443,6 +443,7 @@ export const createHarness = async ({ controlRoot: controlRootInput, dataRoot: d
           sourceDigest: snapshot.digest,
           runs: await authorityStore.list(project.id),
           legacyInventory,
+          findingScopePaths: project.policy?.qualityFindingPaths ?? [],
           includeNonterminal: intent.action === 'quality' && ['repair-known', 'closeout'].includes(intent.preset),
         });
         intent = { ...intent, qualityTarget };
@@ -450,7 +451,11 @@ export const createHarness = async ({ controlRoot: controlRootInput, dataRoot: d
           intent.qualityRepairInventory = createQualityRepairInventorySnapshot(qualityTarget);
           if (intent.qualityRepairInventory.findings.length === 0) intent.qualityCloseout = createQualityCloseoutSnapshot(qualityTarget);
         } else if (intent.action === 'quality' && intent.preset === 'closeout') intent.qualityCloseout = createQualityCloseoutSnapshot(qualityTarget);
-        else if (['implement', 'quality', 'full', 'deliver'].includes(intent.action)) intent.knownFindingInventory = createQualityInventorySnapshot(qualityTarget);
+        else if (['implement', 'quality', 'full', 'deliver'].includes(intent.action)) {
+          intent.knownFindingInventory = createQualityInventorySnapshot(qualityTarget);
+          if (intent.action === 'quality' && intent.sourcePolicy === 'review-and-repair')
+            intent.qualityRepairInventory = createQualityRepairInventorySnapshot(qualityTarget, { skipIncomplete: true });
+        }
         }
       }
       const sourceToolBinding = workflowInput ? { commandPrefix: [process.execPath, fileURLToPath(new URL('../interfaces/cli/index.mjs', import.meta.url)), 'source'], controlRoot, dataRoot: authorityStore.root } : null;
@@ -509,7 +514,10 @@ export const createHarness = async ({ controlRoot: controlRootInput, dataRoot: d
         ? expandApprovedImplementation({ features: plan.run.features, typedPlan: metadata.approvedPlan.typedPlan, projectId })
         : plan.run.features;
       assert(state.features.every(feature => plannedFeatures.some(planned => planned.id === feature.id
-        && planned.logicalRoot === feature.logicalRoot && digestJson(planned.allowedPaths) === digestJson(feature.allowedPaths))
+        && planned.logicalRoot === feature.logicalRoot && (digestJson(planned.allowedPaths) === digestJson(feature.allowedPaths)
+          || (feature.metadata?.stage === 'quality-repair' && feature.metadata.scopeExtensions?.length > 0
+            && digestJson(planned.allowedPaths) === digestJson(feature.metadata.scopeExtensions[0].before)
+            && digestJson(feature.allowedPaths) === digestJson(feature.metadata.scopeExtensions.at(-1).after))))
         || feature.metadata?.stage === 'gate-diagnostic'), 'LIFECYCLE_RESUME_FEATURE_MISMATCH', 'Run has Features outside the original lifecycle plan.');
       return { plan, runId, blockedFeatureId: selectBlockedResumeFeature(state), authorityRevision: state.revision, authorityDigest: state.authorityDigest };
     },
@@ -1002,6 +1010,9 @@ export const createHarness = async ({ controlRoot: controlRootInput, dataRoot: d
       const feature = state.features.find(item => item.id === dispatch.featureId);
       if (dispatch.execution?.result) assertDispatchResultContract(dispatch.execution.result, feature, { conversationVisible });
       const validatedResult = validateBusinessResult(result, { conversationVisible, repair: Boolean(feature?.metadata?.repairFindingId), feature });
+      if (runtimeEvidence?.hostResultReceipt?.resultDigest && !runtimeEvidence?.resultRejection && !runtimeEvidence?.hostTerminalFailure) {
+        assert(runtimeEvidence.hostResultReceipt.resultDigest === digestJson(result), 'HOST_RESULT_DIGEST_MISMATCH', 'Host result Receipt does not match the native Agent result.');
+      }
       validateProfileResult({ profile: profileRegistry.get(state.profile.id), state, feature, result: validatedResult });
       if (feature?.metadata?.repairFindingId && validatedResult.status === 'completed') {
         assert(Array.isArray(runtimeEvidence?.verificationReceipts) && runtimeEvidence.verificationReceipts.length > 0, 'REPAIR_VERIFICATION_RECEIPT_REQUIRED', 'A completed repair requires at least one host-preserved verification Receipt.');
@@ -1059,6 +1070,11 @@ export const createHarness = async ({ controlRoot: controlRootInput, dataRoot: d
       const verifiedResult = { ...validatedResult, changedFiles: actualChangedFiles };
       await atomicWriteJson(dispatch.outputRef, verifiedResult, { root: authorityStore.root });
       const preservedRuntimeEvidence = runtimeEvidence ? JSON.parse(JSON.stringify(runtimeEvidence)) : null;
+      if (preservedRuntimeEvidence && digestJson(result) !== digestJson(validatedResult)) {
+        const classification = { kind: 'quality-result-classification', version: '1.0', nativeResultDigest: digestJson(result),
+          classifiedResultDigest: digestJson(validatedResult), prerequisiteIds: (validatedResult.deliveryPrerequisites ?? []).map(item => item.id) };
+        preservedRuntimeEvidence.qualityClassification = { ...classification, receiptDigest: digestJson(classification) };
+      }
       const evidence = await evidenceStore.put({ result: verifiedResult, runtimeEvidence: preservedRuntimeEvidence, inputSourceDigest: dispatch.sourceDigest, outputSourceDigest: resultingSnapshot.digest, sourceSnapshotRef: dispatch.sourceSnapshotRef }, { ...evidenceMetadata, mediaType: 'application/json', projectId, ...(state.metadata?.workspaceRef ? { workspaceRef: state.metadata.workspaceRef } : {}), runId, epoch: state.epoch, generation: state.generation, featureId: dispatch.featureId, dispatchId, sourceDigest: dispatch.sourceDigest, artifactDigest: state.artifactDigest, policyDigest: state.policyDigest, pluginSetDigest: state.pluginSetDigest, labels: ['agent-result'] });
       const submitted = await kernel.submit(projectId, runId, { dispatchId, outputRef: dispatch.outputRef, agentId: lease.agentId, packetDigest: dispatch.packetDigest, epoch: state.epoch, generation: state.generation, result: verifiedResult, resultingSourceDigest: resultingSnapshot.digest, evidenceRefs: [evidence.ref] }, { expectedRevision: state.revision, commandId });
       if (feature?.metadata?.stage === 'plan-review' && verifiedResult.status === 'completed') await ensurePlanApprovalArtifact(authorityStore.root, submitted.state);

@@ -15,10 +15,11 @@ import {
 } from '../integrations/legacy-consumers/collection/index.mjs';
 import { resolveLifecycleExecutionPolicy } from '../src/platform/plugins/runtime/execution-policy.mjs';
 import { sealKnownFindingInventory } from '../src/platform/execution/known-finding-inventory.mjs';
-import { deriveQualityTargetSnapshot } from '../src/platform/execution/quality-target.mjs';
+import { createQualityRepairInventorySnapshot, deriveQualityTargetSnapshot } from '../src/platform/execution/quality-target.mjs';
 
 const knownFindingInventory = sealKnownFindingInventory({ projectId: 'cardworld-engine', target: 'V-next', declaration: { version: '1.0', sources: [{ path: 'docs/version.md', sha256: 'b'.repeat(64) }], findings: [] }, snapshot: { digest: 'a'.repeat(64), files: [{ path: 'docs/version.md', sha256: 'b'.repeat(64) }] } });
 const qualityTarget = deriveQualityTargetSnapshot({ projectId: 'cardworld-engine', workflowId: 'engine-delivery', target: 'V-next', sourceDigest: 'a'.repeat(64) });
+const qualityRepairInventory = createQualityRepairInventorySnapshot(qualityTarget);
 
 test('CardWorld consumer compiles one canonical requirement and project-owned delivery Features', () => {
   const descriptor = createCardWorldProjectDescriptor({ workspaceRoot: process.cwd(), remote: 'https://github.com/HowiePan/CardWorld.git' });
@@ -96,7 +97,7 @@ test('CardWorld action plans use action-specific stages, paths, stop conditions,
     ['deliver', ['quality', 'delivery-receipt']],
   ]);
   for (const [action, stages] of expected) {
-    const plan = createCardWorldLifecyclePlan({ intent: { action, target: 'V-next', scope: action, sourcePolicy: ['implement', 'quality'].includes(action) ? 'review-and-repair' : null, qualityTarget, ...(['implement', 'quality', 'full', 'deliver'].includes(action) ? { knownFindingInventory } : {}) }, project, runId: `${action}-v-next`, sourceDigest: 'a'.repeat(64) });
+    const plan = createCardWorldLifecyclePlan({ intent: { action, target: 'V-next', scope: action, sourcePolicy: ['implement', 'quality'].includes(action) ? 'review-and-repair' : null, qualityTarget, ...(action === 'quality' ? { qualityRepairInventory } : {}), ...(['implement', 'quality', 'full', 'deliver'].includes(action) ? { knownFindingInventory } : {}) }, project, runId: `${action}-v-next`, sourceDigest: 'a'.repeat(64) });
     assert.deepEqual(plan.run.features.map(feature => feature.metadata.stage), stages, action);
     assert.equal(plan.stopCondition.action, action);
     if (action === 'implement') {
@@ -106,7 +107,7 @@ test('CardWorld action plans use action-specific stages, paths, stop conditions,
       assert.equal(plan.stopCondition.requiresAllFindingsResolved, true);
     }
   }
-  const quality = createCardWorldLifecyclePlan({ intent: { action: 'quality', target: 'V-next', scope: 'quality', sourcePolicy: 'review-and-repair', qualityTarget, knownFindingInventory }, project, runId: 'quality-v-next', sourceDigest: 'a'.repeat(64) });
+  const quality = createCardWorldLifecyclePlan({ intent: { action: 'quality', target: 'V-next', scope: 'quality', sourcePolicy: 'review-and-repair', qualityTarget, qualityRepairInventory, knownFindingInventory }, project, runId: 'quality-v-next', sourceDigest: 'a'.repeat(64) });
   assert.deepEqual(quality.run.features[0].allowedPaths, []);
   assert.equal(quality.run.features[0].metadata.sourcePolicy, 'read-only');
   assert.equal(quality.run.features[0].metadata.qualityFindingPolicy, 'repair-and-rereview');

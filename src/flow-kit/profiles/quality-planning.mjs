@@ -15,6 +15,11 @@ export const prepareQualityPlanning = ({ intent, project, sourceDigest, profileC
     const inventory = assertQualityRepairInventorySnapshot(intent.qualityRepairInventory);
     assert(inventory.targetDigest === intent.qualityTarget.targetDigest && inventory.sourceDigest === sourceDigest, 'QUALITY_REPAIR_INVENTORY_BINDING_MISMATCH', 'Repair inventory must bind the current Authority target and source.');
   }
+  if (intent.action === 'quality' && intent.sourcePolicy === 'review-and-repair') {
+    const inventory = assertQualityRepairInventorySnapshot(intent.qualityRepairInventory);
+    assert(inventory.targetDigest === intent.qualityTarget.targetDigest && inventory.sourceDigest === sourceDigest,
+      'QUALITY_REPAIR_INVENTORY_BINDING_MISMATCH', 'Initial quality repair inventory must bind the current Authority target and source.');
+  }
   if (closeoutOnly) assert(intent.qualityCloseout?.targetDigest === intent.qualityTarget.targetDigest && intent.qualityCloseout.sourceDigest === sourceDigest, 'QUALITY_CLOSEOUT_SNAPSHOT_REQUIRED', 'Independent closeout requires current authoritative evidence.');
   assert(!exhaustive || (project.policy?.majorReleaseTargets ?? []).includes(intent.target), 'QUALITY_EXHAUSTIVE_MAJOR_RELEASE_REQUIRED', 'Unbounded exhaustive review requires an explicitly declared major release target.');
   const configuredLimit = normalizeQualityReviewLimit(project.policy?.qualityReviewLimit ?? Object.assign({}, ...profileConfigKeys.map(key => project.policy?.profileConfigs?.[key] ?? {})).qualityReviewLimit);

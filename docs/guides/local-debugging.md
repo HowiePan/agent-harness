@@ -74,7 +74,7 @@ node <Harness源码根>/integrations/codex/agent-harness-codex/scripts/local-sou
 
 可见 Agent Prompt 1.4 将完整的 Dispatch packet 写到控制根下的摘要绑定文件。Agent 必须读取该文件并校验精确字节的 SHA-256。读取 Coordinator 的终端请求时要给足输出预算；若输出出现截断标记，不能据此调用 `spawn_agent`。Codex 当前宿主会加密长 `spawn_agent.message`；有些宿主版本也不会在工具输出附带 `executed_tool_calls`。本地 Host 通过确定性任务名、原生调用/输出的 `call_id` 与 `turn_id`、返回的任务名和后续 Agent 可见性核验派发；若宿主提供截断元数据，则额外严格核对。Host Receipt 将证明强度标为 `host-redacted-message`，不宣称能独立复算实际 Prompt 字节；操作人仍须逐字传递生成 Prompt。字段存在但冲突、任务名错配或 Agent 不可观察时，继续拒绝绑定。
 
-常规质量命令默认初审后最多复审两次。已有权威问题需要一次性修复时，使用 `h:local engine quality <版本> repair-known`；它只修复当前开放问题、跑最终 Gate，并在 `routine-version-exit` 决定后生成注明未做全面复审的常规准出凭证。已知问题解决但原 Run 在最终 Gate 或收口阶段中断时，使用 `h:local engine quality <版本> closeout` 独立接续。它要求当前源码与最新质量 Run 一致、所有 Finding 已解决且有审查证据，不新增全面复审，不消耗复审预算；同一命令已有未完成 Run 时应继续该 Run，不能重复启动。只有 Project Descriptor 将目标列入 `majorReleaseTargets` 时，才可显式使用 `h:local engine quality <大版本> release-exhaustive`。
+常规 `quality` 命令先修复 Authority 中证据与路径齐全的开放 Finding，再初审、修复新 Finding，并最多复审两次；当前源码干净或复审额度用尽时停止。越过本项目禁写路径的 Finding 保持开放，项目内 Finding 仍继续修复；开放项阻止准出。只想修复已有权威问题时，使用 `h:local engine quality <版本> repair-known`；它不做全面复审，只跑最终 Gate，并在 `routine-version-exit` 决定后生成注明未做全面复审的常规准出凭证。已知问题解决但原 Run 在最终 Gate 或收口阶段中断时，使用 `h:local engine quality <版本> closeout` 独立接续。它要求当前源码与最新质量 Run 一致、所有 Finding 已解决且有审查证据，不新增全面复审，不消耗复审预算；同一命令已有未完成 Run 时应继续该 Run，不能重复启动。只有 Project Descriptor 将目标列入 `majorReleaseTargets` 时，才可显式使用 `h:local engine quality <大版本> release-exhaustive`。
 
 开发准出后使用 `h:local engine prerelease <版本>` 准备候选：版本元数据、CardWorld 自有 `release/docs-scope.json` 中全部主文档与目录的存量审计、fresh 最终 Gate 和真实 WASM 制品打包都在此阶段完成。`prerelease` 不消耗质量复审预算。候选封存并经用户审核后，从已绑定的 CardWorld checkout 提交 `h:local engine release <版本>`：Hook 将当前候选摘要和修订号固定到本次命令，Coordinator 复核并晋升状态，不创建另一个 Run，也不要求用户组合 `status` 与 `promote` CLI 脚本。Harness 源码同步引起的 Project Descriptor 重新绑定不改变已封存候选；晋升仍逐字节核对业务源码快照与封存制品。当前 V3.8.4 的开发准出凭证可以直接被入口读取；新增的项目侧文档配置作为允许的发布元数据差异记录。
 
@@ -125,6 +125,10 @@ agent-harness dev recover-run --manifest <manifest.json> --run <run-id>
 | `H4` | Kernel、Authority、持久化、关键 Schema、Registry/Recovery | 禁止热应用，必须显式迁移或走新 Release。 |
 
 `dev sync` 在一个命令内生成补丁计划、应用 H0–H3 变更、按需重新绑定 Project，并刷新默认本地 Codex 绑定。它保留 expected revision、命令 ID、制品摘要和 Receipt；H4 仍禁止热应用。需要审查固定计划时，仍可使用 `dev patch plan` 与 `dev patch apply`。H1 不允许重写已派发任务；当前协调进程保持原先已加载模块，新制品摘要用于后续编译和新 Run。
+
+H4 补丁若没有任何活动 Run，可在已绑定项目 checkout 显式执行 `agent-harness dev migrate --manifest <manifest.json> --no-active-run --command-id <稳定ID>`；补丁计划和应用时都复核零活动 Run，写入独立 `idleRebind` Receipt 并重新绑定，已终结的 Run 不被改写。有唯一闲置实施 Run 时仍使用 `--run <精确ID>` 的原迁移路线；两种参数不能同时提供。
+
+有唯一已完成审查、修复阻塞且无活动 Lease/Dispatch 的质量 Run 时，`dev migrate --run <精确ID>` 先核对来源、源码快照、Host Effect 和 Submission Evidence，再更新 H4 绑定，并以 `development-h4-quality-restart` 将旧 Run 记为失败。旧审查和修复证据留在 Authority；下一次相同 `quality` 命令从历史问题清单开始新一轮有界审查，不继承旧 Run 的轮次。
 
 实施 Agent 可以分批完成已批准的项目内工作。若本轮有经工作区快照核实的源码变更，但仍有项目内计划项，Agent 以 `implementation-incomplete` 返回阻塞结果；Coordinator 在同一 Run 内自动重新打开该 Feature，并让下一轮从当前源码和上次 Submission 继续。续接预算按项目内计划项计算，每项 20 轮、上限 200 轮；无源码进展、回到既有摘要、其他故障或预算耗尽时停止并报告具体阻断。跨项目集成证据、独立审查和发布批准不属于当前项目内实施 Feature 的完成条件。
 

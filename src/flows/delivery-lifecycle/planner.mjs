@@ -60,6 +60,7 @@ export const createDeliveryLifecyclePlanner = ({
     qualityBudgetScope: 'run',
     priorQualityReviews,
     repairOnly,
+    repairKnownBeforeReview: quality && intent.sourcePolicy === 'review-and-repair',
     closeoutOnly,
     requireRoutineExitDecision: repairOnly || closeoutOnly,
   };
@@ -75,10 +76,19 @@ export const createDeliveryLifecyclePlanner = ({
   });
   const features = repairOnly && !closeoutOnly
     ? repairsForFindings({
-      feature: { id: 'authority-inventory', logicalRoot: `quality:${intent.target}`, forbiddenPaths: (project.workspace?.excluded ?? ['.git', '.agent-harness-data']).filter(path => !(project.policy?.qualityVerificationOutputs ?? []).includes(path)), gatePlan: [], metadata: { qualityRoot: `${project.policy?.qualityRootPrefix ?? qualityRootPrefix}:${intent.target}`, reviewRound: 0, qualityContext: { target: intent.target, version: intent.target, verificationOutputPaths: project.policy?.qualityVerificationOutputs ?? [] } } },
+      feature: { id: 'authority-inventory', logicalRoot: `quality:${intent.target}`, forbiddenPaths: (project.workspace?.excluded ?? ['.git', '.agent-harness-data']).filter(path => !(project.policy?.qualityVerificationOutputs ?? []).includes(path)), gatePlan: [], metadata: { qualityRoot: `${project.policy?.qualityRootPrefix ?? qualityRootPrefix}:${intent.target}`, reviewRound: 0, qualityContext: { target: intent.target, version: intent.target, verificationOutputPaths: project.policy?.qualityVerificationOutputs ?? [], repairScopePaths: actionPaths.implement ?? [], findingScopePaths: project.policy?.qualityFindingPaths ?? [] } } },
       findings: intent.qualityRepairInventory.findings, dependsOn: [], repairOnly: true,
     })
     : compileWorkflowFeatures({ definition: workflowDefinition, routeId, templates, context: { intent: prerelease ? { ...intent, actionPaths } : intent, sourceDigest, project } });
+  if (profileConfig.repairKnownBeforeReview && intent.qualityRepairInventory.findings.length) {
+    const review = features.find(feature => feature.metadata?.qualityReview === true);
+    assert(review, 'QUALITY_REVIEW_FEATURE_REQUIRED', 'Full quality requires an initial review Feature.');
+    const repairs = repairsForFindings({ feature: { ...review, metadata: { ...review.metadata, reviewRound: 0 } },
+      findings: intent.qualityRepairInventory.findings, dependsOn: [], skipUnrepairable: true });
+    for (const repair of repairs) repair.metadata.initialQualityRepair = true;
+    review.dependsOn = [...new Set([...(review.dependsOn ?? []), ...repairs.map(item => item.id)])];
+    features.unshift(...repairs);
+  }
   const gateBindings = project.policy?.gateBindings ?? {};
   for (const feature of features) {
     const stageGates = resolveStageGates(gateBindings, feature.kind);
@@ -87,7 +97,7 @@ export const createDeliveryLifecyclePlanner = ({
     if (prerelease) feature.metadata.releaseDocumentationDigest = intent.releaseDocumentation.inventoryDigest;
   }
   return {
-    run: { runId, profileId, profileConfig, features, metadata: { workflow: { id: workflowDefinition.id, version: workflowDefinition.version, artifactDigest: workflowDefinition.artifactDigest }, qualityTarget: structuredClone(intent.qualityTarget), ...(intent.planRevision ? { planRevision: structuredClone(intent.planRevision) } : {}), ...(intent.changeRequest ? { changeRequest: structuredClone(intent.changeRequest) } : {}), ...(repairOnly ? { qualityRepairInventory: structuredClone(intent.qualityRepairInventory) } : {}), ...(closeoutOnly ? { qualityCloseout: structuredClone(intent.qualityCloseout) } : {}) } },
+    run: { runId, profileId, profileConfig, features, metadata: { workflow: { id: workflowDefinition.id, version: workflowDefinition.version, artifactDigest: workflowDefinition.artifactDigest }, qualityTarget: structuredClone(intent.qualityTarget), ...(intent.planRevision ? { planRevision: structuredClone(intent.planRevision) } : {}), ...(intent.changeRequest ? { changeRequest: structuredClone(intent.changeRequest) } : {}), ...(intent.qualityRepairInventory ? { qualityRepairInventory: structuredClone(intent.qualityRepairInventory) } : {}), ...(closeoutOnly ? { qualityCloseout: structuredClone(intent.qualityCloseout) } : {}) } },
     stopCondition: { type: repairOnly || closeoutOnly ? 'routine-version-exit' : quality ? 'quality-run-complete' : full ? `${stopConditionPrefix}-full-complete` : `${stopConditionPrefix}-action-complete`, action: intent.action, requiresFeatureCompletion: true, requiresAllFindingsResolved: full || quality || intent.action === 'implement' || intent.action === 'deliver', requiredFinalGates: gateIds },
     protectedOperations: ['publication', 'commit', 'push', 'legacy-destruction', 'privilege-expansion', 'external-cutover', 'irreversible-migration'],
   };

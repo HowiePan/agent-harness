@@ -148,7 +148,7 @@ Extension 身份对象的字段是 `id`、`version`、可选或注册后必需�
 
 内置 action：`full`、`requirements`/`req`、`plan`、`replan`、`implement`/`impl`、`scope`、`quality`/`qa`、`docs`、`prerelease`、`review`、`deliver`、`status`、`resume`、`recover`。`replan` 的 `change:<ID>` 参数引用项目输入中的 `planChangeRequests`；无参数时仅处理源码修正或上次被拒的计划审查。质量 preset 为 `full`、`review-only`、`recheck`、`repair-known`、`closeout`、`release-exhaustive`；需求 preset 为 `full`（默认，`intake → expansion → canonical`）、`expand-to-plan`（`intake → expansion → canonical → plan`）、`direct`（不扩展，`intake → canonical → plan`）、`plan-only`（`plan`）。
 
-`qualityReviewLimit.mode` 为 `bounded` 或 `unbounded`；`bounded` 时 `maxRechecks` 为非负整数，默认 2。新 Run 的预算为一次初审加最多两次修复后复审；同一 Run 的续接不重置预算。Target 的历史审查次数继续进入审计快照，但不扣新命令的预算。用尽额度仍未达到关闭条件时，Run 以 `incomplete` 和 `quality-review-limit-reached` 终结，不签发准出；新的显式 `quality` 命令可继承历史 Finding 并开启新的有界 Run。旧计划没有 `qualityBudgetScope:run` 时仍按原目标累计口径解释，不得改写其不可变配置。`unbounded` 只能用于已列入 `majorReleaseTargets` 的 `release-exhaustive`，同一大版本只允许一次启动，进程中断后须续接原 Run。`repair-known` 冻结当前权威台账的开放 Finding，只派发对应修复并运行最终 Gate；不做初审或复审，准出凭证注明 `fullReviewPerformed:false`，等待 `routine-version-exit` 人工决定后关闭。开放 Finding 为零时，它规划只读证据收口；相同命令已有未完成 Run 时，仍按单次启动规则继续原 Run。`closeout` 是独立收口入口：要求已有审查、全部 Finding 已解决且最新质量 Run 的源码摘要与当前源码一致；它不消耗复审预算，完成只读证据核对、fresh 最终 Gate 和必要的准出决定后，从不可变 `run-closure` 凭证派生可重复核验的 `version-clearance` 凭证，标记版本开发完成。该投影不修改 Kernel Authority；提交、发布和推送仍需单独授权。
+`qualityReviewLimit.mode` 为 `bounded` 或 `unbounded`；`bounded` 时 `maxRechecks` 为非负整数，默认 2。默认 `quality full` 先按 Authority 中证据与路径齐全的开放 Finding 修复，再进行一次初审及最多两次修复后复审；同一 Run 的续接不重置预算。审查中新发现的项目内 Finding 直接生成路径受限的修复 Feature，不要求预先列入 Project Descriptor；超出 qualityFindingPaths 的交付前置条件保留在 Submission 与 Target 的 deliveryPrerequisites 中，不占用 Finding 修复与复审预算；真正的代码 Finding 仍须解决才能质量准出。Target 的历史审查次数继续进入审计快照，但不扣新命令的预算。用尽额度仍未达到关闭条件时，Run 以 `incomplete` 和 `quality-review-limit-reached` 终结，不签发准出；新的显式 `quality` 命令可继承历史 Finding 并开启新的有界 Run。旧计划没有 `qualityBudgetScope:run` 时仍按原目标累计口径解释，不得改写其不可变配置。`unbounded` 只能用于已列入 `majorReleaseTargets` 的 `release-exhaustive`，同一大版本只允许一次启动，进程中断后须续接原 Run。`repair-known` 冻结当前权威台账的开放 Finding，只派发对应修复并运行最终 Gate；不做初审或复审，准出凭证注明 `fullReviewPerformed:false`，等待 `routine-version-exit` 人工决定后关闭。开放 Finding 为零时，它规划只读证据收口；相同命令已有未完成 Run 时，仍按单次启动规则继续原 Run。`closeout` 是独立收口入口：要求已有审查、全部 Finding 已解决且最新质量 Run 的源码摘要与当前源码一致；它不消耗复审预算，完成只读证据核对、fresh 最终 Gate 和必要的准出决定后，从不可变 `run-closure` 凭证派生可重复核验的 `version-clearance` 凭证，标记版本开发完成。该投影不修改 Kernel Authority；提交、发布和推送仍需单独授权。
 
 `prerelease` 独立消费现有 `development-complete` 准出凭证，不计入质量复审预算。项目必须在业务仓声明符合 `release-documentation-scope.schema.json` 的文档范围；`documents` 的 `main` 和可选 `directory`、独立 `directories` 允许修改这些文件及目录下全部文件。预发布文档节点审计整个现存范围，包括旧版遗漏，结果列出 `auditedFiles`、`updatedFiles`、`resolved`、`unresolved`；未覆盖文件或未解决问题阻断候选封存。项目的实际打包 Gate 应为 `scope:final,required:false,forceFresh:true`，只在预发布加入必需 Gate 清单。候选清单绑定最终源码、文档、制品摘要、开发准出及 Gate 回执；正式晋升只改发布状态，要求精确候选摘要和批准 Decision。
 
@@ -225,12 +225,13 @@ Project Descriptor 是 Registry 中的规范化结果，通常由生成器产生
 | `policy.itemKey`、`policy.itemPaths` | 通用批处理项键与路径。 |
 | `policy.recovery` | 恢复策略。 |
 | `policy.qualityVerificationOutputs` | 质量修复时可写的工作区相对构建/测试产物目录；不授予源码修改权限。 |
+| `policy.qualityFindingPaths` | 可作为代码审查 Finding 的项目内源码路径范围；范围外的交付前置条件保留在 `deliveryPrerequisites`，不进入代码修复或复审预算。 |
 | `gateRecipes` | 可执行 Gate 声明。 |
 | `artifactProviders` | Artifact Provider ID 数组。 |
 
 `policy.recovery` 的字段是 `automaticLineageResolution`、`automaticOrdinaryResume`、可选的 `automaticBlockedRunReplacement`、`automaticVerifiedHardRecovery` 和固定为 `true` 的 `preserveSupersededRuns`。`automaticBlockedRunReplacement` 只允许源摘要变化、无活动 Lease/Dispatch 的已耗尽 blocked Run 保留审计并以新 Run 重规划；自动恢复仍需通过对应验证，不等于自动批准硬恢复。
 
-质量审查本身仍只读。交付 Profile 从已注册 Project Descriptor 读取 `qualityVerificationOutputs`，在修复派单中单独声明验证产物路径；源码仍只允许写入 Finding 的 `affectedPaths`。路径必须位于当前工作区内，不能穿过符号链接或与禁止路径重叠；缺少所需源码/测试路径或验证输出路径时，Agent 必须报告精确阻塞，不得自行扩权。
+质量审查本身仍只读。交付 Profile 从已注册 Project Descriptor 读取 `qualityVerificationOutputs`，在修复派单中单独声明验证产物路径；源码最初只允许写入 Finding 的 `affectedPaths`。需要额外源码或测试路径时，Agent 返回结构化 `blocker.repairCandidatePaths`；Harness 校验候选属于同一项目的 `actionPaths.implement`、与原 Finding 同根、位于当前工作区且不穿过链接或禁写/验证产物路径，然后在同一 Run 留痕扩展并重新派发。无法通过校验的路径继续保持阻塞。
 
 ## 5. Workflow、Node、Feature 与循环
 

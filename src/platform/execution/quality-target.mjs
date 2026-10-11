@@ -1,5 +1,6 @@
 import { digestJson, withoutKeys } from '../../common/canonical.mjs';
 import { assert } from '../../common/errors.mjs';
+import { qualityFindingInScope } from './quality-classification.mjs';
 
 const digestPattern = /^[a-f0-9]{64}$/;
 const terminalRun = run => run?.status === 'closed'
@@ -86,7 +87,7 @@ export const assertQualityTargetSnapshot = input => {
   return structuredClone(input);
 };
 
-export const deriveQualityTargetSnapshot = ({ projectId, workflowId, target, sourceDigest, runs = [], legacyInventory = null, includeNonterminal = false, scopeRoot = null } = {}) => {
+export const deriveQualityTargetSnapshot = ({ projectId, workflowId, target, sourceDigest, runs = [], legacyInventory = null, includeNonterminal = false, scopeRoot = null, findingScopePaths = [] } = {}) => {
   assert(typeof projectId === 'string' && projectId.length > 0 && typeof workflowId === 'string' && workflowId.length > 0 && typeof target === 'string' && target.length > 0 && digestPattern.test(sourceDigest ?? ''), 'QUALITY_TARGET_INPUT_INVALID', 'Quality Target derivation requires Project, Workflow, target, and source identities.');
   assert(Array.isArray(runs), 'QUALITY_TARGET_RUNS_INVALID', 'Quality Target derivation requires an array of Run Authority states.');
   const ledger = new Map();
@@ -138,7 +139,24 @@ export const deriveQualityTargetSnapshot = ({ projectId, workflowId, target, sou
     sourceDigest: run.sourceDigest,
     status: run.status,
   }));
-  const findings = [...ledger.values()].map(item => ({ ...item, observations: [...item.observations].sort((left, right) => String(left.observedAt ?? '').localeCompare(String(right.observedAt ?? '')) || String(left.runId).localeCompare(String(right.runId))) })).sort((left, right) => left.id.localeCompare(right.id));
+  const classified = [...ledger.values()].map(item => ({ ...item, observations: [...item.observations].sort((left, right) => String(left.observedAt ?? '').localeCompare(String(right.observedAt ?? '')) || String(left.runId).localeCompare(String(right.runId))) })).sort((left, right) => left.id.localeCompare(right.id));
+  const findings = classified.filter(item => qualityFindingInScope(item, findingScopePaths));
+  const prerequisiteLedger = new Map(classified.filter(item => !qualityFindingInScope(item, findingScopePaths))
+    .map(item => [item.id, { ...item, classification: 'delivery-prerequisite', reason: 'outside-quality-source-scope' }]));
+  for (const run of selected) for (const submission of run.submissions ?? []) {
+    if (submission.supersededAt || submission.result?.status !== 'completed') continue;
+    for (const item of submission.result.deliveryPrerequisites ?? []) prerequisiteLedger.set(item.id, {
+      id: item.id, severity: item.severity ?? null, summary: item.summary, status: 'open', source: 'review-submission',
+      affectedPaths: [...(item.affectedPaths ?? [])], evidence: [...(item.evidence ?? [])],
+      evidenceRefs: [...(submission.evidenceRefs ?? [])], firstSeenRunId: prerequisiteLedger.get(item.id)?.firstSeenRunId ?? run.runId,
+      lastSeenRunId: run.runId, classification: 'delivery-prerequisite', reason: item.reason,
+      observations: [...(prerequisiteLedger.get(item.id)?.observations ?? []), {
+        runId: run.runId, authorityDigest: run.authorityDigest, sourceDigest: submission.outputSourceDigest ?? run.sourceDigest,
+        status: 'open', evidenceRefs: [...(submission.evidenceRefs ?? [])], observedAt: submission.submittedAt ?? run.updatedAt ?? null,
+      }],
+    });
+  }
+  const prerequisites = [...prerequisiteLedger.values()].sort((left, right) => left.id.localeCompare(right.id));
   const body = {
     protocolVersion: '1.0',
     kind: 'quality-target-snapshot',
@@ -150,6 +168,7 @@ export const deriveQualityTargetSnapshot = ({ projectId, workflowId, target, sou
     sourceDigest,
     runs: runRefs,
     findings,
+    prerequisites,
     reviewHistory,
     exhaustiveRunIds,
     migration: legacyInventory ? { source: 'project-descriptor', inventoryDigest: legacyInventory.inventoryDigest } : null,
@@ -157,7 +176,7 @@ export const deriveQualityTargetSnapshot = ({ projectId, workflowId, target, sou
   return Object.freeze({ ...body, targetDigest: qualityTargetDigest(body) });
 };
 
-export const createQualityRepairInventorySnapshot = targetInput => {
+export const createQualityRepairInventorySnapshot = (targetInput, { skipIncomplete = false } = {}) => {
   const target = assertQualityTargetSnapshot(targetInput);
   const findings = target.findings.filter(item => item.status === 'open').map(item => ({
     id: item.id, severity: item.severity, summary: item.summary,
@@ -165,7 +184,7 @@ export const createQualityRepairInventorySnapshot = targetInput => {
     evidence: [...new Set([...(item.evidence ?? []), ...item.evidenceRefs])],
     evidenceRefs: [...item.evidenceRefs], symbols: [...(item.symbols ?? [])], contracts: [...(item.contracts ?? [])],
     generatedOutputs: [...(item.generatedOutputs ?? [])], conflictKeys: [...(item.conflictKeys ?? [])],
-  }));
+  })).filter(item => !skipIncomplete || item.affectedPaths.length > 0 && item.evidence.length > 0);
   for (const finding of findings) assert(finding.affectedPaths.length > 0 && finding.evidence.length > 0, 'QUALITY_REPAIR_FINDING_INCOMPLETE', `Finding ${finding.id} requires affected paths and evidence for repair-only execution.`);
   const body = { version: '1.0', kind: 'quality-repair-inventory', projectId: target.projectId, workflowId: target.workflowId, target: target.target, ...(target.scopeRoot ? { scopeRoot: target.scopeRoot } : {}), sourceDigest: target.sourceDigest, targetDigest: target.targetDigest, findings };
   return Object.freeze({ ...body, inventoryDigest: digestJson(body) });

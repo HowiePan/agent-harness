@@ -8,9 +8,22 @@ import { createDevelopmentPatchPlan, applyDevelopmentPatchPlan, diffDevelopmentF
 import { AuthorityStore } from '../src/kernel/authority-store.mjs';
 import { developmentSourceManifestDigest, writeDevelopmentSourceManifest } from '../src/application/development-source.mjs';
 import { syncDevelopmentSource } from '../src/interfaces/cli/local-development-sync.mjs';
-import { assertDevelopmentRunRecoveryEffects, hasRejectedPlanReview, selectDevelopmentRecoveryExtension } from '../src/application/development-run-recovery.mjs';
+import { assertDevelopmentRunRecoveryEffects, assertH4QualityRestartable, hasRejectedPlanReview, selectDevelopmentRecoveryExtension } from '../src/application/development-run-recovery.mjs';
 
 const record = (path, sha256 = 'a'.repeat(64)) => ({ path, sha256, size: 1 });
+
+test('H4 quality restart requires a reviewed, blocked, idle Run', () => {
+  const state = { status: 'all-remaining-blocked', metadata: { commandIntent: { action: 'quality' } },
+    features: [{ metadata: { stage: 'quality' }, state: 'completed' },
+      { metadata: { stage: 'quality-repair' }, state: 'blocked' }], leases: [], dispatches: [] };
+  assert.doesNotThrow(() => assertH4QualityRestartable(state));
+  for (const invalid of [
+    { ...state, status: 'running' },
+    { ...state, metadata: { commandIntent: { action: 'implement' } } },
+    { ...state, leases: [{ status: 'active' }] },
+    { ...state, features: [...state.features, { metadata: { stage: 'quality-recheck' }, state: 'pending' }] },
+  ]) assert.throws(() => assertH4QualityRestartable(invalid), error => error.code === 'DEVELOPMENT_H4_QUALITY_NOT_RESTARTABLE');
+});
 
 test('rejected Plan review permits H1 recovery only for the latest completed negative decision', () => {
   const state = { status: 'closure-blocked', features: [{ id: 'review', state: 'completed', metadata: { stage: 'plan-review' } }],
@@ -105,10 +118,42 @@ test('explicit H4 migration accepts only the exact idle Run; ordinary patch appl
     await assert.rejects(() => applyDevelopmentPatchPlan(plan, { commandId: 'h4-wrong-run',
       authorityDecision: { actor: 'test', decision: 'approved' }, h4MigrationRunId: 'unrelated' }),
     error => error.code === 'DEVELOPMENT_H4_MIGRATION_RUN_CHANGED');
+    await assert.rejects(() => applyDevelopmentPatchPlan(plan, { commandId: 'h4-not-idle',
+      authorityDecision: { actor: 'test', decision: 'approved' }, h4IdleRebind: true }),
+    error => error.code === 'DEVELOPMENT_H4_MIGRATION_RUN_CHANGED');
     const result = await applyDevelopmentPatchPlan(plan, { commandId: 'h4-exact-run',
       authorityDecision: { actor: 'test', decision: 'approved' }, h4MigrationRunId: 'implementation' });
     assert.equal(result.receipt.level, 'H4');
     assert.equal(result.receipt.migrationRunId, 'implementation');
+  } finally { await rm(dataRoot, { recursive: true, force: true }); }
+});
+
+test('explicit H4 idle rebind advances a binding only when no Run is active', async () => {
+  const controlRoot = harnessProjectRoot();
+  const dataRoot = resolve(controlRoot, '.tmp', 'development-patch-tests', `h4-idle-${process.pid}-${Date.now()}`);
+  await mkdir(dataRoot, { recursive: true });
+  try {
+    const created = await writeDevelopmentSourceManifest({ bindingId: 'h4-idle-test', sourceRoot: controlRoot,
+      controlRoot, dataRoot, configPath: resolve(controlRoot, 'examples', 'project-harness.json'), projectRoot: controlRoot });
+    const manifest = structuredClone(created.manifest);
+    const altered = files => files.map(item => item.path === 'src/kernel/kernel.mjs'
+      ? { ...item, sha256: '0'.repeat(64) } : item);
+    manifest.files = altered(manifest.files);
+    manifest.sourceIdentity.runtimeFiles = altered(manifest.sourceIdentity.runtimeFiles);
+    manifest.release.artifactDigest = '1'.repeat(64);
+    manifest.sourceIdentity.runtimeDigest = '1'.repeat(64);
+    manifest.sourceIdentity.sourceDigest = '2'.repeat(64);
+    delete manifest.manifestDigest;
+    manifest.manifestDigest = developmentSourceManifestDigest(manifest);
+    await atomicWriteJson(created.file, manifest, { root: dataRoot });
+    const plan = await createDevelopmentPatchPlan(created.file);
+    assert.equal(plan.level, 'H4');
+    assert.deepEqual(plan.activeRuns, []);
+    const result = await applyDevelopmentPatchPlan(plan, { commandId: 'h4-idle-rebind',
+      authorityDecision: { actor: 'test', decision: 'approved' }, h4IdleRebind: true });
+    assert.equal(result.receipt.level, 'H4');
+    assert.equal(result.receipt.idleRebind, true);
+    assert.equal(result.receipt.migrationRunId, undefined);
   } finally { await rm(dataRoot, { recursive: true, force: true }); }
 });
 

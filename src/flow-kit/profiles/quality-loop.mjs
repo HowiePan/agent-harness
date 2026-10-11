@@ -63,7 +63,22 @@ const repairGroups = findings => {
   return groups;
 };
 
-export const repairsForFindings = ({ feature, findings, dependsOn = [feature.id], repairOnly = false }) => repairGroups(findings).map(group => {
+export const repairsForFindings = ({ feature, findings, dependsOn = [feature.id], repairOnly = false, skipUnrepairable = false }) => repairGroups(findings.filter(finding => {
+  const affectedPaths = unique(finding.affectedPaths ?? [])
+    .map(value => safeQualityPath(value, 'QUALITY_REPAIR_SOURCE_PATH_INVALID', 'Quality repair source path'));
+  const verificationOutputs = verificationOutputPaths(feature);
+  for (const path of affectedPaths) {
+    if (feature.forbiddenPaths.some(forbidden => pathOverlaps([path], [slash(forbidden)]))) {
+      if (skipUnrepairable) return false;
+      assert(false, 'QUALITY_REPAIR_SOURCE_FORBIDDEN', `Quality repair source path overlaps a forbidden path: ${path}`);
+    }
+    if (verificationOutputs.some(output => pathOverlaps([path], [output]))) {
+      if (skipUnrepairable) return false;
+      assert(false, 'QUALITY_REPAIR_SOURCE_OUTPUT_OVERLAP', `Quality repair source path overlaps a verification output: ${path}`);
+    }
+  }
+  return true;
+})).map(group => {
   const finding = group[0];
   const findingIds = group.map(item => item.id);
   const qualityRoot = feature.metadata.qualityRoot ?? feature.logicalRoot;
@@ -81,7 +96,7 @@ export const repairsForFindings = ({ feature, findings, dependsOn = [feature.id]
   const taskProjection = taskFeatureProjection(defineNodeTaskContract({
     role: { id: 'quality-repairer', description: 'Repairs compatible evidence-backed quality findings within their authorized paths.' },
     objective: `Resolve quality findings ${findingIds.join(', ')} within their shared affected paths.`,
-    instructions: ['Inspect the cited finding evidence and current source, including affected tests.', 'Apply the smallest complete repair.', 'Run focused checks that directly verify the repaired behavior. If a required source or test file is outside allowedPaths, report a scope blocker with that exact path.'],
+    instructions: ['Inspect the cited finding evidence and current source, including affected tests.', 'Apply the smallest complete repair.', 'Run focused checks that directly verify the repaired behavior. If a required source or test file is outside allowedPaths, return blocker.kind=scope and structured blocker.repairCandidatePaths with the exact workspace-relative path.'],
     inputs: [{ id: 'finding', source: 'feature', path: 'findingId', required: true, description: 'The exact finding assigned to this repair Feature.' }],
     steps: [{ id: 'repair', instruction: `Repair findings ${findingIds.join(', ')}.` }, { id: 'verify', instruction: `Verify each finding with a passing checkpoint named verify:<findingId>.` }],
     constraints: ['Modify only affected authorized paths.', 'Do not mark the finding resolved without current verification evidence.'],
@@ -126,6 +141,7 @@ export const repairsForFindings = ({ feature, findings, dependsOn = [feature.id]
 
 const nextRecheck = ({ state, feature }) => {
   const root = feature.metadata.qualityRoot;
+  if (feature.metadata.initialQualityRepair) return [];
   if (state.profile?.config?.repairOnly || qualityReviewBudgetExhausted(state, root)) return [];
   const rootFeatures = state.features.filter(item => item.metadata?.qualityRoot === root);
   if (qualityReviewNoProgress(state, root)) return [];
@@ -185,7 +201,7 @@ export const createQualityFollowUpFeatures = ({ state, feature, findings, result
     const policy = feature.metadata?.qualityFindingPolicy
       ?? (feature.metadata?.sourcePolicy === 'review-and-repair' ? 'repair-and-rereview' : 'record-only');
     assert(['repair-and-rereview', 'record-only'].includes(policy), 'QUALITY_FINDING_POLICY_INVALID', 'Quality review has an unknown Finding follow-up policy.');
-    if (policy === 'repair-and-rereview') return repairsForFindings({ feature: { ...feature, metadata: { ...feature.metadata, qualityRoot: feature.metadata.qualityRoot ?? feature.logicalRoot, reviewRound: feature.metadata.reviewRound ?? 1 } }, findings });
+    if (policy === 'repair-and-rereview') return repairsForFindings({ feature: { ...feature, metadata: { ...feature.metadata, qualityRoot: feature.metadata.qualityRoot ?? feature.logicalRoot, reviewRound: feature.metadata.reviewRound ?? 1 } }, findings, skipUnrepairable: true });
     return [];
   }
   if (feature.metadata?.repairFindingId && result?.status === 'completed') return nextRecheck({ state, feature });

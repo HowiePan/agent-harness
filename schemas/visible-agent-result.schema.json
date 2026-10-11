@@ -26,6 +26,7 @@
     "notMade": { "type": "array", "items": { "type": "string" } },
     "changedFiles": { "type": "array", "uniqueItems": true, "items": { "type": "string", "minLength": 1 } },
     "observations": { "type": "array", "items": { "type": "string" } },
+    "deliveryPrerequisites": { "type": "array", "items": { "type": "object", "required": ["id", "summary", "evidence", "affectedPaths", "classification", "reason"], "properties": { "id": { "type": "string", "minLength": 1 }, "summary": { "type": "string", "minLength": 1 }, "severity": { "enum": ["P0", "P1", "P2", "P3"] }, "evidence": { "type": "array", "items": { "type": "string" } }, "affectedPaths": { "type": "array", "items": { "type": "string" } }, "classification": { "const": "delivery-prerequisite" }, "reason": { "type": "string", "minLength": 1 } }, "additionalProperties": false } },
     "diagnostics": { "type": "array", "uniqueItems": true, "items": { "type": "object", "required": ["id", "summary", "evidence"], "properties": { "id": { "type": "string", "minLength": 1 }, "summary": { "type": "string", "minLength": 1 }, "evidence": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "type": "string", "minLength": 1 } } }, "additionalProperties": false } },
     "diagnosticDispositions": { "type": "array", "uniqueItems": true, "items": { "type": "object", "required": ["id", "disposition", "evidence"], "properties": { "id": { "type": "string", "minLength": 1 }, "disposition": { "enum": ["finding", "not-reproduced"] }, "findingId": { "type": "string", "minLength": 1 }, "evidence": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "type": "string", "minLength": 1 } } }, "additionalProperties": false } },
     "findings": {
@@ -70,7 +71,7 @@
     "failureClass": { "type": ["string", "null"] },
     "blocker": {
       "anyOf": [
-        { "type": "object", "required": ["kind", "summary"], "properties": { "kind": { "type": "string" }, "summary": { "type": "string" }, "resumeWhen": { "type": ["string", "null"] }, "code": { "type": "string" } }, "additionalProperties": false },
+        { "type": "object", "required": ["kind", "summary"], "properties": { "kind": { "type": "string" }, "summary": { "type": "string" }, "resumeWhen": { "type": ["string", "null"] }, "code": { "type": "string" }, "repairCandidatePaths": { "type": "array", "minItems": 1, "maxItems": 3, "uniqueItems": true, "items": { "type": "string", "minLength": 1 } } }, "additionalProperties": false },
         { "type": "null" }
       ]
     }

@@ -3,6 +3,7 @@ import { digestJson } from '../../common/canonical.mjs';
 import { assert } from '../../common/errors.mjs';
 import { assertJsonSchema, assertSchemaDefinition } from '../../common/json-schema.mjs';
 import { assertKnownFindingDispositions, assertKnownFindingInventory } from './known-finding-inventory.mjs';
+import { classifyQualityFindings, qualityFindingInScope } from './quality-classification.mjs';
 
 const businessResultSchema = JSON.parse(readFileSync(new URL('../../../schemas/result.schema.json', import.meta.url), 'utf8'));
 export const VISIBLE_AGENT_RESULT_CONTRACT_VERSION = '1.2';
@@ -45,6 +46,17 @@ export const validateBusinessResult = (input, { conversationVisible = false, rep
     code: conversationVisible ? 'VISIBLE_RESULT_SCHEMA_INVALID' : 'RESULT_SCHEMA_INVALID',
     label: conversationVisible ? 'Conversation-visible Agent result' : 'Agent result',
   });
+  if (feature?.metadata?.qualityReview === true && result.status === 'completed') {
+    const findingScopePaths = feature.metadata.qualityContext?.findingScopePaths;
+    for (const item of result.deliveryPrerequisites ?? []) {
+      assert(item.evidence.length > 0 && (!findingScopePaths?.length || !qualityFindingInScope(item, findingScopePaths)),
+        'QUALITY_PREREQUISITE_INVALID', 'Delivery prerequisites require evidence and cannot claim a code Finding within the review scope.');
+    }
+    const classified = classifyQualityFindings(result.findings, findingScopePaths);
+    if (result.findings !== undefined) result.findings = classified.findings;
+    if (classified.deliveryPrerequisites.length) result.deliveryPrerequisites = [...(result.deliveryPrerequisites ?? []), ...classified.deliveryPrerequisites];
+    if (result.outputs?.quality?.value?.findings) result.outputs.quality.value.findings = structuredClone(classified.findings);
+  }
   assert(Buffer.byteLength(JSON.stringify(result.outputs ?? {})) <= 256 * 1024, 'RESULT_OUTPUT_BUDGET_EXCEEDED', 'Typed node outputs exceed 256 KiB.');
   for (const [portId, output] of Object.entries(result.outputs ?? {})) assert(/^[a-z][a-z0-9.-]{0,63}$/.test(portId) && output.schemaId, 'RESULT_OUTPUT_PORT_INVALID', 'Typed node output port is invalid.');
   if (result.status === 'completed' && feature?.metadata?.outputPorts) {

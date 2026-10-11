@@ -8,9 +8,10 @@ import { loadExtensionPack } from '../src/platform/extensions/contract.mjs';
 import { createVisibleHostAdapter } from '../src/platform/plugins/runtime/visible-host-adapter.mjs';
 import { harnessTemporaryRoot } from '../src/common/write-boundary.mjs';
 import { digestJson, sha256 } from '../src/common/canonical.mjs';
-import { createQualityFollowUpFeatures, createQualityGateDiagnosticReview, validateQualityReviewPolicies } from '../src/flow-kit/profiles/quality-loop.mjs';
+import { createQualityFollowUpFeatures, createQualityGateDiagnosticReview, repairsForFindings, validateQualityReviewPolicies } from '../src/flow-kit/profiles/quality-loop.mjs';
 import { qualityReviewBudgetExhausted } from '../src/flow-kit/profiles/quality-budget.mjs';
 import { retireUnresumableQualityRun } from '../src/application/quality-run-retirement.mjs';
+import { createDeliveryLifecycleProfile } from '../src/flows/delivery-lifecycle/policy/delivery-lifecycle.mjs';
 
 const releaseIdentity = { version: '1.0.0', artifactDigest: 'a'.repeat(64), verified: true };
 
@@ -41,9 +42,22 @@ test('a quality Finding cannot turn verification output into a source-edit allow
     metadata: { qualityReview: true, qualityFindingPolicy: 'repair-and-rereview', qualityRoot: 'quality:fixture', qualityContext: { verificationOutputPaths: ['.cardworld-local'] } },
   };
   const findings = [{ id: 'Q-unsafe', severity: 'P1', summary: 'Unsafe repair scope', affectedPaths: ['.cardworld-local/cache'], generatedOutputs: [], evidence: ['fixture'] }];
-  assert.throws(() => createQualityFollowUpFeatures({ feature, findings }), error => error.code === 'QUALITY_REPAIR_SOURCE_OUTPUT_OVERLAP');
+  assert.throws(() => repairsForFindings({ feature, findings }), error => error.code === 'QUALITY_REPAIR_SOURCE_OUTPUT_OVERLAP');
   findings[0].affectedPaths = ['.GIT/objects'];
-  assert.throws(() => createQualityFollowUpFeatures({ feature, findings }), error => error.code === 'QUALITY_REPAIR_SOURCE_FORBIDDEN');
+  assert.throws(() => repairsForFindings({ feature, findings }), error => error.code === 'QUALITY_REPAIR_SOURCE_FORBIDDEN');
+});
+
+test('quality Profile keeps out-of-scope Findings open while authorizing in-scope repairs', () => {
+  const feature = {
+    id: 'quality', logicalRoot: 'quality:fixture', forbiddenPaths: ['tabletop-collection'],
+    metadata: { stage: 'quality', qualityReview: true, qualityFindingPolicy: 'repair-and-rereview', qualityRoot: 'quality:fixture' },
+  };
+  const reviewed = { status: 'completed', findings: [finding, { ...finding, id: 'Q-external', affectedPaths: ['tabletop-collection/engine-artifact.lock.json'] }] };
+  const verdict = createDeliveryLifecycleProfile().validateResult({ state: {}, feature, result: reviewed });
+  assert.equal(verdict.ok, true);
+  const repairs = createQualityFollowUpFeatures({ state: {}, feature, findings: reviewed.findings, result: reviewed });
+  assert.deepEqual(repairs.map(item => item.metadata.repairFindingId), [finding.id]);
+  assert.deepEqual(repairs[0].allowedPaths, ['README.md']);
 });
 
 test('batch quality budgets count reviews separately for each quality root', () => {
@@ -97,10 +111,12 @@ const finding = {
 const openDisposition = [{ id: finding.id, disposition: 'open', evidence: ['README.md:1'] }];
 const cleanDisposition = [{ id: finding.id, disposition: 'not-reproduced', evidence: ['fresh README.md check'] }];
 const externalFinding = { ...finding, id: 'Q-E2E-002', summary: 'Separate fixture file fails a full check.', evidence: ['OTHER.md:1'], affectedPaths: ['OTHER.md'], conflictKeys: ['fixture-other'] };
+const forbiddenFinding = { ...finding, id: 'Q-E2E-FORBIDDEN', summary: 'Dependency outside this project remains open.', evidence: ['external lock version'], affectedPaths: ['tabletop-collection/engine-artifact.lock.json'], conflictKeys: [] };
 const overlappingFinding = { ...finding, id: 'Q-E2E-003', summary: 'Second defect in the same file.', evidence: ['README.md:2'], generatedOutputs: ['generated/second'] };
+const scopeFinding = { ...finding, id: 'Q-E2E-SCOPE', summary: 'Source and focused test both need a repair.', evidence: ['fixture/source.txt:1'], affectedPaths: ['fixture/source.txt'] };
 const externalDiagnostic = { id: 'full-check-other', summary: 'Full check fails in OTHER.md.', evidence: ['host:full-check:OTHER.md:1'] };
 
-const createHost = ({ workspace, failFirstWait = false, runningWaitCount = 0, failFirstInspect = false, failFirstConfirm = false, failFirstResult = false, repeatFindingOnce = false, repeatFindingCount = null, rejectRepairResultWithEdit = false, invalidRepairCheckpointOnce = false, externalDiagnosticOnce = false, overlappingFindings = false, missingDiagnosticDispositionOnce = false, cleanInitialReview = false, rejectProfileResultOnce = false, advanceClockOnResult = null, now = () => new Date().toISOString() }) => {
+const createHost = ({ workspace, failFirstWait = false, runningWaitCount = 0, failFirstInspect = false, failFirstConfirm = false, failFirstResult = false, repeatFindingOnce = false, repeatFindingCount = null, rejectRepairResultWithEdit = false, invalidRepairCheckpointOnce = false, externalDiagnosticOnce = false, overlappingFindings = false, missingDiagnosticDispositionOnce = false, cleanInitialReview = false, cleanAfterKnownRepair = false, includeForbiddenFinding = false, scopeBlockOnce = false, rejectProfileResultOnce = false, advanceClockOnResult = null, now = () => new Date().toISOString() }) => {
   const agents = new Map();
   const stats = { spawnCount: 0, containCount: 0, terminalCount: 0, maxActive: 0, reconcileCount: 0 };
   let sequence = 0;
@@ -115,6 +131,7 @@ const createHost = ({ workspace, failFirstWait = false, runningWaitCount = 0, fa
   let shouldConfirmExternalFinding = externalDiagnosticOnce;
   let shouldOmitDiagnosticDisposition = missingDiagnosticDispositionOnce;
   let shouldRejectProfileResult = rejectProfileResultOnce;
+  let shouldScopeBlock = scopeBlockOnce;
   const adapter = createVisibleHostAdapter({
     provider: 'quality-e2e-host',
     adapterVersion: '1.1.0',
@@ -213,10 +230,27 @@ const createHost = ({ workspace, failFirstWait = false, runningWaitCount = 0, fa
           });
         }
         if (cleanInitialReview) return finish({ result: result({ summary: 'Initial quality review is clean.', findings: [], knownFindingDispositions: cleanDisposition, outputs: { quality: { schemaId: 'delivery-quality-v1', value: { findings: [] }, evidenceRefs: ['host:review'] } } }), receipt: { operation: 'result', stage } });
-        const found = overlappingFindings ? [finding, overlappingFinding] : [finding];
-        return finish({ result: result({ summary: 'Initial full review found defects.', findings: found, knownFindingDispositions: openDisposition, outputs: { quality: { schemaId: 'delivery-quality-v1', value: { findings: found }, evidenceRefs: ['host:review'] } } }), receipt: { operation: 'result', stage } });
+        if (cleanAfterKnownRepair && (await readFile(resolve(workspace, 'README.md'), 'utf8')).includes('verified repair'))
+          return finish({ result: result({ summary: 'Known Finding was repaired before review.', findings: [], knownFindingDispositions: cleanDisposition, outputs: { quality: { schemaId: 'delivery-quality-v1', value: { findings: [] }, evidenceRefs: ['host:review'] } } }), receipt: { operation: 'result', stage } });
+        const found = [...(scopeBlockOnce ? [scopeFinding] : overlappingFindings ? [finding, overlappingFinding] : [finding]), ...(includeForbiddenFinding ? [forbiddenFinding] : [])];
+        return finish({ result: result({ summary: 'Initial full review found defects.', findings: found, knownFindingDispositions: scopeBlockOnce ? cleanDisposition : openDisposition, outputs: { quality: { schemaId: 'delivery-quality-v1', value: { findings: found }, evidenceRefs: ['host:review'] } } }), receipt: { operation: 'result', stage } });
       }
       if (stage === 'quality-repair') {
+        if (scopeBlockOnce && task.packet.feature.metadata.repairFindingId === scopeFinding.id) {
+          const sourcePath = resolve(workspace, 'fixture/source.txt');
+          const testPath = resolve(workspace, 'fixture/behavior.test.txt');
+          if (shouldScopeBlock) {
+            shouldScopeBlock = false;
+            await writeFile(sourcePath, 'partial source repair\n', 'utf8');
+            return finish({ result: { status: 'blocked', summary: 'Focused verification requires a test change.', changedFiles: ['fixture/source.txt'],
+              failureClass: 'scope-blocker', blocker: { kind: 'scope', summary: 'The focused test is outside this Dispatch.', repairCandidatePaths: ['fixture/behavior.test.txt'] } }, receipt: { operation: 'result', stage } });
+          }
+          assert(task.packet.feature.allowedPaths.includes('fixture/behavior.test.txt'));
+          await writeFile(sourcePath, 'verified source repair\n', 'utf8');
+          await writeFile(testPath, 'verified focused test\n', 'utf8');
+          return finish({ result: result({ summary: 'Source and test repaired.', changedFiles: ['fixture/source.txt', 'fixture/behavior.test.txt'], checkpoint: 'scope-repair' }),
+            runtimeEvidence: { verificationReceipts: [{ id: 'scope-repair', status: 'passed', evidence: ['fixture/behavior.test.txt'] }] }, receipt: { operation: 'result', stage } });
+        }
         const repairPath = task.packet.feature.metadata.repairFindingId === externalFinding.id ? 'OTHER.md' : 'README.md';
         if (!task.repaired) {
           const current = await readFile(resolve(workspace, repairPath), 'utf8');
@@ -289,7 +323,7 @@ const createHost = ({ workspace, failFirstWait = false, runningWaitCount = 0, fa
   return { adapter, agents, stats };
 };
 
-const setup = async ({ failFirstWait = false, runningWaitCount = 0, failFirstInspect = false, failFirstConfirm = false, failFirstResult = false, repeatFindingOnce = false, repeatFindingCount = null, rejectRepairResultWithEdit = false, invalidRepairCheckpointOnce = false, externalDiagnosticOnce = false, gateFailureUntilRepair = false, overlappingFindings = false, missingDiagnosticDispositionOnce = false, cleanInitialReview = false, rejectProfileResultOnce = false, slowResultTransportMs = 0, preset = 'full', qualityReviewLimit = { mode: 'bounded', maxRechecks: 2 }, majorReleaseTargets = [] } = {}) => {
+const setup = async ({ failFirstWait = false, runningWaitCount = 0, failFirstInspect = false, failFirstConfirm = false, failFirstResult = false, repeatFindingOnce = false, repeatFindingCount = null, rejectRepairResultWithEdit = false, invalidRepairCheckpointOnce = false, externalDiagnosticOnce = false, gateFailureUntilRepair = false, overlappingFindings = false, missingDiagnosticDispositionOnce = false, cleanInitialReview = false, cleanAfterKnownRepair = false, includeForbiddenFinding = false, scopeBlockOnce = false, rejectProfileResultOnce = false, slowResultTransportMs = 0, preset = 'full', qualityReviewLimit = { mode: 'bounded', maxRechecks: 2 }, majorReleaseTargets = [] } = {}) => {
   const controlRoot = resolve(process.cwd());
   const parent = resolve(harnessTemporaryRoot(), 'quality-lifecycle-e2e');
   await mkdir(parent, { recursive: true });
@@ -299,6 +333,11 @@ const setup = async ({ failFirstWait = false, runningWaitCount = 0, failFirstIns
   await mkdir(resolve(workspace, '.git'), { recursive: true });
   await writeFile(resolve(workspace, 'README.md'), '# Quality fixture\n', 'utf8');
   await writeFile(resolve(workspace, 'OTHER.md'), '# Separate fixture\n', 'utf8');
+  if (scopeBlockOnce) {
+    await mkdir(resolve(workspace, 'fixture'), { recursive: true });
+    await writeFile(resolve(workspace, 'fixture/source.txt'), 'source defect\n', 'utf8');
+    await writeFile(resolve(workspace, 'fixture/behavior.test.txt'), 'failing focused test\n', 'utf8');
+  }
   const loadedEngine = await loadExtensionPack('./integrations/legacy-consumers/cardworld/index.mjs', { cwd: controlRoot, controlRoot });
   const engine = rejectProfileResultOnce ? {
     ...loadedEngine,
@@ -308,13 +347,15 @@ const setup = async ({ failFirstWait = false, runningWaitCount = 0, failFirstIns
   } : loadedEngine;
   const runtime = await loadExtensionPack('./integrations/codex/extensions/codex-runtime.mjs', { cwd: controlRoot, controlRoot });
   let clockMs = Date.now();
-  const host = createHost({ workspace, failFirstWait, runningWaitCount, failFirstInspect, failFirstConfirm, failFirstResult, repeatFindingOnce, repeatFindingCount, rejectRepairResultWithEdit, invalidRepairCheckpointOnce, externalDiagnosticOnce, overlappingFindings, missingDiagnosticDispositionOnce, cleanInitialReview, rejectProfileResultOnce,
+  const host = createHost({ workspace, failFirstWait, runningWaitCount, failFirstInspect, failFirstConfirm, failFirstResult, repeatFindingOnce, repeatFindingCount, rejectRepairResultWithEdit, invalidRepairCheckpointOnce, externalDiagnosticOnce, overlappingFindings, missingDiagnosticDispositionOnce, cleanInitialReview, cleanAfterKnownRepair, includeForbiddenFinding, scopeBlockOnce, rejectProfileResultOnce,
     advanceClockOnResult: slowResultTransportMs ? () => { clockMs += slowResultTransportMs; } : null,
     ...(slowResultTransportMs ? { now: () => new Date(clockMs).toISOString() } : {}) });
   const create = () => createHarness({ controlRoot, dataRoot, releaseIdentity, strictProjectIdentity: false, extensions: [engine, runtime], agentAdapter: host.adapter,
     ...(slowResultTransportMs ? { now: () => new Date(clockMs).toISOString() } : {}) });
   const harness = await create();
   const descriptor = createCardWorldProjectDescriptor({ workspaceRoot: workspace, harness: releaseIdentity, qualityReviewLimit, majorReleaseTargets, knownFindingInventories: { 'V3.8.4': { version: '1.0', sources: [{ path: 'README.md', sha256: sha256('# Quality fixture\n') }], findings: [{ id: finding.id, severity: finding.severity, sourcePath: 'README.md' }] } } });
+  descriptor.policy.qualityFindingPaths = scopeBlockOnce ? ['README.md', 'OTHER.md', 'fixture'] : ['README.md', 'OTHER.md'];
+  if (scopeBlockOnce) descriptor.policy.actionPaths.implement = ['README.md', 'fixture'];
   descriptor.gateRecipes = gateFailureUntilRepair ? [{ id: 'fixture-gate', scope: 'final', required: true, executionClass: 'deterministic-process', command: [process.execPath, '-e', "process.exit(require('node:fs').readFileSync('OTHER.md','utf8').includes('verified repair') ? 0 : 1)"] }] : [];
   descriptor.extensions = descriptor.extensions.map(item => ({ ...item, digest: item.id === engine.id ? engine.digest : runtime.digest }));
   await harness.projectRegistry.register(descriptor, { expectedRevision: 0, commandId: 'quality-e2e-project' });
@@ -345,6 +386,24 @@ test('a clean initial quality review directly seals version clearance and develo
   assert.equal(completed.versionClearance.receipt.qualityConclusion.fullReviewPerformed, true);
   assert.equal(completed.versionClearance.receipt.status, 'development-complete');
   assert.equal(JSON.parse(await readFile(completed.versionClearance.file, 'utf8')).receiptDigest, completed.versionClearance.receipt.receiptDigest);
+});
+
+test('full quality repairs authoritative open Findings before its first review', async t => {
+  const fixture = await setup({ preset: 'review-only', cleanAfterKnownRepair: true });
+  t.after(() => rm(fixture.root, { recursive: true, force: true }));
+  const prior = await fixture.harness.executeVisibleLifecyclePlan(fixture.plan, { commandId: 'known-before-review-prior',
+    preflightReport: await fixture.harness.createExecutionReadinessReport(fixture.plan) });
+  assert.equal(prior.state.findings[0].status, 'open');
+  const plan = await fixture.harness.createLifecyclePlan({ projectId: prior.state.projectId, action: 'quality', target: 'V3.8.4',
+    arguments: ['full'], extensionId: fixture.plan.extension.id, executionWorkspaceRoot: fixture.workspace });
+  assert.deepEqual(plan.intent.qualityRepairInventory.findings.map(item => item.id), [finding.id]);
+  assert.deepEqual(plan.run.features.map(feature => feature.metadata.stage), ['quality-repair', 'quality']);
+  assert.deepEqual(plan.run.features[1].dependsOn, [plan.run.features[0].id]);
+  const completed = await fixture.harness.executeVisibleLifecyclePlan(plan, { commandId: 'known-before-review-full',
+    preflightReport: await fixture.harness.createExecutionReadinessReport(plan) });
+  assert.equal(completed.status, 'closed');
+  assert.equal(completed.state.findings[0].status, 'resolved');
+  assert.deepEqual(completed.state.features.map(feature => feature.metadata.stage), ['quality-repair', 'quality']);
 });
 
 test('running Host waits do not consume the visible coordination round budget', async t => {
@@ -405,6 +464,37 @@ test('visible quality lifecycle completes review, verified repair, fresh re-revi
   assert.deepEqual(repair.allowedPaths, ['README.md']);
   assert.equal(repair.generatedOutputs.includes('.cardworld-local'), true);
   assert.equal(repair.generatedOutputs.includes('tabletop-collection/.cardworld-local'), false);
+});
+
+test('mixed review repairs project source and records the external gate as a prerequisite', async t => {
+  const fixture = await setup({ includeForbiddenFinding: true });
+  t.after(() => rm(fixture.root, { recursive: true, force: true }));
+  const run = await fixture.harness.executeVisibleLifecyclePlan(fixture.plan, { commandId: 'quality-mixed-boundary',
+    preflightReport: await fixture.harness.createExecutionReadinessReport(fixture.plan) });
+  assert.equal(run.status, 'closed');
+  assert.equal(run.state.findings.find(item => item.id === finding.id)?.status, 'resolved');
+  assert.equal(run.state.findings.some(item => item.id === forbiddenFinding.id), false);
+  const classified = run.state.submissions.find(item => item.result?.deliveryPrerequisites?.length);
+  assert.deepEqual(classified?.result.deliveryPrerequisites.map(item => item.id), [forbiddenFinding.id]);
+  const classificationEvidence = JSON.parse((await fixture.harness.evidenceStore.read(classified.evidenceRefs[0])).bytes.toString('utf8'));
+  assert.deepEqual(classificationEvidence.runtimeEvidence.qualityClassification.prerequisiteIds, [forbiddenFinding.id]);
+  assert.deepEqual(run.state.features.map(feature => feature.metadata.stage), ['quality', 'quality-repair', 'quality-recheck']);
+  assert.equal(fixture.host.stats.spawnCount, 3);
+});
+
+test('scope-blocked quality repair expands its recorded paths and completes the same Run', async t => {
+  const fixture = await setup({ scopeBlockOnce: true });
+  t.after(() => rm(fixture.root, { recursive: true, force: true }));
+  const run = await fixture.harness.executeVisibleLifecyclePlan(fixture.plan, { commandId: 'quality-scope-continuation',
+    preflightReport: await fixture.harness.createExecutionReadinessReport(fixture.plan) });
+  assert.equal(run.status, 'closed');
+  const repair = run.state.features.find(item => item.metadata.repairFindingId === scopeFinding.id);
+  assert.equal(repair.state, 'completed');
+  assert.deepEqual(repair.allowedPaths, ['fixture/source.txt', 'fixture/behavior.test.txt']);
+  assert.equal(repair.metadata.scopeExtensions.length, 1);
+  assert.equal(run.state.submissions.filter(item => item.featureId === repair.id).length, 2);
+  assert.equal(run.state.events.some(item => item.type === 'feature.quality-scope-extended' && item.featureId === repair.id), true);
+  assert.equal(run.state.findings.find(item => item.id === scopeFinding.id)?.status, 'resolved');
 });
 
 test('out-of-scope check diagnostic is confirmed by review and repaired in the same Run', async t => {

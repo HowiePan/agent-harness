@@ -6,7 +6,7 @@ import { assertHardRecoveryDecision, hardRecoveryCapability } from '../platform/
 import { readRecoveryVerification } from '../platform/recovery/verification.mjs';
 import { readRecoveryResolution } from '../platform/recovery/resolution.mjs';
 import { atomicWriteJson } from './atomic-io.mjs';
-import { qualityCanClose, validateFinding } from './quality.mjs';
+import { qualityCanClose, qualityRepairScopeCandidates, validateFinding } from './quality.mjs';
 import { assertArtifactRebaseDecision } from '../platform/maintenance/upgrade-authorization.mjs';
 import { buildRunReceipt, writeRunReceipt } from './receipts.mjs';
 import { scheduleFeatures, validateWorkGraph } from './work-graph.mjs';
@@ -128,7 +128,10 @@ export class HarnessKernel {
     }
     const profileConfig = profile.validateConfig(structuredClone(input.profileConfig ?? {}), features);
     if (input.initialFindings?.length) {
-      assert(profileConfig.repairOnly === true && input.metadata?.qualityRepairInventory?.findings && digestJson(input.initialFindings) === digestJson(input.metadata.qualityRepairInventory.findings), 'INITIAL_FINDINGS_AUTHORITY_REQUIRED', 'Initial Findings require an exact pinned repair-only Authority inventory.');
+      assert((profileConfig.repairOnly === true || profileConfig.repairKnownBeforeReview === true)
+        && input.metadata?.qualityRepairInventory?.findings
+        && digestJson(input.initialFindings) === digestJson(input.metadata.qualityRepairInventory.findings),
+      'INITIAL_FINDINGS_AUTHORITY_REQUIRED', 'Initial Findings require an exact pinned Authority repair inventory.');
     }
     const at = this.now();
     const state = {
@@ -594,6 +597,19 @@ export class HarnessKernel {
       assertMutableRun(state);
       const feature = state.features.find(item => item.id === input.featureId);
       assert(feature?.state === 'blocked', 'FEATURE_NOT_REOPENABLE', 'Only a blocked Feature with remaining budget can be reopened.');
+      if (input.additionalAllowedPaths !== undefined) {
+        const submission = state.submissions.findLast(item => item.featureId === feature.id);
+        const candidates = qualityRepairScopeCandidates(feature, submission?.result?.blocker);
+        assert(submission?.result?.status === 'blocked' && submission.result.failureClass === 'scope-blocker'
+          && candidates.length > 0 && digestJson(candidates) === digestJson(input.additionalAllowedPaths),
+        'QUALITY_REPAIR_SCOPE_EXTENSION_INVALID', 'Quality repair path extension must match the latest structured scope blocker and its pinned repair scope.');
+        const before = [...feature.allowedPaths];
+        feature.allowedPaths = [...new Set([...before, ...candidates])];
+        feature.metadata.scopeExtensions = [...(feature.metadata.scopeExtensions ?? []), {
+          submissionId: submission.submissionId, before, added: candidates, after: [...feature.allowedPaths],
+        }];
+        event(state, 'feature.quality-scope-extended', { featureId: feature.id, submissionId: submission.submissionId, before, added: candidates, after: feature.allowedPaths }, this.now);
+      }
       feature.state = 'pending';
       feature.reopenedAt = this.now();
       feature.reopenReason = input.reason;

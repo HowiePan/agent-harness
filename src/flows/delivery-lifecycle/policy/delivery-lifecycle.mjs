@@ -7,7 +7,7 @@ import { planApprovalSatisfied } from '../plan-approval.mjs';
 
 export const DELIVERY_STAGES = Object.freeze([
   'requirement-intake', 'requirement-expansion', 'canonical-requirement', 'version-planning', 'plan-review', 'implementation',
-  'scope-resolution', 'docs-closeout', 'quality', 'quality-repair', 'quality-recheck', 'quality-closeout', 'release-preparation', 'release-documentation', 'user-code-review', 'delivery-receipt',
+  'scope-resolution', 'docs-closeout', 'quality-repair', 'quality', 'quality-recheck', 'quality-closeout', 'release-preparation', 'release-documentation', 'user-code-review', 'delivery-receipt',
 ]);
 
 const stageIndex = stage => DELIVERY_STAGES.indexOf(stage);
@@ -33,6 +33,7 @@ export const createDeliveryLifecycleProfile = (id = 'delivery-lifecycle') => Obj
       qualityBudgetScope: config.qualityBudgetScope === 'run' ? 'run' : 'target',
       priorQualityReviews: config.priorQualityReviews ?? 0,
       repairOnly: config.repairOnly === true,
+      repairKnownBeforeReview: config.repairKnownBeforeReview === true,
       closeoutOnly: config.closeoutOnly === true,
       requireRoutineExitDecision: config.requireRoutineExitDecision === true,
     };
@@ -48,6 +49,14 @@ export const createDeliveryLifecycleProfile = (id = 'delivery-lifecycle') => Obj
   },
 
   validateResult({ state, feature, result }) {
+    if (feature.metadata?.qualityReview === true && result.status === 'completed') {
+      try {
+        createQualityFollowUpFeatures({ state, feature, findings: result.findings ?? [], result });
+      } catch (error) {
+        if (!error.code?.startsWith('QUALITY_')) throw error;
+        return { ok: false, reason: `${error.code}: ${error.message}` };
+      }
+    }
     if (feature.metadata?.approvedProposal && result.status === 'completed') {
       const proposal = feature.metadata.approvedProposal;
       const output = result.outputs?.implement?.value;

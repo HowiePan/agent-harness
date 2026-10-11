@@ -4,7 +4,7 @@ import { assert } from '../../../../common/errors.mjs';
 
 export const createDeliveryTemplates = ({ actionPaths, forbiddenPaths = ['.git', '.agent-harness-data'], qualityRootPrefix = 'delivery' } = {}) => {
   const safeForbidden = [...new Set(['.git', '.agent-harness-data', ...(forbiddenPaths ?? []).filter(p => !p.includes(':') && !p.startsWith('/'))])];
-  const makeFeature = ({ action, target, stage, dependsOn = [], allowedPaths = [], sourcePolicy = 'write', qualityFindingPolicy = 'repair-and-rereview', ownerRole = 'operator', qualityReview = false, sourceDigest, knownFindingInventory = null, verificationOutputPaths = [] }) => ({
+  const makeFeature = ({ action, target, stage, dependsOn = [], allowedPaths = [], sourcePolicy = 'write', qualityFindingPolicy = 'repair-and-rereview', ownerRole = 'operator', qualityReview = false, sourceDigest, knownFindingInventory = null, verificationOutputPaths = [], repairScopePaths = [], findingScopePaths = [] }) => ({
     id: `${action}/${target}`,
     executionClass: 'agent-reasoning', kind: action, ownerRole,
     logicalRoot: `${action}:${target}`, laneId: qualityReview ? 'quality' : action,
@@ -20,7 +20,7 @@ export const createDeliveryTemplates = ({ actionPaths, forbiddenPaths = ['.git',
     conflictKeys: [`${target}-${qualityReview ? 'quality-review' : action}`], gatePlan: [],
     metadata: { stage, sourcePolicy, target, version: target, allowDynamicDecomposition: stage === 'implementation' && !qualityReview && allowedPaths.length > 0,
       ...(sourcePolicy === 'write' ? { verificationOutputPaths: structuredClone(verificationOutputPaths) } : {}),
-      ...(qualityReview ? { qualityReview: true, qualityFindingPolicy, qualityRoot: `${qualityRootPrefix}:${target}`, reviewRound: 1, reviewSourceDigest: sourceDigest, ...(knownFindingInventory ? { knownFindingInventory: structuredClone(knownFindingInventory) } : {}), qualityContext: { target, version: target, verificationOutputPaths: structuredClone(verificationOutputPaths), ...(knownFindingInventory ? { knownFindingInventory: structuredClone(knownFindingInventory) } : {}) } } : {}),
+      ...(qualityReview ? { qualityReview: true, qualityFindingPolicy, qualityRoot: `${qualityRootPrefix}:${target}`, reviewRound: 1, reviewSourceDigest: sourceDigest, ...(knownFindingInventory ? { knownFindingInventory: structuredClone(knownFindingInventory) } : {}), qualityContext: { target, version: target, verificationOutputPaths: structuredClone(verificationOutputPaths), repairScopePaths: structuredClone(repairScopePaths), findingScopePaths: structuredClone(findingScopePaths), ...(knownFindingInventory ? { knownFindingInventory: structuredClone(knownFindingInventory) } : {}) } } : {}),
     },
   });
 
@@ -33,7 +33,8 @@ export const createDeliveryTemplates = ({ actionPaths, forbiddenPaths = ['.git',
       allowedPaths: readOnly ? [] : resolvedPaths, sourcePolicy: readOnly ? 'read-only' : 'write',
       ownerRole: node.qualityReview || node.readOnly || node.action === 'review' ? 'reviewer' : 'operator', qualityReview: Boolean(node.qualityReview),
       qualityFindingPolicy: context.intent.sourcePolicy === 'read-only' ? 'record-only' : 'repair-and-rereview', sourceDigest: context.sourceDigest, knownFindingInventory: context.intent.knownFindingInventory ?? null,
-      verificationOutputPaths: context.intent.sourcePolicy === 'read-only' ? [] : context.project?.policy?.qualityVerificationOutputs ?? [] });
+      verificationOutputPaths: context.intent.sourcePolicy === 'read-only' ? [] : context.project?.policy?.qualityVerificationOutputs ?? [],
+      repairScopePaths: pathsSource.implement ?? [], findingScopePaths: context.project?.policy?.qualityFindingPaths ?? [] });
     if (node.stage === 'quality-closeout') feature.metadata.qualityCloseout = structuredClone(context.intent.qualityCloseout);
     if (node.stage === 'implementation' && !readOnly) {
       const retries = context.project?.policy?.implementationVerificationRepairRetries ?? 0;

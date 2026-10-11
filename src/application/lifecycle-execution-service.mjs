@@ -5,7 +5,8 @@ import { RunCoordinator } from '../platform/workflow/coordinator/run-coordinator
 import { ProjectGateRunner, runPendingFeatureGates } from '../platform/workflow/gates/project-gate-runner.mjs';
 import { isVisibleHostAdapter } from '../platform/plugins/runtime/visible-host-adapter.mjs';
 import { canonicalize, digestJson, sha256 } from '../common/canonical.mjs';
-import { assertInside } from '../common/paths.mjs';
+import { assertInside, assertNoLinkPath } from '../common/paths.mjs';
+import { resolve } from 'node:path';
 import { atomicWrite } from '../kernel/atomic-io.mjs';
 import { validateBusinessResult, validateProfileResult } from '../platform/execution/result-contract.mjs';
 import { ensureVersionClearance } from './version-clearance.mjs';
@@ -14,8 +15,9 @@ import { ensureBatchPreReleaseCandidate } from './batch-prerelease.mjs';
 import { verifyCollectionScenarioInventories } from './collection-exhaustion.mjs';
 import { ensurePlanApprovalArtifact } from '../flows/delivery-lifecycle/plan-approval.mjs';
 import { performance } from 'node:perf_hooks';
+import { qualityRepairScopeCandidates } from '../kernel/quality.mjs';
 
-const recoverableResultCodes = new Set(['REPAIR_CHECKPOINT_REQUIRED', 'REPAIR_CHECKPOINT_EVIDENCE_REQUIRED', 'REPAIR_FINDING_CHECKPOINT_REQUIRED', 'QUALITY_DIAGNOSTIC_DISPOSITION_REQUIRED', 'PROFILE_RESULT_REJECTED']);
+const recoverableResultCodes = new Set(['REPAIR_CHECKPOINT_REQUIRED', 'REPAIR_CHECKPOINT_EVIDENCE_REQUIRED', 'REPAIR_FINDING_CHECKPOINT_REQUIRED', 'QUALITY_DIAGNOSTIC_DISPOSITION_REQUIRED', 'QUALITY_PREREQUISITE_INVALID', 'PROFILE_RESULT_REJECTED']);
 export const visibleLifecycleStopReason = state => {
   if (state.profile?.id === 'collection-batch' && state.features.some(feature => ['blocked', 'failed-budget'].includes(feature.state)
     && feature.blocker?.kind !== 'engine-artifact')) return 'collection-attention-required';
@@ -25,6 +27,13 @@ export const visibleLifecycleStopReason = state => {
 const safeProjectPath = path => typeof path === 'string' && path.length > 0 && !path.includes('\\')
   && !path.includes(':') && !path.startsWith('/') && path.split('/').every(segment => segment && segment !== '.' && segment !== '..' && !segment.includes('*'));
 const insideScope = (scope, path) => path === scope || path.startsWith(`${scope}/`);
+const safeQualityScopePaths = (feature, blocker, workspaceRoot) => {
+  const candidates = qualityRepairScopeCandidates(feature, blocker);
+  try {
+    for (const path of candidates) assertNoLinkPath(workspaceRoot, resolve(workspaceRoot, path), 'Quality repair candidate');
+    return candidates;
+  } catch { return []; }
+};
 export const shouldRetryImplementationVerificationPath = ({ feature, result, state }) => {
   if (feature?.metadata?.stage !== 'implementation' || result?.status !== 'blocked' || result.failureClass !== 'verification-path-prohibited') return false;
   const candidates = result.blocker?.repairCandidatePaths;
@@ -367,8 +376,8 @@ const continueVisibleLifecyclePlan = async (context, api, planInput, { commandId
       let runtimeEvidence = transported.runtimeEvidence ?? {};
       let rejected = null;
       try {
-        validateBusinessResult(businessResult, { conversationVisible: true, repair: Boolean(feature?.metadata?.repairFindingId), feature });
-        validateProfileResult({ profile: api.profileRegistry.get(state.profile.id), state, feature, result: businessResult });
+        const validatedPreview = validateBusinessResult(businessResult, { conversationVisible: true, repair: Boolean(feature?.metadata?.repairFindingId), feature });
+        validateProfileResult({ profile: api.profileRegistry.get(state.profile.id), state, feature, result: validatedPreview });
       }
       catch (error) {
         if (!recoverableResultCodes.has(error.code) || !['completed', 'blocked'].includes(businessResult.status) || !hostResultReceipt?.observationRequestDigest) throw error;
@@ -381,11 +390,22 @@ const continueVisibleLifecyclePlan = async (context, api, planInput, { commandId
       }
       const submitted = await api.recordResult(plan.project.id, activeRunId, dispatch.dispatchId, businessResult, { commandId: `${commandId}.submit.${dispatch.dispatchId}`, runtimeEvidence: { ...runtimeEvidence, hostWaitReceipt: waited?.receipt ?? null, hostResultReceipt } });
       state = submitted.state;
+      const qualityScopePaths = businessResult.status === 'blocked' && businessResult.failureClass === 'scope-blocker'
+        ? safeQualityScopePaths(feature, businessResult.blocker, plan.run.executionWorkspaceRoot) : [];
       if (rejected && submitted.result.featureState === 'blocked') {
         const reopened = await api.kernel.reopenFeature(plan.project.id, activeRunId, {
           featureId: feature.id,
           reason: `${rejected.result.summary}. Reinspect the current source and correct the rejected result before reporting completion.`,
         }, { expectedRevision: state.revision, commandId: `${commandId}.reopen.${dispatch.dispatchId}` });
+        state = reopened.state;
+      } else if (businessResult.status === 'blocked' && businessResult.failureClass === 'scope-blocker'
+        && state.features.find(item => item.id === feature.id)?.state === 'blocked'
+        && qualityScopePaths.length > 0) {
+        const added = qualityScopePaths;
+        const reopened = await api.kernel.reopenFeature(plan.project.id, activeRunId, {
+          featureId: feature.id, additionalAllowedPaths: added,
+          reason: `Continue the same quality repair from the committed scope blocker. The additional source paths ${added.join(', ')} were checked against the pinned project repair scope; retain prior repair and verification evidence.`,
+        }, { expectedRevision: state.revision, commandId: `${commandId}.quality-scope-reopen.${dispatch.dispatchId}` });
         state = reopened.state;
       } else if (shouldRetryImplementationVerificationPath({ feature, result: businessResult, state })) {
         const reopened = await api.kernel.reopenFeature(plan.project.id, activeRunId, {

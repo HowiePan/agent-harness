@@ -104,18 +104,19 @@ export const verifyDevelopmentPatchPlan = async plan => {
 };
 
 export const applyDevelopmentPatchPlan = async (planInput, { commandId, authorityDecision, developmentInvocation = null,
-  h4MigrationRunId = null, now = () => new Date().toISOString() } = {}) => {
+  h4MigrationRunId = null, h4IdleRebind = false, now = () => new Date().toISOString() } = {}) => {
   const { plan, manifest, current } = await verifyDevelopmentPatchPlan(planInput);
   assert(commandId, 'COMMAND_ID_REQUIRED', 'Development patch apply requires a command ID.');
   assert(plan.changes.length > 0, 'DEVELOPMENT_PATCH_NOT_REQUIRED', 'Harness source matches the active development binding; no patch is required.');
   if (plan.level === 'H4') {
-    assert(h4MigrationRunId, 'DEVELOPMENT_PATCH_INCOMPATIBLE', 'H4 changes require an explicit, single-Run migration; dev sync cannot hot-apply them.', { changes: plan.changes.map(change => change.path) });
+    assert(Boolean(h4MigrationRunId) !== h4IdleRebind, 'DEVELOPMENT_PATCH_INCOMPATIBLE', 'H4 changes require an explicit single-Run migration or an idle-binding rebind; dev sync cannot hot-apply them.', { changes: plan.changes.map(change => change.path) });
     const active = await activeRunSummary({ dataRoot: plan.dataRoot, controlRoot: plan.controlRoot });
-    assert(plan.activeRuns.length === 1 && active.length === 1
-      && active[0].runId === h4MigrationRunId
-      && digestJson(active) === digestJson(plan.activeRuns)
-      && active[0].activeLeaseIds.length === 0 && active[0].activeDispatchIds.length === 0,
-    'DEVELOPMENT_H4_MIGRATION_RUN_CHANGED', 'H4 migration requires the exact single idle Run captured in the patch plan.');
+    assert(h4IdleRebind ? plan.activeRuns.length === 0 && active.length === 0
+      : plan.activeRuns.length === 1 && active.length === 1
+        && active[0].runId === h4MigrationRunId
+        && digestJson(active) === digestJson(plan.activeRuns)
+        && active[0].activeLeaseIds.length === 0 && active[0].activeDispatchIds.length === 0,
+    'DEVELOPMENT_H4_MIGRATION_RUN_CHANGED', 'H4 migration requires the exact single idle Run or an unchanged binding with no active Runs.');
   }
   if (developmentInvocation) assertLocalDevelopmentInvocation(developmentInvocation, { projectRoot: manifest.projectRoot, configPath: manifest.configPath, controlRoot: plan.controlRoot, dataRoot: plan.dataRoot });
   const resolvedDecision = authorityDecision ?? (developmentInvocation ? decisionFromLocalDevelopmentInvocation(developmentInvocation, { action: 'development-patch', planDigest: plan.planDigest, commandId, bindingId: plan.bindingId, beforeRuntimeDigest: plan.before.runtimeDigest, afterRuntimeDigest: plan.after.runtimeDigest, level: plan.level }) : null);
@@ -146,7 +147,7 @@ export const applyDevelopmentPatchPlan = async (planInput, { commandId, authorit
     beforeRuntimeDigest: plan.before.runtimeDigest, afterRuntimeDigest: plan.after.runtimeDigest,
     generation: generationNumber, sameRun: plan.disposition.sameRun,
     requiresCoordinatorRestart: plan.disposition.requiresCoordinatorRestart,
-    ...(plan.level === 'H4' ? { migrationRunId: h4MigrationRunId } : {}),
+    ...(plan.level === 'H4' ? h4IdleRebind ? { idleRebind: true } : { migrationRunId: h4MigrationRunId } : {}),
     affectedRuns: plan.activeRuns, changes: plan.changes.map(({ path, change, level, impact }) => ({ path, change, level, impact })),
     authorityDecision: resolvedDecision ? structuredClone(resolvedDecision) : null,
     appliedAt: now(), manifestDigest: next.manifestDigest,

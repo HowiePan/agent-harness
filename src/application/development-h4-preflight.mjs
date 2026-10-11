@@ -10,7 +10,7 @@ import { expandApprovedImplementation } from '../flows/delivery-lifecycle/approv
 import { createHarness } from './harness.mjs';
 import { loadProjectHarnessConfig } from './project-initialization.mjs';
 import { CodexHostEffectJournal } from './codex-host-effect-journal.mjs';
-import { assertDevelopmentRunRecoveryEffects } from './development-run-recovery.mjs';
+import { assertDevelopmentRunRecoveryEffects, assertH4QualityRestartable } from './development-run-recovery.mjs';
 
 /** Preview the replacement graph under the future H4 source before changing its binding. */
 export const previewDevelopmentH4Migration = async ({ plan, manifest, runId }) => {
@@ -22,10 +22,13 @@ export const previewDevelopmentH4Migration = async ({ plan, manifest, runId }) =
   const authorityStore = new AuthorityStore({ root: manifest.dataRoot, controlRoot });
   const evidenceStore = new EvidenceStore({ root: manifest.dataRoot, controlRoot });
   const prior = await authorityStore.read(plan.activeRuns[0].projectId, runId);
+  const implementation = prior.metadata?.commandIntent?.action === 'implement'
+    && prior.metadata?.approvedPlan?.typedPlan;
+  const quality = prior.metadata?.commandIntent?.action === 'quality';
   assert(prior.revision === plan.activeRuns[0].revision && prior.status === plan.activeRuns[0].status
-    && prior.metadata?.commandIntent?.action === 'implement'
-    && prior.metadata?.approvedPlan?.typedPlan,
-  'DEVELOPMENT_H4_MIGRATION_RUN_CHANGED', 'H4 preview requires the unchanged approved implementation Run.');
+    && (implementation || quality),
+  'DEVELOPMENT_H4_MIGRATION_RUN_CHANGED', 'H4 preview requires the unchanged approved implementation or quality Run.');
+  if (quality) assertH4QualityRestartable(prior);
   if (prior.dispatches.length || prior.leases.length) {
     const contract = prior.leases.find(lease => lease.runtimeReceipt?.hostSpawnReceipt)?.runtimeReceipt.hostSpawnReceipt.contract;
     assert(contract, 'DEVELOPMENT_RUN_HOST_CONTRACT_REQUIRED', 'H4 migration requires the original Host contract.');
@@ -65,6 +68,20 @@ export const previewDevelopmentH4Migration = async ({ plan, manifest, runId }) =
       executionWorkspaceRoot: prior.metadata.workspace.root });
     assert(replacement.run.sourceDigest === prior.sourceDigest,
       'DEVELOPMENT_H4_SOURCE_CHANGED', 'H4 migration requires the exact authoritative project source.');
+    if (prior.metadata.commandIntent.action === 'quality') {
+      assertH4QualityRestartable(prior);
+      const evidenceRefs = [...new Set(prior.submissions.flatMap(item => item.evidenceRefs ?? []))];
+      assert(evidenceRefs.length > 0, 'DEVELOPMENT_H4_QUALITY_EVIDENCE_REQUIRED', 'The stopped quality Run has no submission evidence.');
+      for (const ref of evidenceRefs) {
+        const record = await evidenceStore.read(ref);
+        assert(record.metadata.projectId === prior.projectId && record.metadata.runId === runId,
+          'DEVELOPMENT_H4_QUALITY_EVIDENCE_INVALID', 'Quality submission evidence belongs to another Run.');
+      }
+      return { projectId: prior.projectId, priorRunId: runId, priorRevision: prior.revision,
+        priorAuthorityDigest: prior.authorityDigest, sourceDigest: prior.sourceDigest,
+        terminalOutcome: { status: 'failed', reason: 'development-h4-quality-restart' },
+        newQualityCommandReady: true };
+    }
     if (prior.features.every(feature => feature.state === 'completed')
       && harness.profileRegistry.get(prior.profile.id).canClose(prior).reason === 'quality-review-limit-reached') {
       return { projectId: prior.projectId, priorRunId: runId, priorRevision: prior.revision,

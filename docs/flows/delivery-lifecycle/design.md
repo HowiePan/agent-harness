@@ -6,7 +6,7 @@
 
 独立的 `implement` 命令在已批准计划上连续执行 `implement → scope → docs → quality`，包括质量修复、复审和最终 Gate，不能在实现 Feature 完成时结束。它与 `full` 路线共享质量收口规则，并从 Target 取得当前源码的 `QualityInventorySnapshot@2.0`。
 
-质量预算约束单次 Run 的初审与最多两次复审，Target 的历史审查和 Finding 仍持续留痕。预算用尽而缺少当前源码的干净审查时，Run 以 `incomplete` 终结并注明 `quality-review-limit-reached`；实现 Feature 的已完成证据保留，重复 `implement` 不得从头再跑。新的显式 `quality` 命令继承历史 Finding 并启动自己的有界流程；`quality closeout` 继续只读核验已解决 Finding 与最终 Gate。执行故障只有在不能安全续接且有绑定证据时才记录为 `failed`，等待人工决定或外部依赖的 Run 不据此自动判为失败。
+质量预算约束单次 Run 的初审与最多两次复审，Target 的历史审查和 Finding 仍持续留痕。独立 `quality full` 先按 Target 中证据与路径齐全的开放 Finding 派发修复，再进行初审；证据不完整的迁移 Finding 交由初审重新核实。审查提交的项目内 Finding 自动生成受其路径约束的修复 Feature，修复后在新源码摘要上复审。预算用尽而缺少当前源码的干净审查时，Run 以 `incomplete` 终结并注明 `quality-review-limit-reached`；实现 Feature 的已完成证据保留，重复 `implement` 不得从头再跑。新的显式 `quality` 命令继承历史 Finding 并启动自己的有界流程；`quality closeout` 继续只读核验已解决 Finding 与最终 Gate。执行故障只有在不能安全续接且有绑定证据时才记录为 `failed`，等待人工决定或外部依赖的 Run 不据此自动判为失败。
 
 独立 `implement` Run 启动时，将批准的 `proposedFeatures` 中本项目 `project-owned` 条目编译成逐包实施 Feature。编译器校验 ID、依赖和环，并按批准顺序串行执行；每包保留完整计划与当前提案，完成结果必须绑定提案 ID、逐条合同和验证证据。跨项目提案不获引擎写权限，外部制品与受保护发布证据可明确延后到对应集成或发布阶段。项目 Descriptor 的动作路径仍是写权限上界；提案路径提供实施指引，不因同一项目内必要的相邻源码文件改动要求用户重新规划。`scope` 等后续阶段仅在所有本项目实施包完成后开始。
 
@@ -18,7 +18,7 @@
 
 进入 `implement`、`quality`、`full` 或 `deliver` 时，Harness 从 Target 生成不可变 `QualityInventorySnapshot@2.0`，绑定 Target revision/digest 和当前 Source digest。质量结果必须逐条处置快照中的既有 Finding，同时允许提交新的 Finding。源码变化保留 Ledger 历史但使旧 clean review 失效，必须在新 Source digest 上完成完整复审。旧 `policy.knownFindingInventories` 只作为迁移种子读取：迁移验证已注册声明自身并保留旧来源摘要，不再要求当前版本文档仍等于旧摘要；新快照独立绑定当前 Source digest，并记录原 inventory digest。新 Project Descriptor 不再生成旧字段。
 
-权限边界不变：质量审查只读，修复由独立 Feature 执行；Flow 和 Extension 只返回 Intent/Event/Receipt，不直接写 Kernel Authority。Target 投影可从 Run Authority 和 Receipt 重建，不依赖模型上下文或插件内部状态。
+权限边界不变：质量审查只读，修复由独立 Feature 执行；Flow 和 Extension 只返回 Intent/Event/Receipt，不直接写 Kernel Authority。项目可声明代码审查的 `qualityFindingPaths`；范围外的跨项目集成、发布文档等交付前置条件作为 `deliveryPrerequisites` 留在 Submission 和 Target 投影，不派发代码修复，也不消耗复审轮次。范围内 Finding 仍须修复并复审。修复遇到必需的额外源码或测试路径时，Agent 以结构化 `blocker.repairCandidatePaths` 报告；Kernel 仅在候选与原问题同属项目允许的修复根目录、且不触及禁写和验证产物路径时，记录 `feature.quality-scope-extended` 事件并在同一 Run 重新派发。Target 投影可从 Run Authority 和 Receipt 重建，不依赖模型上下文或插件内部状态。
 
 ## 公共质量机制
 

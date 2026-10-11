@@ -43,11 +43,11 @@ const rebind = async (manifest, { commandId, decision, developmentInvocation }) 
   return applyProjectInitializationPlan(initPlan, { controlRoot: manifest.controlRoot, dataRoot: manifest.dataRoot, releaseIdentity, commandId: `${commandId}.rebind`, authorityDecision: decision, developmentInvocation });
 };
 
-export const applySourcePatch = async (plan, { decision, commandId, cwd = process.cwd(), h4MigrationRunId = null }) => {
+export const applySourcePatch = async (plan, { decision, commandId, cwd = process.cwd(), h4MigrationRunId = null, h4IdleRebind = false }) => {
   const patchManifest = JSON.parse(await readFile(resolve(plan.manifestFile), 'utf8'));
   await readLocalCodexBindings(plan.manifestFile, patchManifest);
   const developmentInvocation = decision ? null : await createLocalDevelopmentInvocation({ projectRoot: patchManifest.projectRoot, configPath: patchManifest.configPath, controlRoot: plan.controlRoot, dataRoot: plan.dataRoot, cwd });
-  const patched = await applyDevelopmentPatchPlan(plan, { commandId, authorityDecision: decision, developmentInvocation, h4MigrationRunId });
+  const patched = await applyDevelopmentPatchPlan(plan, { commandId, authorityDecision: decision, developmentInvocation, h4MigrationRunId, h4IdleRebind });
   const initialization = plan.disposition.requiresRebind ? await rebind(patched.manifest, { commandId, decision, developmentInvocation }) : null;
   const bindingFile = await refreshLocalCodexBindings(plan.manifestFile, patched.manifest, initialization);
   const carryoverRefresh = await refreshPendingDevelopmentCarryover({ manifestFile: plan.manifestFile,
@@ -58,13 +58,17 @@ export const applySourcePatch = async (plan, { decision, commandId, cwd = proces
 
 /** Explicit H4 new-Run migration; ordinary dev sync never enters this route. */
 export const migrateDevelopmentSource = async (manifestFile, { runId, decision = null,
-  commandId, cwd = process.cwd() } = {}) => {
-  assert(commandId && runId, 'DEVELOPMENT_H4_MIGRATION_INPUT_REQUIRED', 'H4 migration requires an exact Run ID and stable command ID.');
+  noActiveRun = false, commandId, cwd = process.cwd() } = {}) => {
+  assert(commandId && Boolean(runId) !== noActiveRun, 'DEVELOPMENT_H4_MIGRATION_INPUT_REQUIRED', 'H4 migration requires a stable command ID and exactly one of an exact Run ID or --no-active-run.');
   const plan = await createDevelopmentPatchPlan(manifestFile);
   assert(plan.level === 'H4' && plan.changes.length > 0, 'DEVELOPMENT_H4_MIGRATION_NOT_REQUIRED', 'The current source has no pending H4 migration.');
   const manifest = JSON.parse(await readFile(resolve(manifestFile), 'utf8'));
-  const preview = await previewDevelopmentH4Migration({ plan, manifest, runId });
-  const patched = await applySourcePatch(plan, { decision, commandId, cwd, h4MigrationRunId: runId });
+  if (noActiveRun) assert(plan.activeRuns.length === 0, 'DEVELOPMENT_H4_MIGRATION_RUN_CHANGED', 'Idle H4 rebind requires no active Runs.');
+  const preview = noActiveRun
+    ? { bindingId: plan.bindingId, activeRuns: 0, sourceDigest: plan.after.sourceDigest }
+    : await previewDevelopmentH4Migration({ plan, manifest, runId });
+  const patched = await applySourcePatch(plan, { decision, commandId, cwd, h4MigrationRunId: runId, h4IdleRebind: noActiveRun });
+  if (noActiveRun) return { plan, preview, ...patched, continuation: 'new-lifecycle-command-ready' };
   const recovery = await recoverDevelopmentRun({ manifestFile, runId, commandId: `${commandId}.recover`, cwd });
   return { plan, preview, ...patched, recovery,
     continuation: recovery.continuation === 'new-quality-command-ready'

@@ -4,6 +4,7 @@ import { resolve } from 'node:path';
 import { createHarness, defaultDataRoot } from '../../application/harness.mjs';
 import { applyBootstrapPlan, createBootstrapPlan } from '../../application/bootstrap.mjs';
 import { newId } from '../../common/canonical.mjs';
+import { captureWorkspace } from '../../common/workspace-snapshot.mjs';
 import { safeSegment } from '../../common/paths.mjs';
 import { ProjectGateRunner } from '../../platform/workflow/gates/project-gate-runner.mjs';
 import { loadExtensionPack } from '../../platform/extensions/contract.mjs';
@@ -27,7 +28,9 @@ import { verifyDevelopmentSourceManifest, writeDevelopmentSourceManifest } from 
 import { createDevelopmentPatchPlan, rollbackDevelopmentPatch } from '../../application/development-patch.mjs';
 import { recoverDevelopmentRun } from '../../application/development-run-recovery.mjs';
 import { recordDevelopmentPlanSourceCompatibility } from '../../application/development-plan-source-compatibility.mjs';
+import { assertDevelopmentCloseoutDecisionScope } from '../../application/development-closeout-decision.mjs';
 import { createLocalDevelopmentInvocation } from '../../application/local-development-invocation.mjs';
+import { ensureVersionClearance } from '../../application/version-clearance.mjs';
 import { applySourcePatch, refreshLocalCodexBindings, syncDevelopmentSource } from './local-development-sync.mjs';
 import { migrateDevelopmentSource } from './local-development-sync.mjs';
 import { ensurePlanApprovalArtifact, planApprovalSatisfied } from '../../flows/delivery-lifecycle/plan-approval.mjs';
@@ -82,7 +85,7 @@ agent-harness dev plan-source-compatible --manifest <json> --run <plan-run-id> -
 agent-harness dev apply --plan <json|-> --manifest <json> [--command-id <id>] [--decision <json>]
 agent-harness dev verify|doctor --manifest <json>
 agent-harness dev sync --manifest <json> [--command-id <id>] [--decision <json>]
-agent-harness dev migrate --manifest <json> --run <id> --command-id <id> [--decision <json>]
+agent-harness dev migrate --manifest <json> (--run <id> | --no-active-run) --command-id <id> [--decision <json>]
 agent-harness dev recover-run --manifest <json> --run <id> [--command-id <id>]
 agent-harness dev patch plan|status --manifest <json>
 agent-harness dev patch apply --manifest <json> --plan <json|-> [--command-id <id>] [--decision <json>]
@@ -124,7 +127,7 @@ agent-harness run gates --project <id> --run <id> --scope <feature|stable|final>
 agent-harness run bind --project <id> --run <id> --dispatch <id> --agent <id> --runtime-receipt <json|->
 agent-harness run submit --project <id> --run <id> --dispatch <id> --result <json|->
 agent-harness run heartbeat --project <id> --run <id> --lease <id> --agent <id>
-agent-harness run decision --project <id> --run <id> --decision <json>
+agent-harness run decision --project <id> --run <id> --decision <json> [--expected-revision <n>] [--command-id <id>]
 agent-harness run gate --project <id> --run <id> --gate-result <json>
 agent-harness run finding-open --project <id> --run <id> --finding <json>
 agent-harness run finding-resolve --project <id> --run <id> --resolution <json>
@@ -212,6 +215,7 @@ if (command === 'dev' && subject === 'sync') {
 }
 if (command === 'dev' && subject === 'migrate') {
   const result = await migrateDevelopmentSource(take('--manifest'), { runId: take('--run'),
+    noActiveRun: argv.includes('--no-active-run'),
     decision: await externalDevelopmentDecision(take('--decision')),
     commandId: take('--command-id') });
   console.log(JSON.stringify({ ok: true, ...result }, null, 2));
@@ -342,8 +346,8 @@ const dataRoot = resolve(take('--data-root') ?? development?.manifest.dataRoot ?
 if (development) {
   if (!samePath(controlRoot, development.manifest.controlRoot) || !samePath(dataRoot, development.manifest.dataRoot)) throw Object.assign(new Error('Development manifest does not match the selected control and data roots.'), { code: 'DEVELOPMENT_MANIFEST_ROOT_MISMATCH' });
   if (take('--harness-digest') && take('--harness-digest') !== development.releaseIdentity.artifactDigest) throw Object.assign(new Error('Development manifest does not match --harness-digest.'), { code: 'DEVELOPMENT_MANIFEST_RELEASE_MISMATCH' });
-  const developmentCommandAllowed = (command === 'workflow' && subject === 'list') || (command === 'lifecycle' && ['plan', 'preflight'].includes(subject)) || (command === 'project' && subject === 'list') || (command === 'extension' && subject === 'list') || (['version-release', 'release-candidate'].includes(command) && ['status', 'promote'].includes(subject)) || command === 'doctor';
-  if (!developmentCommandAllowed) throw Object.assign(new Error('Development manifest is limited to inspection, planning, preflight, and frozen version release status/promotion. Use the dev commands for source binding changes.'), { code: 'DEVELOPMENT_MANIFEST_COMMAND_UNSUPPORTED' });
+  const developmentCommandAllowed = (command === 'workflow' && subject === 'list') || (command === 'lifecycle' && ['plan', 'preflight'].includes(subject)) || (command === 'project' && subject === 'list') || (command === 'extension' && subject === 'list') || (command === 'run' && subject === 'decision') || (['version-release', 'release-candidate'].includes(command) && ['status', 'promote'].includes(subject)) || command === 'doctor';
+  if (!developmentCommandAllowed) throw Object.assign(new Error('Development manifest is limited to inspection, planning, preflight, exact closeout decisions, and frozen version release status/promotion. Use the dev commands for source binding changes.'), { code: 'DEVELOPMENT_MANIFEST_COMMAND_UNSUPPORTED' });
   if (['version-release', 'release-candidate'].includes(command) && subject === 'promote') await createLocalDevelopmentInvocation({
     projectRoot: development.manifest.projectRoot,
     configPath: development.manifest.configPath,
@@ -591,9 +595,34 @@ if (command === 'features' && subject === 'compile') {
     console.log(JSON.stringify({ ok: true, ...output.result, revision: output.state.revision }, null, 2));
   } else if (command === 'run' && subject === 'decision') {
     const state = await harness.authorityStore.read(take('--project'), take('--run'));
-    const decision = await jsonFile(take('--decision'));
-    const output = await harness.kernel.recordDecision(state.projectId, state.runId, decision, { expectedRevision: state.revision, commandId: take('--command-id') ?? newId('command') });
-    console.log(JSON.stringify({ ok: true, decision: output.result.decision, revision: output.state.revision }, null, 2));
+    const decision = development ? await externalDevelopmentDecision(take('--decision')) : await jsonFile(take('--decision'));
+    let decisionScope = null;
+    if (development) {
+      await createLocalDevelopmentInvocation({ projectRoot: development.manifest.projectRoot,
+        configPath: development.manifest.configPath, controlRoot, dataRoot });
+      const config = await loadProjectHarnessConfig(development.manifest.configPath,
+        { projectRoot: development.manifest.projectRoot });
+      const project = await harness.projectRegistry.get(state.projectId);
+      const workspaceMatch = samePath(project.workspace.root, development.manifest.projectRoot)
+        && Boolean(state.metadata?.workspace?.root)
+        && samePath(state.metadata.workspace.root, project.workspace.root);
+      const currentSourceDigest = workspaceMatch
+        ? (await captureWorkspace(project.workspace.root, { excluded: project.workspace.excluded ?? [] })).digest : null;
+      decisionScope = assertDevelopmentCloseoutDecisionScope({ state, decision, projectId: config.request.binding.projectId,
+        expectedRevision: Number(take('--expected-revision')), commandId: take('--command-id'),
+        profile: harness.profileRegistry.get(state.profile.id), currentSourceDigest, workspaceMatch });
+    }
+    const output = decisionScope?.recorded
+      ? { result: { decision: state.decisions.find(item => item.id === 'routine-version-exit') }, state }
+      : await harness.kernel.recordDecision(state.projectId, state.runId, decision, { expectedRevision: state.revision, commandId: take('--command-id') ?? newId('command') });
+    if (development) {
+      const closed = output.state.status === 'closed' ? { result: { receipt: null }, state: output.state }
+        : await harness.kernel.closeRun(state.projectId, state.runId, {},
+          { expectedRevision: output.state.revision, commandId: `${take('--command-id')}.close` });
+      const versionClearance = await ensureVersionClearance(dataRoot, closed.state);
+      console.log(JSON.stringify({ ok: true, decision: output.result.decision, closure: closed.result,
+        versionClearance, revision: closed.state.revision }, null, 2));
+    } else console.log(JSON.stringify({ ok: true, decision: output.result.decision, revision: output.state.revision }, null, 2));
   } else if (command === 'run' && subject === 'gate') {
     throw Object.assign(new Error('Submit Gate results through run gates, which executes the pinned Recipe and verifies its Receipt.'), { code: 'DIRECT_GATE_RESULT_DENIED' });
   } else if (command === 'run' && subject === 'finding-open') {

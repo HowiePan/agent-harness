@@ -24,6 +24,17 @@ export const hasRejectedPlanReview = state => {
   return reviews.at(-1)?.result.outputs?.['plan-review']?.value?.approved === false;
 };
 
+export const assertH4QualityRestartable = state => {
+  assert(state.metadata?.commandIntent?.action === 'quality'
+    && state.status === 'all-remaining-blocked'
+    && state.features.some(feature => feature.metadata?.stage === 'quality' && feature.state === 'completed')
+    && state.features.some(feature => feature.metadata?.stage === 'quality-repair' && feature.state === 'blocked')
+    && state.features.every(feature => ['completed', 'blocked'].includes(feature.state))
+    && !state.leases.some(lease => lease.status === 'active')
+    && !state.dispatches.some(dispatch => ['requested', 'assigned'].includes(dispatch.status)),
+  'DEVELOPMENT_H4_QUALITY_NOT_RESTARTABLE', 'H4 quality restart requires a reviewed, blocked, idle quality Run.');
+};
+
 export const selectDevelopmentRecoveryExtension = ({ state, intent, project, installedExtensions }) => {
   const workflow = state.metadata?.workflow;
   assert(workflow?.id === intent.workflowId && state.profile?.id === intent.profileId && state.metadata?.workspace?.root,
@@ -162,6 +173,24 @@ export const recoverDevelopmentRun = async ({ manifestFile, runId, commandId, cw
     arguments: intent.preset === 'default' ? [] : [intent.preset], executionWorkspaceRoot: state.metadata.workspace.root });
   assert(plan.logicalTaskKey === state.metadata.logicalTaskKey && plan.run.runId !== runId && plan.planDigest !== state.metadata.lifecyclePlanDigest,
     'DEVELOPMENT_RUN_REPLACEMENT_INVALID', 'The current source did not produce a distinct Plan for the same logical task.');
+  if (receipt.level === 'H4' && intent.action === 'quality') {
+    assertH4QualityRestartable(state);
+    const snapshot = await captureWorkspace(state.metadata.workspace.root, { excluded: project.workspace.excluded ?? [] });
+    assert(snapshot.digest === state.sourceDigest && plan.run.sourceDigest === state.sourceDigest,
+      'DEVELOPMENT_H4_SOURCE_CHANGED', 'H4 quality restart requires the exact authoritative project source.');
+    const hostContract = state.leases.find(lease => lease.runtimeReceipt?.hostSpawnReceipt)?.runtimeReceipt.hostSpawnReceipt.contract;
+    assert(hostContract, 'DEVELOPMENT_RUN_HOST_CONTRACT_REQUIRED', 'Recovery requires the bound Host contract.');
+    const effects = new CodexHostEffectJournal({ controlRoot: manifest.controlRoot, dataRoot: manifest.dataRoot, contract: hostContract });
+    assertDevelopmentRunRecoveryEffects(state, await effects.list());
+    const evidenceRefs = [...new Set(state.submissions.flatMap(item => item.evidenceRefs ?? []))];
+    assert(evidenceRefs.length > 0, 'DEVELOPMENT_H4_QUALITY_EVIDENCE_REQUIRED', 'The stopped quality Run has no submission evidence.');
+    const finished = await harness.kernel.finishRun(projectId, runId,
+      { status: 'failed', reason: 'development-h4-quality-restart', evidenceRefs },
+      { expectedRevision: state.revision, commandId });
+    return { projectId, priorRunId: runId, priorRevision: finished.state.revision,
+      patchReceiptDigest: receipt.receiptDigest, status: finished.state.status,
+      continuation: 'new-quality-command-ready' };
+  }
   if (receipt.level === 'H4' && intent.action === 'implement'
     && state.features.every(feature => feature.state === 'completed')
     && harness.profileRegistry.get(state.profile.id).canClose(state).reason === 'quality-review-limit-reached') {

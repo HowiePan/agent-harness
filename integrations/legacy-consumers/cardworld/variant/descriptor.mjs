@@ -83,6 +83,7 @@ export const createCardWorldProjectDescriptor = ({
       planSourceAutoCompatiblePaths: ['scripts/cardworld.ps1'],
       release: { documentationScopePath: 'release/docs-scope.json', versionPaths: ['card_world_engine/Cargo.toml', 'card_world_engine/Cargo.lock'], packageGateId: 'wasm-release-package', artifactRoot: 'card_world_engine/pkg', artifactIdentity: { path: 'package.json', versionField: 'version' } },
       qualityVerificationOutputs: [...qualityVerificationOutputs],
+      qualityFindingPaths: ['card_world_engine', 'card_world_web/src', 'card_world_web/tests', 'scripts'],
       qualityReviewLimit: structuredClone(qualityReviewLimit),
       majorReleaseTargets: [...majorReleaseTargets],
       ...(Object.keys(actionExecution).length ? { actionExecution: structuredClone(actionExecution) } : {}),
