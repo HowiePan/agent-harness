@@ -1,7 +1,7 @@
 import { readdir } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { assert } from '../common/errors.mjs';
-import { captureWorkspace } from '../common/workspace-snapshot.mjs';
+import { captureWorkspace, diffWorkspaceSnapshots } from '../common/workspace-snapshot.mjs';
 import { digestJson, withoutKeys } from '../common/canonical.mjs';
 import { readJson } from '../kernel/atomic-io.mjs';
 import { verifyDevelopmentSourceManifest } from './development-source.mjs';
@@ -11,6 +11,7 @@ import { loadProjectHarnessConfig } from './project-initialization.mjs';
 import { createHarness } from './harness.mjs';
 import { ExtensionRegistry } from '../platform/extensions/registry.mjs';
 import { CodexHostEffectJournal } from './codex-host-effect-journal.mjs';
+import { validateBusinessResult } from '../platform/execution/result-contract.mjs';
 import { expandApprovedImplementation } from '../flows/delivery-lifecycle/approved-implementation.mjs';
 import { createCompletionCarryoverPlan, verifyCompletionCarryover } from '../kernel/completion-carryover.mjs';
 
@@ -144,6 +145,184 @@ const currentPatchReceipt = async (manifest, state, evidenceStore) => {
   }
   assert(matches.length === 1, 'DEVELOPMENT_RUN_PATCH_RECEIPT_REQUIRED', 'Exactly one current H2/H3 patch Receipt, an explicit H4 migration Receipt, or H1 receipt for a rejected Plan review must cover the unchanged Run.');
   return matches[0];
+};
+
+export const assessUnacceptedTerminalResult = ({ feature, result, before, after }) => {
+  const nativeResult = validateBusinessResult(result, { conversationVisible: true, feature });
+  assert(nativeResult.status === 'completed' && before?.digest && after?.digest,
+    'DEVELOPMENT_RUN_RETIREMENT_RESULT_MISMATCH', 'Retirement requires a completed result and two source snapshots.');
+  const pathWithin = (root, file) => file === root || file.startsWith(`${root.replace(/\/$/, '')}/`);
+  const claimedChangedFiles = [...new Set(nativeResult.changedFiles.map(path => String(path).replaceAll('\\', '/')))].sort();
+  const rejectedPaths = claimedChangedFiles.filter(path => !feature.allowedPaths.some(root => pathWithin(root, path))
+    || feature.forbiddenPaths.some(root => pathWithin(root, path)));
+  assert(rejectedPaths.length > 0, 'DEVELOPMENT_RUN_RETIREMENT_REJECTION_UNVERIFIED',
+    'The pinned Feature does not substantiate rejection of the completed result.');
+  const changedPaths = diffWorkspaceSnapshots(before, after);
+  assert(claimedChangedFiles.every(path => changedPaths.includes(path)),
+    'DEVELOPMENT_RUN_RETIREMENT_CLAIM_DRIFT', 'The original result claims a file absent from the current source delta.');
+  return { claimedChangedFiles, rejectedPaths,
+    unclaimedChangedPaths: changedPaths.filter(path => !claimedChangedFiles.includes(path)) };
+};
+
+/** Scheduling stores one Run-scoped workspace snapshot; the Dispatch binds it by sourceSnapshotRef. */
+export const assertDispatchSourceSnapshotEvidence = ({ evidence, state, dispatch }) => {
+  const metadata = evidence.metadata;
+  const snapshot = JSON.parse(evidence.bytes.toString('utf8'));
+  assert(metadata.ref === dispatch.sourceSnapshotRef
+    && metadata.projectId === state.projectId && metadata.runId === state.runId
+    && metadata.epoch === dispatch.epoch && metadata.epoch === state.epoch
+    && metadata.generation === dispatch.generation && metadata.generation === state.generation
+    && metadata.featureId === null && metadata.dispatchId === null
+    && metadata.sourceDigest === dispatch.sourceDigest && metadata.sourceDigest === state.sourceDigest
+    && metadata.artifactDigest === state.artifactDigest
+    && metadata.policyDigest === state.policyDigest
+    && metadata.pluginSetDigest === state.pluginSetDigest
+    && metadata.labels?.includes('workspace-snapshot')
+    && metadata.mediaType === 'application/json'
+    && snapshot.protocolVersion === '1.0' && snapshot.root === resolve(state.metadata.workspace.root)
+    && Array.isArray(snapshot.files) && snapshot.digest === digestJson(snapshot.files)
+    && snapshot.digest === dispatch.sourceDigest,
+  'DEVELOPMENT_RUN_RETIREMENT_SOURCE_EVIDENCE_INVALID',
+  'The Run-scoped source snapshot does not bind this Dispatch and Authority baseline.');
+  return snapshot;
+};
+
+export const commitUnacceptedDevelopmentRetirement = async ({ authorityStore, evidenceStore, state, lease, dispatch, feature,
+  evidenceRef, patchReceiptDigest, hostReceiptDigest, resultDigest, observedSourceDigest,
+  claimedChangedFiles, unclaimedChangedPaths, commandId, now = () => new Date().toISOString() }) => {
+  const projectId = state.projectId;
+  const runId = state.runId;
+  const evidence = await evidenceStore.read(evidenceRef);
+  const record = JSON.parse(evidence.bytes.toString('utf8'));
+  assert(evidence.metadata.projectId === projectId && evidence.metadata.runId === runId
+    && evidence.metadata.epoch === state.epoch && evidence.metadata.generation === state.generation
+    && evidence.metadata.featureId === feature.id && evidence.metadata.dispatchId === dispatch.dispatchId
+    && evidence.metadata.sourceDigest === state.sourceDigest
+    && evidence.metadata.artifactDigest === state.artifactDigest
+    && evidence.metadata.policyDigest === state.policyDigest
+    && evidence.metadata.pluginSetDigest === state.pluginSetDigest
+    && record.kind === 'unaccepted-terminal-result-retirement' && record.version === '1.0'
+    && record.priorAuthorityDigest === state.authorityDigest
+    && record.patchReceiptDigest === patchReceiptDigest
+    && record.hostObservationReceipt?.receiptDigest === hostReceiptDigest
+    && record.originalResultDigest === resultDigest
+    && record.sourceDelta?.fromSourceDigest === state.sourceDigest
+    && record.sourceDelta?.observedSourceDigest === observedSourceDigest
+    && digestJson(record.sourceDelta.claimedChangedFiles) === digestJson(claimedChangedFiles)
+    && digestJson(record.sourceDelta.unclaimedChangedPaths) === digestJson(unclaimedChangedPaths)
+    && record.rejection?.code === 'FEATURE_PATH_NOT_ALLOWED'
+    && record.rejection.rejectedPaths?.length > 0,
+  'DEVELOPMENT_RUN_RETIREMENT_EVIDENCE_INVALID', 'Retirement evidence does not bind the current Run, Host result, rejection, and source delta.');
+  const outcome = { projectId, priorRunId: runId, evidenceRef, patchReceiptDigest, observedSourceDigest,
+    claimedChangedFiles, unclaimedChangedPaths, continuation: 'replan-command-ready' };
+  const retired = await authorityStore.transact(projectId, runId,
+    { expectedRevision: state.revision, commandId, payload: { ...outcome, priorAuthorityDigest: state.authorityDigest } }, currentState => {
+      assert(currentState.authorityDigest === state.authorityDigest && currentState.status === 'running'
+        && currentState.leases.some(item => item.leaseId === lease.leaseId && item.status === 'active')
+        && currentState.dispatches.some(item => item.dispatchId === dispatch.dispatchId && item.status === 'assigned'),
+      'DEVELOPMENT_RUN_RETIREMENT_AUTHORITY_CHANGED', 'Run Authority changed before trusted retirement.');
+      const at = now();
+      const activeLease = currentState.leases.find(item => item.leaseId === lease.leaseId);
+      const activeDispatch = currentState.dispatches.find(item => item.dispatchId === dispatch.dispatchId);
+      const activeFeature = currentState.features.find(item => item.id === feature.id);
+      activeLease.status = 'superseded'; activeLease.supersededAt = at; activeLease.supersededReason = 'unaccepted-terminal-result';
+      activeDispatch.status = 'superseded'; activeDispatch.supersededAt = at; activeDispatch.supersededReason = 'unaccepted-terminal-result';
+      activeFeature.state = 'blocked';
+      activeFeature.blocker = { kind: 'runtime-contract', code: 'FEATURE_PATH_NOT_ALLOWED',
+        summary: 'Completed Agent result was rejected by the pinned Feature path contract.' };
+      currentState.status = 'failed';
+      currentState.evidenceRefs.push(...[evidenceRef].filter(ref => !currentState.evidenceRefs.includes(ref)));
+      currentState.metadata = { ...currentState.metadata,
+        unacceptedTerminalResult: { dispatchId: dispatch.dispatchId, resultDigest,
+          hostReceiptDigest, evidenceRef },
+        terminalOutcome: { status: 'failed', reason: 'unaccepted-terminal-result-for-replan',
+          evidenceRefs: [evidenceRef], sourceDigest: currentState.sourceDigest, at } };
+      currentState.events.push({ sequence: currentState.events.length + 1, type: 'run.failed', at,
+        epoch: currentState.epoch, generation: currentState.generation,
+        ...structuredClone(currentState.metadata.terminalOutcome) });
+      return outcome;
+    });
+  return { ...outcome, status: retired.state.status, priorRevision: retired.state.revision };
+};
+
+/** Preserve a rejected native completion without assigning later workspace edits to its Feature. */
+export const retireUnacceptedDevelopmentRun = async ({ manifestFile, runId, commandId, cwd = process.cwd() }) => {
+  assert(commandId && runId, 'DEVELOPMENT_RUN_RETIREMENT_INPUT_REQUIRED', 'Retirement requires a Run and stable command ID.');
+  const { manifest, releaseIdentity } = await verifyDevelopmentSourceManifest(manifestFile);
+  await createLocalDevelopmentInvocation({ projectRoot: manifest.projectRoot, configPath: manifest.configPath,
+    controlRoot: manifest.controlRoot, dataRoot: manifest.dataRoot, cwd });
+  const config = await loadProjectHarnessConfig(manifest.configPath, { projectRoot: manifest.projectRoot });
+  const registry = new ExtensionRegistry({ dataRoot: manifest.dataRoot, controlRoot: manifest.controlRoot, developmentMode: true });
+  const extensions = await registry.loadInstalled();
+  const harness = await createHarness({ controlRoot: manifest.controlRoot, dataRoot: manifest.dataRoot, releaseIdentity,
+    extensions, strictProjectIdentity: false, initializeStorage: false });
+  const projectId = config.request.binding.projectId;
+  const state = await harness.authorityStore.read(projectId, runId);
+  if (state.status === 'failed' && state.metadata?.terminalOutcome?.reason === 'unaccepted-terminal-result-for-replan') {
+    const prior = state.commands?.[commandId];
+    assert(prior?.result?.evidenceRef === state.metadata.unacceptedTerminalResult?.evidenceRef,
+      'DEVELOPMENT_RUN_RETIREMENT_ALREADY_DONE', 'This Run was retired under another command.');
+    return { ...structuredClone(prior.result), status: state.status, priorRevision: state.revision };
+  }
+  assert(state.status === 'running' && state.metadata?.commandIntent?.action === 'implement'
+    && state.metadata?.lifecycleInvocationId && !state.findings.some(item => item.status !== 'resolved'),
+  'DEVELOPMENT_RUN_RETIREMENT_SCOPE_INVALID', 'Only an active implementation Run without open Findings can be retired for a new plan.');
+  const activeLeases = state.leases.filter(item => item.status === 'active');
+  const activeDispatches = state.dispatches.filter(item => ['requested', 'assigned'].includes(item.status));
+  assert(activeLeases.length === 1 && activeDispatches.length === 1
+    && activeLeases[0].dispatchId === activeDispatches[0].dispatchId,
+  'DEVELOPMENT_RUN_RETIREMENT_EFFECT_SCOPE_INVALID', 'Retirement requires exactly one active bound Lease and Dispatch.');
+  const lease = activeLeases[0];
+  const dispatch = activeDispatches[0];
+  const feature = state.features.find(item => item.id === dispatch.featureId);
+  assert(feature?.metadata?.stage === 'implementation' && feature.state === 'running'
+    && lease.featureId === feature.id && lease.agentId === lease.runtimeReceipt?.hostSpawnReceipt?.agentId,
+  'DEVELOPMENT_RUN_RETIREMENT_FEATURE_MISMATCH', 'The active Feature is not the bound implementation task.');
+  const patch = await currentPatchReceipt(manifest, state, harness.evidenceStore);
+  assert(['H2', 'H3'].includes(patch.level), 'DEVELOPMENT_RUN_RETIREMENT_PATCH_INVALID', 'Retirement requires a current H2/H3 repair Receipt.');
+  const journal = new CodexHostEffectJournal({ controlRoot: manifest.controlRoot, dataRoot: manifest.dataRoot,
+    contract: lease.runtimeReceipt.hostSpawnReceipt.contract });
+  const effects = await journal.list();
+  assertDevelopmentRunRecoveryEffects(state, effects);
+  const effect = effects.find(item => item.effectId === lease.runtimeReceipt.hostSpawnReceipt.effectId);
+  assert(effect?.state === 'settled' && effect.outcome?.disposition === 'result-observed'
+    && effect.sessionId === lease.runtimeReceipt.hostSpawnReceipt.sessionId
+    && effect.canonicalAgentName === lease.agentId && effect.binding?.dispatchId === dispatch.dispatchId,
+  'DEVELOPMENT_RUN_RETIREMENT_HOST_UNVERIFIED', 'The original Agent completion is not bound to this active Lease.');
+  // The original Host receipt and JSONL must agree byte-for-byte. A later chat
+  // summary or a fresh list_agents result cannot substitute for that observation.
+  const { readCodexRolloutObservation } = await import('../../integrations/codex/agent-harness-codex/lib/codex-rollout-host-exchange.mjs');
+  const observed = await readCodexRolloutObservation({ controlRoot: manifest.controlRoot, dataRoot: manifest.dataRoot,
+    sessionId: effect.sessionId, expectedCwd: state.metadata.workspace.root,
+    observationRequestDigest: effect.outcome.observationRequestDigest, agentId: lease.agentId });
+  assert(digestJson(observed.result) === effect.outcome.resultDigest,
+  'DEVELOPMENT_RUN_RETIREMENT_RESULT_MISMATCH', 'The original completed Agent result differs from the settled Host Effect.');
+  const sourceEvidence = await harness.evidenceStore.read(dispatch.sourceSnapshotRef);
+  const before = assertDispatchSourceSnapshotEvidence({ evidence: sourceEvidence, state, dispatch });
+  const project = await harness.projectRegistry.get(projectId);
+  const workspaceRoot = state.metadata.workspace.root;
+  const after = await captureWorkspace(workspaceRoot, { excluded: project.workspace.excluded ?? [] });
+  const { claimedChangedFiles, rejectedPaths, unclaimedChangedPaths } = assessUnacceptedTerminalResult({
+    feature, result: observed.result, before, after });
+  const evidence = await harness.evidenceStore.put({
+    kind: 'unaccepted-terminal-result-retirement', version: '1.0',
+    priorAuthorityDigest: state.authorityDigest, patchReceiptDigest: patch.receiptDigest,
+    hostEffectDigest: effect.effectDigest, hostObservationReceipt: observed.receipt,
+    originalResult: observed.result, originalResultDigest: effect.outcome.resultDigest,
+    rejection: { code: 'FEATURE_PATH_NOT_ALLOWED', rejectedPaths },
+    sourceDelta: { fromSourceDigest: before.digest, observedSourceDigest: after.digest,
+      claimedChangedFiles, unclaimedChangedPaths, attribution: 'unaccepted-agent-claim-and-unattributed-later-changes' },
+  }, { mediaType: 'application/json', projectId, runId, epoch: state.epoch, generation: state.generation,
+    featureId: feature.id, dispatchId: dispatch.dispatchId, sourceDigest: dispatch.sourceDigest,
+    artifactDigest: state.artifactDigest, policyDigest: state.policyDigest, pluginSetDigest: state.pluginSetDigest,
+    createdAt: observed.receipt.observedAt, labels: ['unaccepted-result', 'run-retirement'] });
+  const current = await captureWorkspace(workspaceRoot, { excluded: project.workspace.excluded ?? [] });
+  assert(current.digest === after.digest, 'DEVELOPMENT_RUN_RETIREMENT_SOURCE_DRIFT', 'Project source changed during retirement verification.');
+  return commitUnacceptedDevelopmentRetirement({ authorityStore: harness.authorityStore, evidenceStore: harness.evidenceStore,
+    state, lease, dispatch,
+    feature, evidenceRef: evidence.ref, patchReceiptDigest: patch.receiptDigest,
+    hostReceiptDigest: observed.receipt.receiptDigest, resultDigest: effect.outcome.resultDigest,
+    observedSourceDigest: after.digest, claimedChangedFiles, unclaimedChangedPaths, commandId });
 };
 
 /** Retire a stopped source-link Run only after its Host effects and replacement Plan are verified. */

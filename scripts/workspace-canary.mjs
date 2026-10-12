@@ -7,6 +7,7 @@ import { parsePseudoCommand } from '../integrations/codex/agent-harness-codex/ho
 import { createCardWorldProjectDescriptor } from '../integrations/legacy-consumers/cardworld/index.mjs';
 import { createTabletopCollectionProjectDescriptor } from '../integrations/legacy-consumers/collection/index.mjs';
 import { sha256 } from '../src/common/canonical.mjs';
+import { planApprovalSnapshot } from '../src/flows/delivery-lifecycle/plan-approval.mjs';
 
 // Exercise the legacy Engine and Collection closure path in the same command Gate.
 await import('./workflow-canary.mjs');
@@ -24,7 +25,11 @@ const legacyWorkflowOutputs = Object.freeze({
     intake: ['intake', 'delivery-intake-v1', { requirements: ['Synthetic workspace requirement.'] }],
     expansion: ['expansion', 'delivery-expansion-v1', { expandedRequirements: ['Synthetic expanded workspace requirement.'], derivedFrom: ['docs/requirements.md'], assumptions: [], unresolved: [] }],
     canonical: ['canonical', 'canonical-requirement-v1', { id: 'workspace-requirement', acceptance: ['Synthetic acceptance is satisfied.'] }],
-    plan: ['plan', 'delivery-plan-v1', { features: ['synthetic-feature'] }],
+    plan: ['plan', 'delivery-plan-v1', { features: ['synthetic-feature'], proposedFeatures: [
+      { id: 'synthetic-feature', projectId: 'engine-member', disposition: 'project-owned',
+        allowedPaths: ['README.md'], dependsOn: [], contracts: [], verification: [] },
+    ] }],
+    'plan-review': ['plan-review', 'delivery-plan-review-v1', { approved: true, findings: [] }],
     implement: ['implement', 'delivery-implementation-v1', { changedFiles: [] }],
     scope: ['scope', 'delivery-scope-v1', { resolved: true }],
     docs: ['docs', 'delivery-docs-v1', { documents: ['README.md'] }],
@@ -34,7 +39,9 @@ const legacyWorkflowOutputs = Object.freeze({
   }),
   'collection-batch-production': Object.freeze({
     rules: ['rules', 'batch-rules-v1', { ready: true }],
-    produce: ['produce', 'batch-produce-v1', { changedFiles: [] }],
+    produce: ['produce', 'batch-produce-v1', { changedFiles: [], requiredScenarios: ['synthetic-scenario'],
+      readyRemaining: [], scenarioAudit: [{ id: 'synthetic-scenario', disposition: 'passed',
+        evidenceRefs: ['workspace-canary/synthetic-scenario'] }] }],
     quality: ['quality', 'batch-quality-v1', { findings: [] }],
     review: ['review', 'batch-review-v1', { reviewed: true }],
     accept: ['accept', 'batch-accept-v1', { accepted: true }],
@@ -58,11 +65,14 @@ const handler = async packet => {
   const legacyDefinition = legacyWorkflowOutputs[context.workflow.id]?.[nodeId];
   if (legacyDefinition) {
     const [port, schemaId, value] = legacyDefinition;
+    const resolvedValue = nodeId === 'plan' && context.workflow.id === 'engine-delivery'
+      ? { ...value, proposedFeatures: value.proposedFeatures.map(feature => ({ ...feature, projectId: packet.projectId })) }
+      : value;
     return {
       status: 'completed',
       summary: `Workspace Canary ${nodeId}`,
       changedFiles: [],
-      outputs: { [port]: out(schemaId, value, [`workspace-canary/${nodeId}`]) },
+      outputs: { [port]: out(schemaId, resolvedValue, [`workspace-canary/${nodeId}`]) },
       ...(nodeId === 'quality' ? { findings: [], knownFindingDispositions: [] } : {}),
     };
   }
@@ -190,7 +200,12 @@ const runLegacyWorkspace = async (workspaceId, extension, descriptor, command, d
   const coordinator = new RunCoordinator({ harness });
   const approveDecision = async decisionId => {
     const state = await harness.authorityStore.read(plan.project.id, started.state.runId);
-    await harness.kernel.recordDecision(plan.project.id, state.runId, { id: decisionId, actor: 'workspace-canary', decision: 'approved' }, { expectedRevision: state.revision, commandId: `${workspaceId}-${decisionId}` });
+    const planIdentity = decisionId === 'implementation-plan-approved' ? planApprovalSnapshot(state) : null;
+    if (planIdentity) assert(planIdentity.reviewApproved, 'The synthetic Engine plan did not pass independent review.');
+    await harness.kernel.recordDecision(plan.project.id, state.runId, { id: decisionId, actor: 'workspace-canary', decision: 'approved',
+      ...(planIdentity ? { projectId: state.projectId, runId: state.runId,
+        planDigest: planIdentity.planDigest, artifactDigest: planIdentity.artifactDigest } : {}) },
+    { expectedRevision: state.revision, commandId: `${workspaceId}-${decisionId}` });
   };
   for (const id of decisionsBefore) await approveDecision(id);
   await coordinator.run({ projectId: plan.project.id, runId: started.state.runId, maxRounds: 40 });
@@ -227,15 +242,16 @@ try {
   const engineRoot = resolve(root, 'engine-output');
   const collectionRoot = resolve(root, 'collection-output');
   for (const path of [engineRoot, collectionRoot]) { await mkdir(resolve(path, '.git'), { recursive: true }); await writeFile(resolve(path, 'README.md'), legacyWorkspaceReadme); }
-  const engineDescriptor = createCardWorldProjectDescriptor({ id: 'engine-member', workspaceRoot: engineRoot, runtimePluginId: runtimeId, runtimePluginIds: [runtimeId], agentExecutionMode: 'headless', knownFindingInventories: { v1: { version: '1.0', sources: [{ path: 'README.md', sha256: sha256(legacyWorkspaceReadme) }], findings: [] } } });
+  const engineDescriptor = createCardWorldProjectDescriptor({ id: 'engine-member', workspaceRoot: engineRoot, runtimePluginId: runtimeId, runtimePluginIds: [runtimeId], agentExecutionMode: 'headless', knownFindingInventories: { 'V1.0.0': { version: '1.0', sources: [{ path: 'README.md', sha256: sha256(legacyWorkspaceReadme) }], findings: [] } } });
   engineDescriptor.gateRecipes = [];
+  delete engineDescriptor.policy.planArchiveRoot;
   engineDescriptor.extensions[0].digest = engineExtension.digest;
   engineDescriptor.workflows = [{ id: engineExtension.workflows[0].id, version: engineExtension.workflows[0].version, artifactDigest: engineExtension.workflows[0].artifactDigest, extensionId: engineExtension.id }];
   const collectionDescriptor = createTabletopCollectionProjectDescriptor({ id: 'collection-member', workspaceRoot: collectionRoot, runtimePluginId: runtimeId, runtimePluginIds: [runtimeId], agentExecutionMode: 'headless', batches: [{ id: 'B1', gameIds: ['game-a'], ruleStatus: 'rule-ready' }] });
   collectionDescriptor.gateRecipes = [];
   collectionDescriptor.extensions[0].digest = collectionExtension.digest;
   collectionDescriptor.workflows = [{ id: collectionExtension.workflows[0].id, version: collectionExtension.workflows[0].version, artifactDigest: collectionExtension.workflows[0].artifactDigest, extensionId: collectionExtension.id }];
-  await runLegacyWorkspace('engine', engineExtension, engineDescriptor, 'h:engine full v1', [], ['canonical-requirement-approved', 'user-code-review']);
+  await runLegacyWorkspace('engine', engineExtension, engineDescriptor, 'h:engine full V1.0.0', [], ['canonical-requirement-approved', 'implementation-plan-approved', 'user-code-review']);
   await runLegacyWorkspace('collection', collectionExtension, collectionDescriptor, 'h:collection full B1', ['batch:B1:launched'], ['game:game-a:harness-accepted', 'game:game-a:release-review-approved', 'game:game-a:accepted', 'batch:B1:closed']);
   const requirement = await runCommand('h:alpha flow requirements-design analyze audit-trail', { outputPaths: { requirements: 'docs/requirements.md', design: 'docs/design.md' } });
   assert((await readFile(resolve(alpha.outputRoot, 'docs/requirements.md'), 'utf8')).includes('Audit Trail'));

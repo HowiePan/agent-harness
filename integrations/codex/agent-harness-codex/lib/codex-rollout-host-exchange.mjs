@@ -1,9 +1,11 @@
 import { randomUUID } from 'node:crypto';
-import { open, realpath, stat } from 'node:fs/promises';
+import { createReadStream } from 'node:fs';
+import { open, readFile, readdir, realpath, stat } from 'node:fs/promises';
 import { isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { homedir } from 'node:os';
 import { DatabaseSync } from 'node:sqlite';
 import { StringDecoder } from 'node:string_decoder';
+import { createInterface } from 'node:readline';
 import { digestJson, sha256 } from '../../../../src/common/canonical.mjs';
 import { assertHarnessWritePath } from '../../../../src/common/write-boundary.mjs';
 import { atomicWriteJson } from '../../../../src/kernel/atomic-io.mjs';
@@ -33,6 +35,69 @@ export const locateCodexRollout = async ({ codexHome = process.env.CODEX_HOME ||
   const path = await realpath(normalizeHostPath(row.rollout_path));
   if (!inside(join(home, 'sessions'), path) || !path.toLowerCase().endsWith('.jsonl') || !path.includes(codexSessionId)) fail('CODEX_ROLLOUT_PATH_INVALID', 'Codex rollout path is not bound to this session under CODEX_HOME.');
   return { path, cliVersion: row.cli_version, codexHome: home };
+};
+
+/** Read an already attested native observation from its original rollout. No new Host call is implied. */
+export const readCodexRolloutObservation = async ({ controlRoot, dataRoot, sessionId, expectedCwd,
+  observationRequestDigest, agentId, locate = locateCodexRollout } = {}) => {
+  if (!safeId(sessionId) || !safeId(agentId?.split('/').at(-1)) || !/^[a-f0-9]{64}$/.test(observationRequestDigest ?? ''))
+    fail('CODEX_ROLLOUT_HISTORICAL_SCOPE_INVALID', 'Historical Host observation requires a bound session, Agent, and request digest.');
+  const receiptRoot = assertHarnessWritePath(resolve(dataRoot, 'host-bridge', 'rollout-receipts'), 'Codex rollout Host receipts', controlRoot);
+  const receipts = [];
+  const names = (await readdir(receiptRoot)).filter(name => /^host_request_[A-Za-z0-9_-]+-[A-Za-z0-9_-]+\.json$/.test(name));
+  for (let index = 0; index < names.length; index += 64) {
+    const batch = await Promise.all(names.slice(index, index + 64).map(async name => JSON.parse(await readFile(resolve(receiptRoot, name), 'utf8'))));
+    receipts.push(...batch.filter(receipt => receipt.sessionId === sessionId && receipt.requestDigest === observationRequestDigest));
+    if (receipts.length > 1) break;
+  }
+  if (receipts.length !== 1) fail('CODEX_ROLLOUT_HISTORICAL_RECEIPT_REQUIRED', 'Exactly one original Host receipt must bind the terminal observation.');
+  const receipt = receipts[0];
+  const { receiptDigest, ...body } = receipt;
+  if (receipt.protocolVersion !== '1.0' || receipt.kind !== 'codex-rollout-host-receipt' || receipt.tool !== 'collaboration.list_agents'
+    || receiptDigest !== digestJson(body) || !safeId(receipt.callId) || !safeId(receipt.outputId)
+    || receipt.argumentsDigest !== digestJson({}))
+    fail('CODEX_ROLLOUT_HISTORICAL_RECEIPT_INVALID', 'Original Host receipt is invalid or does not bind a native Agent observation.');
+  const host = await locate({ codexSessionId: sessionId, expectedCwd });
+  if (sha256(host.path) !== receipt.rolloutPathDigest || host.cliVersion !== receipt.codexVersion)
+    fail('CODEX_ROLLOUT_HISTORICAL_PATH_MISMATCH', 'Original Host receipt does not bind this Codex rollout.');
+  let call = null;
+  let output = null;
+  const lines = createInterface({ input: createReadStream(host.path, { encoding: 'utf8' }), crlfDelay: Infinity });
+  try {
+    for await (const line of lines) {
+      if (!line.includes(receipt.callId) && !line.includes(receipt.outputId)) continue;
+      if (Buffer.byteLength(line) > 8 * 1024 * 1024) fail('CODEX_ROLLOUT_HISTORICAL_LINE_INVALID', 'Original Host observation exceeds the native event limit.');
+      let record;
+      try { record = JSON.parse(line); } catch { fail('CODEX_ROLLOUT_HISTORICAL_LINE_INVALID', 'Original Host observation is not valid JSON.'); }
+      if (record?.type !== 'response_item') continue;
+      const item = record.payload;
+      if (item?.type === 'function_call' && item.call_id === receipt.callId) {
+        let argumentsValue;
+        try { argumentsValue = JSON.parse(item.arguments); }
+        catch { fail('CODEX_ROLLOUT_HISTORICAL_CALL_MISMATCH', 'Original native Agent observation arguments are invalid.'); }
+        if (call || item.namespace !== 'collaboration' || item.name !== 'list_agents'
+          || item.internal_chat_message_metadata_passthrough?.turn_id !== receipt.turnId
+          || digestJson(argumentsValue) !== receipt.argumentsDigest)
+          fail('CODEX_ROLLOUT_HISTORICAL_CALL_MISMATCH', 'Original native Agent observation call differs from its receipt.');
+        call = item;
+      }
+      if (item?.type === 'function_call_output' && item.call_id === receipt.callId && item.id === receipt.outputId) {
+        if (output || record.ordinal !== receipt.ordinal
+          || item.internal_chat_message_metadata_passthrough?.turn_id !== receipt.turnId)
+          fail('CODEX_ROLLOUT_HISTORICAL_OUTPUT_MISMATCH', 'Original native Agent observation output differs from its receipt.');
+        try { output = JSON.parse(item.output); } catch { fail('CODEX_ROLLOUT_HISTORICAL_OUTPUT_INVALID', 'Original native Agent observation is not valid JSON.'); }
+      }
+    }
+  } finally { lines.close(); }
+  if (!call || !output || digestJson(output) !== receipt.resultDigest || !Array.isArray(output.agents))
+    fail('CODEX_ROLLOUT_HISTORICAL_OUTPUT_MISMATCH', 'Original native Agent observation cannot be verified against its receipt.');
+  const matches = output.agents.filter(item => item?.agent_name === agentId);
+  if (matches.length !== 1 || typeof matches[0]?.agent_status?.completed !== 'string')
+    fail('CODEX_ROLLOUT_HISTORICAL_TERMINAL_REQUIRED', 'The bound original Agent has no unique completed native result.');
+  let result;
+  try { result = JSON.parse(matches[0].agent_status.completed); }
+  catch { fail('CODEX_ROLLOUT_HISTORICAL_RESULT_INVALID', 'The original completed Agent result is not structured JSON.'); }
+  return { receipt, result };
 };
 
 const validateRequest = (request, sessionId) => {

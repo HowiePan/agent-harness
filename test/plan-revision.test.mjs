@@ -131,6 +131,10 @@ test('replan captures idle implementation for retirement and blocks an active Le
   assert.throws(() => preparePlanRevisionIntent({ intent, project: { policy: {} }, states: [parent, live], sourceDigest: nextSource, sourceChanges }), error => error.code === 'REPLAN_IMPLEMENTATION_BUSY');
   const unresolved = { ...implementation, findings: [{ id: 'P2-open', status: 'open' }] };
   assert.throws(() => preparePlanRevisionIntent({ intent, project: { policy: {} }, states: [parent, unresolved], sourceDigest: nextSource, sourceChanges }), error => error.code === 'REPLAN_OPEN_FINDINGS');
+  const retired = { ...implementation, status: 'failed', leases: [{ status: 'superseded' }],
+    dispatches: [{ status: 'superseded' }], findings: [] };
+  assert.deepEqual(preparePlanRevisionIntent({ intent, project: { policy: {} }, states: [parent, retired],
+    sourceDigest: nextSource, sourceChanges }).planRevision.affectedImplementationRuns.map(run => run.runId), ['implement-old']);
 });
 
 test('revision artifact shows complete feature delta and old approval cannot approve the new plan', () => {

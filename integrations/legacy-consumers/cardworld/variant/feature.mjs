@@ -4,7 +4,7 @@ const implementationAllowedPaths = Object.freeze([
   'card_world_engine',
   'scripts', 'docs/versions', 'docs/schemas', 'docs/integration_guide.md',
   'docs/benchmarks.md', 'docs/requirements.md', 'docs/requirements',
-  'docs/project_plan.md', 'docs/engine_design', 'docs/testing', 'CHANGELOG.md',
+  'docs/project_plan.md', 'docs/engine_design.md', 'docs/engine_design', 'docs/testing', 'CHANGELOG.md',
 ]);
 export const CARDWORLD_ACTION_PATHS = Object.freeze({
   requirements: ['docs/requirements.md', 'docs/versions'],

@@ -1,6 +1,6 @@
 import { resolve } from 'node:path';
 import { createHarness } from '../../../../src/application/harness.mjs';
-import { recoverDevelopmentRun, selectDevelopmentRecoveryExtension } from '../../../../src/application/development-run-recovery.mjs';
+import { recoverDevelopmentRun, retireUnacceptedDevelopmentRun, selectDevelopmentRecoveryExtension } from '../../../../src/application/development-run-recovery.mjs';
 import { verifyDevelopmentSourceManifest } from '../../../../src/application/development-source.mjs';
 import { createLocalDevelopmentInvocation } from '../../../../src/application/local-development-invocation.mjs';
 import { loadProjectHarnessConfig } from '../../../../src/application/project-initialization.mjs';
@@ -44,6 +44,19 @@ const main = async () => {
     if (!['plan', 'replan', 'implement', 'produce', 'quality'].includes(old.metadata?.commandIntent?.action) || !old.metadata?.lifecycleInvocationId)
       fail('VISIBLE_DEVELOPMENT_RECOVERY_SCOPE_INVALID', 'Recovery only continues an existing authorized planning, implementation, production, or quality lifecycle.');
     const commandId = `${old.metadata.lifecycleInvocationId}.development-recover.${runId}`;
+    if (retireOnly && (old.status === 'running' || old.status === 'failed')) {
+      const lease = old.leases.find(item => item.status === 'active');
+      const effectId = lease?.runtimeReceipt?.hostSpawnReceipt?.effectId;
+      const effect = effectId ? await host.journal.read(effectId, { required: true }) : null;
+      if (old.metadata?.terminalOutcome?.reason === 'unaccepted-terminal-result-for-replan'
+        || effect?.state === 'settled' && effect.outcome?.disposition === 'result-observed'
+          && !effect.outcome.terminalFailureDigest && !effect.outcome.rejectionDigest) {
+        const retired = await retireUnacceptedDevelopmentRun({ manifestFile, runId,
+          commandId: `${old.metadata.lifecycleInvocationId}.unaccepted-retire.${runId}` });
+        emit({ kind: 'codex-visible-development-recovery', phase: 'run-retired', ...retired });
+        return;
+      }
+    }
     const salvageTerminalFailure = async () => {
       const active = old.leases.filter(item => item.status === 'active');
       if (active.length !== 1 || old.dispatches.filter(item => ['requested', 'assigned'].includes(item.status)).length !== 1)

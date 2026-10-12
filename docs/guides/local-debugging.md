@@ -103,6 +103,8 @@ Hook 在绑定、同步或路由失败时仍用 `decision:block` 阻止无可信
 
 若用户要求修复 Harness 并把旧 Run 退役到可重新发命令的状态，但明确不要求继续业务执行，可使用源码 Host 协调器 `visible-development-recovery.mjs --manifest <manifest.json> --run <run-id> --retire-only`。它仍须以原生 Host 观察/中断回执隔离活动 Effect、验证 H2/H3 补丁 Receipt，并通过 Kernel Authority 退役旧 Run；发出 `run-retired` 后立即停止，不执行替代 Run 的预检、启动或调度。随后由用户重新提交 `h:local ...`。
 
+若原 Agent 已返回 `completed`，但结果因旧 Feature 路径合同被拒收，`--retire-only` 另走可信拒收收口：从原 Codex session 的 rollout 回读已签收的 `list_agents` 调用和输出，并与 Host Effect 的结果摘要、当前 H2/H3 补丁 Receipt、原 Dispatch 源快照及当前源码差异逐项核对。原结果申报路径必须仍存在于源码差异中，且至少一条被旧 Feature 合同拒绝。Harness 将原结果、拒收原因、申报路径与未申报的后续路径分别封存为 Evidence，以 expected revision 和幂等 command ID 把旧 Run 记为 `failed`、释放 Lease/Dispatch；不会创建 F-14 完成 Submission、把未申报改动归给原 Agent，或自动启动替代实施 Run。此入口仅由原项目 checkout 的对话运行；先在该 checkout 执行 `dev sync` 生成覆盖旧 Run 的当前 H3 补丁 Receipt，成功后由用户重新提交 `h:local ... replan ...`，新计划仍需独立审查与批准。
+
 ## 变化检测与应用
 
 ```text

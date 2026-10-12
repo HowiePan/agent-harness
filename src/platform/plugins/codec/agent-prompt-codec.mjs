@@ -52,7 +52,9 @@ export const compileAgentPrompt = (packetInput, manifest = REFERENCE_AGENT_PROMP
   if (taskAware) assert(Array.isArray(packet.workflowContext?.taskInputs), 'NODE_TASK_INPUTS_UNRESOLVED', 'Prompt compilation requires resolved Node Task inputs.');
   if (task?.inputs.some(input => input.id === 'approved-delivery-plan')) {
     const approved = packet.workflowContext.taskInputs.find(input => input.id === 'approved-delivery-plan')?.value;
-    const upstream = packet.workflowContext.taskInputs.find(input => input.id === 'upstream-delivery-plan')?.values ?? [];
+    const upstream = packet.workflowContext.taskInputs.filter(input => input.source === 'upstream'
+      && input.nodeId === 'plan' && input.portId === 'plan' && input.schemaId === 'delivery-plan-v1')
+      .flatMap(input => input.values ?? []);
     assert(approved?.proposedFeatures?.some(proposal => proposal.projectId === packet.projectId && proposal.disposition === 'project-owned')
       || upstream.some(item => item.value?.proposedFeatures?.some(proposal => proposal.projectId === packet.projectId && proposal.disposition === 'project-owned')),
     'IMPLEMENTATION_TYPED_PLAN_INPUT_REQUIRED', 'Implementation Dispatch requires a typed project-owned delivery plan from the approved Feature or upstream planning Feature.');

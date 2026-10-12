@@ -38,6 +38,12 @@ test('Implementation prompt requires a typed project-owned plan input', () => {
   assert.throws(() => compileAgentPrompt(implementation), error => error.code === 'IMPLEMENTATION_TYPED_PLAN_INPUT_REQUIRED');
   implementation.workflowContext.taskInputs[0].value = { proposedFeatures: [{ id: 'engine', projectId: 'project', disposition: 'project-owned' }] };
   assert.ok(compileAgentPrompt(implementation).text);
+  implementation.workflowContext.taskInputs[0].value = null;
+  implementation.workflowContext.taskInputs[1] = { id: 'upstream.plan.plan', source: 'upstream', nodeId: 'plan',
+    portId: 'plan', schemaId: 'delivery-plan-v1', values: [{ value: { proposedFeatures: [
+      { id: 'engine', projectId: 'project', disposition: 'project-owned' },
+    ] } }] };
+  assert.ok(compileAgentPrompt(implementation).text);
 });
 
 test('Prompt Codec deterministically compiles immutable Dispatch data into the full quality contract', () => {

@@ -6,6 +6,7 @@ import { captureSourceManifest, createExecutionAuthorizationAdapter, createHarne
 import { createCardWorldProjectDescriptor } from '../integrations/legacy-consumers/cardworld/index.mjs';
 import { createTabletopCollectionProjectDescriptor } from '../integrations/legacy-consumers/collection/index.mjs';
 import { sha256 } from '../src/common/canonical.mjs';
+import { planApprovalSnapshot } from '../src/flows/delivery-lifecycle/plan-approval.mjs';
 
 const rootBase = resolve(harnessTemporaryRoot(), 'workflow-canary');
 await mkdir(rootBase, { recursive: true });
@@ -46,7 +47,11 @@ const lifecycleCanaryOutputs = Object.freeze({
   intake: ['intake', 'delivery-intake-v1', { requirements: ['Synthetic canary requirement.'] }],
   expansion: ['expansion', 'delivery-expansion-v1', { expandedRequirements: ['Synthetic expanded requirement.'], derivedFrom: ['docs/requirements.md'], assumptions: [], unresolved: [] }],
   canonical: ['canonical', 'canonical-requirement-v1', { id: 'canary-requirement', acceptance: ['Synthetic acceptance is satisfied.'] }],
-  plan: ['plan', 'delivery-plan-v1', { features: ['synthetic-feature'] }],
+  plan: ['plan', 'delivery-plan-v1', { features: ['synthetic-feature'], proposedFeatures: [
+    { id: 'synthetic-feature', projectId: 'engine-canary', disposition: 'project-owned',
+      allowedPaths: ['README.md'], dependsOn: [], contracts: [], verification: [] },
+  ] }],
+  'plan-review': ['plan-review', 'delivery-plan-review-v1', { approved: true, findings: [] }],
   implement: ['implement', 'delivery-implementation-v1', { changedFiles: [] }],
   scope: ['scope', 'delivery-scope-v1', { resolved: true }],
   docs: ['docs', 'delivery-docs-v1', { documents: ['README.md'] }],
@@ -57,7 +62,9 @@ const lifecycleCanaryOutputs = Object.freeze({
 
 const batchCanaryOutputs = Object.freeze({
   rules: ['rules', 'batch-rules-v1', { ready: true }],
-  produce: ['produce', 'batch-produce-v1', { changedFiles: [] }],
+  produce: ['produce', 'batch-produce-v1', { changedFiles: [], requiredScenarios: ['synthetic-scenario'],
+    readyRemaining: [], scenarioAudit: [{ id: 'synthetic-scenario', disposition: 'passed',
+      evidenceRefs: ['canary/synthetic-scenario'] }] }],
   quality: ['quality', 'batch-quality-v1', { findings: [] }],
   review: ['review', 'batch-review-v1', { reviewed: true }],
   accept: ['accept', 'batch-accept-v1', { accepted: true }],
@@ -156,8 +163,9 @@ const runExistingWorkflows = async ({ engineExtension, collectionExtension }) =>
     await mkdir(resolve(path, '.git'), { recursive: true });
     await writeFile(resolve(path, 'README.md'), syntheticWorkspaceReadme);
   }
-  const engineDescriptor = createCardWorldProjectDescriptor({ id: 'engine-canary', workspaceRoot: engineWorkspace, runtimePluginId: runtimeId, runtimePluginIds: [runtimeId], agentExecutionMode: 'headless', knownFindingInventories: { v1: { version: '1.0', sources: [{ path: 'README.md', sha256: sha256(syntheticWorkspaceReadme) }], findings: [] } } });
+  const engineDescriptor = createCardWorldProjectDescriptor({ id: 'engine-canary', workspaceRoot: engineWorkspace, runtimePluginId: runtimeId, runtimePluginIds: [runtimeId], agentExecutionMode: 'headless', knownFindingInventories: { 'V1.0.0': { version: '1.0', sources: [{ path: 'README.md', sha256: sha256(syntheticWorkspaceReadme) }], findings: [] } } });
   engineDescriptor.gateRecipes = [];
+  delete engineDescriptor.policy.planArchiveRoot;
   engineDescriptor.extensions[0].digest = engineExtension.digest;
   engineDescriptor.workflows = [{ id: engineExtension.workflows[0].id, version: engineExtension.workflows[0].version, artifactDigest: engineExtension.workflows[0].artifactDigest, extensionId: engineExtension.id }];
   const collectionDescriptor = createTabletopCollectionProjectDescriptor({ id: 'collection-canary', workspaceRoot: collectionWorkspace, runtimePluginId: runtimeId, runtimePluginIds: [runtimeId], agentExecutionMode: 'headless', batches: [{ id: 'B1', gameIds: ['game-a'], ruleStatus: 'rule-ready' }] });
@@ -166,16 +174,25 @@ const runExistingWorkflows = async ({ engineExtension, collectionExtension }) =>
   collectionDescriptor.workflows = [{ id: collectionExtension.workflows[0].id, version: collectionExtension.workflows[0].version, artifactDigest: collectionExtension.workflows[0].artifactDigest, extensionId: collectionExtension.id }];
   for (const descriptor of [engineDescriptor, collectionDescriptor]) await harness.projectRegistry.register(descriptor, { commandId: `canary-register-${descriptor.id}`, authorityDecision: { actor: 'canary-command', decision: 'approved', action: 'project-execution-policy-change', expiresAt: '2099-09-19T00:00:00.000Z', context: projectExecutionPolicyDecisionContext({ input: descriptor, expectedRevision: 0 }) } });
   const coordinator = new RunCoordinator({ harness });
-  const enginePlan = await harness.createLifecyclePlan({ projectId: engineDescriptor.id, workflowId: 'engine-delivery', action: 'full', target: 'v1', executionAuthorizationEvidence: { explicitUnattended: true } });
+  const enginePlan = await harness.createLifecyclePlan({ projectId: engineDescriptor.id, workflowId: 'engine-delivery', action: 'full', target: 'V1.0.0', executionAuthorizationEvidence: { explicitUnattended: true } });
   const enginePreflight = await harness.createExecutionReadinessReport(enginePlan);
   assert.equal(enginePreflight.executionReady, true);
   const engineStart = await harness.startLifecyclePlan(enginePlan, { commandId: 'canary-engine-start', preflightReport: enginePreflight });
   await coordinator.run({ projectId: engineDescriptor.id, runId: engineStart.state.runId, maxRounds: 20 });
   await approve(engineDescriptor.id, engineStart.state.runId, 'canonical-requirement-approved');
   await coordinator.run({ projectId: engineDescriptor.id, runId: engineStart.state.runId, maxRounds: 30 });
+  const reviewedPlan = await harness.authorityStore.read(engineDescriptor.id, engineStart.state.runId);
+  const planIdentity = planApprovalSnapshot(reviewedPlan);
+  assert(planIdentity?.reviewApproved, 'The synthetic Engine plan did not pass independent review.');
+  await harness.kernel.recordDecision(engineDescriptor.id, engineStart.state.runId,
+    { id: 'implementation-plan-approved', actor: 'canary-command', decision: 'approved',
+      projectId: engineDescriptor.id, runId: engineStart.state.runId,
+      planDigest: planIdentity.planDigest, artifactDigest: planIdentity.artifactDigest },
+    { expectedRevision: reviewedPlan.revision, commandId: 'canary-engine-plan-approved' });
+  await coordinator.run({ projectId: engineDescriptor.id, runId: engineStart.state.runId, maxRounds: 30 });
   await approve(engineDescriptor.id, engineStart.state.runId, 'user-code-review');
   let state = await harness.authorityStore.read(engineDescriptor.id, engineStart.state.runId);
-  assert(state.features.every(feature => feature.state === 'completed'));
+  assert(state.features.every(feature => feature.state === 'completed'), JSON.stringify(state.features.map(feature => ({ id: feature.id, state: feature.state, blocker: feature.blocker }))));
   state = (await harness.kernel.closeRun(engineDescriptor.id, state.runId, {}, { expectedRevision: state.revision, commandId: 'canary-engine-close' })).state;
   assert.equal(state.status, 'closed');
   outputs.push({ workflowId: 'engine-delivery', runId: state.runId, status: state.status, featureCount: state.features.length, planDigest: enginePlan.planDigest });

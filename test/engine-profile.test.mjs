@@ -10,6 +10,7 @@ import { command, dispatchAndBind, feature, makeFixture, recordResult, startRun 
 
 test('engine implementation owns engine docs but not downstream applications', () => {
   assert(CARDWORLD_ACTION_PATHS.implement.includes('docs/requirements'));
+  assert(CARDWORLD_ACTION_PATHS.implement.includes('docs/engine_design.md'));
   assert(CARDWORLD_ACTION_PATHS.implement.includes('docs/testing'));
   assert(CARDWORLD_ACTION_PATHS.implement.includes('card_world_engine'));
   assert(CARDWORLD_ACTION_PATHS.implement.every(path =>
