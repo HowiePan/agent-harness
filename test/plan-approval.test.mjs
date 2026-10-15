@@ -83,6 +83,20 @@ test('plan review keeps version IDs and validation paths literal in Markdown', a
   assert.equal(markdown.includes('AdvanceTicks\\(n\\)'), false);
 });
 
+test('approval Markdown retains structured verification and review finding details', () => {
+  const state = reviewedRun(false);
+  const verification = { capabilityProducer: 'A-01', specificationRef: 'docs/contract.md#native-check' };
+  const finding = { id: 'PR-01', severity: 'P1', summary: 'Missing native verification' };
+  state.submissions[0].result.outputs.plan.value.proposedFeatures[0].verification = [verification];
+  state.submissions[1].result.outputs['plan-review'].value.findings = [finding];
+  const snapshot = planApprovalSnapshot(state);
+  assert.ok(snapshot.markdown.includes(JSON.stringify(verification)));
+  assert.ok(snapshot.markdown.includes(JSON.stringify(finding)));
+  assert.equal(snapshot.markdown.includes('[object Object]'), false);
+  assert.equal(snapshot.reviewApproved, false);
+  assert.equal(planApprovalSatisfied(state), false);
+});
+
 test('reviewed plan is archived in project docs and only its exact generated delta is compatible', async t => {
   const workspaceRoot = await mkdtemp(join(tmpdir(), 'harness-plan-archive-'));
   t.after(() => rm(workspaceRoot, { recursive: true, force: true }));
@@ -120,6 +134,32 @@ test('a revised plan replaces only a verified previous generated archive', async
   const replacement = await ensureProjectPlanArchive({ project, state: revised, workspaceRoot, previousPlanRuns: [prior] });
   assert.equal(replacement.path, original.path);
   assert.equal(await readFile(replacement.path, 'utf8'), planApprovalSnapshot(revised).markdown);
+});
+
+test('archive compatibility recognizes exact legacy bytes without admitting edits or another project', async t => {
+  const workspaceRoot = await mkdtemp(join(tmpdir(), 'harness-plan-legacy-archive-'));
+  t.after(() => rm(workspaceRoot, { recursive: true, force: true }));
+  const project = { policy: { planArchiveRoot: 'docs/versions' } };
+  const prior = reviewedRun(true);
+  prior.metadata.commandIntent.target = 'V3.9.0';
+  prior.submissions[0].result.outputs.plan.value.proposedFeatures[0].verification = [{ producer: 'engine', check: 'native' }];
+  const legacy = planApprovalSnapshot(prior, { legacyStructuredValues: true });
+  assert.ok(legacy.markdown.includes('[object Object]'));
+  assert.equal(legacy.planDigest, planApprovalSnapshot(prior).planDigest);
+  assert.notEqual(legacy.artifactDigest, planApprovalSnapshot(prior).artifactDigest);
+  const archive = await ensureProjectPlanArchive({ project, state: prior, workspaceRoot });
+  await writeFile(archive.path, legacy.markdown);
+  const revised = { ...structuredClone(prior), runId: 'plan-2' };
+  const input = { project, state: revised, workspaceRoot, previousPlanRuns: [prior] };
+  assert.equal((await ensureProjectPlanArchive({ ...input, dryRun: true })).updateRequired, true);
+  assert.equal(await readFile(archive.path, 'utf8'), legacy.markdown);
+  await assert.rejects(ensureProjectPlanArchive({ ...input, previousPlanRuns: [{ ...prior, projectId: 'other' }] }),
+    { code: 'PLAN_ARCHIVE_CONFLICT' });
+  await writeFile(archive.path, legacy.markdown + 'manual edit');
+  await assert.rejects(ensureProjectPlanArchive(input), { code: 'PLAN_ARCHIVE_CONFLICT' });
+  await writeFile(archive.path, legacy.markdown);
+  await ensureProjectPlanArchive(input);
+  assert.equal(await readFile(archive.path, 'utf8'), planApprovalSnapshot(revised).markdown);
 });
 
 test('approved plan can bind an audited source delta while later engine edits still invalidate it', () => {

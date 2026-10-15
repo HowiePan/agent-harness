@@ -4,6 +4,7 @@ import { diffWorkspaceSnapshots } from '../common/workspace-snapshot.mjs';
 import { resolve } from 'node:path';
 import { planApprovalSnapshot, reviewedPlanProposal } from '../flows/delivery-lifecycle/plan-approval.mjs';
 import { CodexHostEffectJournal } from './codex-host-effect-journal.mjs';
+import { readInterruptedWorkspaceDraft } from './interrupted-workspace-recovery.mjs';
 
 const excludedPath = (path, excluded) => excluded.some(entry => {
   const normalized = String(entry).replaceAll('\\', '/').replace(/^\.\//, '').replace(/\/$/, '');
@@ -67,7 +68,7 @@ export const assessAutomaticPlanSourceCompatibility = ({ planRun, assessment, im
 };
 
 /** Preserve source progress already committed by an implementation Run for this exact approved plan. */
-export const assessVerifiedImplementationContinuation = ({ planRun, planArtifact, priorRuns, currentSourceDigest, workspaceRoot, implementationFeatures }) => {
+export const assessVerifiedImplementationContinuation = ({ planRun, planArtifact, priorRuns, currentSourceDigest, workspaceRoot, implementationFeatures, verifiedSourceRecoveries = [] }) => {
   const currentPaths = (implementationFeatures ?? [])
     .filter(feature => feature.metadata?.stage === 'implementation' && feature.metadata?.sourcePolicy !== 'read-only')
     .flatMap(feature => feature.allowedPaths ?? []).filter(safePath);
@@ -89,8 +90,13 @@ export const assessVerifiedImplementationContinuation = ({ planRun, planArtifact
     const submitted = (run.submissions ?? []).filter(item => !item.supersededAt);
     if (!submitted.length || !submitted.some(item => item.changedFiles?.length)) continue;
     let digest = binding.sourceDigest;
+    const bridge = () => {
+      const matches = verifiedSourceRecoveries.filter(item => item.fromSourceDigest === digest);
+      if (matches.length === 1) digest = matches[0].toSourceDigest;
+    };
     let valid = true;
     for (const item of submitted) {
+      if (item.inputSourceDigest !== digest) bridge();
       const feature = run.features?.find(candidate => candidate.id === item.featureId);
       const paths = item.changedFiles ?? [];
       if (item.inputSourceDigest !== digest || !item.outputSourceDigest || !item.submissionDigest
@@ -100,6 +106,7 @@ export const assessVerifiedImplementationContinuation = ({ planRun, planArtifact
           && currentPaths.some(scope => containsPath(scope, path)))) { valid = false; break; }
       digest = item.outputSourceDigest;
     }
+    if (digest !== currentSourceDigest) bridge();
     if (valid && digest === currentSourceDigest && digest !== binding.sourceDigest) return {
       mode: 'verified-prior-implementation', priorRunId: run.runId,
       fromSourceDigest: binding.sourceDigest, toSourceDigest: currentSourceDigest,
@@ -115,6 +122,22 @@ export const assessRecoveredImplementationContinuation = async ({ planRun, planA
   const implementationPaths = (implementationFeatures ?? [])
     .filter(feature => feature.metadata?.stage === 'implementation' && feature.metadata?.sourcePolicy !== 'read-only')
     .flatMap(feature => feature.allowedPaths ?? []).filter(safePath);
+  const verifiedSourceRecoveries = [];
+  for (const origin of priorRuns ?? []) {
+    const binding = origin.metadata?.approvedPlan;
+    if (!origin.metadata?.interruptedWorkspaceDraft || origin.projectId !== planRun.projectId
+      || binding?.runId !== planRun.runId || binding.planDigest !== planArtifact.planDigest
+      || binding.artifactDigest !== planArtifact.artifactDigest
+      || resolve(origin.metadata?.workspace?.root ?? '') !== resolve(workspaceRoot)) continue;
+    verifiedSourceRecoveries.push(await readInterruptedWorkspaceDraft({ state: origin, evidenceStore,
+      controlRoot, dataRoot, readHostEffect }));
+  }
+  if (verifiedSourceRecoveries.length) {
+    const verified = assessVerifiedImplementationContinuation({ planRun, planArtifact, priorRuns,
+      currentSourceDigest: currentSnapshot.digest, workspaceRoot, implementationFeatures, verifiedSourceRecoveries });
+    if (verified) return { ...verified, mode: 'verified-implementation-with-interrupted-draft',
+      draftEvidenceRefs: verifiedSourceRecoveries.map(item => item.evidenceRef) };
+  }
   for (const run of priorRuns ?? []) {
     if (run.status !== 'superseded' || !/^development-h[234]-recovery:[a-f0-9]{64}$/.test(run.metadata?.supersededReason ?? '')) continue;
     const verified = assessVerifiedImplementationContinuation({ planRun, planArtifact, priorRuns: [run],

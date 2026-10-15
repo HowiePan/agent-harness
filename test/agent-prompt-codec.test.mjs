@@ -126,6 +126,26 @@ test('visible 1.5 Prompt keeps the complete task and result contract in digest-b
   assert.doesNotMatch(compiled.text, /"knownFindingDispositions"/);
 });
 
+test('visible prompts preserve explicit Dispatch authority for protected source operations', () => {
+  for (const contractVersion of ['1.4', '1.5']) {
+    const migration = packet();
+    migration.feature = { ...migration.feature, id: 'source-layout', kind: 'implementation',
+      task: taskContract('source-layout', ['Relocate the approved source files and retire their old paths']),
+      allowedPaths: ['src', 'legacy'], forbiddenPaths: ['.git', '.control'] };
+    migration.execution.prompt.contractVersion = contractVersion;
+    migration.execution.runtime = { mode: 'conversation-visible', userVisible: true, hostOrchestrated: true };
+    migration.execution.result = createDispatchResultContract(migration.feature, { conversationVisible: true });
+    const compiled = compileAgentPrompt(migration);
+    assert.match(compiled.text, /Do not commit, tag, publish, delete, or migrate without explicit Dispatch authority\./);
+    assert.doesNotMatch(compiled.text, /publish, delete, or migrate\./);
+    assert.match(compiled.text, /(?:Do not delegate or change Harness control data|Do not modify Harness Authority)/);
+    assert.match(compiled.text, /(?:never write forbiddenPaths|never forbiddenPaths)/i);
+    assert.equal(compiled.promptDigest, sha256(compiled.text));
+    assert.equal(compiled.packetDigest, digestJson(migration));
+    assert.deepEqual(migration.feature.allowedPaths, ['src', 'legacy']);
+  }
+});
+
 test('quality repair Prompt separates source edits from declared verification artifacts', () => {
   const repair = packet();
   repair.feature.id = 'quality-repair';

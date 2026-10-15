@@ -30,7 +30,7 @@ export const deliveryValueSchemas = Object.freeze({
       id: string, projectId: string, disposition: { enum: ['project-owned', 'cross-project-dependency'] }, allowedPaths: strings, dependsOn: strings,
     }, additionalProperties: true } },
   }, additionalProperties: true },
-  'delivery-plan-review-v1': { type: 'object', required: ['approved'], properties: { approved: { type: 'boolean' }, findings: strings }, additionalProperties: true },
+  'delivery-plan-review-v1': { type: 'object', required: ['approved'], properties: { approved: { type: 'boolean' }, findings: strings, resolvedFindings: strings }, additionalProperties: true },
   'delivery-implementation-v1': { type: 'object', required: ['changedFiles'], properties: { changedFiles: strings }, additionalProperties: true },
   'delivery-scope-v1': { type: 'object', required: ['resolved'], properties: { resolved: { type: 'boolean' } }, additionalProperties: true },
   'delivery-docs-v1': { type: 'object', required: ['documents'], properties: { documents: strings }, additionalProperties: true },
@@ -41,3 +41,36 @@ export const deliveryValueSchemas = Object.freeze({
   'release-preparation-v1': { type: 'object', required: ['version', 'changedFiles'], properties: { version: string, changedFiles: strings }, additionalProperties: true },
   'release-documentation-audit-v1': { type: 'object', required: ['auditedFiles', 'updatedFiles', 'resolved', 'unresolved'], properties: { auditedFiles: strings, updatedFiles: strings, resolved: strings, unresolved: strings }, additionalProperties: true },
 });
+
+/** Publish the same completion evidence required by the approved-proposal Profile. */
+export const approvedImplementationValueSchema = proposal => {
+  const contracts = proposal.contracts ?? [];
+  const verification = proposal.verification ?? [];
+  const prerequisites = proposal.externalPrerequisites ?? [];
+  const verificationEntry = item => ({
+    type: 'object', required: ['item', 'status'],
+    properties: { item: { const: item }, status: { enum: ['completed', 'deferred'] } },
+    oneOf: [
+      { required: ['evidenceRefs'], properties: {
+        status: { const: 'completed' }, evidenceRefs: { ...strings, minItems: 1 },
+      } },
+      ...(prerequisites.length ? [{ required: ['externalPrerequisite', 'reason'], properties: {
+        status: { const: 'deferred' }, externalPrerequisite: { enum: prerequisites },
+        reason: { ...string, pattern: '\\S' },
+      } }] : []),
+    ],
+    additionalProperties: true,
+  });
+  return {
+    ...structuredClone(deliveryValueSchemas['delivery-implementation-v1']),
+    required: ['changedFiles', 'proposalId', 'completedContracts', 'verificationResults'],
+    properties: {
+      changedFiles: strings,
+      proposalId: { const: proposal.id },
+      completedContracts: { type: 'array', minItems: contracts.length, maxItems: contracts.length,
+        uniqueItems: true, items: contracts.length ? { enum: contracts } : string },
+      verificationResults: { type: 'array', minItems: verification.length, maxItems: verification.length,
+        uniqueItems: true, items: verification.length ? { oneOf: verification.map(verificationEntry) } : { type: 'object' } },
+    },
+  };
+};

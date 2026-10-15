@@ -17,7 +17,7 @@ import { ensurePlanApprovalArtifact } from '../flows/delivery-lifecycle/plan-app
 import { performance } from 'node:perf_hooks';
 import { qualityRepairScopeCandidates } from '../kernel/quality.mjs';
 
-const recoverableResultCodes = new Set(['REPAIR_CHECKPOINT_REQUIRED', 'REPAIR_CHECKPOINT_EVIDENCE_REQUIRED', 'REPAIR_FINDING_CHECKPOINT_REQUIRED', 'QUALITY_DIAGNOSTIC_DISPOSITION_REQUIRED', 'QUALITY_PREREQUISITE_INVALID', 'PROFILE_RESULT_REJECTED']);
+const recoverableResultCodes = new Set(['REPAIR_CHECKPOINT_REQUIRED', 'REPAIR_CHECKPOINT_EVIDENCE_REQUIRED', 'REPAIR_FINDING_CHECKPOINT_REQUIRED', 'QUALITY_DIAGNOSTIC_DISPOSITION_REQUIRED', 'QUALITY_PREREQUISITE_INVALID', 'PROFILE_RESULT_REJECTED', 'RESULT_OUTPUT_PORTS_MISMATCH', 'RESULT_OUTPUT_SCHEMA_ID_MISMATCH', 'RESULT_OUTPUT_VALUE_SCHEMA_INVALID']);
 export const visibleLifecycleStopReason = state => {
   if (state.profile?.id === 'collection-batch' && state.features.some(feature => ['blocked', 'failed-budget'].includes(feature.state)
     && feature.blocker?.kind !== 'engine-artifact')) return 'collection-attention-required';
@@ -106,7 +106,7 @@ const finishExhaustedQualityRun = async (api, plan, state, commandId, reason) =>
 };
 
 const rejectVisibleResult = ({ error, result, receipt, runtimeReceipt, agentId, dispatchId, packetDigest }) => {
-  const summary = `Agent result rejected by ${error.code}: ${error.message}${error.details?.reason ? ` (${error.details.reason})` : ''}`;
+  const summary = `Agent result rejected by ${error.code}: ${error.message}${error.details?.reason ? ` (${error.details.reason})` : ''}${error.code.startsWith('RESULT_OUTPUT_') ? ' Return the full declared outputs in the native JSON result itself; a path to a JSON file is not a typed output.' : ''}`;
   const body = {
     kind: 'result-rejected-receipt', version: '1.0', agentId, dispatchId,
     packetDigest,

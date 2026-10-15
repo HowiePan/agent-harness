@@ -6,6 +6,7 @@ CLI 主入口：`node bin/agent-harness.mjs`；`--help` 输出所有当前参数
 agent-harness init create-config|validate|plan|apply|execute
 agent-harness dev attach|rebind|execute|verify|doctor|watch|generations|sync
 agent-harness dev patch plan|status|apply|rollback
+agent-harness dev plan-closeout --manifest <json> --run <id> --repair <json> --expected-revision <n> --command-id <id> [--check]
 agent-harness config schema|validate
 agent-harness docs list|show
 agent-harness extension register|list|remove
@@ -18,6 +19,8 @@ agent-harness run status|plan-artifact|schedule|dispatch|submit|gates|decision|c
 
 CardWorld 在 `harness.json` 的 `project.input.versionPredecessors` 显式登记目标版本与前版的关系。对已登记此策略的版本，`requirements`、`plan`、`replan` 在创建 Lifecycle Plan 前统一读取前版发布证据；缺少映射、仅有本地批准、尚未发布均阻断，只有验证过的 Git 正式发布记录通过。新版本开始前须先登记映射并同步 Project 绑定。独立审查通过后，Harness 将同一份计划 Markdown 归档到 Project 策略指定的 `docs/versions/v<major>/<target>-execution-plan-review.md`；重规划仅能覆盖可验证为上一版 Harness 生成的归档。实施时仅对该归档文件的精确内容变化提供自动来源兼容，其他文件变化仍须按原有来源审查规则处理。
 `h:local engine replan <版本>` 修订该项目、Workflow 和目标的现行计划。它读取上一版完整计划及独立审查发现，产出完整替代计划和工作包差异，再走独立审查与新的用户批准。已有计划审查被拒且项目源码已修正时，重新提交普通 `plan` 也可安全替换被拒 Run；旧审查作为审计证据保留。已批准但尚未实施的计划、待批准计划、以及处于空闲边界且无开放 Finding 的实施 Run 可通过显式 `replan` 修订；存在活动 Lease、待处理 Dispatch 或开放 Finding 时分别返回 `REPLAN_IMPLEMENTATION_BUSY` 或 `REPLAN_OPEN_FINDINGS`，不会撤销正在执行或待修复的工作。新计划进入审查后，旧计划批准不得用于启动 `implement`。已发布的版本不能原地 `replan`。
+
+旧实施 Run 已为 `failed` 或 `incomplete` 时，Replan 保留其终态和 Evidence。替代计划完成独立审查及新的用户批准后，下一次 `implement` 可创建新实施 Run；谱系核对同项目、目标、Workflow、Profile 及 Replan 捕获的每个旧 Run revision/Authority digest，并要求旧候选无活动 Lease/Dispatch。旧计划原地重启、未获批准的修订、摘要漂移及未完成工作仍阻断；正式启动还须通过现行计划与源码兼容检查。
 
 `implement` 遇到验证路径越界时，实施 Agent 先检查构建或测试脚本的输出路由；若修复文件已在本次 `allowedPaths` 内，则在同一 Feature 中改正路由并重跑验证。项目可声明最多两次同 Run 自动重派，重派沿用原有路径、计划及 Gate 绑定。确需写入另一项目、扩大权限、改变需求或进行受保护发布时才停下；不能把验证产物目录直接扩到另一项目来绕过边界。
 

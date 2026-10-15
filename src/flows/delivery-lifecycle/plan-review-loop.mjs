@@ -41,7 +41,7 @@ export const createPlanReviewFollowUps = ({ state, feature, result }) => {
   const reviewerTask = withTaskFeedback(reviewer.task, {
     id: 'previous-review', path: 'planReviewFeedback',
     description: 'The preceding independent review findings that the revised plan must address.',
-    instruction: 'Check every preceding review finding against the revised complete plan, then independently inspect the full scope for remaining blockers.',
+    instruction: 'Check every preceding review finding against the revised complete plan, then independently inspect the full scope for remaining blockers. Report each fixed Finding ID in outputs["plan-review"].value.resolvedFindings and add a checkpoint with that exact ID, status resolved, a specific summary and non-empty evidence. Keep unresolved original IDs in the typed plan-review findings; add every newly discovered blocker to the top-level findings array with its ID, severity, summary, affectedPaths and evidence. Do not reopen an existing Authority Finding by duplicating it as a new top-level Finding. An approved result alone never closes a Finding.',
   });
   return [{
     ...structuredClone(planner), ...plannerTask,

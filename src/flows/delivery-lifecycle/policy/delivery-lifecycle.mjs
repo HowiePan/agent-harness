@@ -1,4 +1,5 @@
 import { assert } from '../../../common/errors.mjs';
+import { digestJson } from '../../../common/canonical.mjs';
 import { defineNodeTaskContract, taskFeatureProjection } from '../../../common/task-contract.mjs';
 import { approvalSatisfied } from '../../../flow-kit/primitives.mjs';
 import { createQualityFollowUpFeatures, createQualityGateDiagnosticReview, hasCurrentCleanQualityReview, qualityReviewNoProgress, validateQualityReviewPolicies } from '../../../flow-kit/profiles/quality-loop.mjs';
@@ -13,6 +14,8 @@ export const DELIVERY_STAGES = Object.freeze([
 ]);
 
 const stageIndex = stage => DELIVERY_STAGES.indexOf(stage);
+const sameVerificationItem = (left, right) => left !== undefined && right !== undefined
+  && digestJson(left) === digestJson(right);
 const planReviewApproved = state => {
   const reviews = state.submissions?.filter(submission =>
     state.features.some(feature => feature.id === submission.featureId && feature.metadata?.stage === 'plan-review')
@@ -68,9 +71,13 @@ export const createDeliveryLifecycleProfile = (id = 'delivery-lifecycle') => Obj
       const contracts = proposal.contracts ?? [];
       const verification = proposal.verification ?? [];
       const reported = output?.verificationResults;
+      if (Array.isArray(reported) && reported.some(entry => verification.some(item => sameVerificationItem(entry?.item, item))
+        && !['completed', 'deferred'].includes(entry.status))) {
+        return { ok: false, reason: 'approved-proposal-verification-status-must-be-completed-or-deferred: successful entries require status completed and non-empty evidenceRefs' };
+      }
       const verified = Array.isArray(reported) && reported.length === verification.length
         && verification.every(item => {
-          const matches = reported.filter(entry => entry?.item === item);
+          const matches = reported.filter(entry => sameVerificationItem(entry?.item, item));
           return matches.length === 1 && (matches[0].status === 'completed'
             ? Array.isArray(matches[0].evidenceRefs) && matches[0].evidenceRefs.length > 0
             : matches[0].status === 'deferred' && (proposal.externalPrerequisites ?? []).includes(matches[0].externalPrerequisite)

@@ -106,7 +106,7 @@ export const previewDevelopmentH4Migration = async ({ plan, manifest, runId }) =
         terminalOutcome: { status: 'incomplete', reason: 'quality-review-limit-reached' } };
     }
     const replacementFeatures = expandApprovedImplementation({ features: replacement.run.features,
-      typedPlan: prior.metadata.approvedPlan.typedPlan, projectId: prior.projectId });
+      typedPlan: prior.metadata.approvedPlan.typedPlan, projectId: prior.projectId, approvalBinding: prior.metadata.approvedPlan });
     const carryover = createCompletionCarryoverPlan({ prior, replacementFeatures,
       replacementRunId: replacement.run.runId, replacementPlanDigest: replacement.planDigest,
       patchReceiptDigest: '0'.repeat(64), sourceDigest: replacement.run.sourceDigest });

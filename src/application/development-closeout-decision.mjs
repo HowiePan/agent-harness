@@ -8,8 +8,11 @@ export const assertDevelopmentPlanDecisionScope = ({ state, decision, projectId,
   const recorded = state.decisions?.find(item => item.id === 'implementation-plan-approved');
   const awaiting = state.status === 'closure-blocked' && !recorded
     && profile.canClose(state).reason === 'implementation-plan-user-approval-required';
-  const continuing = ['ready-to-close', 'closed'].includes(state.status)
-    && recorded?.digest === digestJson(decision) && planApprovalSatisfied(state);
+  const continuing = ['closure-blocked', 'ready-to-close', 'closed'].includes(state.status)
+    && state.features.every(feature => feature.state === 'completed')
+    && !state.leases?.some(lease => lease.status === 'active')
+    && recorded?.digest === digestJson(decision) && planApprovalSatisfied(state)
+    && profile.canClose(state).ok === true;
   assert(commandId && workspaceMatch && state.projectId === projectId && state.revision === expectedRevision
     && snapshot?.reviewApproved && (awaiting || continuing)
     && decision?.id === 'implementation-plan-approved' && decision.actor === 'user'

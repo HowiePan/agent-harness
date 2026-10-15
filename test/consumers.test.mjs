@@ -42,6 +42,8 @@ test('CardWorld consumer compiles one canonical requirement and project-owned de
   assert(descriptor.policy.actionPaths.implement.includes('docs/versions'));
   assert(descriptor.policy.actionPaths.implement.includes('docs/requirements'));
   assert(descriptor.policy.actionPaths.implement.includes('docs/testing'));
+  assert(descriptor.policy.actionPaths.implement.includes('AGENTS.md'));
+  assert(descriptor.policy.actionPaths.implement.includes('.agent/skills'));
   assert(!descriptor.policy.actionPaths.implement.some(path => path.startsWith('card_world_web') || path.startsWith('card_world_desktop')));
   assert(!descriptor.policy.qualityFindingPaths.some(path => path.startsWith('card_world_web') || path.startsWith('card_world_desktop')));
   assert(!descriptor.policy.actionPaths.implement.some(path => path.startsWith('tabletop-collection')));
@@ -96,6 +98,24 @@ test('CardWorld full lifecycle keeps every mutable stage before the final qualit
   const quality = plan.run.features.find(feature => feature.metadata.stage === 'quality');
   assert.deepEqual(quality.dependsOn, ['docs/V-next']);
   assert.deepEqual(quality.allowedPaths, []);
+});
+
+test('CardWorld implementation carries engine guidance paths without granting planning or review writes', () => {
+  const project = createCardWorldProjectDescriptor({ workspaceRoot: process.cwd() });
+  project.gateRecipes = [];
+  const plan = createCardWorldLifecyclePlan({ intent: { action: 'implement', target: 'V-next',
+    scope: 'implementation..quality', sourcePolicy: 'review-and-repair', qualityTarget, knownFindingInventory },
+  project, runId: 'implement-guidance', sourceDigest: 'a'.repeat(64) });
+  const implementation = plan.run.features.find(feature => feature.metadata.stage === 'implementation');
+  for (const path of ['AGENTS.md', '.agent/skills']) {
+    assert(implementation.allowedPaths.includes(path));
+    assert(!project.policy.actionPaths.plan.includes(path));
+    assert(!project.policy.actionPaths.scope.includes(path));
+    assert(!project.policy.actionPaths.docs.includes(path));
+  }
+  assert.deepEqual(plan.run.features.find(feature => feature.metadata.stage === 'quality').allowedPaths, []);
+  assert(implementation.forbiddenPaths.includes('tabletop-collection'));
+  assert(implementation.forbiddenPaths.includes('.git'));
 });
 
 test('CardWorld action plans use action-specific stages, paths, stop conditions, and delivery verification', () => {

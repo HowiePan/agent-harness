@@ -138,9 +138,33 @@ H4 补丁若没有任何活动 Run，可在已绑定项目 checkout 显式执行
 
 H2/H3 导致 Coordinator 已退出时，`dev recover-run` 仅在项目 checkout 中使用当前 source-link 绑定。它核验覆盖原 Run 和活动 Lease 的补丁 Receipt、每个 Lease 对应的终态 Host Effect、原命令意图，以及同一逻辑任务的新 Plan；随后以预期 revision 将旧 Run 标记为 `superseded`。若有未决 Host Effect 或任一身份不符，它保持旧 Run 原状并返回错误。恢复命令本身不启动生命周期。
 
+旧 Run 退役进入 Quality Target 历史后，替代 Plan 的摘要可能再次变化。可见恢复程序在未创建替代 Run 时重新校验相同逻辑任务、项目 Descriptor、源码、物理 checkout、Feature 依赖及最终门禁。没有任何已完成 Feature 的实施 Run，允许按当前 Descriptor 修复原批准计划已声明的项目内路径；新增路径必须同时属于当前实施白名单和原批准项目工作包。其他路径、跨项目范围或依赖变化仍拒绝。存在已完成工作时，必须沿用独立的封存完成证据与原图不变合同，不能用这条路径扩大权限。
+
+独立实施工作包的 `approved-plan-binding` 输入携带 Authority 核验后的规划 Run、计划/审阅稿/源码摘要、原用户批准 Decision 和 typed plan 摘要。它随 Dispatch packet 摘要绑定，供 Agent 核对批准证据；`sourceManifest` 为空不代表缺少批准。这个输入不增加写入范围，实际路径仍以 Descriptor 和 Feature 为准。
+
+批准提案的 `verification` 可以包含对象。完成结果的 `verificationResults[].item` 必须按完整规范化 JSON 内容匹配批准项，不能依赖进程内对象引用或属性书写顺序。JSON 往返后仍须逐项唯一覆盖；错误 producer/ref、附加字段、重复或缺失条目、错误状态、空证据及未经批准的延期继续拒绝。
+
+可见简版派发提示与完整提示使用相同的受保护操作条件：只有 Dispatch 明确授权时才可提交、打标签、发布、删除或迁移。禁止委派及修改 Harness 控制数据的边界仍无条件生效，路径授权也不因任务描述而扩大。提示生成器补丁必须按实际 H0–H4 分类同步并签发新的派发；不得手改旧 Prompt、重放旧 Lease 或用普通消息覆盖其限制。
+
+完成证据承接仍先重新核验当前人工批准和源码兼容性；展开替代任务图时保留已封存的批准上下文字节。当前源码摘要与兼容性评估不会改写原任务的批准来源。只有项目、规划 Run、计划、制品、原源码、typed plan 和用户 Decision 全部一致才允许承接，Kernel 继续核验完整任务图及每项 Submission/Evidence。
+
+实施代理因中断被 preflight 隔离、ordinary resume 已废止旧 Transport 后，允许保留其未提交源码草稿。恢复器核对唯一原 Dispatch、Run 级原始快照、原生中断及再次观察回执、完整 Host 绑定和全部源路径差异；越界或来源不明的变更继续拒绝。通过后只记录带前后源码摘要和 Evidence 的 `workspace.interrupted-draft-preserved` 事件，不创建 Submission、不完成 Feature、不恢复旧 Lease。下一次派发重新验证草稿；完成证据承接仍逐项校验原图和原 Submission。该协调器补丁为 H3，经 `dev sync` 和正式开发恢复准备替代 Run。
+
+用户只要求修复到可重新发命令时，可在项目 checkout 使用 `visible-development-recovery.mjs --manifest <manifest> --run <run-id> --prepare-only`。它完成正式退役与封存承接计划，执行带原生 Host 观察的预检，发出 `prepared` 后停止；不创建替代 Run、不派发代理、不执行实施工作。`--retire-only` 仍在退役后立即停止。
+
 项目对话仍在当前 Codex 会话、原命令允许内部接续且旧 Agent 无法通过原 Coordinator 观察时，可运行 `integrations/codex/agent-harness-codex/scripts/visible-development-recovery.mjs --manifest <manifest> --run <run-id>`。它先用原 Run 与补丁 Receipt 验证替代 Plan，再通过当前会话原生 `list_agents`、`interrupt_agent` 和再次 `list_agents` 为缺失 Agent 建立身份绑定的隔离证据；不把缺失的 Agent 文本冒充 Submission。随后调用 `dev recover-run` 的同一校验逻辑，启动原 action/target 的替代 Plan，并让新 Agent 从现有源码重新验证未提交改动。任一步身份、来源或宿主收据不可验证时停止，保留 Authority 供诊断。
 
+规划或 Replan 在写入草稿后中断时，恢复仍要求覆盖该 Run 的真实 H2/H3 补丁收据；不能伪造补丁来解除租约。恢复器原样保留 Authority 中的 `requestedPreset` 和动态 selector，核对中断 Dispatch 的来源快照及当前文件差异。只有原规划 Feature 允许且不触及禁写路径的草稿可作为替代 Run 的未接收输入；来源摘要、工作区、变更单、基础规划/只读复审范围及批准门禁必须一致。多轮修订 Feature 留在旧 Run 审计中，不将完成标记或未接收的 JSON 提升为 Submission。隔离旧 Host Effect 后封存草稿证据，通过 Kernel 退役旧 Run，再由新规划 Agent 核验现有文件并独立复审。恢复程序也输出 `plan-review-ready` 及完整制品身份，人工批准仍单独进行。
+
 ## generation 与回滚
+
+### 已批准规划的收口修复
+
+`dev plan-closeout --manifest <绑定> --run <规划 Run> --repair <修复输入.json> --expected-revision <当前修订> --command-id <稳定 ID> [--check]` 仅修复已完成规划的控制投影，不启动或恢复 Feature，不复用旧 Lease、预检或 Runtime Receipt。它要求从登记项目 checkout 发起，全部 Feature 均为已完成的规划/只读复审，当前谱系及精确计划/Markdown 摘要匹配既存用户批准，无活动 Lease 或待处理 Dispatch。H2/H3 同步后的未来执行仍必须创建新的 Plan/Run；此入口不能接续旧 Feature，也不转移旧批准到新 Run。
+
+修复输入包含 `kind: "reviewed-plan-closeout-repair"`、`actor: "operator"`、`projectId`、`runId`、`planDigest`、`artifactDigest` 和 `legacyAssessments`。常规复审通过 `resolvedFindings` 及同 ID 的有证据检查点逐项关闭问题；“审查通过”不自动关闭遗留 Finding。旧版非结构化结论的每项 assessment 必须包含 Finding `id`、后续 `reviewSubmissionId`、原文 `quotedAssessment`、该次审查全部新阻塞 ID `supersededBy` 及具体 `summary`。恢复器核验派生关系、原始 Submission/内容寻址 Evidence、最终复审逐项关闭全部后继阻塞后，通过 Kernel 记录分项 resolution。不能从缺失的 Agent 结果或状态字符串生成结论。
+
+归档替换仅接受同项目/目标的已审查旧 Run 按现版或已知旧版生成器得到的精确字节；手工修改、其他项目和未知格式仍拒绝。旧 Run、Submission 与封存制品保留。项目来源只能无变化或仅变化为精确的新归档。`--check` 不写文件或 Authority；返回的 `implementationPlanReady` 只认证已关闭计划、批准、来源及归档前置条件，不代替下一条用户命令的实时 Host/进程执行预检。操作按当前 revision 和稳定 command ID 可恢复，重复收口不重复写批准或启动工作。
 
 ```text
 agent-harness dev generations --manifest <manifest.json>
@@ -150,6 +174,8 @@ agent-harness dev patch rollback --manifest <manifest.json> --target-manifest <g
 Runtime generation 位于 Harness 控制根。Rollback 只切换已验证绑定，要求 checkout 已恢复到目标摘要；工具不会擅自改业务代码或 Harness 源码。
 
 ## 修复权限边界
+
+原生 rollout 定位先只读查询 Codex SQLite 会话记录。若 Windows 沙箱仅在该查询返回 `SQLITE_CANTOPEN`（14），定位器可从当前 UUIDv7 时间戳确定的单日 `sessions` 目录中读取唯一匹配文件，并核验首行原生 `session_meta` 的会话 ID、工作区和 CLI 版本。整个过程不写 Codex 数据、不复制数据库、不扫描其他日期或选择其他会话。可读取但缺失/不匹配的数据库记录、数据库损坏、重复文件和元数据不匹配仍阻断；后续 Host 请求/原生工具结果绑定规则不变。此定位修复不授权重启已经退出的 Coordinator；下一次用户命令由 Hook 重新固定源码摘要和意图。
 
 项目 Run 始终只能写其执行目标，不能同时获得 Harness 源码写权限。维护者可以在独立 Harness maintenance 上下文修复源码，再生成 patch plan；H0/H1 按上表继续，H2–H4 必须停止旧执行路径。不得沿用已经失效的 Plan、预检、Lease 或 Runtime Receipt。
 

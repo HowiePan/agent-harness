@@ -116,7 +116,7 @@ const overlappingFinding = { ...finding, id: 'Q-E2E-003', summary: 'Second defec
 const scopeFinding = { ...finding, id: 'Q-E2E-SCOPE', summary: 'Source and focused test both need a repair.', evidence: ['fixture/source.txt:1'], affectedPaths: ['fixture/source.txt'] };
 const externalDiagnostic = { id: 'full-check-other', summary: 'Full check fails in OTHER.md.', evidence: ['host:full-check:OTHER.md:1'] };
 
-const createHost = ({ workspace, failFirstWait = false, runningWaitCount = 0, failFirstInspect = false, failFirstConfirm = false, failFirstResult = false, repeatFindingOnce = false, repeatFindingCount = null, rejectRepairResultWithEdit = false, invalidRepairCheckpointOnce = false, externalDiagnosticOnce = false, overlappingFindings = false, missingDiagnosticDispositionOnce = false, cleanInitialReview = false, cleanAfterKnownRepair = false, includeForbiddenFinding = false, scopeBlockOnce = false, rejectProfileResultOnce = false, advanceClockOnResult = null, now = () => new Date().toISOString() }) => {
+const createHost = ({ workspace, failFirstWait = false, runningWaitCount = 0, failFirstInspect = false, failFirstConfirm = false, failFirstResult = false, repeatFindingOnce = false, repeatFindingCount = null, rejectRepairResultWithEdit = false, invalidRepairCheckpointOnce = false, externalDiagnosticOnce = false, overlappingFindings = false, missingDiagnosticDispositionOnce = false, cleanInitialReview = false, cleanAfterKnownRepair = false, includeForbiddenFinding = false, scopeBlockOnce = false, rejectProfileResultOnce = false, invalidTypedOutputOnce = null, advanceClockOnResult = null, now = () => new Date().toISOString() }) => {
   const agents = new Map();
   const stats = { spawnCount: 0, containCount: 0, terminalCount: 0, maxActive: 0, reconcileCount: 0 };
   let sequence = 0;
@@ -131,6 +131,7 @@ const createHost = ({ workspace, failFirstWait = false, runningWaitCount = 0, fa
   let shouldConfirmExternalFinding = externalDiagnosticOnce;
   let shouldOmitDiagnosticDisposition = missingDiagnosticDispositionOnce;
   let shouldRejectProfileResult = rejectProfileResultOnce;
+  let invalidTypedOutput = invalidTypedOutputOnce;
   let shouldScopeBlock = scopeBlockOnce;
   const adapter = createVisibleHostAdapter({
     provider: 'quality-e2e-host',
@@ -213,6 +214,15 @@ const createHost = ({ workspace, failFirstWait = false, runningWaitCount = 0, fa
       };
       const stage = task.packet.feature.metadata.stage;
       if (stage === 'quality') {
+        if (invalidTypedOutput) {
+          const outputs = invalidTypedOutput === 'missing' ? {} : { quality: {
+            schemaId: invalidTypedOutput === 'schema-id' ? 'wrong-schema' : 'delivery-quality-v1',
+            value: invalidTypedOutput === 'value' ? {} : { findings: [] }, evidenceRefs: ['host:review'],
+          } };
+          invalidTypedOutput = null;
+          return finish({ result: result({ summary: 'Review stored in an unaccepted file.', findings: [], knownFindingDispositions: cleanDisposition, outputs }),
+            receipt: { operation: 'result', stage, observationRequestDigest: 'd'.repeat(64) } });
+        }
         if (shouldRejectProfileResult) {
           shouldRejectProfileResult = false;
           return finish({ result: result({ summary: 'Profile rejected first review.', findings: [], knownFindingDispositions: cleanDisposition, outputs: { quality: { schemaId: 'delivery-quality-v1', value: { findings: [] }, evidenceRefs: ['host:review'] } } }), receipt: { operation: 'result', stage, observationRequestDigest: 'd'.repeat(64) } });
@@ -323,7 +333,7 @@ const createHost = ({ workspace, failFirstWait = false, runningWaitCount = 0, fa
   return { adapter, agents, stats };
 };
 
-const setup = async ({ failFirstWait = false, runningWaitCount = 0, failFirstInspect = false, failFirstConfirm = false, failFirstResult = false, repeatFindingOnce = false, repeatFindingCount = null, rejectRepairResultWithEdit = false, invalidRepairCheckpointOnce = false, externalDiagnosticOnce = false, gateFailureUntilRepair = false, overlappingFindings = false, missingDiagnosticDispositionOnce = false, cleanInitialReview = false, cleanAfterKnownRepair = false, includeForbiddenFinding = false, scopeBlockOnce = false, rejectProfileResultOnce = false, slowResultTransportMs = 0, preset = 'full', qualityReviewLimit = { mode: 'bounded', maxRechecks: 2 }, majorReleaseTargets = [] } = {}) => {
+const setup = async ({ failFirstWait = false, runningWaitCount = 0, failFirstInspect = false, failFirstConfirm = false, failFirstResult = false, repeatFindingOnce = false, repeatFindingCount = null, rejectRepairResultWithEdit = false, invalidRepairCheckpointOnce = false, externalDiagnosticOnce = false, gateFailureUntilRepair = false, overlappingFindings = false, missingDiagnosticDispositionOnce = false, cleanInitialReview = false, cleanAfterKnownRepair = false, includeForbiddenFinding = false, scopeBlockOnce = false, rejectProfileResultOnce = false, invalidTypedOutputOnce = null, slowResultTransportMs = 0, preset = 'full', qualityReviewLimit = { mode: 'bounded', maxRechecks: 2 }, majorReleaseTargets = [] } = {}) => {
   const controlRoot = resolve(process.cwd());
   const parent = resolve(harnessTemporaryRoot(), 'quality-lifecycle-e2e');
   await mkdir(parent, { recursive: true });
@@ -347,7 +357,7 @@ const setup = async ({ failFirstWait = false, runningWaitCount = 0, failFirstIns
   } : loadedEngine;
   const runtime = await loadExtensionPack('./integrations/codex/extensions/codex-runtime.mjs', { cwd: controlRoot, controlRoot });
   let clockMs = Date.now();
-  const host = createHost({ workspace, failFirstWait, runningWaitCount, failFirstInspect, failFirstConfirm, failFirstResult, repeatFindingOnce, repeatFindingCount, rejectRepairResultWithEdit, invalidRepairCheckpointOnce, externalDiagnosticOnce, overlappingFindings, missingDiagnosticDispositionOnce, cleanInitialReview, cleanAfterKnownRepair, includeForbiddenFinding, scopeBlockOnce, rejectProfileResultOnce,
+  const host = createHost({ workspace, failFirstWait, runningWaitCount, failFirstInspect, failFirstConfirm, failFirstResult, repeatFindingOnce, repeatFindingCount, rejectRepairResultWithEdit, invalidRepairCheckpointOnce, externalDiagnosticOnce, overlappingFindings, missingDiagnosticDispositionOnce, cleanInitialReview, cleanAfterKnownRepair, includeForbiddenFinding, scopeBlockOnce, rejectProfileResultOnce, invalidTypedOutputOnce,
     advanceClockOnResult: slowResultTransportMs ? () => { clockMs += slowResultTransportMs; } : null,
     ...(slowResultTransportMs ? { now: () => new Date(clockMs).toISOString() } : {}) });
   const create = () => createHarness({ controlRoot, dataRoot, releaseIdentity, strictProjectIdentity: false, extensions: [engine, runtime], agentAdapter: host.adapter,
@@ -443,6 +453,27 @@ test('a Profile-rejected visible result is recorded and retried inside the origi
   assert.equal(completed.state.leases.filter(lease => lease.status === 'active').length, 0);
   assert.equal(completed.state.features[0].state, 'completed');
 });
+
+for (const [invalidTypedOutputOnce, code] of [['missing', 'RESULT_OUTPUT_PORTS_MISMATCH'], ['schema-id', 'RESULT_OUTPUT_SCHEMA_ID_MISMATCH'], ['value', 'RESULT_OUTPUT_VALUE_SCHEMA_INVALID']]) {
+  test(`a visible typed output rejection (${invalidTypedOutputOnce}) records failure before a same-Run retry`, async t => {
+    const fixture = await setup({ cleanInitialReview: true, invalidTypedOutputOnce });
+    t.after(() => rm(fixture.root, { recursive: true, force: true }));
+    const completed = await fixture.harness.executeVisibleLifecyclePlan(fixture.plan, {
+      commandId: `typed-output-retry-${invalidTypedOutputOnce}`,
+      preflightReport: await fixture.harness.createExecutionReadinessReport(fixture.plan),
+    });
+    assert.equal(completed.status, 'closed');
+    assert.equal(fixture.host.stats.spawnCount, 2);
+    assert.equal(completed.state.runId, fixture.plan.run.runId);
+    const rejected = completed.state.submissions.find(item => item.result.blocker?.code === code);
+    assert(rejected);
+    assert.equal(rejected.result.status, 'failed');
+    assert.match(rejected.result.summary, /native JSON result itself/);
+    assert.equal(rejected.result.outputs?.quality, undefined);
+    assert.equal(completed.state.leases.filter(lease => lease.status === 'active').length, 0);
+    assert.equal(completed.state.features[0].state, 'completed');
+  });
+}
 
 test('visible quality lifecycle completes review, verified repair, fresh re-review, and closure', async t => {
   const fixture = await setup();

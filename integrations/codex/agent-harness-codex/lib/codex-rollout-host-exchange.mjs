@@ -10,6 +10,7 @@ import { digestJson, sha256 } from '../../../../src/common/canonical.mjs';
 import { assertHarnessWritePath } from '../../../../src/common/write-boundary.mjs';
 import { atomicWriteJson } from '../../../../src/kernel/atomic-io.mjs';
 import { createHostResponseEnvelope } from './stdio-host-exchange.mjs';
+import { resolveCodexThreadWithMetadata } from './codex-rollout-locator.mjs';
 
 const fail = (code, message) => { throw Object.assign(new Error(message), { code }); };
 const delay = ms => new Promise(done => setTimeout(done, ms));
@@ -27,10 +28,9 @@ export const locateCodexRollout = async ({ codexHome = process.env.CODEX_HOME ||
   const home = await realpath(resolve(codexHome));
   const databasePath = await realpath(resolve(stateDbPath ?? join(home, 'state_5.sqlite')));
   if (!inside(home, databasePath)) fail('CODEX_ROLLOUT_DATABASE_PATH_INVALID', 'Codex state database is outside CODEX_HOME.');
-  let row;
-  const database = new DatabaseSync(databasePath, { readOnly: true });
-  try { row = database.prepare('SELECT id, rollout_path, cwd, cli_version FROM threads WHERE id = ?').get(codexSessionId); }
-  finally { database.close(); }
+  const located = await resolveCodexThreadWithMetadata({ databasePath, codexSessionId, codexHome: home, expectedCwd, Database: DatabaseSync });
+  if (located.host) return located.host;
+  const row = located.row;
   if (!row || row.id !== codexSessionId || !samePath(row.cwd, expectedCwd)) fail('CODEX_ROLLOUT_SESSION_NOT_BOUND', 'Codex state database does not bind this session to the current workspace.');
   const path = await realpath(normalizeHostPath(row.rollout_path));
   if (!inside(join(home, 'sessions'), path) || !path.toLowerCase().endsWith('.jsonl') || !path.includes(codexSessionId)) fail('CODEX_ROLLOUT_PATH_INVALID', 'Codex rollout path is not bound to this session under CODEX_HOME.');

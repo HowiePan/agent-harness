@@ -1,6 +1,7 @@
 import { resolve } from 'node:path';
 import { createHarness } from '../../../../src/application/harness.mjs';
-import { recoverDevelopmentRun, retireUnacceptedDevelopmentRun, selectDevelopmentRecoveryExtension } from '../../../../src/application/development-run-recovery.mjs';
+import { recoverDevelopmentRun, retireUnacceptedDevelopmentRun, selectDevelopmentRecoveryExtension, planningRecoverySnapshots } from '../../../../src/application/development-run-recovery.mjs';
+import { developmentRecoveryArguments, isPlanningRecovery } from '../../../../src/application/development-planning-recovery.mjs';
 import { verifyDevelopmentSourceManifest } from '../../../../src/application/development-source.mjs';
 import { createLocalDevelopmentInvocation } from '../../../../src/application/local-development-invocation.mjs';
 import { loadProjectHarnessConfig } from '../../../../src/application/project-initialization.mjs';
@@ -9,17 +10,17 @@ import { createCodexRolloutHostExchange } from '../lib/codex-rollout-host-exchan
 import { createCodexCollaborationHostAdapter } from '../lib/codex-collaboration-host-adapter.mjs';
 import { createHostExchangeDiagnosticWriter } from '../lib/host-exchange-diagnostics.mjs';
 import { assertLocalProcessGateHost } from '../lib/local-process-gate-readiness.mjs';
-import { digestJson } from '../../../../src/common/canonical.mjs';
 import { createLifecycleCommandPlan, validateLifecycleCommandPlan } from '../../../../src/application/lifecycle-command-plan.mjs';
-import { expandApprovedImplementation } from '../../../../src/flows/delivery-lifecycle/approved-implementation.mjs';
+import { assertDevelopmentReplacementScope } from '../../../../src/application/development-replacement-scope.mjs';
 
 const emit = value => process.stdout.write(`${JSON.stringify({ protocolVersion: '1.0', ...value })}\n`);
 const fail = (code, message) => { throw Object.assign(new Error(message), { code }); };
 
 const main = async () => {
   const retireOnly = process.argv.length === 7 && process.argv[6] === '--retire-only';
-  if (![6, 7].includes(process.argv.length) || process.argv[2] !== '--manifest' || process.argv[4] !== '--run' || (process.argv.length === 7 && !retireOnly))
-    fail('VISIBLE_DEVELOPMENT_RECOVERY_ARGUMENTS_INVALID', 'Usage: visible-development-recovery.mjs --manifest <source-link-manifest> --run <run-id> [--retire-only]');
+  const prepareOnly = process.argv.length === 7 && process.argv[6] === '--prepare-only';
+  if (![6, 7].includes(process.argv.length) || process.argv[2] !== '--manifest' || process.argv[4] !== '--run' || (process.argv.length === 7 && !retireOnly && !prepareOnly))
+    fail('VISIBLE_DEVELOPMENT_RECOVERY_ARGUMENTS_INVALID', 'Usage: visible-development-recovery.mjs --manifest <source-link-manifest> --run <run-id> [--retire-only|--prepare-only]');
   const manifestFile = resolve(process.argv[3]);
   const runId = process.argv[5];
   const sessionId = process.env.CODEX_SESSION_ID;
@@ -144,7 +145,7 @@ const main = async () => {
     let plan = sealedReplacement ? validateLifecycleCommandPlan(sealedReplacement)
       : await harness.createLifecyclePlan({ projectId, extensionId: extension.id, workflowId: intent.workflowId,
         profileId: intent.profileId, action: intent.action, target: intent.target,
-        arguments: intent.preset === 'default' ? [] : [intent.preset], executionWorkspaceRoot: old.metadata.workspace.root });
+        arguments: developmentRecoveryArguments(intent), executionWorkspaceRoot: old.metadata.workspace.root });
     if (sealedReplacement && (plan.run.runId !== recovery.replacementRunId
       || plan.planDigest !== recovery.replacementPlanDigest || plan.logicalTaskKey !== old.metadata.logicalTaskKey
       || plan.extension.id !== extension.id || plan.project.id !== projectId))
@@ -173,16 +174,11 @@ const main = async () => {
     }
     if (!sealedReplacement && (plan.run.runId !== recovery.replacementRunId || plan.planDigest !== recovery.replacementPlanDigest)) {
       const intended = await harness.authorityStore.read(projectId, recovery.replacementRunId, { required: false });
-      const scope = features => features.map(feature => ({ id: feature.id, allowedPaths: feature.allowedPaths,
-        forbiddenPaths: feature.forbiddenPaths, dependsOn: feature.dependsOn })).sort((left, right) => left.id.localeCompare(right.id));
-      const approvedPlan = old.metadata?.approvedPlan;
-      const candidateFeatures = approvedPlan?.projectId === projectId && approvedPlan.typedPlan
-        ? expandApprovedImplementation({ features: plan.run.features, typedPlan: approvedPlan.typedPlan, projectId })
-        : plan.run.features;
-      if (intended || plan.logicalTaskKey !== old.metadata.logicalTaskKey
-        || digestJson(scope(candidateFeatures)) !== digestJson(scope(old.features))
-        || digestJson(plan.stopCondition) !== digestJson(old.metadata.stopCondition))
+      if (intended)
         fail('VISIBLE_DEVELOPMENT_RECOVERY_PLAN_CHANGED', 'The replacement Plan changed outside the retired Run ledger.');
+      const planningSource = isPlanningRecovery(retired)
+        ? await planningRecoverySnapshots({ state: retired, plan, project, evidenceStore: harness.evidenceStore }) : null;
+      assertDevelopmentReplacementScope({ retired, plan, project, planningSource });
       emit({ kind: 'codex-visible-development-recovery', phase: 'replacement-replanned', projectId,
         priorRunId: runId, retiredReplacementRunId: recovery.replacementRunId, runId: plan.run.runId,
         reason: 'retired-run-entered-quality-target-ledger' });
@@ -191,12 +187,23 @@ const main = async () => {
     const onGateProgress = event => emit({ kind: 'codex-visible-lifecycle-event', phase: 'gate-progress', event });
     const preflight = await harness.createExecutionReadinessReport(plan, { onGateProgress });
     emit({ kind: 'codex-visible-development-recovery', phase: 'preflight', projectId, runId: plan.run.runId,
-      executionReady: preflight.executionReady, blockers: preflight.checks.filter(check => !check.ready).map(check => check.id) });
+      executionReady: preflight.executionReady, blockers: preflight.checks.filter(check => !check.ready).map(check => check.id),
+      issues: preflight.checks.filter(check => !check.ready).map(check => ({ id: check.id, issues: check.issues })) });
     if (!preflight.executionReady) { process.exitCode = 2; return; }
+    if (prepareOnly) {
+      emit({ kind: 'codex-visible-development-recovery', phase: 'prepared', projectId,
+        priorRunId: runId, runId: plan.run.runId, planDigest: plan.planDigest,
+        executionReady: true, executionStarted: false });
+      return;
+    }
     const result = await harness.executeVisibleLifecyclePlan(plan, {
       commandId: `${old.metadata.lifecycleInvocationId}.development-continue.${runId}`,
       preflightReport: preflight, onGateProgress,
     });
+    if (result.planApprovalArtifact) emit({ kind: 'codex-visible-lifecycle-event', phase: 'plan-review-ready',
+      commandId: `${old.metadata.lifecycleInvocationId}.development-continue.${runId}`,
+      status: result.planApprovalArtifact.reviewApproved ? 'awaiting-user-approval' : 'independent-review-rejected',
+      artifact: result.planApprovalArtifact });
     emit({ kind: 'codex-visible-development-recovery', phase: 'complete', projectId, runId: plan.run.runId,
       status: result.status, reason: result.reason ?? null, revision: result.state?.revision ?? null });
     if (!['closed', 'completed'].includes(result.status)) process.exitCode = 3;

@@ -29,6 +29,7 @@ import { createDevelopmentPatchPlan, rollbackDevelopmentPatch } from '../../appl
 import { recoverDevelopmentRun } from '../../application/development-run-recovery.mjs';
 import { recordDevelopmentPlanSourceCompatibility } from '../../application/development-plan-source-compatibility.mjs';
 import { assertDevelopmentCloseoutDecisionScope, assertDevelopmentPlanDecisionScope } from '../../application/development-closeout-decision.mjs';
+import { closeDevelopmentReviewedPlan } from '../../application/development-plan-closeout.mjs';
 import { createLocalDevelopmentInvocation } from '../../application/local-development-invocation.mjs';
 import { ensureVersionClearance } from '../../application/version-clearance.mjs';
 import { applySourcePatch, refreshLocalCodexBindings, syncDevelopmentSource } from './local-development-sync.mjs';
@@ -82,6 +83,7 @@ agent-harness init plan|execute --config <project/harness.json> [--project-root 
 agent-harness init apply --plan <json|-> --command-id <id> --decision <json>
 agent-harness dev attach|rebind|execute --config <project/harness.json> [--project-root <path>] [--binding-id <id>] [--decision <json>]
 agent-harness dev plan-source-compatible --manifest <json> --run <plan-run-id> --decision <review.json> --command-id <id>
+agent-harness dev plan-closeout --manifest <json> --run <plan-run-id> --repair <json> --expected-revision <n> --command-id <id> [--check]
 agent-harness dev apply --plan <json|-> --manifest <json> [--command-id <id>] [--decision <json>]
 agent-harness dev verify|doctor --manifest <json>
 agent-harness dev sync --manifest <json> [--command-id <id>] [--decision <json>]
@@ -211,6 +213,13 @@ if (command === 'dev' && subject === 'sync') {
   const decision = await externalDevelopmentDecision(take('--decision'));
   const result = await syncDevelopmentSource(take('--manifest'), { decision, commandId: take('--command-id') ?? newId('dev-sync') });
   console.log(JSON.stringify({ ok: true, ...result }, null, 2));
+  process.exit(0);
+}
+if (command === 'dev' && subject === 'plan-closeout') {
+  const output = await closeDevelopmentReviewedPlan({ manifestFile: take('--manifest'), runId: take('--run'),
+    repair: await jsonFile(take('--repair')), expectedRevision: Number(take('--expected-revision')),
+    commandId: take('--command-id'), checkOnly: has('--check') });
+  console.log(JSON.stringify({ ok: true, ...output }, null, 2));
   process.exit(0);
 }
 if (command === 'dev' && subject === 'migrate') {

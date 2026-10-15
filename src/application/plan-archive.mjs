@@ -18,7 +18,7 @@ export const planArchivePath = (project, target) => {
 };
 
 /** Publish the reviewed Markdown byte-for-byte; never overwrite a different project file. */
-export const ensureProjectPlanArchive = async ({ project, state, workspaceRoot, previousPlanRuns = [] }) => {
+export const ensureProjectPlanArchive = async ({ project, state, workspaceRoot, previousPlanRuns = [], dryRun = false }) => {
   const snapshot = planApprovalSnapshot(state);
   if (!snapshot?.reviewApproved) return null;
   const relativePath = planArchivePath(project, snapshot.target);
@@ -29,12 +29,15 @@ export const ensureProjectPlanArchive = async ({ project, state, workspaceRoot, 
   catch (error) { if (error.code !== 'ENOENT') throw error; }
   const priorGenerated = previousPlanRuns.some(run => {
     const prior = planApprovalSnapshot(run);
-    return prior?.reviewApproved && prior.target === snapshot.target && prior.artifactDigest === sha256(existing ?? '');
+    return run.projectId === state.projectId && prior?.reviewApproved && prior.target === snapshot.target
+      && [prior.artifactDigest, planApprovalSnapshot(run, { legacyStructuredValues: true }).artifactDigest]
+        .includes(sha256(existing ?? ''));
   });
   assert(existing === null || existing === snapshot.markdown || priorGenerated, 'PLAN_ARCHIVE_CONFLICT',
     `Project plan archive ${relativePath} differs from the reviewed plan; preserve it and resolve the conflict explicitly.`);
-  if (existing !== snapshot.markdown) await atomicWrite(path, snapshot.markdown, { root: workspaceRoot });
-  return { relativePath, path, planDigest: snapshot.planDigest, artifactDigest: snapshot.artifactDigest };
+  if (!dryRun && existing !== snapshot.markdown) await atomicWrite(path, snapshot.markdown, { root: workspaceRoot });
+  return { relativePath, path, planDigest: snapshot.planDigest, artifactDigest: snapshot.artifactDigest,
+    ...(dryRun ? { updateRequired: existing !== snapshot.markdown } : {}) };
 };
 
 /** Admit only the exact generated archive delta, with all other source files unchanged. */

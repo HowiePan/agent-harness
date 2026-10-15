@@ -114,6 +114,52 @@ test('replan can use a reviewed plan retired by development recovery before its 
   assert.equal(resolution.reasonCode, 'PLAN_REVISION_REQUESTED');
 });
 
+test('replan keeps its reviewed parent when a newer planning draft has no accepted outputs', () => {
+  const parent = reviewed();
+  const interrupted = structuredClone(parent);
+  interrupted.runId = 'interrupted-draft';
+  interrupted.updatedAt = '2026-09-30T12:00:00.000Z';
+  interrupted.status = 'running';
+  interrupted.features[0].state = 'running';
+  interrupted.features[1].state = 'pending';
+  interrupted.submissions = [];
+  const intent = { action: 'replan', target: 'V1', workflowId: 'engine-delivery', profileId: 'engine-delivery', preset: 'default' };
+  const states = [interrupted, parent];
+  assert.equal(selectPlanRevisionParent({ intent, states })?.runId, parent.runId);
+  assert.equal(preparePlanRevisionIntent({ intent, project: { policy: {} }, states,
+    sourceDigest: source }).planRevision.parentRunId, parent.runId);
+  assert.throws(() => preparePlanRevisionIntent({ intent, project: { policy: {} }, states: [interrupted],
+    sourceDigest: source }), error => error.code === 'REPLAN_PARENT_INCOMPLETE');
+  assert.equal(interrupted.submissions.length, 0);
+  assert.equal(interrupted.features[0].state, 'running');
+});
+
+test('recovery preserves a reviewed parent across a retired replacement without trusting unrelated history', () => {
+  const parent = reviewed({ status: 'superseded' });
+  parent.metadata = { ...parent.metadata, supersededReason: `development-h3-recovery:${'f'.repeat(64)}`,
+    supersededByRunId: 'unstarted-parent-replacement', supersedePlanDigest: 'e'.repeat(64) };
+  parent.authorityDigest = digestJson(Object.fromEntries(Object.entries(parent).filter(([key]) => key !== 'authorityDigest')));
+  const intent = { action: 'replan', target: 'V1', workflowId: 'engine-delivery', profileId: 'engine-delivery', preset: 'default' };
+  const revision = preparePlanRevisionIntent({ intent, project: { policy: {} }, states: [parent], sourceDigest: source }).planRevision;
+  const retired = { ...reviewed({ status: 'superseded' }), runId: 'retired-replacement', submissions: [],
+    metadata: { ...parent.metadata, supersededByRunId: 'unstarted-next-replacement', planRevision: revision } };
+  const olderClosed = { ...reviewed({ status: 'closed' }), runId: 'older-closed-plan' };
+  const resolve = (changedParent = parent, changedRetired = retired, extra = []) => resolveRunLineage({
+    plan: planned({ action: 'replan', sourceDigest: source, parent: revision }),
+    states: [changedParent, changedRetired, olderClosed, ...extra],
+    currentLineage: { revision: 3, activeRunId: retired.runId },
+  });
+  assert.equal(resolve().reasonCode, 'PLAN_REVISION_REQUESTED');
+  for (const field of ['parentRunId', 'parentAuthorityDigest', 'parentPlanDigest']) {
+    assert.equal(resolve(parent, { ...retired, metadata: { ...retired.metadata,
+      planRevision: { ...revision, [field]: 'unrelated' } } }).reasonCode, 'REPLAN_PARENT_STALE_OR_BUSY');
+  }
+  assert.equal(resolve({ ...parent, authorityDigest: 'f'.repeat(64) }).reasonCode, 'REPLAN_PARENT_STALE_OR_BUSY');
+  assert.equal(resolve({ ...parent, metadata: { ...parent.metadata, logicalTaskKey: 'other' } }).reasonCode, 'REPLAN_PARENT_STALE_OR_BUSY');
+  assert.equal(resolve({ ...parent, metadata: { ...parent.metadata, supersededReason: 'manual' } }).reasonCode, 'REPLAN_PARENT_STALE_OR_BUSY');
+  assert.equal(resolve(parent, retired, [{ runId: 'unstarted-parent-replacement', status: 'superseded' }]).reasonCode, 'REPLAN_PARENT_STALE_OR_BUSY');
+});
+
 test('replan captures idle implementation for retirement and blocks an active Lease', () => {
   const parent = reviewed({ approved: true, status: 'closed' });
   const intent = { action: 'replan', target: 'V1', workflowId: 'engine-delivery', profileId: 'engine-delivery', preset: 'default' };

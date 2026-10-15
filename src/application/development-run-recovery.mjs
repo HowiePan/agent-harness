@@ -14,6 +14,8 @@ import { CodexHostEffectJournal } from './codex-host-effect-journal.mjs';
 import { validateBusinessResult } from '../platform/execution/result-contract.mjs';
 import { expandApprovedImplementation } from '../flows/delivery-lifecycle/approved-implementation.mjs';
 import { createCompletionCarryoverPlan, verifyCompletionCarryover } from '../kernel/completion-carryover.mjs';
+import { assertPlanningReplacementScope, developmentRecoveryArguments, isPlanningRecovery } from './development-planning-recovery.mjs';
+import { recoverInterruptedWorkspace, readInterruptedWorkspaceDraft } from './interrupted-workspace-recovery.mjs';
 
 const activeLeaseIds = state => state.leases.filter(lease => lease.status === 'active').map(lease => lease.leaseId).sort();
 const activeDispatchIds = state => state.dispatches.filter(dispatch => ['requested', 'assigned'].includes(dispatch.status)).map(dispatch => dispatch.dispatchId).sort();
@@ -58,7 +60,11 @@ export const assertDevelopmentRunRecoveryEffects = (state, effects) => {
     const effect = matches[0];
     const terminalResult = effect.state === 'settled' && ['result-observed', 'result-rejected'].includes(effect.outcome?.disposition);
     const hasDigests = (...values) => values.every(value => typeof value === 'string' && /^[a-f0-9]{64}$/.test(value));
-    const fenced = effect.state === 'contained' && effect.outcome?.reason === 'development-run-recovery' && (
+    const resumedContainment = effect.outcome?.reason === 'preflight-reconciliation'
+      && lease.status === 'superseded' && lease.generation === state.generation - 1
+      && state.events.some(event => event.type === 'run.recovered' && event.mode === 'ordinary-resume'
+        && event.epoch === state.epoch && event.generation === state.generation);
+    const fenced = effect.state === 'contained' && (effect.outcome?.reason === 'development-run-recovery' || resumedContainment) && (
       (effect.outcome.disposition === 'absent-after-interrupt' && effect.outcome.target === lease.agentId
         && hasDigests(effect.outcome.observationRequestDigest, effect.outcome.interruptRequestDigest,
           effect.outcome.interruptResultDigest, effect.outcome.verificationRequestDigest))
@@ -139,7 +145,12 @@ const currentPatchReceipt = async (manifest, state, evidenceStore) => {
         const unchanged = run.revision === state.revision
           && digestJson(run.activeLeaseIds ?? []) === digestJson(activeLeaseIds(state))
           && digestJson(run.activeDispatchIds ?? []) === digestJson(activeDispatchIds(state));
-        if (unchanged || await terminalFailureProgress(run, state, evidenceStore)) { matches.push(receipt); break; }
+        const draft = state.revision === run.revision + 1
+          && state.events.at(-1)?.type === 'workspace.interrupted-draft-preserved'
+          ? await readInterruptedWorkspaceDraft({ state, evidenceStore,
+            controlRoot: manifest.controlRoot, dataRoot: manifest.dataRoot }) : null;
+        if (unchanged || draft?.patchReceiptDigest === receipt.receiptDigest
+          || await terminalFailureProgress(run, state, evidenceStore)) { matches.push(receipt); break; }
       }
     }
   }
@@ -185,6 +196,21 @@ export const assertDispatchSourceSnapshotEvidence = ({ evidence, state, dispatch
   'DEVELOPMENT_RUN_RETIREMENT_SOURCE_EVIDENCE_INVALID',
   'The Run-scoped source snapshot does not bind this Dispatch and Authority baseline.');
   return snapshot;
+};
+
+export const planningRecoverySnapshots = async ({ state, plan, project, evidenceStore }) => {
+  const running = state.features.filter(feature => feature.state === 'running');
+  assert(running.length === 1 && running[0].metadata?.stage === 'version-planning',
+    'DEVELOPMENT_PLANNING_RECOVERY_DISPATCH_REQUIRED', 'Planning recovery requires exactly one interrupted planning Feature.');
+  const dispatches = state.dispatches.filter(dispatch => dispatch.featureId === running[0].id
+    && dispatch.sourceDigest === state.sourceDigest && dispatch.sourceSnapshotRef);
+  assert(dispatches.length === 1, 'DEVELOPMENT_PLANNING_RECOVERY_DISPATCH_REQUIRED',
+    'Planning recovery requires the exact interrupted source snapshot.');
+  const dispatch = dispatches[0];
+  const before = assertDispatchSourceSnapshotEvidence({ evidence: await evidenceStore.read(dispatch.sourceSnapshotRef), state, dispatch });
+  const after = await captureWorkspace(state.metadata.workspace.root, { excluded: project.workspace.excluded ?? [] });
+  assertPlanningReplacementScope({ retired: state, plan, project, before, after });
+  return { before, after };
 };
 
 export const commitUnacceptedDevelopmentRetirement = async ({ authorityStore, evidenceStore, state, lease, dispatch, feature,
@@ -337,7 +363,7 @@ export const recoverDevelopmentRun = async ({ manifestFile, runId, commandId, cw
   const harness = await createHarness({ controlRoot: manifest.controlRoot, dataRoot: manifest.dataRoot, releaseIdentity,
     extensions: installedExtensions, strictProjectIdentity: false, initializeStorage: false });
   const projectId = config.request.binding.projectId;
-  const state = await harness.authorityStore.read(projectId, runId);
+  let state = await harness.authorityStore.read(projectId, runId);
   assert(state.status !== 'closed' && state.status !== 'superseded' && state.metadata?.lifecycleInvocationId,
     'DEVELOPMENT_RUN_NOT_RECOVERABLE', 'Only an unfinished, lifecycle-owned Run can be retired by source-link recovery.');
   const receipt = await currentPatchReceipt(manifest, state, harness.evidenceStore);
@@ -346,12 +372,19 @@ export const recoverDevelopmentRun = async ({ manifestFile, runId, commandId, cw
     'DEVELOPMENT_RUN_INTENT_REQUIRED', 'Recovery requires the original lifecycle command intent.');
   assert(!intent.workflowInput, 'DEVELOPMENT_RUN_WORKFLOW_INPUT_UNSUPPORTED', 'Recovery cannot recompile a pinned Workflow input without a new source capture.');
   const project = await harness.projectRegistry.get(projectId);
+  if (state.metadata.commandIntent.action === 'implement'
+    && state.events.at(-1)?.type === 'run.recovered' && state.events.at(-1).mode === 'ordinary-resume')
+    state = await recoverInterruptedWorkspace({ state, project, authorityStore: harness.authorityStore,
+    evidenceStore: harness.evidenceStore, controlRoot: manifest.controlRoot, dataRoot: manifest.dataRoot,
+    commandId: `${commandId}.interrupted-source`, patchReceiptDigest: receipt.receiptDigest });
   const extension = selectDevelopmentRecoveryExtension({ state, intent, project, installedExtensions });
   const plan = await harness.createLifecyclePlan({ projectId, extensionId: extension.id, workflowId: intent.workflowId,
     profileId: intent.profileId, action: intent.action, target: intent.target,
-    arguments: intent.preset === 'default' ? [] : [intent.preset], executionWorkspaceRoot: state.metadata.workspace.root });
+    arguments: developmentRecoveryArguments(intent), executionWorkspaceRoot: state.metadata.workspace.root });
   assert(plan.logicalTaskKey === state.metadata.logicalTaskKey && plan.run.runId !== runId && plan.planDigest !== state.metadata.lifecyclePlanDigest,
     'DEVELOPMENT_RUN_REPLACEMENT_INVALID', 'The current source did not produce a distinct Plan for the same logical task.');
+  const planningSource = isPlanningRecovery(state)
+    ? await planningRecoverySnapshots({ state, plan, project, evidenceStore: harness.evidenceStore }) : null;
   if (receipt.level === 'H4' && intent.action === 'quality') {
     assertH4QualityRestartable(state);
     const snapshot = await captureWorkspace(state.metadata.workspace.root, { excluded: project.workspace.excluded ?? [] });
@@ -396,7 +429,7 @@ export const recoverDevelopmentRun = async ({ manifestFile, runId, commandId, cw
   if (completedImplementation) {
     const typedPlan = state.metadata?.approvedPlan?.typedPlan;
     assert(typedPlan, 'CARRYOVER_APPROVED_PLAN_REQUIRED', 'Completed implementation requires its original approved typed plan.');
-    const replacementFeatures = expandApprovedImplementation({ features: plan.run.features, typedPlan, projectId });
+    const replacementFeatures = expandApprovedImplementation({ features: plan.run.features, typedPlan, projectId, approvalBinding: state.metadata.approvedPlan });
     assert(replacementFeatures.filter(feature => feature.metadata?.stage === 'implementation')
       .every(feature => feature.metadata?.workflow?.artifactDigest === plan.workflow?.artifactDigest),
     'CARRYOVER_REPLACEMENT_WORKFLOW_MISMATCH', 'Replacement Features do not bind the approved current Workflow.');
@@ -415,12 +448,26 @@ export const recoverDevelopmentRun = async ({ manifestFile, runId, commandId, cw
     const effects = new CodexHostEffectJournal({ controlRoot: manifest.controlRoot, dataRoot: manifest.dataRoot, contract: hostContract });
     assertDevelopmentRunRecoveryEffects(state, await effects.list());
   }
+  let draftEvidence = null;
+  if (planningSource) {
+    const current = await captureWorkspace(state.metadata.workspace.root, { excluded: project.workspace.excluded ?? [] });
+    assert(current.digest === planningSource.after.digest, 'DEVELOPMENT_PLANNING_RECOVERY_SOURCE_DRIFT',
+      'Planning source changed during Host containment; preserve the old Run.');
+    draftEvidence = await harness.evidenceStore.put({ kind: 'unaccepted-planning-draft-recovery', version: '1.0',
+      priorRunId: runId, priorAuthorityDigest: state.authorityDigest, patchReceiptDigest: receipt.receiptDigest,
+      replacementRunId: plan.run.runId, replacementPlanDigest: plan.planDigest,
+      ...assertPlanningReplacementScope({ retired: state, plan, project, ...planningSource }),
+      snapshot: planningSource.after }, { projectId, runId, epoch: state.epoch, generation: state.generation,
+      sourceDigest: state.sourceDigest, artifactDigest: state.artifactDigest, policyDigest: state.policyDigest,
+      pluginSetDigest: state.pluginSetDigest, labels: ['unaccepted-planning-draft'] });
+  }
   const retired = await harness.kernel.supersedeRun(projectId, runId, {
     replacementRunId: plan.run.runId, planDigest: plan.planDigest,
     reason: `development-${receipt.level.toLowerCase()}-recovery:${receipt.receiptDigest}`,
     ...(completionCarryover ? { completionCarryover } : {}),
   }, { expectedRevision: state.revision, commandId });
   return { projectId, priorRunId: runId, priorRevision: retired.state.revision, patchReceiptDigest: receipt.receiptDigest,
+    ...(draftEvidence ? { unacceptedDraftEvidenceRef: draftEvidence.ref } : {}),
     replacementRunId: plan.run.runId, replacementPlanDigest: plan.planDigest, status: retired.state.status,
     ...(completionCarryover ? { completedFeatureIds: completionCarryover.plan.completedSubmissions.map(item => item.featureId),
       firstPendingFeatureId: completionCarryover.plan.firstPendingFeatureId, carryoverDigest: completionCarryover.plan.carryoverDigest } : {}),
@@ -460,7 +507,7 @@ export const refreshPendingDevelopmentCarryover = async ({ manifestFile, command
   'CARRYOVER_REFRESH_CLAIM_INVALID', 'Retired Run and its sealed replacement claim differ.');
   const typedPlan = prior.metadata.approvedPlan?.typedPlan;
   assert(typedPlan, 'CARRYOVER_APPROVED_PLAN_REQUIRED', 'Pending implementation carry-over requires its approved plan.');
-  const previousFeatures = expandApprovedImplementation({ features: previous.replacementPlan.run.features, typedPlan, projectId });
+  const previousFeatures = expandApprovedImplementation({ features: previous.replacementPlan.run.features, typedPlan, projectId, approvalBinding: prior.metadata.approvedPlan });
   await verifyCompletionCarryover({ plan: previous.plan, prior, replacementFeatures: previousFeatures,
     evidenceStore: harness.evidenceStore, authorityStore: harness.authorityStore });
   const plan = await harness.createLifecyclePlan({ projectId, extensionId: extension.id, workflowId: intent.workflowId,
@@ -471,7 +518,7 @@ export const refreshPendingDevelopmentCarryover = async ({ manifestFile, command
   assert(plan.logicalTaskKey === prior.metadata.logicalTaskKey && plan.run.sourceDigest === prior.sourceDigest
     && plan.run.runId !== prior.runId && !states.some(state => state.runId === plan.run.runId),
   'CARRYOVER_REFRESH_REPLACEMENT_INVALID', 'Current Plan cannot safely replace the unstarted claim.');
-  const replacementFeatures = expandApprovedImplementation({ features: plan.run.features, typedPlan, projectId });
+  const replacementFeatures = expandApprovedImplementation({ features: plan.run.features, typedPlan, projectId, approvalBinding: prior.metadata.approvedPlan });
   const carryoverPlan = createCompletionCarryoverPlan({ prior: { ...prior, status: 'ready' }, replacementFeatures,
     replacementRunId: plan.run.runId, replacementPlanDigest: plan.planDigest,
     patchReceiptDigest: previous.plan.patchReceiptDigest, sourceDigest: plan.run.sourceDigest });

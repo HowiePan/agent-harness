@@ -13,10 +13,16 @@ export const reviewedPlanProposal = state => latestOutput(state, 'version-planni
 
 // Values follow fixed Markdown prefixes. Keep inline punctuation literal so
 // validation expressions and paths remain readable in the review source.
-const line = value => String(value ?? '').replace(/[\r\n\t]+/g, ' ').trim();
-const list = (heading, values) => values?.length ? [`### ${heading}`, '', ...values.map(value => `- ${line(value)}`), ''] : [];
+const line = value => (value !== null && typeof value === 'object' ? JSON.stringify(value) : String(value ?? ''))
+  .replace(/[\r\n\t]+/g, ' ').trim();
 
-export const planApprovalSnapshot = state => {
+export const planApprovalSnapshot = (state, { legacyStructuredValues = false } = {}) => {
+  // Read-only compatibility with sealed archives produced before structured
+  // values were rendered as JSON. The default approval bytes never change.
+  const renderLine = legacyStructuredValues
+    ? value => String(value ?? '').replace(/[\r\n\t]+/g, ' ').trim() : line;
+  const renderList = (heading, values) => values?.length
+    ? [`### ${heading}`, '', ...values.map(value => `- ${renderLine(value)}`), ''] : [];
   const plan = reviewedPlanProposal(state);
   const review = latestOutput(state, 'plan-review', 'plan-review');
   if (!plan || !review) return null;
@@ -34,7 +40,7 @@ export const planApprovalSnapshot = state => {
     rows.push(`- 项目内依赖：${(item.dependsOn ?? []).length ? item.dependsOn.map(line).join('、') : '无'}`);
     rows.push(`- 建议路径：${(item.allowedPaths ?? []).length ? item.allowedPaths.map(line).join('；') : '无'}`);
     rows.push('');
-    rows.push(...list('外部前置', item.externalPrerequisites), ...list('交付合同', item.contracts), ...list('验证', item.verification));
+    rows.push(...renderList('外部前置', item.externalPrerequisites), ...renderList('交付合同', item.contracts), ...renderList('验证', item.verification));
   }
   if (state.metadata?.planRevision) {
     const revision = state.metadata.planRevision;
@@ -56,19 +62,19 @@ export const planApprovalSnapshot = state => {
       rows.push(`- 变更类型：${line(state.metadata.changeRequest.kind)}`,
         `- 变更摘要：${line(state.metadata.changeRequest.summary)}`,
         `- 变更单摘要：${line(state.metadata.changeRequest.digest)}`, '');
-      rows.push(...list('新增或变动的需求', state.metadata.changeRequest.requirements),
-        ...list('变更验收标准', state.metadata.changeRequest.acceptance));
+      rows.push(...renderList('新增或变动的需求', state.metadata.changeRequest.requirements),
+        ...renderList('变更验收标准', state.metadata.changeRequest.acceptance));
     }
     for (const change of changes) rows.push(`- ${line(change.disposition)}：${line(change.id)}`);
     rows.push('');
   }
-  rows.push(...list('独立审查发现', review.findings));
+  rows.push(...renderList('独立审查发现', review.findings));
   if (plan.acceptanceCoverage && typeof plan.acceptanceCoverage === 'object') {
     rows.push('## 门禁覆盖', '');
     for (const [gate, ids] of Object.entries(plan.acceptanceCoverage).sort(([a], [b]) => a.localeCompare(b))) rows.push(`- ${line(gate)}：${(ids ?? []).map(line).join('、')}`);
     rows.push('');
   }
-  rows.push(...list('顺序与冲突', plan.orderingAndConflicts), ...list('受保护操作', plan.protectedOperations));
+  rows.push(...renderList('顺序与冲突', plan.orderingAndConflicts), ...renderList('受保护操作', plan.protectedOperations));
   rows.push('## 审核决定', '', review.approved === true
     ? '此处尚无人工批准。你确认此计划后，须记录 `implementation-plan-approved` Decision，并绑定上方规划摘要与此 Markdown 的 SHA-256。'
     : '独立 Agent 审查未通过；需修订并重新规划，此稿不得批准实施。', '');

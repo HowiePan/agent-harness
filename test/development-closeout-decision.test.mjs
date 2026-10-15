@@ -67,4 +67,12 @@ test('source-linked Plan approval binds the exact reviewed artifact and may clos
   state.decisions.push({ ...decision, digest: digestJson(decision) });
   assert.deepEqual(assertDevelopmentPlanDecisionScope({ ...input,
     profile: { canClose: () => ({ ok: true }) } }), { recorded: true });
+  state.status = 'closure-blocked';
+  assert.deepEqual(assertDevelopmentPlanDecisionScope({ ...input,
+    profile: { canClose: () => ({ ok: true }) } }), { recorded: true });
+  assert.throws(() => assertDevelopmentPlanDecisionScope(input),
+    { code: 'DEVELOPMENT_PLAN_DECISION_SCOPE_MISMATCH' });
+  state.leases = [{ status: 'active' }];
+  assert.throws(() => assertDevelopmentPlanDecisionScope({ ...input,
+    profile: { canClose: () => ({ ok: true }) } }), { code: 'DEVELOPMENT_PLAN_DECISION_SCOPE_MISMATCH' });
 });

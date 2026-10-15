@@ -14,13 +14,16 @@ const unstartedDevelopmentReplacement = (state, states) => state.status === 'sup
   && Boolean(state.metadata?.supersededByRunId && state.metadata?.supersedePlanDigest)
   && !states.some(candidate => candidate.runId === state.metadata.supersededByRunId);
 
-export const selectPlanRevisionParent = ({ intent, states }) => states.filter(state => (state.status !== 'superseded'
+export const selectPlanRevisionParent = ({ intent, states }) => {
+  const candidates = states.filter(state => (state.status !== 'superseded'
   || unstartedDevelopmentReplacement(state, states))
   && ['plan', 'replan'].includes(state.metadata?.commandIntent?.action)
   && state.metadata.commandIntent.target === intent.target
   && state.metadata.commandIntent.workflowId === intent.workflowId
   && state.features.some(feature => feature.metadata?.stage === 'plan-review'))
-  .sort((left, right) => String(right.updatedAt).localeCompare(String(left.updatedAt)))[0] ?? null;
+    .sort((left, right) => String(right.updatedAt).localeCompare(String(left.updatedAt)));
+  return candidates.find(state => planOutput(state) && planApprovalSnapshot(state)) ?? candidates[0] ?? null;
+};
 
 export const preparePlanRevisionIntent = ({ intent, project, states, sourceDigest, sourceChanges = null }) => {
   if (intent.action !== 'replan') return intent;

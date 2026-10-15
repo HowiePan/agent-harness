@@ -1,6 +1,7 @@
 import { createDeliveryTemplates } from '../../../../src/flows/delivery-lifecycle/nodes/delivery/feature.mjs';
 
 const implementationAllowedPaths = Object.freeze([
+  'AGENTS.md', '.agent/skills',
   'card_world_engine',
   'scripts', 'docs/versions', 'docs/schemas', 'docs/integration_guide.md',
   'docs/benchmarks.md', 'docs/requirements.md', 'docs/requirements',

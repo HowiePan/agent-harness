@@ -25,6 +25,8 @@ import { installExtensionPacks } from '../platform/extensions/contract.mjs';
 import { resolveCommandIntent } from '../platform/extensions/command-contract.mjs';
 import { createLifecycleCommandPlan, validateLifecycleCommandPlan } from './lifecycle-command-plan.mjs';
 import { selectBlockedResumeFeature } from './lifecycle-resume.mjs';
+import { resolveCarryoverApproval } from './implementation-carryover-approval.mjs';
+import { recoverInterruptedWorkspace } from './interrupted-workspace-recovery.mjs';
 import { createExecutionReadinessReport as buildExecutionReadinessReport } from './execution-readiness-service.mjs';
 import { executeHeadlessLifecyclePlan, executeVisibleLifecyclePlan as runVisibleLifecyclePlan } from './lifecycle-execution-service.mjs';
 import { loadReleaseIdentity } from './release-identity.mjs';
@@ -32,6 +34,7 @@ import { preparePrereleaseIntent, readReleaseForKind, promoteReleaseForKind } fr
 import { publishVersionRelease, readPortableVersionRelease } from './version-prerelease.mjs';
 import { verifyPlanningPredecessor } from './version-predecessor-gate.mjs';
 import { assessPlanArchiveSourceCompatibility, ensureProjectPlanArchive } from './plan-archive.mjs';
+import { reconcilePlanReviewFindings } from './plan-review-reconciliation.mjs';
 import { captureWorkspace, diffWorkspaceSnapshots } from '../common/workspace-snapshot.mjs';
 import { resolveProjectWorkspace } from '../common/workspace-identity.mjs';
 import { MemoryStore } from '../platform/resources/memory/memory-store.mjs';
@@ -532,7 +535,7 @@ export const createHarness = async ({ controlRoot: controlRootInput, dataRoot: d
       assert(plan.run.runId === runId && plan.planDigest === metadata.lifecyclePlanDigest && plan.logicalTaskKey === metadata.logicalTaskKey,
         'LIFECYCLE_RESUME_PLAN_MISMATCH', 'The original immutable plan cannot be reconstructed from current trusted definitions.');
       const plannedFeatures = metadata.approvedPlan?.typedPlan
-        ? expandApprovedImplementation({ features: plan.run.features, typedPlan: metadata.approvedPlan.typedPlan, projectId })
+        ? expandApprovedImplementation({ features: plan.run.features, typedPlan: metadata.approvedPlan.typedPlan, projectId, approvalBinding: metadata.approvedPlan })
         : plan.run.features;
       assert(state.features.every(feature => plannedFeatures.some(planned => planned.id === feature.id
         && planned.logicalRoot === feature.logicalRoot && (digestJson(planned.allowedPaths) === digestJson(feature.allowedPaths)
@@ -592,6 +595,8 @@ export const createHarness = async ({ controlRoot: controlRootInput, dataRoot: d
           if (current.action === 'ordinary-resume' && current.selectedRunId === state.runId) {
             const resumed = await kernel.recover(plan.project.id, state.runId, { mode: 'ordinary-resume' }, { expectedRevision: state.revision, commandId: `${commandId}.lineage.resume.${current.resolutionDigest}` });
             state = resumed.state;
+            state = await recoverInterruptedWorkspace({ state, project, authorityStore, evidenceStore,
+              controlRoot, dataRoot: globalDataRoot, commandId: `${commandId}.interrupted-source.${state.generation}` });
           }
         }
         return { status: state.status === 'closed' ? 'closed' : 'started', planDigest: plan.planDigest, plan, runtimePolicy, state, reused: true };
@@ -637,6 +642,9 @@ export const createHarness = async ({ controlRoot: controlRootInput, dataRoot: d
             && !current.dispatches.some(dispatch => ['requested', 'assigned'].includes(dispatch.status))
             && !current.findings.some(finding => finding.status !== 'resolved'),
           'REPLAN_IMPLEMENTATION_CHANGED', 'Implementation changed or became active after the revision plan was captured.');
+          // A failed or incomplete implementation is already terminal. Preserve its
+          // original outcome and Evidence; only a mutable idle Run needs supersede.
+          if (['failed', 'incomplete'].includes(current.status)) continue;
           await kernel.supersedeRun(plan.project.id, current.runId, { replacementRunId: plan.run.runId, planDigest: plan.planDigest,
             reason: 'plan-revision-requested' }, { expectedRevision: current.revision, commandId: `${commandId}.replan.supersede.${current.runId}` });
         }
@@ -653,6 +661,8 @@ export const createHarness = async ({ controlRoot: controlRootInput, dataRoot: d
       if (lineageResolution.action === 'ordinary-resume' && state) {
         const resumed = await kernel.recover(plan.project.id, state.runId, { mode: 'ordinary-resume' }, { expectedRevision: state.revision, commandId: `${commandId}.lineage.resume.${lineageResolution.resolutionDigest}` });
         state = resumed.state;
+        state = await recoverInterruptedWorkspace({ state, project, authorityStore, evidenceStore,
+          controlRoot, dataRoot: globalDataRoot, commandId: `${commandId}.interrupted-source.${state.generation}` });
       }
       if (lineageResolution.action === 'supersede-and-start') state = null;
       if (!state) {
@@ -822,8 +832,13 @@ export const createHarness = async ({ controlRoot: controlRootInput, dataRoot: d
         const typedPlan = reviewedPlanProposal(latest);
         assert(typedPlan?.proposedFeatures?.some(feature => feature.projectId === project.id && feature.disposition === 'project-owned'),
           'IMPLEMENTATION_TYPED_PLAN_REQUIRED', 'Approved implementation plan has no project-owned Feature proposal.');
-        approvedPlan = { projectId: latest.projectId, runId: latest.runId, planDigest: artifact.planDigest, artifactDigest: artifact.artifactDigest, sourceDigest: runSourceDigest, originalSourceDigest: latest.sourceDigest, typedPlan: structuredClone(typedPlan), ...(sourceCompatibility ? { sourceCompatibility } : {}) };
+        const approvalDecision = latest.decisions.find(decision => decision.id === 'implementation-plan-approved'
+          && decision.decision === 'approved' && decision.planDigest === artifact.planDigest
+          && decision.artifactDigest === artifact.artifactDigest);
+        approvedPlan = { projectId: latest.projectId, runId: latest.runId, planDigest: artifact.planDigest, artifactDigest: artifact.artifactDigest, sourceDigest: runSourceDigest, originalSourceDigest: latest.sourceDigest, typedPlan: structuredClone(typedPlan), approvalDecision: structuredClone(approvalDecision), ...(sourceCompatibility ? { sourceCompatibility } : {}) };
       }
+      if (input.completionCarryover) approvedPlan = resolveCarryoverApproval({ input, currentApproval: approvedPlan,
+        prior: await authorityStore.read(project.id, input.completionCarryover.priorRunId) });
       const pluginSet = pluginHost.snapshot();
       const installedCompositionDigest = digestJson({ plugins: pluginSet.manifests, extensions: extensionSet.installed });
       const policyDigest = input.policyDigest ?? digestJson({ profiles: project.profiles, extensions: project.extensions ?? [], ...(project.workflows ? { workflows: project.workflows } : {}), policy: project.policy ?? {}, gateRecipes: project.gateRecipes ?? [], artifactProviders: project.artifactProviders ?? [] });
@@ -849,7 +864,7 @@ export const createHarness = async ({ controlRoot: controlRootInput, dataRoot: d
       }
       const implementationFeature = input.features.find(feature => feature.metadata?.stage === 'implementation');
       const features = approvedPlan && implementationFeature?.task && implementationFeature.metadata?.workflow?.nodeId === 'implement'
-        ? expandApprovedImplementation({ features: input.features, typedPlan: approvedPlan.typedPlan, projectId: project.id })
+        ? expandApprovedImplementation({ features: input.features, typedPlan: approvedPlan.typedPlan, projectId: project.id, approvalBinding: approvedPlan })
         : approvedPlan ? input.features.map(feature => feature.metadata?.stage === 'implementation'
           ? { ...feature, attemptLimit: Math.max(feature.attemptLimit ?? 3, 21),
             metadata: { ...feature.metadata, approvedDeliveryPlan: structuredClone(approvedPlan.typedPlan), implementationProgressRetries: 20 } }
@@ -1098,8 +1113,10 @@ export const createHarness = async ({ controlRoot: controlRootInput, dataRoot: d
         preservedRuntimeEvidence.qualityClassification = { ...classification, receiptDigest: digestJson(classification) };
       }
       const evidence = await evidenceStore.put({ result: verifiedResult, runtimeEvidence: preservedRuntimeEvidence, inputSourceDigest: dispatch.sourceDigest, outputSourceDigest: resultingSnapshot.digest, sourceSnapshotRef: dispatch.sourceSnapshotRef }, { ...evidenceMetadata, mediaType: 'application/json', projectId, ...(state.metadata?.workspaceRef ? { workspaceRef: state.metadata.workspaceRef } : {}), runId, epoch: state.epoch, generation: state.generation, featureId: dispatch.featureId, dispatchId, sourceDigest: dispatch.sourceDigest, artifactDigest: state.artifactDigest, policyDigest: state.policyDigest, pluginSetDigest: state.pluginSetDigest, labels: ['agent-result'] });
-      const submitted = await kernel.submit(projectId, runId, { dispatchId, outputRef: dispatch.outputRef, agentId: lease.agentId, packetDigest: dispatch.packetDigest, epoch: state.epoch, generation: state.generation, result: verifiedResult, resultingSourceDigest: resultingSnapshot.digest, evidenceRefs: [evidence.ref] }, { expectedRevision: state.revision, commandId });
+      let submitted = await kernel.submit(projectId, runId, { dispatchId, outputRef: dispatch.outputRef, agentId: lease.agentId, packetDigest: dispatch.packetDigest, epoch: state.epoch, generation: state.generation, result: verifiedResult, resultingSourceDigest: resultingSnapshot.digest, evidenceRefs: [evidence.ref] }, { expectedRevision: state.revision, commandId });
       if (feature?.metadata?.stage === 'plan-review' && verifiedResult.status === 'completed') {
+        const reconciled = await reconcilePlanReviewFindings({ state: submitted.state, kernel, evidenceStore, commandId });
+        submitted = { ...submitted, state: reconciled.state };
         await ensurePlanApprovalArtifact(authorityStore.root, submitted.state);
         await ensureProjectPlanArchive({ project, state: submitted.state, workspaceRoot,
           previousPlanRuns: (await authorityStore.list(projectId)).filter(run => run.runId !== runId) });

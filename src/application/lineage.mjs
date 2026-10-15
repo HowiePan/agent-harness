@@ -7,6 +7,7 @@ import { safeSegment } from '../common/paths.mjs';
 import { atomicWriteJson, readJson, withDirectoryLock } from '../kernel/atomic-io.mjs';
 import { leaseHealth } from '../kernel/kernel.mjs';
 import { assertHarnessWritePath } from '../common/write-boundary.mjs';
+import { planApprovalSatisfied } from '../flows/delivery-lifecycle/plan-approval.mjs';
 
 const resolutionSchema = JSON.parse(readFileSync(new URL('../../schemas/run-lineage-resolution.schema.json', import.meta.url), 'utf8'));
 const lineageSchema = JSON.parse(readFileSync(new URL('../../schemas/run-lineage.schema.json', import.meta.url), 'utf8'));
@@ -60,6 +61,25 @@ const belongsToLogicalTask = (state, plan) => {
 };
 
 const sealResolution = body => validateRunLineageResolution({ ...body, resolutionDigest: runLineageResolutionDigest(body) });
+
+// Only a newly approved revision may replace terminal implementation attempts.
+// Its captured Authority identities must still match; a failed status alone is
+// never permission to restart an exhausted or otherwise blocked implementation.
+const approvedRevisionCoversTerminalImplementation = (plan, states, candidates) => {
+  if (plan.intent.action !== 'implement' || !candidates.every(candidate => terminalStatus(candidate.status)
+    && candidate.activeLeaseCount === 0 && candidate.activeDispatchCount === 0)) return false;
+  const retired = candidates.filter(candidate => ['failed', 'incomplete'].includes(candidate.status));
+  if (!retired.length) return false;
+  return states.some(state => state.projectId === plan.project.id && state.status === 'closed'
+    && state.profile?.id === plan.run.profileId
+    && state.metadata?.commandIntent?.action === 'replan'
+    && state.metadata.commandIntent.target === plan.intent.target
+    && state.metadata.commandIntent.workflowId === plan.intent.workflowId
+    && planApprovalSatisfied(state)
+    && retired.every(candidate => state.metadata?.planRevision?.affectedImplementationRuns?.some(affected =>
+      affected.runId === candidate.runId && affected.revision === candidate.revision
+      && affected.authorityDigest === candidate.authorityDigest)));
+};
 
 export const resolveRunLineage = ({ plan, states, currentLineage = null, policy = {}, now = () => new Date().toISOString(), ttlMs = 60000 }) => {
   const createdAt = typeof now === 'function' ? now() : now;
@@ -120,8 +140,17 @@ export const resolveRunLineage = ({ plan, states, currentLineage = null, policy 
       // A verified development patch may retire a rejected plan before its
       // replacement starts. The replacement replan still binds that exact
       // parent's current Authority digest and the active lineage pointer.
+      const retiredParent = revision && retiredActive && states.find(state => state.runId === revision.parentRunId
+        && state.status === 'superseded' && state.metadata?.supersededByRunId && state.metadata?.supersedePlanDigest
+        && /^development-h[1234]-recovery:[a-f0-9]{64}$/.test(state.metadata?.supersededReason ?? '')
+        && belongsToLogicalTask(state, plan)
+        && !states.some(candidate => candidate.runId === state.metadata.supersededByRunId)
+        && retiredActive.metadata?.planRevision?.parentRunId === state.runId
+        && retiredActive.metadata.planRevision.parentAuthorityDigest === state.authorityDigest
+        && retiredActive.metadata.planRevision.parentPlanDigest === revision.parentPlanDigest);
       const parent = revision && (candidates.find(candidate => candidate.runId === revision.parentRunId)
-        ?? (retiredActive?.runId === revision.parentRunId ? candidateFor(retiredActive, createdAt) : null));
+        ?? (retiredActive?.runId === revision.parentRunId ? candidateFor(retiredActive, createdAt) : null)
+        ?? (retiredParent ? candidateFor(retiredParent, createdAt) : null));
       if (plan.intent.action === 'quality' && plan.intent.preset === 'release-exhaustive') {
         action = 'block';
         selectedRunId = null;
@@ -146,6 +175,9 @@ export const resolveRunLineage = ({ plan, states, currentLineage = null, policy 
       } else if (plan.intent.action === 'quality' && candidates.every(candidate => terminalStatus(candidate.status))) {
         action = 'start';
         reasonCode = 'PREVIOUS_QUALITY_RUNS_TERMINAL';
+      } else if (approvedRevisionCoversTerminalImplementation(plan, states, candidates)) {
+        action = 'start';
+        reasonCode = 'APPROVED_REPLAN_REPLACES_TERMINAL_IMPLEMENTATION';
       } else if (policy.automaticBlockedRunReplacement === true
         && plan.intent.action === 'produce'
         && candidates.every(candidate => ['closed', 'all-remaining-blocked'].includes(candidate.status))
@@ -171,7 +203,8 @@ export const resolveRunLineage = ({ plan, states, currentLineage = null, policy 
     selectedRunId = null;
     reasonCode = 'ORDINARY_RESUME_POLICY_DENIED';
     blockers = [{ code: reasonCode, message: 'Project recovery policy denies automatic ordinary resume.' }];
-  } else if (['reattach', 'supersede-and-start'].includes(action) && policy.automaticLineageResolution === false) {
+  } else if ((['reattach', 'supersede-and-start'].includes(action)
+    || reasonCode === 'APPROVED_REPLAN_REPLACES_TERMINAL_IMPLEMENTATION') && policy.automaticLineageResolution === false) {
     action = 'block';
     selectedRunId = null;
     reasonCode = 'AUTOMATIC_LINEAGE_POLICY_DENIED';
