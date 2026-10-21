@@ -25,6 +25,7 @@ import { installExtensionPacks } from '../platform/extensions/contract.mjs';
 import { resolveCommandIntent } from '../platform/extensions/command-contract.mjs';
 import { createLifecycleCommandPlan, validateLifecycleCommandPlan } from './lifecycle-command-plan.mjs';
 import { selectBlockedResumeFeature } from './lifecycle-resume.mjs';
+import { buildImplementationContinuation } from './implementation-continuation.mjs';
 import { resolveCarryoverApproval } from './implementation-carryover-approval.mjs';
 import { recoverInterruptedWorkspace } from './interrupted-workspace-recovery.mjs';
 import { createExecutionReadinessReport as buildExecutionReadinessReport } from './execution-readiness-service.mjs';
@@ -869,7 +870,7 @@ export const createHarness = async ({ controlRoot: controlRootInput, dataRoot: d
           ? { ...feature, attemptLimit: Math.max(feature.attemptLimit ?? 3, 21),
             metadata: { ...feature.metadata, approvedDeliveryPlan: structuredClone(approvedPlan.typedPlan), implementationProgressRetries: 20 } }
           : feature) : input.features;
-      return kernel.startRun({ ...input, features, profileConfig, policyDigest, sourceDigest: runSourceDigest, pluginSetDigest: input.pluginSetDigest ?? installedCompositionDigest, metadata: { ...input.metadata, approvedPlan, ...(lifecycleExecution ? { lifecycleExecution } : {}), workspace: structuredClone(workspace), gateRecipes: structuredClone(project.gateRecipes ?? []), projectDescriptorDigest: project.descriptorDigest, extensionSetDigest: extensionSet.digest } }, command);
+      return kernel.startRun({ ...input, features, profileConfig, policyDigest, sourceDigest: runSourceDigest, pluginSetDigest: input.pluginSetDigest ?? installedCompositionDigest, metadata: { ...input.metadata, approvedPlan, ...(approvedPlan ? { attemptAccounting: 'separate-progress-v1' } : {}), ...(lifecycleExecution ? { lifecycleExecution } : {}), workspace: structuredClone(workspace), gateRecipes: structuredClone(project.gateRecipes ?? []), projectDescriptorDigest: project.descriptorDigest, extensionSetDigest: extensionSet.digest } }, command);
     },
 
     async dispatch(projectId, runId, input, command) {
@@ -908,11 +909,12 @@ export const createHarness = async ({ controlRoot: controlRootInput, dataRoot: d
       if (runtimePolicy.mode === 'conversation-visible') assert(Number.isFinite(visibleHeartbeatTimeoutMs) && visibleHeartbeatTimeoutMs > 0, 'VISIBLE_AGENT_HEARTBEAT_TIMEOUT_INVALID', 'Visible Agent heartbeat timeout must be a positive number of milliseconds.');
       const scheduledInput = { ...input, maxConcurrency: schedulingLimit, runtimePluginId, runtimeRequirements: { mode: runtimePolicy.mode, userVisible: runtimePolicy.userVisible, hostOrchestrated: runtimePolicy.hostOrchestrated, ...(runtimePolicy.mode === 'conversation-visible' ? { heartbeatTimeoutMs: visibleHeartbeatTimeoutMs } : {}) }, sourceSnapshotRef: snapshotEvidence.ref };
       if (input.candidateFeatureIds) {
-        const executionByFeatureId = Object.fromEntries(input.candidateFeatureIds.map(featureId => {
+        const executionByFeatureId = Object.fromEntries(await Promise.all(input.candidateFeatureIds.map(async featureId => {
           const feature = state.features.find(item => item.id === featureId);
           assert(feature, 'FEATURE_NOT_FOUND', `Unknown candidate Feature: ${featureId}`);
-          return [featureId, { prompt: structuredClone(promptBinding), result: createDispatchResultContract(feature, { conversationVisible: runtimePolicy.mode === 'conversation-visible' }), runtime: { mode: runtimePolicy.mode, userVisible: runtimePolicy.userVisible, hostOrchestrated: runtimePolicy.hostOrchestrated, ...(runtimeManifest.capabilities.includes('typed-output-envelope-v1') ? { resultDialect: 'typed-output-envelope-v1' } : {}) } }];
-        }));
+          const continuation = await buildImplementationContinuation(state, feature, workspaceRoot);
+          return [featureId, { ...(continuation ? { implementationContinuation: continuation } : {}), prompt: structuredClone(promptBinding), result: createDispatchResultContract(feature, { conversationVisible: runtimePolicy.mode === 'conversation-visible' }), runtime: { mode: runtimePolicy.mode, userVisible: runtimePolicy.userVisible, hostOrchestrated: runtimePolicy.hostOrchestrated, ...(runtimeManifest.capabilities.includes('typed-output-envelope-v1') ? { resultDialect: 'typed-output-envelope-v1' } : {}) } }];
+        })));
         return kernel.schedule(projectId, runId, { ...scheduledInput, executionByFeatureId }, command);
       }
       const activeFeatureIds = [...new Set([...state.leases.filter(lease => ['requested', 'active'].includes(lease.status)).map(lease => lease.featureId), ...state.dispatches.filter(dispatch => ['requested', 'assigned'].includes(dispatch.status)).map(dispatch => dispatch.featureId)])];
@@ -929,6 +931,8 @@ export const createHarness = async ({ controlRoot: controlRootInput, dataRoot: d
       for (const featureId of strategy.payload.featureIds) {
         const feature = state.features.find(item => item.id === featureId);
         const execution = { prompt: structuredClone(promptBinding), result: createDispatchResultContract(feature, { conversationVisible: runtimePolicy.mode === 'conversation-visible' }), ...(runtimePolicy ? { runtime: { mode: runtimePolicy.mode, userVisible: runtimePolicy.userVisible, hostOrchestrated: runtimePolicy.hostOrchestrated, ...(runtimeManifest.capabilities.includes('typed-output-envelope-v1') ? { resultDialect: 'typed-output-envelope-v1' } : {}) } } : {}) };
+        const continuation = await buildImplementationContinuation(state, feature, workspaceRoot);
+        if (continuation) execution.implementationContinuation = continuation;
         if (modelRouterPluginId) {
           const request = { featureId, role: feature.ownerRole, capabilities: feature.metadata.requiredCapabilities ?? [], risk: Number(feature.metadata.risk ?? 0) };
           const route = await pluginHost.invoke(modelRouterPluginId, 'route', { ...request, requestDigest: digestJson(request) });

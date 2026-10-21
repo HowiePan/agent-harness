@@ -1,7 +1,7 @@
 import { mkdir, rm } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { atomicWriteJson } from '../kernel/atomic-io.mjs';
-import { newId } from '../common/canonical.mjs';
+import { digestJson, newId, withoutKeys } from '../common/canonical.mjs';
 import { assert } from '../common/errors.mjs';
 import { assertNoLinkPath } from '../common/paths.mjs';
 import { assertHarnessWritePath, harnessProjectRoot } from '../common/write-boundary.mjs';
@@ -200,6 +200,34 @@ export const createExecutionReadinessReport = async (context, planInput, { onGat
     }
   } else if (lineageResolution?.action === 'block') add('write-capability', false, writeProbe, [{ code: 'RUN_LINEAGE_BLOCKED', message: 'Execution readiness write probe is deferred while Run lineage is blocked.' }]);
   else add('write-capability', false, writeProbe, [{ code: 'WRITE_CAPABILITY_NOT_PROBED', message: 'Execution readiness requires an explicit atomic write probe.' }]);
+  // Native Host observation may take longer than the validity window. Recheck
+  // mutable baselines after it, then issue (rather than prolong) a fresh report.
+  if (plan && project && lineageResolution) {
+    for (const id of ['project', 'workspace-source', 'run-lineage']) {
+      const check = checks.find(item => item.id === id);
+      if (!check?.ready) continue;
+      try {
+        if (id === 'project') {
+          const current = await projectRegistry.get(plan.project.id);
+          assert(current.revision === plan.project.revision && current.descriptorDigest === plan.project.descriptorDigest,
+            'LIFECYCLE_PLAN_PROJECT_STALE', 'Project changed during readiness checks.');
+        } else if (id === 'workspace-source') {
+          const snapshot = await captureWorkspace(plan.run.executionWorkspaceRoot, { excluded: project.workspace.excluded ?? [] });
+          assert(snapshot.digest === check.details.expectedSourceDigest || check.details.activeLeaseCount > 0,
+            'EXECUTION_WORKSPACE_SOURCE_STALE', 'Workspace changed during readiness checks.');
+          check.details.actualSourceDigest = snapshot.digest;
+        } else {
+          const current = resolveRunLineage({ plan, states: await authorityStore.list(plan.project.id),
+            currentLineage: await lineageStore.read(plan.project.id, plan.logicalTaskKey), policy: project.policy?.recovery ?? {}, now: kernel.now, ttlMs });
+          const identity = value => digestJson(withoutKeys(value, ['createdAt', 'expiresAt', 'resolutionDigest']));
+          assert(identity(current) === identity(lineageResolution), 'EXECUTION_READINESS_AUTHORITY_CHANGED', 'Run lineage changed during readiness checks.');
+          lineageResolution = current;
+          check.details.resolution = structuredClone(current);
+        }
+      } catch (error) { check.ready = false; check.issues.push(...issues(error)); }
+    }
+  }
+  const issuedAt = kernel.now();
   const executionReady = Boolean(plan && project) && checks.every(check => check.ready);
   return sealExecutionReadinessReport({
     protocolVersion: '1.0',
@@ -211,7 +239,7 @@ export const createExecutionReadinessReport = async (context, planInput, { onGat
     checks,
     writeProbe,
     executionReady,
-    createdAt,
-    expiresAt: new Date(Date.parse(createdAt) + ttlMs).toISOString(),
+    createdAt: issuedAt,
+    expiresAt: new Date(Date.parse(issuedAt) + ttlMs).toISOString(),
   });
 };

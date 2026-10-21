@@ -1,5 +1,8 @@
 import { assert } from '../common/errors.mjs';
+import { submissionAttempt } from '../kernel/attempt-budget.mjs';
 import { selectBlockedResumeFeature } from './lifecycle-resume.mjs';
+import { ACCEPTANCE_CONTINUATION_POLICY, hasNewAcceptanceCheckpoint } from './implementation-continuation.mjs';
+import { hasTargetImplementationProgress, shouldCorrectImplementationHandoff, implementationHandoffCorrectionReason } from './implementation-handoff.mjs';
 import { AUTO_CONCURRENCY, AUTO_CONCURRENCY_LIMIT, resolveConcurrencyLimit } from '../common/concurrency.mjs';
 import { RunCoordinator } from '../platform/workflow/coordinator/run-coordinator.mjs';
 import { ProjectGateRunner, runPendingFeatureGates } from '../platform/workflow/gates/project-gate-runner.mjs';
@@ -55,19 +58,26 @@ export const shouldContinueImplementationProgress = ({ feature, result, state, s
   if (/(?:permission|authority|out-of-scope|scope-violation|policy|forbidden|external|approval|security|host|environment|dependency)/i.test(failure)
     && result.failureClass !== 'external-prerequisite-and-incomplete-implementation') return false;
   const current = state.features.find(item => item.id === feature.id);
-  if (current?.state !== 'blocked' || !submission || submission.featureId !== feature.id
-    || submission.outputSourceDigest === submission.inputSourceDigest
-    || !Array.isArray(submission.changedFiles) || !submission.changedFiles.length) return false;
+  if (current?.state !== 'blocked' || !submission || submission.featureId !== feature.id) return false;
+  const continuation = state.dispatches?.find(item => item.dispatchId === submission.dispatchId)?.execution?.implementationContinuation;
+  const acceptanceProgress = continuation?.policy === ACCEPTANCE_CONTINUATION_POLICY;
+  if (acceptanceProgress && !hasNewAcceptanceCheckpoint(state, feature, submission, continuation)
+    && !hasTargetImplementationProgress(state, feature, submission, continuation)) return false;
+  const sourceChanged = submission.outputSourceDigest !== submission.inputSourceDigest;
+  if (!acceptanceProgress && (!sourceChanged || !Array.isArray(submission.changedFiles) || !submission.changedFiles.length)) return false;
   const seenSource = state.submissions.some(item => item.submissionId !== submission.submissionId
     && item.featureId === feature.id
     && [item.inputSourceDigest, item.outputSourceDigest].includes(submission.outputSourceDigest));
-  if (seenSource) return false;
-  const budget = feature.metadata.implementationProgressRetries;
+  if (sourceChanged && seenSource) return false;
+  const additions = (state.metadata?.attemptBudgetExtensions ?? []).filter(item => item.logicalRoot === feature.logicalRoot
+    && item.attemptKey === (submission.attemptBudgetKey ?? `${feature.logicalRoot}:${result.failureClass}`))
+    .reduce((total, item) => total + item.additional, 0);
+  const budget = feature.metadata.implementationProgressRetries + additions;
   if (!Number.isInteger(budget) || budget < 1) return false;
   const continuations = state.submissions.filter(item => item.featureId === feature.id
     && item.result?.status === 'blocked' && item.outputSourceDigest !== item.inputSourceDigest).length;
-  const attempt = state.attempts[`${feature.logicalRoot}:${result.failureClass}`];
-  return continuations <= budget && Boolean(attempt && !attempt.exhausted);
+  const attempt = submissionAttempt(state, feature, { ...submission, result });
+  return Boolean(attempt && !attempt.exhausted) && (attempt.budgetKind === 'progress' || continuations <= budget);
 };
 export const shouldContinueCollectionProgress = ({ feature, result, state, submission }) => {
   const expectedClass = feature?.metadata?.stage === 'shared-capability' ? 'collection-shared-incomplete'
@@ -236,6 +246,13 @@ const continueVisibleLifecyclePlan = async (context, api, planInput, { commandId
       blocker: structuredClone(feature.blocker ?? null),
       allowedPaths: [...feature.allowedPaths],
       verificationOutputPaths: [...(feature.metadata?.verificationOutputPaths ?? [])],
+      ...(feature.state === 'failed-budget' ? { budgetAttention: (() => {
+        const submission = [...current.submissions].reverse().find(item => item.featureId === feature.id);
+        const attempt = submissionAttempt(current, feature, submission);
+        return attempt ? { attemptKey: attempt.key, budgetKind: attempt.budgetKind ?? 'legacy-failure',
+          used: attempt.budgetKind === 'progress' ? attempt.used : attempt.failures, limit: attempt.limit,
+          next: 'request-explicit-bounded-budget-extension', replanRequired: false } : null;
+      })() } : {}),
     }));
   const retryFailedGates = async results => {
     if (plan.intent.action === 'prerelease') return null;
@@ -417,8 +434,16 @@ const continueVisibleLifecyclePlan = async (context, api, planInput, { commandId
         submission: state.submissions.find(item => item.dispatchId === dispatch.dispatchId) })) {
         const reopened = await api.kernel.reopenFeature(plan.project.id, activeRunId, {
           featureId: feature.id,
-          reason: `Verified source progress was submitted, but the approved project-owned implementation remains incomplete. Continue from the current source and prior Submission within the approved plan. Do not require cross-project integration evidence or release approval for this Feature. Prior progress: ${businessResult.summary}`,
+          reason: `Implementation or acceptance progress was submitted, but the approved project-owned implementation remains incomplete. Continue the next final-target step and remaining obligations from current source and prior evidence. Partial implementation checkpoints are not final acceptance. Prior progress: ${businessResult.summary}`,
         }, { expectedRevision: state.revision, commandId: `${commandId}.implementation-progress-reopen.${dispatch.dispatchId}` });
+        state = reopened.state;
+      } else if (shouldCorrectImplementationHandoff({ state,
+        feature: state.features.find(item => item.id === feature.id),
+        submission: state.submissions.find(item => item.dispatchId === dispatch.dispatchId), commandId })) {
+        const continuation = dispatch.execution.implementationContinuation;
+        const reopened = await api.kernel.reopenFeature(plan.project.id, activeRunId, {
+          featureId: feature.id, reason: implementationHandoffCorrectionReason(commandId, feature, continuation),
+        }, { expectedRevision: state.revision, commandId: `${commandId}.implementation-handoff-correction.${dispatch.dispatchId}` });
         state = reopened.state;
       } else if (shouldContinueCollectionProgress({ feature, result: businessResult, state,
         submission: state.submissions.find(item => item.dispatchId === dispatch.dispatchId) })) {

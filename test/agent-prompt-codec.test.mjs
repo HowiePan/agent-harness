@@ -126,6 +126,17 @@ test('visible 1.5 Prompt keeps the complete task and result contract in digest-b
   assert.doesNotMatch(compiled.text, /"knownFindingDispositions"/);
 });
 
+test('visible continuation Prompt points to immutable obligations without operator-added instructions', () => {
+  const visible = packet();
+  visible.execution.runtime = { mode: 'conversation-visible', userVisible: true, hostOrchestrated: true };
+  visible.execution.result = createDispatchResultContract(visible.feature, { conversationVisible: true });
+  visible.execution.implementationContinuation = { policy: 'approved-obligation-progress/1', obligations: [{ id: 'obligation:one' }] };
+  const compiled = compileAgentPrompt(visible);
+  assert.match(compiled.text, /Read execution.implementationContinuation/);
+  assert.match(compiled.text, /repeated passing checks or source edits alone/);
+  assert.match(compiled.text, new RegExp(compiled.packetDigest));
+});
+
 test('visible prompts preserve explicit Dispatch authority for protected source operations', () => {
   for (const contractVersion of ['1.4', '1.5']) {
     const migration = packet();

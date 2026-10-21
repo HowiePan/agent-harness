@@ -35,6 +35,7 @@ import { ensureVersionClearance } from '../../application/version-clearance.mjs'
 import { applySourcePatch, refreshLocalCodexBindings, syncDevelopmentSource } from './local-development-sync.mjs';
 import { migrateDevelopmentSource } from './local-development-sync.mjs';
 import { ensurePlanApprovalArtifact, planApprovalSatisfied } from '../../flows/delivery-lifecycle/plan-approval.mjs';
+import { previewImplementationBudget, verifyImplementationBudgetScope } from '../../application/implementation-budget.mjs';
 
 const argv = process.argv.slice(2);
 const take = name => {
@@ -87,7 +88,7 @@ agent-harness dev plan-closeout --manifest <json> --run <plan-run-id> --repair <
 agent-harness dev apply --plan <json|-> --manifest <json> [--command-id <id>] [--decision <json>]
 agent-harness dev verify|doctor --manifest <json>
 agent-harness dev sync --manifest <json> [--command-id <id>] [--decision <json>]
-agent-harness dev migrate --manifest <json> (--run <id> | --no-active-run) --command-id <id> [--decision <json>]
+agent-harness dev migrate --manifest <json> (--run <id> | --no-active-run) --command-id <id> [--decision <json>] [--budget-extension <json|->]
 agent-harness dev recover-run --manifest <json> --run <id> [--command-id <id>]
 agent-harness dev patch plan|status --manifest <json>
 agent-harness dev patch apply --manifest <json> --plan <json|-> [--command-id <id>] [--decision <json>]
@@ -118,6 +119,8 @@ agent-harness memory export|import --input <json|-> [--command-id <id>] [--expec
 agent-harness features compile --extension <module> --input <json>
 agent-harness run start --project <id> --run <id> --profile <id> --features <json> [--config <json>] [--execution-workspace <absolute-path>]
 agent-harness run status --project <id> --run <id>
+agent-harness run budget-plan --project <id> --run <id> --request <json|->
+agent-harness run budget-extend --project <id> --run <id> --proposal <json|-> --approval <json|-> --expected-revision <n> --command-id <id>
 agent-harness run plan-artifact --project <id> --run <id>
 agent-harness version-release status --project <id> --target <version>
 agent-harness version-release promote --project <id> --target <version> --candidate-digest <sha256> --expected-revision <n> --command-id <id> --approval <json>
@@ -225,6 +228,7 @@ if (command === 'dev' && subject === 'plan-closeout') {
 if (command === 'dev' && subject === 'migrate') {
   const result = await migrateDevelopmentSource(take('--manifest'), { runId: take('--run'),
     noActiveRun: argv.includes('--no-active-run'),
+    budgetExtension: take('--budget-extension') ? await jsonInput('--budget-extension') : null,
     decision: await externalDevelopmentDecision(take('--decision')),
     commandId: take('--command-id') });
   console.log(JSON.stringify({ ok: true, ...result }, null, 2));
@@ -355,7 +359,7 @@ const dataRoot = resolve(take('--data-root') ?? development?.manifest.dataRoot ?
 if (development) {
   if (!samePath(controlRoot, development.manifest.controlRoot) || !samePath(dataRoot, development.manifest.dataRoot)) throw Object.assign(new Error('Development manifest does not match the selected control and data roots.'), { code: 'DEVELOPMENT_MANIFEST_ROOT_MISMATCH' });
   if (take('--harness-digest') && take('--harness-digest') !== development.releaseIdentity.artifactDigest) throw Object.assign(new Error('Development manifest does not match --harness-digest.'), { code: 'DEVELOPMENT_MANIFEST_RELEASE_MISMATCH' });
-  const developmentCommandAllowed = (command === 'workflow' && subject === 'list') || (command === 'lifecycle' && ['plan', 'preflight'].includes(subject)) || (command === 'project' && subject === 'list') || (command === 'extension' && subject === 'list') || (command === 'run' && subject === 'decision') || (['version-release', 'release-candidate'].includes(command) && ['status', 'promote'].includes(subject)) || command === 'doctor';
+  const developmentCommandAllowed = (command === 'workflow' && subject === 'list') || (command === 'lifecycle' && ['plan', 'preflight'].includes(subject)) || (command === 'project' && subject === 'list') || (command === 'extension' && subject === 'list') || (command === 'run' && ['decision', 'budget-plan', 'budget-extend'].includes(subject)) || (['version-release', 'release-candidate'].includes(command) && ['status', 'promote'].includes(subject)) || command === 'doctor';
   if (!developmentCommandAllowed) throw Object.assign(new Error('Development manifest is limited to inspection, planning, preflight, exact reviewed-plan or closeout decisions, and frozen version release status/promotion. Use the dev commands for source binding changes.'), { code: 'DEVELOPMENT_MANIFEST_COMMAND_UNSUPPORTED' });
   if (['version-release', 'release-candidate'].includes(command) && subject === 'promote') await createLocalDevelopmentInvocation({
     projectRoot: development.manifest.projectRoot,
@@ -534,9 +538,23 @@ if (command === 'features' && subject === 'compile') {
   process.exit(0);
 }
 
-  const readOnlyHarness = command === 'recovery' && ['assess', 'plan'].includes(subject) || ['version-release', 'release-candidate'].includes(command) && subject === 'status';
+  const readOnlyHarness = command === 'run' && subject === 'budget-plan' || command === 'recovery' && ['assess', 'plan'].includes(subject) || ['version-release', 'release-candidate'].includes(command) && subject === 'status';
   const harness = await createHarness({ controlRoot, dataRoot, workspaceId: scopedWorkspaceId, memoryRoot: take('--memory-root'), extensions, releaseIdentity, strictProjectIdentity: !development, initializeStorage: !readOnlyHarness });
-  if (command === 'version-release' && subject === 'status') {
+  if (command === 'run' && ['budget-plan', 'budget-extend'].includes(subject)) {
+    const state = await harness.authorityStore.read(take('--project'), take('--run'));
+    if (subject === 'budget-plan') {
+      const proposal = await previewImplementationBudget({ harness, state, development, request: await jsonInput('--request') });
+      console.log(JSON.stringify({ ok: true, proposal, executionStarted: false }, null, 2));
+    } else {
+      const proposal = await jsonInput('--proposal');
+      const approval = await jsonInput('--approval');
+      await verifyImplementationBudgetScope({ harness, state, development, featureId: proposal.featureId });
+      if (!take('--command-id') || !Number.isSafeInteger(Number(take('--expected-revision')))) throw Object.assign(new Error('Budget extension requires a command ID and exact expected revision.'), { code: 'BUDGET_EXTENSION_COMMAND_REQUIRED' });
+      const output = await harness.kernel.extendAttemptBudget(state.projectId, state.runId, { proposal, approval },
+        { commandId: take('--command-id'), expectedRevision: Number(take('--expected-revision')) });
+      console.log(JSON.stringify({ ok: true, ...output.result, revision: output.state.revision, executionStarted: false }, null, 2));
+    }
+  } else if (command === 'version-release' && subject === 'status') {
     const output = await harness.readVersionRelease(take('--project'), take('--target'));
     console.log(JSON.stringify({ ok: true, ...output }, null, 2));
   } else if (command === 'version-release' && subject === 'promote') {

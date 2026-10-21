@@ -1,5 +1,5 @@
 import { resolve } from 'node:path';
-import { digestJson, newId } from '../common/canonical.mjs';
+import { digestJson, newId, withoutKeys } from '../common/canonical.mjs';
 import { assert, fail } from '../common/errors.mjs';
 import { safeSegment } from '../common/paths.mjs';
 import { assertHardRecoveryDecision, hardRecoveryCapability } from '../platform/recovery/authorization.mjs';
@@ -12,6 +12,7 @@ import { buildRunReceipt, writeRunReceipt } from './receipts.mjs';
 import { scheduleFeatures, validateWorkGraph } from './work-graph.mjs';
 import { assertDispatchResultContract, validateBusinessResult, validateProfileResult } from '../platform/execution/result-contract.mjs';
 import { completionCarryoverDigest, verifyCompletionCarryover } from './completion-carryover.mjs';
+import { assertBudgetExtensionApproval, prepareBudgetExtension, selectAttemptBudget, submissionAttempt } from './attempt-budget.mjs';
 
 const activeLease = lease => ['requested', 'active'].includes(lease.status);
 const activeDispatch = dispatch => ['requested', 'assigned'].includes(dispatch.status);
@@ -173,11 +174,27 @@ export class HarnessKernel {
       state.evidenceRefs = [...new Set(plan.completedSubmissions.flatMap(item => item.evidenceRefs))];
       const roots = new Set(prior.features.filter(item => item.metadata?.stage === 'implementation').map(item => item.logicalRoot));
       state.attempts = Object.fromEntries(Object.entries(prior.attempts).filter(([key]) => [...roots].some(root => key.startsWith(`${root}:`))));
+      // Carry-over preserves the prior accounting contract and approved additions.
+      if (prior.metadata?.attemptAccounting) state.metadata.attemptAccounting = prior.metadata.attemptAccounting;
+      else delete state.metadata.attemptAccounting;
+      if (prior.metadata?.attemptBudgetExtensions) state.metadata.attemptBudgetExtensions = structuredClone(prior.metadata.attemptBudgetExtensions);
       const pending = prior.features.find(item => item.id === plan.firstPendingFeatureId);
       const lastPendingSubmission = [...prior.submissions].reverse().find(item => item.featureId === pending.id);
       if (lastPendingSubmission) {
         const resumed = state.features.find(item => item.id === pending.id);
         resumed.reopenReason = `Continue ${pending.id} from retired Run ${prior.runId}. Prior attempt: ${lastPendingSubmission.result?.summary ?? 'no summary'}. Recheck its blocker against the current Feature authority and source before acting.`;
+        const priorAttempt = submissionAttempt(prior, pending, lastPendingSubmission);
+        if (priorAttempt) {
+          const history = prior.submissions.filter(item => item.featureId === pending.id && item.result?.status !== 'completed');
+          for (const item of history) assert(item.submissionDigest === digestJson(withoutKeys(item, ['submissionDigest'])),
+            'CARRYOVER_ATTEMPT_HISTORY_INVALID', 'Incomplete attempt history must retain its original Submission digest.');
+          state.submissions.push(...structuredClone(history));
+          state.evidenceRefs = [...new Set([...state.evidenceRefs, ...history.flatMap(item => item.evidenceRefs ?? [])])];
+          if (priorAttempt.exhausted) {
+            resumed.state = 'failed-budget';
+            resumed.blocker = structuredClone(pending.blocker ?? lastPendingSubmission.result.blocker);
+          }
+        }
       }
       state.metadata.completionCarryover = { priorRunId: prior.runId, priorAuthorityDigest: prior.authorityDigest,
         carryoverDigest: plan.carryoverDigest, completedFeatureIds: [...completedIds], firstPendingFeatureId: pending.id,
@@ -342,6 +359,8 @@ export class HarnessKernel {
       assert(input.resultingSourceDigest, 'RESULTING_SOURCE_DIGEST_REQUIRED', 'Submission requires the resulting workspace source digest.');
       if (result.status === 'completed') assert((input.evidenceRefs ?? []).length > 0, 'COMPLETION_EVIDENCE_REQUIRED', 'Completed Features require content-addressed evidence.');
       const submission = { submissionId: this.id('submission'), dispatchId: dispatch.dispatchId, leaseId: lease.leaseId, featureId: feature.id, agentId: lease.agentId, epoch: state.epoch, generation: state.generation, inputSourceDigest: dispatch.sourceDigest, outputSourceDigest: input.resultingSourceDigest, changedFiles, result: structuredClone(result), evidenceRefs: [...new Set(input.evidenceRefs ?? [])], submittedAt: this.now() };
+      const budget = result.status === 'completed' ? null : selectAttemptBudget({ state, feature, submission, profile });
+      if (budget) submission.attemptBudgetKey = budget.key;
       submission.submissionDigest = digestJson(submission);
       state.submissions.push(submission);
       for (const finding of findings) {
@@ -359,11 +378,14 @@ export class HarnessKernel {
       feature.submissionId = submission.submissionId;
       if (result.status === 'completed') feature.state = 'completed';
       else {
-        const key = `${feature.logicalRoot}:${result.failureClass ?? result.status}`;
-        const attempt = state.attempts[key] ?? { key, logicalRoot: feature.logicalRoot, failureClass: result.failureClass ?? result.status, failures: 0, limit: feature.attemptLimit, records: [] };
-        attempt.failures += 1;
+        const { key } = budget;
+        const attempt = state.attempts[key] ?? { key, logicalRoot: feature.logicalRoot, failureClass: result.failureClass ?? result.status,
+          budgetKind: budget.budgetKind, failures: 0, ...(budget.budgetKind === 'progress' ? { used: 0 } : {}), limit: budget.limit, records: [] };
+        assert(!attempt.budgetKind || attempt.budgetKind === budget.budgetKind, 'ATTEMPT_BUDGET_KIND_COLLISION', 'A failure class cannot alias the progress ledger.');
+        if (attempt.budgetKind === 'progress') attempt.used += 1;
+        else attempt.failures += 1;
         attempt.records.push({ dispatchId: dispatch.dispatchId, submissionId: submission.submissionId, at: this.now(), summary: result.summary ?? null });
-        attempt.exhausted = attempt.failures >= attempt.limit;
+        attempt.exhausted = (attempt.budgetKind === 'progress' ? attempt.used : attempt.failures) >= attempt.limit;
         state.attempts[key] = attempt;
         feature.state = attempt.exhausted ? 'failed-budget' : 'blocked';
         feature.blocker = structuredClone(result.blocker ?? { kind: result.failureClass ?? 'execution', summary: result.summary ?? 'Feature blocked.' });
@@ -592,11 +614,36 @@ export class HarnessKernel {
     });
   }
 
+  async extendAttemptBudget(projectId, runId, input, command) {
+    return this.authorityStore.transact(projectId, runId, { expectedRevision: command.expectedRevision, commandId: command.commandId, payload: input }, state => {
+      const proposal = prepareBudgetExtension({ state, ...input.proposal });
+      assert(digestJson(proposal) === digestJson(input.proposal), 'BUDGET_EXTENSION_PROPOSAL_STALE', 'Budget proposal no longer matches Authority.');
+      assertBudgetExtensionApproval(proposal, input.approval);
+      assert(!state.decisions.some(item => item.id === input.approval.id), 'DECISION_DUPLICATE', 'Budget approval has already been consumed.');
+      const attempt = state.attempts[proposal.attemptKey];
+      attempt.limit = proposal.afterLimit;
+      attempt.exhausted = (attempt.budgetKind === 'progress' ? attempt.used : attempt.failures) >= attempt.limit;
+      const feature = state.features.find(item => item.id === proposal.featureId);
+      if (feature.state === 'failed-budget' && !attempt.exhausted) feature.state = 'blocked';
+      const decision = { ...structuredClone(input.approval), recordedAt: this.now(), digest: digestJson(input.approval) };
+      state.decisions.push(decision);
+      const extension = { ...proposal, approval: decision, commandId: command.commandId, recordedAt: this.now() };
+      state.metadata.attemptBudgetExtensions = [...(state.metadata.attemptBudgetExtensions ?? []), extension];
+      event(state, 'attempt.budget-extended', { featureId: feature.id, attemptKey: proposal.attemptKey,
+        proposalDigest: proposal.proposalDigest, decisionId: decision.id, beforeLimit: proposal.beforeLimit,
+        afterLimit: proposal.afterLimit, additional: proposal.additional }, this.now);
+      state.status = deriveStatus(state, this.profile(state.profile.id));
+      return { extension, continuation: 'await-explicit-implement' };
+    });
+  }
+
   async reopenFeature(projectId, runId, input, command) {
     return this.authorityStore.transact(projectId, runId, { expectedRevision: command.expectedRevision, commandId: command.commandId, payload: input }, state => {
       assertMutableRun(state);
       const feature = state.features.find(item => item.id === input.featureId);
       assert(feature?.state === 'blocked', 'FEATURE_NOT_REOPENABLE', 'Only a blocked Feature with remaining budget can be reopened.');
+      const last = [...state.submissions].reverse().find(item => item.featureId === feature.id);
+      assert(!submissionAttempt(state, feature, last)?.exhausted, 'FEATURE_BUDGET_EXHAUSTED', 'Reopening cannot reset an exhausted budget.');
       if (input.additionalAllowedPaths !== undefined) {
         const submission = state.submissions.findLast(item => item.featureId === feature.id);
         const candidates = qualityRepairScopeCandidates(feature, submission?.result?.blocker);

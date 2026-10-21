@@ -7,6 +7,7 @@ import { normalizeQualityReviewLimit, qualityReviewBudgetExhausted } from '../..
 import { planApprovalSatisfied } from '../plan-approval.mjs';
 import { createPlanReviewFollowUps, DEFAULT_PLAN_REVIEW_LIMIT } from '../plan-review-loop.mjs';
 import { uniqueProposalIds } from '../proposal-id.mjs';
+import { implementationAttemptBudget } from './implementation-progress.mjs';
 
 export const DELIVERY_STAGES = Object.freeze([
   'requirement-intake', 'requirement-expansion', 'canonical-requirement', 'version-planning', 'plan-review', 'implementation',
@@ -26,6 +27,7 @@ const planReviewApproved = state => {
 export const createDeliveryLifecycleProfile = (id = 'delivery-lifecycle') => Object.freeze({
   id,
   version: '1.0.0',
+  attemptBudget: implementationAttemptBudget,
 
   validateConfig(config) {
     assert(config.priorQualityReviews === undefined || (Number.isInteger(config.priorQualityReviews) && config.priorQualityReviews >= 0), 'QUALITY_REVIEW_HISTORY_INVALID', 'Prior quality review count must be a non-negative integer.');

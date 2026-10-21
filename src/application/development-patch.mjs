@@ -7,6 +7,7 @@ import { AuthorityStore } from '../kernel/authority-store.mjs';
 import { assertHarnessWritePath, harnessControlRoot } from '../common/write-boundary.mjs';
 import { safeSegment } from '../common/paths.mjs';
 import { assertLocalDevelopmentInvocation, decisionFromLocalDevelopmentInvocation } from './local-development-invocation.mjs';
+import { verifyMigrationBudgetExtension } from './development-budget-migration.mjs';
 import {
   captureDevelopmentSourceIdentity,
   developmentSourceManifestDigest,
@@ -104,7 +105,7 @@ export const verifyDevelopmentPatchPlan = async plan => {
 };
 
 export const applyDevelopmentPatchPlan = async (planInput, { commandId, authorityDecision, developmentInvocation = null,
-  h4MigrationRunId = null, h4IdleRebind = false, now = () => new Date().toISOString() } = {}) => {
+  h4MigrationRunId = null, h4IdleRebind = false, budgetExtension = null, now = () => new Date().toISOString() } = {}) => {
   const { plan, manifest, current } = await verifyDevelopmentPatchPlan(planInput);
   assert(commandId, 'COMMAND_ID_REQUIRED', 'Development patch apply requires a command ID.');
   assert(plan.changes.length > 0, 'DEVELOPMENT_PATCH_NOT_REQUIRED', 'Harness source matches the active development binding; no patch is required.');
@@ -118,6 +119,9 @@ export const applyDevelopmentPatchPlan = async (planInput, { commandId, authorit
         && active[0].activeLeaseIds.length === 0 && active[0].activeDispatchIds.length === 0,
     'DEVELOPMENT_H4_MIGRATION_RUN_CHANGED', 'H4 migration requires the exact single idle Run or an unchanged binding with no active Runs.');
   }
+  assert(!budgetExtension || (plan.level === 'H4' && h4MigrationRunId && !h4IdleRebind),
+    'DEVELOPMENT_BUDGET_MIGRATION_SCOPE_MISMATCH', 'A migration budget requires the exact idle H4 Run migration.');
+  const approvedBudget = await verifyMigrationBudgetExtension({ manifest, runId: h4MigrationRunId, budgetExtension });
   if (developmentInvocation) assertLocalDevelopmentInvocation(developmentInvocation, { projectRoot: manifest.projectRoot, configPath: manifest.configPath, controlRoot: plan.controlRoot, dataRoot: plan.dataRoot });
   const resolvedDecision = authorityDecision ?? (developmentInvocation ? decisionFromLocalDevelopmentInvocation(developmentInvocation, { action: 'development-patch', planDigest: plan.planDigest, commandId, bindingId: plan.bindingId, beforeRuntimeDigest: plan.before.runtimeDigest, afterRuntimeDigest: plan.after.runtimeDigest, level: plan.level }) : null);
   if (plan.level !== 'H0') assert(resolvedDecision?.actor && resolvedDecision?.decision === 'approved', 'DEVELOPMENT_PATCH_DECISION_REQUIRED', 'Runtime development patches require an approved Authority Decision or a local development invocation.');
@@ -149,6 +153,7 @@ export const applyDevelopmentPatchPlan = async (planInput, { commandId, authorit
     requiresCoordinatorRestart: plan.disposition.requiresCoordinatorRestart,
     ...(plan.level === 'H4' ? h4IdleRebind ? { idleRebind: true } : { migrationRunId: h4MigrationRunId } : {}),
     affectedRuns: plan.activeRuns, changes: plan.changes.map(({ path, change, level, impact }) => ({ path, change, level, impact })),
+    ...(approvedBudget ? { budgetExtension: approvedBudget } : {}),
     authorityDecision: resolvedDecision ? structuredClone(resolvedDecision) : null,
     appliedAt: now(), manifestDigest: next.manifestDigest,
   };

@@ -66,6 +66,11 @@
       "size": 1426
     },
     {
+      "path": "docs/guides/implementation-budget.md",
+      "sha256": "a7d6f99524572604864a79158afddafc43c2f1de1c3db57f70b3de949dc98dc0",
+      "size": 6881
+    },
+    {
       "path": "docs/guides/local-debugging.md",
       "sha256": "c5d41fa7b7de4096a8c6567e59398f4dd689ce9ac559af1cbeef021983281df3",
       "size": 30759
@@ -816,6 +821,11 @@
       "size": 1681
     },
     {
+      "path": "src/application/development-budget-migration.mjs",
+      "sha256": "ee8a974547f3b0839f14c710f16fe53d6af09c8b46db95e56415a2cb13e1409e",
+      "size": 6513
+    },
+    {
       "path": "src/application/development-closeout-decision.mjs",
       "sha256": "3e93e0648ba7c311e6fb562e7ea15ed819750e3ecb376873512ab1677ec57348",
       "size": 2997
@@ -827,8 +837,8 @@
     },
     {
       "path": "src/application/development-patch.mjs",
-      "sha256": "4688e5d29ba4063187aae2c45e38c6cc69dae4309419dc5134344f1a35a3ca81",
-      "size": 14850
+      "sha256": "28a82922c50a604a6541ab3e361a8cbc2918a5456040a9dbf95abe838b4b4e53",
+      "size": 15351
     },
     {
       "path": "src/application/development-plan-closeout.mjs",
@@ -852,8 +862,8 @@
     },
     {
       "path": "src/application/development-run-recovery.mjs",
-      "sha256": "3cb73794812c617be5e389017a324ecf69d21e950ff1c3816fce82bff2f52005",
-      "size": 44714
+      "sha256": "9c54ca24c9e31b36d1d5bd67b5b5791ea1a4ff9267910e6ba72c1279c014b56c",
+      "size": 46155
     },
     {
       "path": "src/application/development-source.mjs",
@@ -862,8 +872,8 @@
     },
     {
       "path": "src/application/execution-readiness-service.mjs",
-      "sha256": "dafb670c25a6e9337a25549d43fb45388ed1efb4c1421d82f224256c94028457",
-      "size": 18150
+      "sha256": "fb05581b48c490a52f78a474ee0bee21f94b2e7b91642f2a8ba23d9762702ace",
+      "size": 20120
     },
     {
       "path": "src/application/execution-readiness.mjs",
@@ -872,13 +882,28 @@
     },
     {
       "path": "src/application/harness.mjs",
-      "sha256": "37e0dcc676de80612fb330b8c14ef9ba91a95cc710b21ae7fbe14673c7fbfc37",
-      "size": 107956
+      "sha256": "d5181e2dc756534576ffc95a61690ac65e8dfc2b89b287729feedc85514243d8",
+      "size": 108488
+    },
+    {
+      "path": "src/application/implementation-budget.mjs",
+      "sha256": "193b4d4492b667da836b87b7dd5ac943c9adb7ba10e8f255e8ae062dc925acb2",
+      "size": 2860
     },
     {
       "path": "src/application/implementation-carryover-approval.mjs",
       "sha256": "aee81a81b5843dd0546eb4375a4b953ec0cac409ac3fa911360f100c9723bfc0",
       "size": 1603
+    },
+    {
+      "path": "src/application/implementation-continuation.mjs",
+      "sha256": "fd1fdd442acd31a518f371480f687e1592ae149dd97c9e89e391dc725959a095",
+      "size": 10363
+    },
+    {
+      "path": "src/application/implementation-handoff.mjs",
+      "sha256": "9881212884ef03bd7cd8dc1d7ce1d7ed5bbe431198c933f117c6d8eb4e11c382",
+      "size": 4006
     },
     {
       "path": "src/application/installation.mjs",
@@ -897,13 +922,13 @@
     },
     {
       "path": "src/application/lifecycle-execution-service.mjs",
-      "sha256": "d1ed31ff3b99674e9276a7bb4ddc8216ab98cbac0ec848980e157da935074954",
-      "size": 39857
+      "sha256": "5c173edffdd08e89e5ee878a87d50c5f6532dbab9c9db8a113f610db3321ca74",
+      "size": 42309
     },
     {
       "path": "src/application/lifecycle-resume.mjs",
-      "sha256": "c2aada77f62018944b46f030cb1b5afde312be98b0fbd064fd4bc379af1cfb40",
-      "size": 3324
+      "sha256": "44e5a79dec5bb8ca5b526ca720f3395cb7535d70b37cf29102c307cc6173e9c0",
+      "size": 3687
     },
     {
       "path": "src/application/lineage.mjs",
@@ -1292,8 +1317,13 @@
     },
     {
       "path": "src/flows/delivery-lifecycle/policy/delivery-lifecycle.mjs",
-      "sha256": "e464cd04590fd1c000bb66d9c0d622c140643acad27cc0a3f37e4f0f921dec6e",
-      "size": 16223
+      "sha256": "264f354126c8e276c259f3fc5b31c70a6d3b2af58f0e2d1f697ac61e3cf0e3b5",
+      "size": 16346
+    },
+    {
+      "path": "src/flows/delivery-lifecycle/policy/implementation-progress.mjs",
+      "sha256": "7f705aceeff34e3bb216c982ff5fe6460b945357852542bed6a85f4d6c391401",
+      "size": 1020
     },
     {
       "path": "src/flows/delivery-lifecycle/policy/index.mjs",
@@ -1457,18 +1487,23 @@
     },
     {
       "path": "src/interfaces/cli/index.mjs",
-      "sha256": "504665d11689390b04d907a7be8a0319993ff1caeaefd564c21b225e76fb2c57",
-      "size": 59277
+      "sha256": "b5d5734f37934ce860204aad70486f84eb17ab8e13d7db4940593d22c9cc0206",
+      "size": 61099
     },
     {
       "path": "src/interfaces/cli/local-development-sync.mjs",
-      "sha256": "9f6375024b6eb544899c3055105a8fc85c2744e64b2b943b98fccec81fcec110",
-      "size": 8178
+      "sha256": "c789f3ed607f443311f56ae8b8f274afa148b3f68e422907a29f1da9f7fc3a84",
+      "size": 8796
     },
     {
       "path": "src/kernel/atomic-io.mjs",
       "sha256": "ca4c27aa15c7a7fc3804e0dffe7b2925a09335d79cbeb5f739f36d2ccd95e095",
       "size": 3333
+    },
+    {
+      "path": "src/kernel/attempt-budget.mjs",
+      "sha256": "ccf1c696cb965631fa8702b20abcdb4a106dc19edf1d86866d56ab4f101bae9c",
+      "size": 5211
     },
     {
       "path": "src/kernel/authority-store.mjs",
@@ -1497,8 +1532,8 @@
     },
     {
       "path": "src/kernel/kernel.mjs",
-      "sha256": "66a6c4d87cb0639435cfdc3c497d6b91794153b3ddcdad4753c4948d0b3a0dc9",
-      "size": 65512
+      "sha256": "70fef429343715c0ee4f08dd587c9bb314095a268d6050f12db7bf195b5e3cd8",
+      "size": 69595
     },
     {
       "path": "src/kernel/quality.mjs",
@@ -1617,8 +1652,8 @@
     },
     {
       "path": "src/platform/plugins/codec/agent-prompt-codec.mjs",
-      "sha256": "c00422db16e40972aa16f29c49246bc0356a37fad8214bf5673916d9a5a9d042",
-      "size": 21218
+      "sha256": "84544976962a86726509a7a911e418622f8653fc72af0ae1c162a7a538067422",
+      "size": 21607
     },
     {
       "path": "src/platform/plugins/codec/json-codec.mjs",
@@ -1837,8 +1872,8 @@
     },
     {
       "path": "src/platform/workflow/profiles/registry.mjs",
-      "sha256": "b7f49352c664b771428cfa7cc6bc935c016eaad00f8ab37505bf4d372c876733",
-      "size": 1290
+      "sha256": "37e1b111aa88c0be99dd5842f20729a27c33d7234eeba076aa259f9c47775b51",
+      "size": 1475
     },
     {
       "path": "src/platform/workflow/source-manifest.mjs",
@@ -1871,7 +1906,7 @@
       "size": 19877
     }
   ],
-  "packageDigest": "56b51c644321cc5bdbaecb06b21f807cce03e78d23f43c2882edb26c64af0422",
+  "packageDigest": "b62145aa3c1e61bf5508490bb27c2eb323e6176ba517dd36ac425ff641e0a4ab",
   "metadataFiles": [
     "release-manifest.json",
     "sbom.spdx.json"

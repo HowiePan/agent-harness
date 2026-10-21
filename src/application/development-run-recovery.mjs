@@ -16,6 +16,7 @@ import { expandApprovedImplementation } from '../flows/delivery-lifecycle/approv
 import { createCompletionCarryoverPlan, verifyCompletionCarryover } from '../kernel/completion-carryover.mjs';
 import { assertPlanningReplacementScope, developmentRecoveryArguments, isPlanningRecovery } from './development-planning-recovery.mjs';
 import { recoverInterruptedWorkspace, readInterruptedWorkspaceDraft } from './interrupted-workspace-recovery.mjs';
+import { approvedBudgetExtensionProgress } from './development-budget-migration.mjs';
 
 const activeLeaseIds = state => state.leases.filter(lease => lease.status === 'active').map(lease => lease.leaseId).sort();
 const activeDispatchIds = state => state.dispatches.filter(dispatch => ['requested', 'assigned'].includes(dispatch.status)).map(dispatch => dispatch.dispatchId).sort();
@@ -149,8 +150,9 @@ const currentPatchReceipt = async (manifest, state, evidenceStore) => {
           && state.events.at(-1)?.type === 'workspace.interrupted-draft-preserved'
           ? await readInterruptedWorkspaceDraft({ state, evidenceStore,
             controlRoot: manifest.controlRoot, dataRoot: manifest.dataRoot }) : null;
-        if (unchanged || draft?.patchReceiptDigest === receipt.receiptDigest
-          || await terminalFailureProgress(run, state, evidenceStore)) { matches.push(receipt); break; }
+        const covered = receipt.budgetExtension ? approvedBudgetExtensionProgress(run, state, receipt)
+          : unchanged || draft?.patchReceiptDigest === receipt.receiptDigest || await terminalFailureProgress(run, state, evidenceStore);
+        if (covered) { matches.push(receipt); break; }
       }
     }
   }
@@ -474,6 +476,17 @@ export const recoverDevelopmentRun = async ({ manifestFile, runId, commandId, cw
     continuation: 'new-lifecycle-command-ready' };
 };
 
+export const pendingCarryoverRefreshOriginValid = (prior, receipt = null) => {
+  const origin = /^development-h([234])-recovery:([a-f0-9]{64})$/.exec(prior.metadata?.supersededReason ?? '');
+  if (!origin || activeLeaseIds(prior).length || activeDispatchIds(prior).length) return false;
+  if (origin[1] !== '4') return true;
+  return receipt?.kind === 'development-patch-receipt' && receipt.level === 'H4'
+    && receipt.migrationRunId === prior.runId && receipt.receiptDigest === origin[2]
+    && receipt.receiptDigest === developmentPatchReceiptDigest(receipt)
+    && prior.metadata?.completionCarryover?.plan?.patchReceiptDigest === receipt.receiptDigest
+    && receipt.affectedRuns?.some(run => run.projectId === prior.projectId && run.runId === prior.runId);
+};
+
 /** Re-seal an unstarted replacement after a later source-link rebind. */
 export const refreshPendingDevelopmentCarryover = async ({ manifestFile, commandId, cwd = process.cwd() }) => {
   assert(commandId, 'COMMAND_ID_REQUIRED', 'Pending carry-over refresh requires a command ID.');
@@ -494,9 +507,17 @@ export const refreshPendingDevelopmentCarryover = async ({ manifestFile, command
   assert(pending.length <= 1, 'CARRYOVER_PENDING_AMBIGUOUS', 'More than one retired Run has an unstarted replacement Plan.');
   const prior = pending[0];
   if (!prior) return null;
-  assert(/^development-h[23]-recovery:[a-f0-9]{64}$/.test(prior.metadata.supersededReason ?? '')
-    && !activeLeaseIds(prior).length && !activeDispatchIds(prior).length,
-  'CARRYOVER_REFRESH_SOURCE_INVALID', 'Only an idle H2/H3 recovery claim can be refreshed.');
+  let originReceipt = null;
+  if (prior.metadata.supersededReason?.startsWith('development-h4-recovery:')) {
+    const patchRoot = resolve(manifest.dataRoot, 'development', 'patches');
+    for (const entry of await readdir(patchRoot, { withFileTypes: true })) {
+      if (!entry.isFile() || !entry.name.endsWith('.json')) continue;
+      const receipt = await readJson(resolve(patchRoot, entry.name));
+      if (receipt.receiptDigest === prior.metadata.completionCarryover?.plan?.patchReceiptDigest) { originReceipt = receipt; break; }
+    }
+  }
+  assert(pendingCarryoverRefreshOriginValid(prior, originReceipt),
+    'CARRYOVER_REFRESH_SOURCE_INVALID', 'Refresh requires an idle H2/H3 claim or the exact verified H4 migration Receipt.');
   const intent = prior.metadata.commandIntent;
   assert(intent?.action === 'implement' && intent.workflowId && intent.profileId && intent.preset,
     'CARRYOVER_REFRESH_INTENT_INVALID', 'Pending claim is not a bound implementation command.');
