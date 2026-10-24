@@ -177,9 +177,12 @@ export const createCodexCollaborationHostAdapter = ({ exchange, controlRoot, dat
   })).effect;
 
   const containEffect = async (effect, { reason = 'reconcile', snapshot = null, fenceMissing = false } = {}) => {
-    if (effect.state === 'settled' || effect.state === 'contained') return effect;
+    const supplementAbsence = fenceMissing && effect.state === 'contained'
+      && effect.outcome?.reason === 'preflight-reconciliation' && effect.outcome.disposition === 'not-observed';
+    if (effect.state === 'settled' || effect.state === 'contained' && !supplementAbsence) return effect;
     const listed = snapshot ?? await listAll({ effectId: effect.effectId, reason });
     const task = taskForEffect(listed.tasks, effect);
+    if (supplementAbsence && task) throw Object.assign(new Error('A previously missing Agent reappeared; its old absence cannot be supplemented.'), { code: 'CODEX_COLLABORATION_AGENT_ABSENCE_UNVERIFIED' });
     if (!task && fenceMissing) {
       const target = nonEmpty(effect.canonicalAgentName, 'CODEX_COLLABORATION_AGENT_ID_REQUIRED', 'Recovery requires the original canonical Agent name.');
       const interrupted = await hostRequest({ operation: 'interrupt', tool: 'collaboration.interrupt_agent', arguments: { target }, binding: { effectId: effect.effectId, reason } });
@@ -187,9 +190,12 @@ export const createCodexCollaborationHostAdapter = ({ exchange, controlRoot, dat
       if (interrupted.result.previous_status !== 'not_found') throw Object.assign(new Error('Recovery could not prove the missing Agent is absent.'), { code: 'CODEX_COLLABORATION_AGENT_ABSENCE_UNVERIFIED', details: { effectId: effect.effectId, target } });
       const verified = await listAll({ effectId: effect.effectId, reason: 'verify-missing-agent' });
       if (taskForEffect(verified.tasks, effect)) throw Object.assign(new Error('The supposedly absent Agent appeared after interruption.'), { code: 'CODEX_COLLABORATION_AGENT_ABSENCE_UNVERIFIED', details: { effectId: effect.effectId, target } });
-      return transition(effect, 'contained', { outcome: { reason, disposition: 'absent-after-interrupt', target,
+      const outcome = { reason: supplementAbsence ? effect.outcome.reason : reason, disposition: 'absent-after-interrupt', target,
         observationRequestDigest: listed.request.requestDigest, interruptRequestDigest: interrupted.request.requestDigest,
-        interruptResultDigest: digestJson(interrupted.result), verificationRequestDigest: verified.request.requestDigest } }, `contain.${effect.revision}`);
+        interruptResultDigest: digestJson(interrupted.result), verificationRequestDigest: verified.request.requestDigest };
+      if (supplementAbsence) return (await journal.confirmAbsent(effect.effectId, {
+        expectedRevision: effect.revision, commandId: `${effect.requestId}.confirm-absent.${effect.revision}`, outcome })).effect;
+      return transition(effect, 'contained', { outcome }, `contain.${effect.revision}`);
     }
     if (!task || terminalNativeStatus(task.agent_status)) {
       return transition(effect, 'contained', { outcome: { reason, disposition: task ? 'already-terminal' : 'not-observed', observedAgentName: task?.agent_name ?? null, observationRequestDigest: listed.request.requestDigest } }, `contain.${effect.revision}`);
@@ -216,7 +222,8 @@ export const createCodexCollaborationHostAdapter = ({ exchange, controlRoot, dat
           if (effect.state !== 'lease-bound') throw Object.assign(new Error(`Active Lease refers to an incompatible Host Effect state: ${effect.state}`), { code: 'CODEX_HOST_EFFECT_ACTIVE_STATE_INVALID' });
           reconciled.push({ effectId: effect.effectId, disposition: 'active-lease-preserved' });
         } else {
-          const contained = await containEffect(effect, { reason: 'preflight-reconciliation', snapshot: listed });
+          const contained = await containEffect(effect, { reason: 'preflight-reconciliation', snapshot: listed,
+            fenceMissing: Boolean(effect.canonicalAgentName) });
           reconciled.push({ effectId: contained.effectId, disposition: contained.outcome?.disposition ?? 'contained' });
         }
       } catch (error) {

@@ -17,6 +17,7 @@ import { createCompletionCarryoverPlan, verifyCompletionCarryover } from '../ker
 import { assertPlanningReplacementScope, developmentRecoveryArguments, isPlanningRecovery } from './development-planning-recovery.mjs';
 import { recoverInterruptedWorkspace, readInterruptedWorkspaceDraft } from './interrupted-workspace-recovery.mjs';
 import { approvedBudgetExtensionProgress } from './development-budget-migration.mjs';
+import { environmentBlockedFeatures, reviewDevelopmentEnvironment } from './development-environment-review.mjs';
 
 const activeLeaseIds = state => state.leases.filter(lease => lease.status === 'active').map(lease => lease.leaseId).sort();
 const activeDispatchIds = state => state.dispatches.filter(dispatch => ['requested', 'assigned'].includes(dispatch.status)).map(dispatch => dispatch.dispatchId).sort();
@@ -354,7 +355,8 @@ export const retireUnacceptedDevelopmentRun = async ({ manifestFile, runId, comm
 };
 
 /** Retire a stopped source-link Run only after its Host effects and replacement Plan are verified. */
-export const recoverDevelopmentRun = async ({ manifestFile, runId, commandId, cwd = process.cwd() }) => {
+export const recoverDevelopmentRun = async ({ manifestFile, runId, commandId, cwd = process.cwd(),
+  environmentReview = null, onEnvironmentProgress = null }) => {
   assert(commandId && runId, 'DEVELOPMENT_RUN_RECOVERY_INPUT_REQUIRED', 'Development Run recovery requires a Run and command ID.');
   const { manifest, releaseIdentity } = await verifyDevelopmentSourceManifest(manifestFile);
   await createLocalDevelopmentInvocation({ projectRoot: manifest.projectRoot, configPath: manifest.configPath,
@@ -442,6 +444,13 @@ export const recoverDevelopmentRun = async ({ manifestFile, runId, commandId, cw
       evidenceStore: harness.evidenceStore, authorityStore: harness.authorityStore });
     completionCarryover = { plan: carryoverPlan, replacementPlan: plan };
   }
+  if (environmentBlockedFeatures(state).length > 0) {
+    assert(completionCarryover, 'DEVELOPMENT_ENVIRONMENT_REVIEW_INVALID',
+      'Environment recovery requires the sealed implementation completion carry-over.');
+    completionCarryover.environmentReview = await reviewDevelopmentEnvironment({ state, project,
+      review: environmentReview, evidenceStore: harness.evidenceStore, patchReceiptDigest: receipt.receiptDigest,
+      onProgress: onEnvironmentProgress });
+  } else assert(environmentReview === null, 'DEVELOPMENT_ENVIRONMENT_REVIEW_INVALID', 'This Run has no environment blocker to review.');
   // Check the replacement Plan before fencing any Host effect. A source or
   // scope mismatch must leave the old Agent and Run untouched.
   if (state.dispatches.length > 0 || state.leases.length > 0) {
@@ -473,6 +482,7 @@ export const recoverDevelopmentRun = async ({ manifestFile, runId, commandId, cw
     replacementRunId: plan.run.runId, replacementPlanDigest: plan.planDigest, status: retired.state.status,
     ...(completionCarryover ? { completedFeatureIds: completionCarryover.plan.completedSubmissions.map(item => item.featureId),
       firstPendingFeatureId: completionCarryover.plan.firstPendingFeatureId, carryoverDigest: completionCarryover.plan.carryoverDigest } : {}),
+    ...(completionCarryover?.environmentReview ? { environmentReview: completionCarryover.environmentReview } : {}),
     continuation: 'new-lifecycle-command-ready' };
 };
 

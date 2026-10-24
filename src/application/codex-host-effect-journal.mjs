@@ -117,6 +117,42 @@ export class CodexHostEffectJournal {
       return { effect, receipt, reused: false };
     }, { root: this.root });
   }
+
+  // An old absence observation is terminal for transport, but insufficient to
+  // preserve source. Add a fresh native absence fence without reopening it or
+  // discarding the original observation. Ordinary transitions stay terminal.
+  async confirmAbsent(effectId, { expectedRevision, commandId, outcome }) {
+    const safeCommandId = safeSegment(commandId, 'commandId');
+    const file = this.file(effectId);
+    const payloadDigest = digestJson(outcome);
+    return withDirectoryLock(`${file}.lock`, async () => {
+      const current = await this.read(effectId, { required: true });
+      const prior = current.commands?.[safeCommandId];
+      if (prior) {
+        assert(prior.payloadDigest === payloadDigest, 'COMMAND_ID_REUSED', 'Absence confirmation command changed.');
+        return { effect: current, receipt: prior, reused: true };
+      }
+      assert(current.revision === expectedRevision, 'CODEX_HOST_EFFECT_REVISION_CONFLICT', 'Host Effect changed before absence confirmation.');
+      const hash = value => typeof value === 'string' && /^[a-f0-9]{64}$/.test(value);
+      assert(current.state === 'contained' && current.outcome?.reason === 'preflight-reconciliation'
+        && current.outcome.disposition === 'not-observed' && hash(current.outcome.observationRequestDigest)
+        && current.canonicalAgentName && current.canonicalAgentName === current.nativeTaskName
+        && outcome?.reason === current.outcome.reason && outcome.disposition === 'absent-after-interrupt'
+        && outcome.target === current.canonicalAgentName
+        && [outcome.observationRequestDigest, outcome.interruptRequestDigest,
+          outcome.interruptResultDigest, outcome.verificationRequestDigest].every(hash),
+      'CODEX_HOST_EFFECT_ABSENCE_PROOF_INVALID', 'Only an identity-bound, freshly fenced absence may supplement an old missing-Agent observation.');
+      const revision = current.revision + 1;
+      const committedAt = this.now();
+      const receipt = { commandId: safeCommandId, payloadDigest, revision, committedAt };
+      const effect = seal({ ...withoutKeys(current, ['effectDigest']), revision, updatedAt: committedAt,
+        outcome: { ...structuredClone(outcome), priorContainment: {
+          effectDigest: current.effectDigest, revision: current.revision, outcome: structuredClone(current.outcome) } },
+        commands: { ...current.commands, [safeCommandId]: receipt } });
+      await atomicWriteJson(file, effect, { root: this.root });
+      return { effect, receipt, reused: false };
+    }, { root: this.root });
+  }
 }
 
 export const isTerminalCodexHostEffect = effect => terminalStates.has(effect?.state);

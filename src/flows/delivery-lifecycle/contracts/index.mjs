@@ -2,12 +2,21 @@ import { stringSchema as string, stringsSchema as strings } from '../../../flow-
 
 export const deliveryWorkflowId = 'delivery-lifecycle';
 export const deliveryProfileId = 'delivery-lifecycle';
+const amendmentReferenceSchema = { type: 'object', required: ['version', 'basePlanDigest', 'changeRequestDigest', 'deltaRef'],
+  properties: { version: { const: 'plan-amendment/1' },
+    basePlanDigest: { type: 'string', pattern: '^[a-f0-9]{64}$' },
+    changeRequestDigest: { type: 'string', pattern: '^[a-f0-9]{64}$' },
+    deltaRef: { type: 'object', required: ['path', 'sha256'], properties: {
+      path: { type: 'string', minLength: 1 }, sha256: { type: 'string', pattern: '^[a-f0-9]{64}$' },
+    }, additionalProperties: false }, plan: { type: 'object' },
+  }, additionalProperties: false };
 
 export const deliveryPorts = Object.freeze({
   intake: 'delivery-intake-v1',
   expansion: 'delivery-expansion-v1',
   canonical: 'canonical-requirement-v1',
   plan: 'delivery-plan-v1',
+  amendment: 'delivery-plan-amendment-v1',
   'plan-review': 'delivery-plan-review-v1',
   implement: 'delivery-implementation-v1',
   scope: 'delivery-scope-v1',
@@ -21,6 +30,24 @@ export const deliveryPorts = Object.freeze({
 });
 
 export const deliveryValueSchemas = Object.freeze({
+  'delivery-plan-amendment-v1': { type: 'object', oneOf: [amendmentReferenceSchema, {
+    type: 'object', required: ['version', 'basePlanDigest', 'changeRequestDigest', 'changes', 'documents'],
+    properties: {
+      version: { const: 'plan-amendment/1' },
+      basePlanDigest: { type: 'string', pattern: '^[a-f0-9]{64}$' },
+      changeRequestDigest: { type: 'string', pattern: '^[a-f0-9]{64}$' },
+      changes: { type: 'array', maxItems: 1000, items: { type: 'object',
+        required: ['path', 'expectedDigest', 'value'], properties: {
+          path: { type: 'string', pattern: '^/' }, expectedDigest: { type: 'string', pattern: '^[a-f0-9]{64}$' }, value: {},
+        }, additionalProperties: false } },
+      documents: { type: 'array', items: { type: 'object', required: ['id', 'changes', 'resultSha256'], properties: {
+        id: string, changes: { type: 'array', maxItems: 1000, items: { type: 'object',
+          required: ['path', 'expectedDigest', 'value'], properties: {
+            path: { type: 'string', pattern: '^/' }, expectedDigest: { type: 'string', pattern: '^[a-f0-9]{64}$' }, value: {},
+          }, additionalProperties: false } }, resultSha256: { type: 'string', pattern: '^[a-f0-9]{64}$' },
+      }, additionalProperties: false } },
+    }, additionalProperties: false,
+  }] },
   'delivery-intake-v1': { type: 'object', required: ['requirements'], properties: { requirements: strings }, additionalProperties: true },
   'delivery-expansion-v1': { type: 'object', required: ['expandedRequirements'], properties: { expandedRequirements: strings, derivedFrom: strings, assumptions: strings, unresolved: strings }, additionalProperties: true },
   'canonical-requirement-v1': { type: 'object', required: ['id', 'acceptance'], properties: { id: string, acceptance: strings }, additionalProperties: true },

@@ -4,7 +4,8 @@ import { defineNodeTaskContract, taskFeatureProjection } from '../../../common/t
 import { approvalSatisfied } from '../../../flow-kit/primitives.mjs';
 import { createQualityFollowUpFeatures, createQualityGateDiagnosticReview, hasCurrentCleanQualityReview, qualityReviewNoProgress, validateQualityReviewPolicies } from '../../../flow-kit/profiles/quality-loop.mjs';
 import { normalizeQualityReviewLimit, qualityReviewBudgetExhausted } from '../../../flow-kit/profiles/quality-budget.mjs';
-import { planApprovalSatisfied } from '../plan-approval.mjs';
+import { planApprovalSatisfied, reviewedPlanProposal } from '../plan-approval.mjs';
+import { resolvedPlanAmendment } from '../plan-amendment.mjs';
 import { createPlanReviewFollowUps, DEFAULT_PLAN_REVIEW_LIMIT } from '../plan-review-loop.mjs';
 import { uniqueProposalIds } from '../proposal-id.mjs';
 import { implementationAttemptBudget } from './implementation-progress.mjs';
@@ -59,6 +60,22 @@ export const createDeliveryLifecycleProfile = (id = 'delivery-lifecycle') => Obj
   },
 
   validateResult({ state, feature, result }) {
+    if (state.metadata?.commandIntent?.action === 'amend' && result.status === 'completed') {
+      try {
+        if (feature.metadata?.stage === 'version-planning') {
+          assert(!result.outputs?.plan, 'PLAN_AMENDMENT_FULL_REWRITE_DENIED', 'Amend accepts a delta, not an Agent-authored full plan.');
+          resolvedPlanAmendment(state.metadata.planRevision, result.outputs?.amendment?.value);
+        } else if (feature.metadata?.stage === 'plan-review') {
+          const plan = reviewedPlanProposal(state);
+          const review = result.outputs?.['plan-review']?.value;
+          assert(review?.basePlanDigest === plan.amendment.basePlanDigest
+            && review.deltaDigest === plan.amendment.deltaDigest
+            && Array.isArray(review.reviewedFeatureIds)
+            && plan.amendment.affectedFeatureIds.every(id => review.reviewedFeatureIds.includes(id)),
+          'PLAN_AMENDMENT_REVIEW_BINDING_MISMATCH', 'Independent review must bind the base, exact delta and full affected Feature set.');
+        }
+      } catch (error) { return { ok: false, reason: `${error.code}: ${error.message}` }; }
+    }
     if (feature.metadata?.qualityReview === true && result.status === 'completed') {
       try {
         createQualityFollowUpFeatures({ state, feature, findings: result.findings ?? [], result });
@@ -95,7 +112,9 @@ export const createDeliveryLifecycleProfile = (id = 'delivery-lifecycle') => Obj
       return { ok: false, reason: 'planning-proposals-must-use-typed-plan-output' };
     }
     if (feature.metadata?.stage === 'version-planning' && result.status === 'completed') {
-      const proposals = result.outputs?.plan?.value?.proposedFeatures ?? [];
+      const proposals = state.metadata?.commandIntent?.action === 'amend'
+        ? resolvedPlanAmendment(state.metadata.planRevision, result.outputs?.amendment?.value).proposedFeatures
+        : result.outputs?.plan?.value?.proposedFeatures ?? [];
       if (proposals.some(item => (item.projectId === state.projectId) !== (item.disposition === 'project-owned'))) {
         return { ok: false, reason: 'planning-proposal-project-disposition-mismatch' };
       }

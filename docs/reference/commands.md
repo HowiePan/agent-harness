@@ -6,6 +6,8 @@ CLI 主入口：`node bin/agent-harness.mjs`；`--help` 输出所有当前参数
 agent-harness init create-config|validate|plan|apply|execute
 agent-harness dev attach|rebind|execute|verify|doctor|watch|generations|sync
 agent-harness dev patch plan|status|apply|rollback
+agent-harness dev amendment-inspect --manifest <json> --change <id> [--workflow <id>]
+agent-harness dev amendment-materialize --manifest <json> --run <amend-run> --patch <draft.json>
 agent-harness dev plan-closeout --manifest <json> --run <id> --repair <json> --expected-revision <n> --command-id <id> [--check]
 agent-harness config schema|validate
 agent-harness docs list|show

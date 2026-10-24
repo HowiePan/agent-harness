@@ -19,7 +19,7 @@ export const expandApprovedImplementation = ({ features, typedPlan, projectId, a
       && /^[a-f0-9]{64}$/.test(approvalBinding.artifactDigest ?? '')
       && digestJson(approvalBinding.typedPlan) === digestJson(typedPlan),
     'IMPLEMENTATION_APPROVAL_BINDING_MISMATCH', 'Approval context does not bind the exact project-owned typed plan.');
-    const { typedPlan: _typedPlan, ...identity } = approvalBinding;
+    const { typedPlan: _typedPlan, amendmentBaseline: _amendmentBaseline, ...identity } = approvalBinding;
     approvedPlanBinding = { ...structuredClone(identity), typedPlanDigest: digestJson(typedPlan) };
   }
   const proposed = typedPlan?.proposedFeatures;
@@ -41,8 +41,12 @@ export const expandApprovedImplementation = ({ features, typedPlan, projectId, a
     ordered.push(ready);
     pending.delete(ready.id);
   }
-  const packageFeatures = ordered.map((proposal, index) => {
-    const prior = ordered[index - 1];
+  const baseline = approvalBinding?.amendmentBaseline;
+  const completed = new Set(baseline?.completedProposalIds ?? []);
+  assert([...completed].every(id => byId.has(id)), 'PLAN_AMENDMENT_BASELINE_PROPOSAL_CHANGED', 'Inherited completion is absent from the approved plan.');
+  const executable = ordered.filter(proposal => !completed.has(proposal.id));
+  const packageFeatures = executable.map((proposal, index) => {
+    const prior = executable[index - 1];
     const { taskDigest: _taskDigest, ...task } = parent.task;
     const contracts = proposal.contracts ?? [];
     const verification = proposal.verification ?? [];
@@ -81,12 +85,13 @@ export const expandApprovedImplementation = ({ features, typedPlan, projectId, a
       ...projection,
       id: packageId(parent, proposal),
       logicalRoot: `${parent.logicalRoot}:${proposal.id}`,
-      dependsOn: [...new Set([...parent.dependsOn, ...proposal.dependsOn.map(id => packageId(parent, byId.get(id))), ...(prior ? [packageId(parent, prior)] : [])])],
+      dependsOn: [...new Set([...parent.dependsOn, ...proposal.dependsOn.filter(id => !completed.has(id)).map(id => packageId(parent, byId.get(id))), ...(prior ? [packageId(parent, prior)] : [])])],
       // The Descriptor remains the write authority. Proposal paths guide the Agent;
       // a necessary sibling source file does not force a new user replan.
       allowedPaths: [...parent.allowedPaths],
       contracts: [...new Set([...parent.contracts, ...contracts])],
-      attemptLimit: Math.max(parent.attemptLimit ?? 3, 21),
+      attemptLimit: Math.max(parent.attemptLimit ?? 3, 21,
+        ...Object.values(baseline?.progress?.[proposal.id]?.attempts ?? {}).map(item => item.limit ?? 0)),
       metadata: {
         ...parent.metadata,
         outputValueSchemas: { ...parent.metadata.outputValueSchemas,
@@ -94,15 +99,16 @@ export const expandApprovedImplementation = ({ features, typedPlan, projectId, a
         approvedDeliveryPlan: structuredClone(typedPlan),
         approvedProposal: structuredClone(proposal),
         ...(approvedPlanBinding ? { approvedPlanBinding } : {}),
+        ...(baseline?.progress?.[proposal.id] ? { amendmentProgressBaseline: structuredClone(baseline.progress[proposal.id]) } : {}),
         implementationProgressRetries: 20,
         allowDynamicDecomposition: false,
       },
     };
   });
-  const lastId = packageFeatures.at(-1).id;
+  const lastId = packageFeatures.at(-1)?.id;
   const remaining = features.filter(feature => feature.id !== parent.id).map(feature => ({
     ...feature,
-    dependsOn: feature.dependsOn.map(id => id === parent.id ? lastId : id),
+    dependsOn: feature.dependsOn.map(id => id === parent.id ? lastId : id).filter(Boolean),
   }));
   return validateWorkGraph([...packageFeatures, ...remaining]);
 };

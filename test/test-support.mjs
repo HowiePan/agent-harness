@@ -107,6 +107,7 @@ export const createMockVisibleHostAdapter = ({
   adapterVersion = '1.0.0',
   onSpawn = null,
   onResult = null,
+  onReconcile = null,
 } = {}) => createVisibleHostAdapter({
   provider,
   adapterVersion,
@@ -139,7 +140,7 @@ export const createMockVisibleHostAdapter = ({
     receipt: { host: provider, resultAt: new Date().toISOString() },
     runtimeEvidence: { hostWaitReceipt: { host: provider }, hostResultReceipt: { host: provider } },
   }),
-  reconcileVisibleHostEffects: async () => ({ reconciled: true }),
+  reconcileVisibleHostEffects: async input => onReconcile ? onReconcile(input) : ({ reconciled: true }),
   confirmVisibleLease: async () => ({ confirmed: true }),
   containVisibleAgent: async () => ({ contained: true }),
   sendVisibleAgent: async () => ({ sent: true }),

@@ -104,6 +104,9 @@ test('source recovery rejects ambiguous transport, wrong scope, changed binding 
       value => { value.effect.binding.packetDigest = 'b'.repeat(64); },
       value => { value.effect.outcome.target = 'unrelated'; },
       value => { delete value.effect.outcome.verificationRequestDigest; },
+      value => { value.effect.outcome = { reason: 'preflight-reconciliation', disposition: 'not-observed', observationRequestDigest: H }; },
+      value => { value.effect.outcome = { reason: 'preflight-reconciliation', disposition: 'absent-after-interrupt', target: 'agent', interruptRequestDigest: H, interruptResultDigest: H, verificationRequestDigest: H }; },
+      value => { value.effect.outcome = { reason: 'preflight-reconciliation', disposition: 'already-terminal', observedAgentName: 'unrelated', observationRequestDigest: H }; },
       value => { value.effect.state = 'lease-bound'; },
       value => { value.before.files = []; },
       value => { value.after.root = resolve(f.workspace, '..'); },
@@ -114,6 +117,37 @@ test('source recovery rejects ambiguous transport, wrong scope, changed binding 
       const input = structuredClone({ state: f.state, before: f.before, after: f.after, effect: f.effect });
       mutate(input);
       assert.throws(() => assessInterruptedWorkspace(input), error => error.code === 'INTERRUPTED_SOURCE_RECOVERY_UNVERIFIED');
+    }
+  } finally { await f.cleanup(); }
+});
+
+test('a fenced missing or observed terminal Agent preserves only an unsubmitted draft', async () => {
+  const f = await fixture();
+  try {
+    for (const outcome of [
+      { reason: 'preflight-reconciliation', disposition: 'absent-after-interrupt', target: 'agent',
+        observationRequestDigest: H, interruptRequestDigest: H, interruptResultDigest: H, verificationRequestDigest: H },
+      { reason: 'preflight-reconciliation', disposition: 'already-terminal', observedAgentName: 'agent', observationRequestDigest: H },
+    ]) {
+      const assessed = assessInterruptedWorkspace({ ...f, effect: { ...f.effect, outcome } });
+      assert.deepEqual(assessed.changedFiles, ['src/runtime.txt']);
+      assert.equal(assessed.feature.state, 'pending');
+      assert.equal(assessed.lease.status, 'superseded');
+      assert.deepEqual(f.state.submissions, []);
+      const authorityStore = { async transact(projectId, runId, command, update) {
+        const state = structuredClone(f.state);
+        update(state);
+        state.revision++;
+        return { state };
+      } };
+      const effect = { ...f.effect, outcome };
+      const recovered = await recoverInterruptedWorkspace({ ...f, effect, authorityStore,
+        evidenceStore: f.harness.evidenceStore, commandId: 'preserve-fenced-draft', readHostEffect: async () => effect });
+      const claim = await readInterruptedWorkspaceDraft({ state: recovered,
+        evidenceStore: f.harness.evidenceStore, readHostEffect: async () => effect });
+      assert.deepEqual(claim.changedFiles, ['src/runtime.txt']);
+      assert.deepEqual(recovered.submissions, []);
+      assert.equal(recovered.features[1].state, 'pending');
     }
   } finally { await f.cleanup(); }
 });

@@ -1,4 +1,5 @@
 import { resolve } from 'node:path';
+import { readFile } from 'node:fs/promises';
 import { createHarness } from '../../../../src/application/harness.mjs';
 import { recoverDevelopmentRun, retireUnacceptedDevelopmentRun, selectDevelopmentRecoveryExtension, planningRecoverySnapshots } from '../../../../src/application/development-run-recovery.mjs';
 import { developmentRecoveryArguments, isPlanningRecovery } from '../../../../src/application/development-planning-recovery.mjs';
@@ -17,10 +18,15 @@ const emit = value => process.stdout.write(`${JSON.stringify({ protocolVersion: 
 const fail = (code, message) => { throw Object.assign(new Error(message), { code }); };
 
 const main = async () => {
-  const retireOnly = process.argv.length === 7 && process.argv[6] === '--retire-only';
-  const prepareOnly = process.argv.length === 7 && process.argv[6] === '--prepare-only';
-  if (![6, 7].includes(process.argv.length) || process.argv[2] !== '--manifest' || process.argv[4] !== '--run' || (process.argv.length === 7 && !retireOnly && !prepareOnly))
-    fail('VISIBLE_DEVELOPMENT_RECOVERY_ARGUMENTS_INVALID', 'Usage: visible-development-recovery.mjs --manifest <source-link-manifest> --run <run-id> [--retire-only|--prepare-only]');
+  const tail = process.argv.slice(6);
+  const retireOnly = tail[0] === '--retire-only';
+  const prepareOnly = tail[0] === '--prepare-only';
+  const reviewFile = prepareOnly && tail.length === 3 && tail[1] === '--environment-review' ? tail[2] : null;
+  if (process.argv[2] !== '--manifest' || !process.argv[3] || process.argv[4] !== '--run' || !process.argv[5]
+    || !(tail.length === 0 || tail.length === 1 && (retireOnly || prepareOnly) || reviewFile))
+    fail('VISIBLE_DEVELOPMENT_RECOVERY_ARGUMENTS_INVALID', 'Usage: visible-development-recovery.mjs --manifest <source-link-manifest> --run <run-id> [--retire-only|--prepare-only [--environment-review <json>]]');
+  const environmentReview = reviewFile ? JSON.parse(await readFile(resolve(reviewFile), 'utf8')) : null;
+  const onEnvironmentProgress = event => emit({ kind: 'codex-visible-development-recovery', phase: 'environment-review', event });
   const manifestFile = resolve(process.argv[3]);
   const runId = process.argv[5];
   const sessionId = process.env.CODEX_SESSION_ID;
@@ -42,7 +48,7 @@ const main = async () => {
       releaseIdentity, extensions, strictProjectIdentity: false,
       agentAdapters: { 'codex-conversation-runtime': host.adapter } });
     const old = await harness.authorityStore.read(projectId, runId);
-    if (!['plan', 'replan', 'implement', 'produce', 'quality'].includes(old.metadata?.commandIntent?.action) || !old.metadata?.lifecycleInvocationId)
+    if (!['plan', 'replan', 'amend', 'implement', 'produce', 'quality'].includes(old.metadata?.commandIntent?.action) || !old.metadata?.lifecycleInvocationId)
       fail('VISIBLE_DEVELOPMENT_RECOVERY_SCOPE_INVALID', 'Recovery only continues an existing authorized planning, implementation, production, or quality lifecycle.');
     const commandId = `${old.metadata.lifecycleInvocationId}.development-recover.${runId}`;
     if (retireOnly && (old.status === 'running' || old.status === 'failed')) {
@@ -101,11 +107,35 @@ const main = async () => {
       recovery = { projectId, priorRunId: runId, replacementRunId: old.metadata.supersededByRunId,
         replacementPlanDigest: old.metadata.supersedePlanDigest, status: old.status, continuation: 'replacement-lifecycle-ready' };
     } else {
-      try { recovery = await recoverDevelopmentRun({ manifestFile, runId, commandId }); }
+      // Earlier preflights could finish ordinary resume with only not-observed
+      // containment. Supplement it through native tools before source recovery;
+      // a chat assertion or manually edited Host journal is never a substitute.
+      const supplementInterruptedAbsence = async () => {
+        if (old.events.at(-1)?.type !== 'run.recovered' || old.events.at(-1).mode !== 'ordinary-resume')
+          fail('VISIBLE_DEVELOPMENT_RECOVERY_SCOPE_INVALID', 'Absence supplementation requires the immediately recovered transport.');
+        for (const lease of old.leases.filter(item => item.status === 'superseded'
+          && item.epoch === old.epoch && item.generation === old.generation - 1)) {
+          const effectId = lease.runtimeReceipt?.hostSpawnReceipt?.effectId;
+          const effect = effectId ? await host.journal.read(effectId, { required: true }) : null;
+          if (effect?.state !== 'contained' || effect.outcome?.reason !== 'preflight-reconciliation'
+            || effect.outcome.disposition !== 'not-observed') continue;
+          const fenced = await host.adapter.contain({ agentId: lease.agentId, dispatchId: lease.dispatchId,
+            runtimeReceipt: lease.runtimeReceipt, reason: 'development-run-recovery' });
+          emit({ kind: 'codex-visible-development-recovery', phase: 'host-fenced', projectId, runId,
+            effectId, disposition: fenced.outcome?.disposition });
+        }
+      };
+      const recover = () => recoverDevelopmentRun({ manifestFile, runId, commandId, environmentReview, onEnvironmentProgress });
+      try { recovery = await recover(); }
       catch (error) {
-        if (error.code === 'CARRYOVER_SOURCE_CHANGED') {
+        if (error.code === 'INTERRUPTED_SOURCE_RECOVERY_UNVERIFIED' && error.details?.reason === 'native-containment') {
+          // recoverDevelopmentRun has already verified the current H2/H3 Patch
+          // Receipt and original project invocation before this native fence.
+          await supplementInterruptedAbsence();
+          recovery = await recover();
+        } else if (error.code === 'CARRYOVER_SOURCE_CHANGED') {
           await salvageTerminalFailure();
-          recovery = await recoverDevelopmentRun({ manifestFile, runId, commandId });
+          recovery = await recover();
         } else {
           if (!['DEVELOPMENT_RUN_HOST_EFFECT_UNSETTLED', 'DEVELOPMENT_RUN_HOST_EFFECT_PENDING'].includes(error.code)) throw error;
           for (const lease of old.leases.filter(item => item.status === 'active')) {
@@ -129,7 +159,7 @@ const main = async () => {
             emit({ kind: 'codex-visible-development-recovery', phase: 'host-fenced', projectId, runId,
               effectId: effect.effectId, disposition: fenced.outcome?.disposition });
           }
-          recovery = await recoverDevelopmentRun({ manifestFile, runId, commandId });
+          recovery = await recover();
         }
       }
     }

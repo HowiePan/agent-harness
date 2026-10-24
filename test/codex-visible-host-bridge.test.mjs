@@ -211,6 +211,89 @@ test('development recovery contains an errored bound Agent without another inter
   assert.equal(fixture.requests.filter(request => request.operation === 'interrupt').length, 0);
 });
 
+test('preflight fences a missing bound Agent before ordinary source recovery', async t => {
+  const f = await setup(t);
+  const host = f.create();
+  const spawned = await host.adapter.spawn(spawnInput);
+  await host.adapter.confirm({ ...spawnInput, agentId: spawned.agentId,
+    runtimeReceipt: { visibility: spawned.visibility, hostSpawnReceipt: spawned.receipt } });
+  f.tasks.delete(spawned.agentId);
+  const report = await host.adapter.reconcile({ activeEffectIds: [] });
+  assert.equal(report.ready, true);
+  const effect = await host.journal.read(spawned.receipt.effectId);
+  assert.equal(effect.outcome.disposition, 'absent-after-interrupt');
+  assert.equal(effect.outcome.target, spawned.agentId);
+  assert.deepEqual(f.requests.slice(-3).map(r => r.operation), ['inspect', 'interrupt', 'inspect']);
+});
+
+const missingLegacyEffect = async t => {
+  const f = await setup(t);
+  const host = f.create();
+  const spawned = await host.adapter.spawn(spawnInput);
+  const runtimeReceipt = { visibility: spawned.visibility, hostSpawnReceipt: spawned.receipt };
+  await host.adapter.confirm({ ...spawnInput, agentId: spawned.agentId, runtimeReceipt });
+  f.tasks.delete(spawned.agentId);
+  const effect = await host.journal.read(spawned.receipt.effectId);
+  const legacy = (await host.journal.transition(effect.effectId, { expectedRevision: effect.revision,
+    commandId: 'legacy-preflight', state: 'contained', patch: { outcome: {
+      reason: 'preflight-reconciliation', disposition: 'not-observed', observedAgentName: null,
+      observationRequestDigest: 'c'.repeat(64) } } })).effect;
+  return { ...f, host, spawned, runtimeReceipt, legacy };
+};
+
+test('legacy not-observed containment gains a native absence fence while retaining the original proof', async t => {
+  const f = await missingLegacyEffect(t);
+  const recovered = await f.create('restarted').adapter.contain({ agentId: f.spawned.agentId,
+    dispatchId: spawnInput.dispatchId, runtimeReceipt: f.runtimeReceipt, reason: 'development-run-recovery' });
+  assert.equal(recovered.outcome.disposition, 'absent-after-interrupt');
+  assert.equal(recovered.outcome.priorContainment.effectDigest, f.legacy.effectDigest);
+  assert.deepEqual(recovered.outcome.priorContainment.outcome, f.legacy.outcome);
+  const effect = await f.host.journal.read(f.legacy.effectId);
+  assert.equal(effect.state, 'contained');
+  assert.deepEqual(effect.binding, f.legacy.binding);
+  assert.equal(effect.sessionId, f.legacy.sessionId);
+  assert.deepEqual(f.requests.slice(-3).map(r => r.operation), ['inspect', 'interrupt', 'inspect']);
+  const count = f.requests.length;
+  await f.host.adapter.contain({ effectId: f.legacy.effectId, reason: 'development-run-recovery' });
+  assert.equal(f.requests.length, count);
+  await assert.rejects(() => f.host.journal.transition(effect.effectId, {
+    expectedRevision: effect.revision, commandId: 'reopen', state: 'lease-bound' }),
+  error => error.code === 'CODEX_HOST_EFFECT_TRANSITION_INVALID');
+});
+
+test('legacy absence supplementation fails closed for bad native interrupt or an Agent reappearing', async t => {
+  for (const mode of ['interrupt', 'verification', 'before']) {
+    const f = await missingLegacyEffect(t);
+    if (mode === 'before') f.tasks.set(f.spawned.agentId, 'running');
+    const host = createCodexCollaborationHostAdapter({ controlRoot: process.cwd(), dataRoot: resolve(f.root, 'data'),
+      sessionId: 'recovery', exchange: async request => {
+        const result = await f.exchange(request);
+        if (request.operation === 'interrupt') {
+          if (mode === 'interrupt') return { previous_status: 'running' };
+          if (mode === 'verification') f.tasks.set(f.spawned.agentId, 'running');
+        }
+        return result;
+      } });
+    await assert.rejects(() => host.adapter.contain({ effectId: f.legacy.effectId, reason: 'development-run-recovery' }),
+      error => error.code === 'CODEX_COLLABORATION_AGENT_ABSENCE_UNVERIFIED');
+    assert.deepEqual(await host.journal.read(f.legacy.effectId), f.legacy);
+  }
+});
+
+test('absence confirmation cannot rewrite a terminal effect with incomplete or cross-Agent proof', async t => {
+  const f = await missingLegacyEffect(t);
+  const outcome = { reason: 'preflight-reconciliation', disposition: 'absent-after-interrupt',
+    target: f.spawned.agentId, observationRequestDigest: 'd'.repeat(64), interruptRequestDigest: 'e'.repeat(64),
+    interruptResultDigest: 'f'.repeat(64), verificationRequestDigest: 'a'.repeat(64) };
+  for (const patch of [{ target: '/root/other' }, { disposition: 'interrupted' },
+    { verificationRequestDigest: null }, { reason: 'unrelated' }]) {
+    await assert.rejects(() => f.host.journal.confirmAbsent(f.legacy.effectId, {
+      expectedRevision: f.legacy.revision, commandId: 'bad-proof', outcome: { ...outcome, ...patch } }),
+    error => error.code === 'CODEX_HOST_EFFECT_ABSENCE_PROOF_INVALID');
+    assert.deepEqual(await f.host.journal.read(f.legacy.effectId), f.legacy);
+  }
+});
+
 test('unverified containment blocks preflight and leaves the Host Effect unresolved', async t => {
   const fixture = await setup(t, { interruptStops: false });
   const host = fixture.create();

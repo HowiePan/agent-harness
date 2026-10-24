@@ -25,11 +25,11 @@ export const deriveLogicalTaskKey = ({ projectId, intent, executionWorkspaceRoot
   ...(workspaceRef ? { workspaceId: workspaceRef.workspaceId, workflowId: workspaceRef.workflowId, projectIds: workspaceRef.projectIds, executionTargetId: workspaceRef.executionTargetId } : {}),
   profileId: intent.profileId,
   workflowId: intent.workflowId ?? null,
-  action: intent.action === 'replan' ? 'plan' : intent.action,
+  action: ['replan', 'amend'].includes(intent.action) ? 'plan' : intent.action,
   target: intent.target,
-  preset: intent.action === 'replan' ? 'default' : intent.preset,
-  arguments: intent.action === 'replan' ? [] : structuredClone(intent.arguments ?? []),
-  selector: intent.action === 'replan' ? null : intent.selector ?? null,
+  preset: ['replan', 'amend'].includes(intent.action) ? 'default' : intent.preset,
+  arguments: ['replan', 'amend'].includes(intent.action) ? [] : structuredClone(intent.arguments ?? []),
+  selector: ['replan', 'amend'].includes(intent.action) ? null : intent.selector ?? null,
 });
 
 export const validateLifecycleCommandPlan = input => {

@@ -4,7 +4,7 @@ import { assert } from '../common/errors.mjs';
 import { diffWorkspaceSnapshots } from '../common/workspace-snapshot.mjs';
 
 const within = (root, path) => path === root || path.startsWith(`${root.replace(/\/$/, '')}/`);
-export const isPlanningRecovery = state => ['plan', 'replan'].includes(state.metadata?.commandIntent?.action);
+export const isPlanningRecovery = state => ['plan', 'replan', 'amend'].includes(state.metadata?.commandIntent?.action);
 
 /** Reuse the Authority-pinned selector, never a conversational reconstruction. */
 export const developmentRecoveryArguments = intent => {

@@ -42,6 +42,12 @@ Workflow 编译器根据当前 route 的真实 `dependsOn` 自动把前序 typed
 
 Workspace 可选择已发布的动作、目标、成员项目范围、Runtime、Gate Recipe、动作路径、Finding inventory 迁移种子和并发参数，不能重排节点或改写结果合同。CardWorld 的路径、脚本、旧命令及 `engine-delivery` 身份由 Legacy shim 显式提供；旧 Descriptor 必须绑定该 shim，新业务不得把它当作中立 Flow 的隐式别名。
 
+## 局部修订路线
+
+`amend <target> change:<id>` 使用独立增量规划和只读影响审查 Task Contract，路线为 amend → plan-review。端口 `delivery-plan-amendment-v1` 只提交摘要绑定的受限补丁；机器合成完整计划并核验依赖图、引用和来源身份。审查固定原计划、补丁及受影响 Feature 集，新的用户批准绑定合成结果。规划节点只能写登记的新制品根，不能改业务源码或原计划。越界、原值漂移、环、悬空引用和提案身份变化均拒绝。
+
+未受影响的已完成项在可信快照与 Submission/Evidence 核验后，作为新实施图的已满足前置；原记录与计数历史保留。命令级闭环由 `test/plan-amendment-e2e.test.mjs` 验证到 closed Receipt 和后续实施承接。字段、物化工具、批准和恢复详见[局部计划修订](../../guides/plan-amendments.md)。
+
 ## 命令级验收
 
 合成入口 `npm run workspace:canary` 通过 CardWorld Legacy shim 解析 `h:engine full v1`，完成 Workspace 绑定、Target revision 0、Plan、预检、逐 Feature Dispatch/Submission、所需 Decision/Gate 和 `closed`。质量专项合成测试还必须覆盖：空 Ledger 首次启动、旧 inventory 迁移、跨 Run Finding 继承、修复后复审、Source digest 变化和活动 Run 不污染 Target。该命令不启动真实 CardWorld Run。验收记录须核对 Workflow ID、Run ID、Target digest、关闭状态与 Receipt；只通过单元测试不算闭环。

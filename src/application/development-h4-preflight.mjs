@@ -25,7 +25,7 @@ export const previewDevelopmentH4Migration = async ({ plan, manifest, runId }) =
   const implementation = prior.metadata?.commandIntent?.action === 'implement'
     && prior.metadata?.approvedPlan?.typedPlan;
   const quality = prior.metadata?.commandIntent?.action === 'quality';
-  const reviewedPlan = ['plan', 'replan'].includes(prior.metadata?.commandIntent?.action)
+  const reviewedPlan = ['plan', 'replan', 'amend'].includes(prior.metadata?.commandIntent?.action)
     && prior.status === 'closure-blocked'
     && prior.features.some(feature => feature.metadata?.stage === 'plan-review' && feature.state === 'completed')
     && prior.features.every(feature => feature.state === 'completed');

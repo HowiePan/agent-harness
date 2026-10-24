@@ -19,6 +19,7 @@ import { verifyCollectionScenarioInventories } from './collection-exhaustion.mjs
 import { ensurePlanApprovalArtifact } from '../flows/delivery-lifecycle/plan-approval.mjs';
 import { performance } from 'node:perf_hooks';
 import { qualityRepairScopeCandidates } from '../kernel/quality.mjs';
+import { resolvePlanAmendmentResult } from './plan-amendment-artifacts.mjs';
 
 const recoverableResultCodes = new Set(['REPAIR_CHECKPOINT_REQUIRED', 'REPAIR_CHECKPOINT_EVIDENCE_REQUIRED', 'REPAIR_FINDING_CHECKPOINT_REQUIRED', 'QUALITY_DIAGNOSTIC_DISPOSITION_REQUIRED', 'QUALITY_PREREQUISITE_INVALID', 'PROFILE_RESULT_REJECTED', 'RESULT_OUTPUT_PORTS_MISMATCH', 'RESULT_OUTPUT_SCHEMA_ID_MISMATCH', 'RESULT_OUTPUT_VALUE_SCHEMA_INVALID']);
 export const visibleLifecycleStopReason = state => {
@@ -394,7 +395,9 @@ const continueVisibleLifecyclePlan = async (context, api, planInput, { commandId
       let rejected = null;
       try {
         const validatedPreview = validateBusinessResult(businessResult, { conversationVisible: true, repair: Boolean(feature?.metadata?.repairFindingId), feature });
-        validateProfileResult({ profile: api.profileRegistry.get(state.profile.id), state, feature, result: validatedPreview });
+        const preview = await resolvePlanAmendmentResult({ state, feature, result: validatedPreview,
+          workspaceRoot: state.metadata?.workspace?.root ?? plan.run.executionWorkspaceRoot });
+        validateProfileResult({ profile: api.profileRegistry.get(state.profile.id), state, feature, result: preview.result });
       }
       catch (error) {
         if (!recoverableResultCodes.has(error.code) || !['completed', 'blocked'].includes(businessResult.status) || !hostResultReceipt?.observationRequestDigest) throw error;

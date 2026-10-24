@@ -1,6 +1,6 @@
 import { assert } from '../common/errors.mjs';
 
-const planningActions = new Set(['requirements', 'plan', 'replan']);
+const planningActions = new Set(['requirements', 'plan', 'replan', 'amend']);
 const versionPattern = /^V\d+\.\d+\.\d+$/;
 const before = (left, right) => {
   const a = left.slice(1).split('.').map(BigInt);

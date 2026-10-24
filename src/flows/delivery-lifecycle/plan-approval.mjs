@@ -3,13 +3,18 @@ import { digestJson, sha256 } from '../../common/canonical.mjs';
 import { safeSegment } from '../../common/paths.mjs';
 import { atomicWrite } from '../../kernel/atomic-io.mjs';
 import { diffPlanFeatures } from './plan-diff.mjs';
+import { resolvedPlanAmendment } from './plan-amendment.mjs';
 
 const latestOutput = (state, stage, port) => {
   const ids = new Set(state.features.filter(feature => feature.metadata?.stage === stage && feature.state === 'completed').map(feature => feature.id));
   return [...(state.submissions ?? [])].reverse().find(submission => ids.has(submission.featureId) && !submission.supersededAt && submission.result?.status === 'completed')?.result.outputs?.[port]?.value ?? null;
 };
 
-export const reviewedPlanProposal = state => latestOutput(state, 'version-planning', 'plan');
+export const reviewedPlanProposal = state => {
+  const patch = latestOutput(state, 'version-planning', 'amendment');
+  return patch ? resolvedPlanAmendment(state.metadata.planRevision, patch)
+    : latestOutput(state, 'version-planning', 'plan');
+};
 
 // Values follow fixed Markdown prefixes. Keep inline punctuation literal so
 // validation expressions and paths remain readable in the review source.
@@ -35,13 +40,25 @@ export const planApprovalSnapshot = (state, { legacyStructuredValues = false } =
     '> 本文件列出未来工作的建议范围；规划本身不授予实施写权限。', '',
     '## 工作包', '',
   ];
-  for (const item of plan.proposedFeatures ?? []) {
+  if (plan.amendment) {
+    rows.push('## 局部修订', '', `- 原批准规划摘要：${plan.amendment.basePlanDigest}`,
+      `- 增量补丁摘要：${plan.amendment.deltaDigest}`,
+      `- 独立审查范围：${plan.amendment.affectedFeatureIds.join('、')}`,
+      `- 机器合成完整计划：${plan.amendment.artifactRoot}/plan.json`,
+      `- 可读增量差异：${plan.readablePlan}`,
+      '- 未受影响内容由原计划承接；本次批准绑定原计划、精确补丁、合成计划与审查结果。', '');
+  }
+  for (const item of (plan.proposedFeatures ?? []).filter(item => !plan.amendment
+    || plan.amendment.affectedFeatureIds.includes(item.id))) {
     rows.push(`### ${line(item.id)} · ${line(item.projectId)} · ${line(item.disposition)}`, '');
     rows.push(`- 项目内依赖：${(item.dependsOn ?? []).length ? item.dependsOn.map(line).join('、') : '无'}`);
     rows.push(`- 建议路径：${(item.allowedPaths ?? []).length ? item.allowedPaths.map(line).join('；') : '无'}`);
     rows.push('');
     rows.push(...renderList('外部前置', item.externalPrerequisites), ...renderList('交付合同', item.contracts), ...renderList('验证', item.verification));
   }
+  if (plan.amendment) rows.push('## 未变工作包', '',
+    ...(plan.proposedFeatures ?? []).filter(item => !plan.amendment.affectedFeatureIds.includes(item.id))
+      .map(item => `- ${line(item.id)}；内容摘要 ${digestJson(item)}；按原批准合同承接。`), '');
   if (state.metadata?.planRevision) {
     const revision = state.metadata.planRevision;
     const changes = diffPlanFeatures(revision.parentPlan, plan);

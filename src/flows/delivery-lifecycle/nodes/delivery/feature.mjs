@@ -28,7 +28,14 @@ export const createDeliveryTemplates = ({ actionPaths, forbiddenPaths = ['.git',
     const readOnly = node.readOnly || context.intent.sourcePolicy === 'read-only' || node.qualityReview;
     const pathsSource = context.intent?.actionPaths ?? context.project?.policy?.actionPaths ?? actionPaths ?? {};
     const pathsForAction = ['requirements-intake', 'requirement-expansion', 'canonical-requirement'].includes(node.action) ? pathsSource.requirements : pathsSource[node.action];
-    const resolvedPaths = Array.isArray(pathsForAction) ? pathsForAction : [];
+    let resolvedPaths = Array.isArray(pathsForAction) ? pathsForAction : [];
+    if (context.intent.action === 'amend' && node.stage === 'version-planning') {
+      const root = context.intent.planRevision?.amendmentScope?.artifactRoot;
+      const bounds = pathsSource.amend ?? pathsSource.replan ?? pathsSource.plan ?? [];
+      assert(root && bounds.some(path => root === path || root.startsWith(`${path}/`)),
+        'PLAN_AMENDMENT_OUTPUT_SCOPE_INVALID', 'Amendment output must fit the Descriptor planning scope.');
+      resolvedPaths = [root];
+    }
     const feature = makeFeature({ action: node.action, target: context.intent.target, stage: node.stage, dependsOn,
       allowedPaths: readOnly ? [] : resolvedPaths, sourcePolicy: readOnly ? 'read-only' : 'write',
       ownerRole: node.qualityReview || node.readOnly || node.action === 'review' ? 'reviewer' : 'operator', qualityReview: Boolean(node.qualityReview),

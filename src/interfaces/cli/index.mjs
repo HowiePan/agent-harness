@@ -36,6 +36,7 @@ import { applySourcePatch, refreshLocalCodexBindings, syncDevelopmentSource } fr
 import { migrateDevelopmentSource } from './local-development-sync.mjs';
 import { ensurePlanApprovalArtifact, planApprovalSatisfied } from '../../flows/delivery-lifecycle/plan-approval.mjs';
 import { previewImplementationBudget, verifyImplementationBudgetScope } from '../../application/implementation-budget.mjs';
+import { inspectDevelopmentAmendment, materializeDevelopmentAmendment } from './commands/plan-amendment.mjs';
 
 const argv = process.argv.slice(2);
 const take = name => {
@@ -88,6 +89,8 @@ agent-harness dev plan-closeout --manifest <json> --run <plan-run-id> --repair <
 agent-harness dev apply --plan <json|-> --manifest <json> [--command-id <id>] [--decision <json>]
 agent-harness dev verify|doctor --manifest <json>
 agent-harness dev sync --manifest <json> [--command-id <id>] [--decision <json>]
+agent-harness dev amendment-inspect --manifest <json> --change <id> [--workflow <id>]
+agent-harness dev amendment-materialize --manifest <json> --run <id> --patch <json>
 agent-harness dev migrate --manifest <json> (--run <id> | --no-active-run) --command-id <id> [--decision <json>] [--budget-extension <json|->]
 agent-harness dev recover-run --manifest <json> --run <id> [--command-id <id>]
 agent-harness dev patch plan|status --manifest <json>
@@ -216,6 +219,13 @@ if (command === 'dev' && subject === 'sync') {
   const decision = await externalDevelopmentDecision(take('--decision'));
   const result = await syncDevelopmentSource(take('--manifest'), { decision, commandId: take('--command-id') ?? newId('dev-sync') });
   console.log(JSON.stringify({ ok: true, ...result }, null, 2));
+  process.exit(0);
+}
+if (command === 'dev' && ['amendment-inspect', 'amendment-materialize'].includes(subject)) {
+  const output = subject === 'amendment-inspect'
+    ? await inspectDevelopmentAmendment({ manifestFile: take('--manifest'), selector: take('--change'), workflowId: take('--workflow') })
+    : await materializeDevelopmentAmendment({ manifestFile: take('--manifest'), runId: take('--run'), patchFile: take('--patch') });
+  console.log(JSON.stringify(output, null, 2));
   process.exit(0);
 }
 if (command === 'dev' && subject === 'plan-closeout') {

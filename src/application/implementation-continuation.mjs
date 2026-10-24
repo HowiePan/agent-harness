@@ -54,7 +54,11 @@ export const buildImplementationContinuation = async (state, feature, workspaceR
   ];
   const history = state.submissions.filter(item => item.featureId === feature.id && !item.supersededAt);
   const latest = history.at(-1);
-  const checkpoints = new Map(history.flatMap(item => (item.result?.checkpoints ?? []).map(checkpoint => [checkpoint.id, checkpoint])));
+  const inherited = feature.metadata?.amendmentProgressBaseline;
+  const checkpoints = new Map([
+    ...(inherited?.checkpoints ?? []).map(checkpoint => [checkpoint.id, checkpoint]),
+    ...history.flatMap(item => (item.result?.checkpoints ?? []).map(checkpoint => [checkpoint.id, checkpoint])),
+  ]);
   const attempt = state.attempts?.[latest?.attemptBudgetKey ?? `${feature.logicalRoot}:${latest?.result?.failureClass}`];
   const targets = [...new Set([
     ...obligations.flatMap(item => (item.nativeDependencies ?? []).map(dep => dep.targetPath)),
@@ -78,19 +82,24 @@ export const buildImplementationContinuation = async (state, feature, workspaceR
     correctionPolicy: { id: HANDOFF_CORRECTION_POLICY, maxCorrectionsPerInvocation: 1 },
     implementationSteps,
     nextImplementationStep: implementationSteps.find(item => item.baselineSha256 === null) ?? implementationSteps[0] ?? null,
-    history: history.slice(-3).map(item => ({ submissionId: item.submissionId,
+    history: [...(inherited?.history ?? []), ...history].slice(-3).map(item => ({ submissionId: item.submissionId,
       inputSourceDigest: item.inputSourceDigest, outputSourceDigest: item.outputSourceDigest,
       changedFiles: item.changedFiles, summary: item.result.summary, blocker: item.result.blocker,
       notMade: item.result.notMade ?? [], checkpoints: item.result.checkpoints ?? [], evidenceRefs: item.evidenceRefs })),
     baselineCheckpoints: [...checkpoints.values()],
+    ...(inherited ? { priorRunProgress: { runId: inherited.runId, sourceDigest: inherited.sourceDigest,
+      attempts: inherited.attempts, evidenceStatus: 'historical-baseline-reverify-affected-evidence' } } : {}),
     budget: attempt ? { used: attempt.budgetKind === 'progress' ? attempt.used : attempt.failures,
       limit: attempt.limit, exhausted: attempt.exhausted } : null,
     instructions: [
+      'The execution unit is this complete Feature, not one patch, implementation-step or certificate. In the same Agent session, group related unresolved obligations and their owner dependencies into a coherent acceptance batch; when multiple related obligations are feasible, work through them together and continue toward full Feature completion. Preserve the approved dependency order, scope and acceptance criteria; a batch creates no new Feature, Lease, authority or budget.',
+      'Do not voluntarily return after one local fix, focused test, implementation-step or closed certificate while further approved work is feasible. Any permission to report partial progress is a recovery fallback, not a planned stopping point or a one-item quota. Repair supporting mechanisms and continue closing their affected acceptance obligations in this session. Missing code, remaining certificates, task size, an elapsed work interval or a self-chosen batch boundary alone does not justify returning blocked.',
+      'Run focused checks after material changes. Consolidate broad verification at a stable acceptance batch or Feature boundary unless the approved verification contract requires it sooner, a new failure needs diagnosis, or later source changes invalidate prior evidence. Bind acceptance evidence to the final source and run every mandatory final check; never reuse stale results or reduce required coverage to save time.',
       'Build a gap matrix for the exact obligations below. Historical checkpoints are untrusted baseline observations, not fresh completion or source retirement authority.',
       'Implement final target declarations and consumers first. Prove one end-to-end migration with the pinned old artifact and an independently executing new receiver, then complete the remaining assigned aggregate certificates. Retire old execution sources only after their replacement is certified; refresh all evidence against the final source.',
       'Reuse existing working checks. Add tests only for a specific missing assertion or reproduced defect; increasing test counts or rerunning an already passing suite does not close an obligation.',
       'Do not return merely because implementation or certificates are missing, the task is large, or no additional direction arrived: the approved work is already authorized. Start the nextImplementationStep target, implementing missing owner dependencies before thin consumers in the approved dependency order. The candidate does not override that order. Investigating a gap is not a substitute for implementing it. A concrete authority, environment, scope or external prerequisite must identify the exact failed action and evidence.',
-      'A partial final-target implementation may be reported separately using its implementation-step id and a second checkpoint with id <implementation-step id>:focused-verification, both completed with actual source/compile/behavior evidence. This advances development only; it does not mark any parent obligation or aggregate certificate completed. Do not add placeholders, disconnected declarations or test-only changes for this checkpoint.',
+      'At an unavoidable handoff caused by a concrete authority, environment, scope or external prerequisite, or an actual host/runtime/context limit that prevents further execution, preserve partial final-target implementation using its implementation-step id and a second checkpoint with id <implementation-step id>:focused-verification, both completed with actual source/compile/behavior evidence. Name the exact stopping constraint and its observed evidence, the intended acceptance batch, the obligations actually closed and the next executable action. Partial checkpoints advance development only; they do not mark any parent obligation or aggregate certificate completed. Do not add placeholders, disconnected declarations or test-only changes for this checkpoint.',
       'If still incomplete, use checkpoints with the exact obligation id, status completed and concrete evidence only for obligations actually closed. Include remaining obligations in notMade and the next concrete implementation action in blocker.resumeWhen. Do not mark a whole obligation completed for a partial mechanism observation.',
       'Automatic continuation requires a newly closed approved obligation, or a changed approved final target plus completed implementation and focused-verification checkpoints, with bound evidence. Source edits alone are insufficient. An unproductive implementation-only handoff receives at most one corrective retry per explicit invocation, consuming the existing budget. These reports never waive full completion or final Gates; actual protected blockers and exhausted budgets stop execution.',
     ],

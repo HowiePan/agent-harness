@@ -112,8 +112,31 @@ for (const explicit of [true, false]) {
     const context = dispatch.execution.implementationContinuation;
     assert.equal(context.obligations.length, 2);
     assert.equal(context.proposalId, 'owner');
+    assert.match(context.instructions.join('\n'), /execution unit is this complete Feature/);
+    assert.match(context.instructions.join('\n'), /Do not voluntarily return after one local fix/);
+    assert.match(context.instructions.join('\n'), /run every mandatory final check/);
     const stored = await f.harness.readDispatchPacket(f.projectId, s.runId, dispatch.dispatchId);
     assert.deepEqual(stored.packet.execution.implementationContinuation, context);
     assert.equal(stored.prompt.packetDigest, dispatch.packetDigest);
   });
 }
+
+test('coarser execution preserves all obligations, protected handoffs, acceptance evidence and existing accounting', async t => {
+  const { s, workspace } = await fixture(t);
+  const before = digestJson(s);
+  const context = await buildImplementationContinuation(s, s.features[0], workspace);
+  const instructions = context.instructions.join('\n');
+  assert.equal(context.obligations.length, 4);
+  assert.deepEqual(context.budget, { used: 32, limit: 41, exhausted: false });
+  assert.match(instructions, /batch creates no new Feature, Lease, authority or budget/);
+  assert.match(instructions, /a recovery fallback, not a planned stopping point/);
+  assert.match(instructions, /actual host\/runtime\/context limit that prevents further execution/);
+  assert.match(instructions, /Name the exact stopping constraint and its observed evidence/);
+  assert.match(instructions, /never reuse stale results or reduce required coverage/);
+  assert.equal(digestJson(s), before);
+  assert.deepEqual(await buildImplementationContinuation(s, s.features[0], workspace), context);
+  const result = { ...last, submissionId: 'no-progress', result: { ...incomplete, checkpoints: [
+    { id: 'runtime-already-passed', status: 'completed', evidence: ['fresh-green-suite'] },
+  ] } };
+  assert.equal(hasNewAcceptanceCheckpoint(s, s.features[0], result, context), false);
+});

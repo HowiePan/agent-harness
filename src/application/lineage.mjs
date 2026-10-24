@@ -8,6 +8,7 @@ import { atomicWriteJson, readJson, withDirectoryLock } from '../kernel/atomic-i
 import { leaseHealth } from '../kernel/kernel.mjs';
 import { assertHarnessWritePath } from '../common/write-boundary.mjs';
 import { planApprovalSatisfied } from '../flows/delivery-lifecycle/plan-approval.mjs';
+import { matchesAmendmentRetry } from './plan-amendment-retry.mjs';
 
 const resolutionSchema = JSON.parse(readFileSync(new URL('../../schemas/run-lineage-resolution.schema.json', import.meta.url), 'utf8'));
 const lineageSchema = JSON.parse(readFileSync(new URL('../../schemas/run-lineage.schema.json', import.meta.url), 'utf8'));
@@ -72,7 +73,7 @@ const approvedRevisionCoversTerminalImplementation = (plan, states, candidates) 
   if (!retired.length) return false;
   return states.some(state => state.projectId === plan.project.id && state.status === 'closed'
     && state.profile?.id === plan.run.profileId
-    && state.metadata?.commandIntent?.action === 'replan'
+    && ['replan', 'amend'].includes(state.metadata?.commandIntent?.action)
     && state.metadata.commandIntent.target === plan.intent.target
     && state.metadata.commandIntent.workflowId === plan.intent.workflowId
     && planApprovalSatisfied(state)
@@ -151,18 +152,24 @@ export const resolveRunLineage = ({ plan, states, currentLineage = null, policy 
       const parent = revision && (candidates.find(candidate => candidate.runId === revision.parentRunId)
         ?? (retiredActive?.runId === revision.parentRunId ? candidateFor(retiredActive, createdAt) : null)
         ?? (retiredParent ? candidateFor(retiredParent, createdAt) : null));
+      const amendmentRetry = plan.intent.action === 'amend' && states.find(state => matchesAmendmentRetry(state, plan));
       if (plan.intent.action === 'quality' && plan.intent.preset === 'release-exhaustive') {
         action = 'block';
         selectedRunId = null;
         reasonCode = 'EXHAUSTIVE_RELEASE_ALREADY_STARTED';
         blockers = [{ code: reasonCode, message: 'The major-release exhaustive review must continue its original Run and cannot start a second invocation.' }];
-      } else if (plan.intent.action === 'replan' && parent && parent.authorityDigest === revision.parentAuthorityDigest
+      } else if (amendmentRetry && parent && parent.authorityDigest === revision.parentAuthorityDigest
+        && currentLineage?.activeRunId === amendmentRetry.runId
+        && candidates.every(candidate => candidate.status === 'closed' || candidate.runId === amendmentRetry.runId)) {
+        action = 'supersede-and-start';
+        reasonCode = 'AMENDMENT_SCOPE_CORRECTION_REQUESTED';
+      } else if (['replan', 'amend'].includes(plan.intent.action) && parent && parent.authorityDigest === revision.parentAuthorityDigest
         && (!currentLineage?.activeRunId || currentLineage.activeRunId === parent.runId || Boolean(retiredActive))
         && candidates.every(candidate => candidate.status === 'closed' || idle(candidate))
         && candidates.every(candidate => candidate.status === 'closed' || candidate.runId === parent.runId)) {
         action = 'supersede-and-start';
         reasonCode = 'PLAN_REVISION_REQUESTED';
-      } else if (plan.intent.action === 'replan') {
+      } else if (['replan', 'amend'].includes(plan.intent.action)) {
         action = 'block';
         selectedRunId = null;
         reasonCode = 'REPLAN_PARENT_STALE_OR_BUSY';

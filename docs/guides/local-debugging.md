@@ -56,7 +56,9 @@ node <Harness源码根>/integrations/codex/agent-harness-codex/scripts/local-sou
   --bindings-dir <Harness数据根>/development/local-codex/.plugin-data
 ```
 
-短探针发出一次 `codex-visible-host-request`，由当前 Codex 任务调用其中指定的原生 `collaboration.list_agents`。Coordinator 自动读取宿主 rollout 中匹配的调用和输出，写入带摘要的 Host Receipt，探针返回 `ok: true` 才算通过。不要手写 Host response，也不要把终端输出转录成回执。短探针不创建 Run。
+每次启动 source-link Coordinator 前先通过当前 session 的短探针；未设置 `CODEX_SESSION_ID` 时，显式传入已核验的 `--session-id <current-session-id>`。短探针发出一次 `codex-visible-host-request`，由当前 Codex 任务调用其中指定的原生 `collaboration.list_agents`。Coordinator 自动读取宿主 rollout 中匹配的调用和输出，写入带摘要的 Host Receipt，探针返回 `ok: true` 才算通过。不要手写 Host response，也不要把终端输出转录成回执。短探针不创建 Run、不派发开发 Agent。
+
+若探针立即返回 `CODEX_ROLLOUT_DATABASE_UNAVAILABLE`，只针对这条官方探针命令申请窄范围沙箱提权并复验。通过后，首次启动已绑定 Coordinator 时沿用这一执行权限，避免先在已确认失败的沙箱内启动；不得因此重复启动退出的 Coordinator、重建命令意图或改用 CLI Agent。原生回执超时等其他错误不能通过此规则自动重试。
 
 开发 Harness 本身时，可复用已经登记的 Harness 桌面项目做只读短探针，并在独立合成项目上验证生命周期。Harness 根任务不启动 Harness 对自身的 Run。业务项目只需保持已审核的 Project Descriptor 与源码绑定；不必为本地源码执行复制 Harness 文件到业务仓。
 
@@ -152,6 +154,10 @@ H2/H3 导致 Coordinator 已退出时，`dev recover-run` 仅在项目 checkout 
 
 用户只要求修复到可重新发命令时，可在项目 checkout 使用 `visible-development-recovery.mjs --manifest <manifest> --run <run-id> --prepare-only`。它完成正式退役与封存承接计划，执行带原生 Host 观察的预检，发出 `prepared` 后停止；不创建替代 Run、不派发代理、不执行实施工作。`--retire-only` 仍在退役后立即停止。
 
+已提交的 `environment-blocker` 不会因重发实施命令而自动重开。环境修复后，H3 开发恢复可用 `--prepare-only --environment-review <json>` 复核。输入为 `kind=environment-blocker-review`、`actor=operator`，并固定 `projectId/runId/featureId/expectedRevision/submissionDigest/sourceDigest/blockerDigest` 及 `executables`。工具路径须恰好覆盖原 Submission 的 `deliveryPrerequisites[].affectedPaths`；程序只对这些物理可执行文件执行固定 `--version`，不接受自定义参数或 shell。它验证原 Evidence、剩余额度及当前源码，现场捕获成功输出和工具 hash，再以 Evidence 封存到旧 Run 的完成承接记录。失败、身份或源码漂移均不退役；未完成工作不提升为完成，预算历史不重置。这里只支持有已完成实施前缀的 H3 恢复；没有真实补丁收据时不得虚构补丁或直接改 Authority。
+
+旧 Agent 已从原生列表消失时，单次 `not-observed` 不能证明其已收敛。新预检对具有原 canonical identity 的 Effect 执行原生观察、精确目标中断（须返回 `not_found`）和再次观察，记录 `absent-after-interrupt`。已被旧预检封存为 `not-observed` 的记录，由上述开发恢复入口在核验当前补丁收据和原 Dispatch 后补齐同一证据链；保留原 Effect 摘要、修订及原观察，不重新开放终态 Transport。缺少任一回执、目标重现或身份失配均拒绝。源码草稿恢复接受身份绑定的这类缺失证明、原生中断证明或已观察终态证明，仍不产生完成 Submission。
+
 项目对话仍在当前 Codex 会话、原命令允许内部接续且旧 Agent 无法通过原 Coordinator 观察时，可运行 `integrations/codex/agent-harness-codex/scripts/visible-development-recovery.mjs --manifest <manifest> --run <run-id>`。它先用原 Run 与补丁 Receipt 验证替代 Plan，再通过当前会话原生 `list_agents`、`interrupt_agent` 和再次 `list_agents` 为缺失 Agent 建立身份绑定的隔离证据；不把缺失的 Agent 文本冒充 Submission。随后调用 `dev recover-run` 的同一校验逻辑，启动原 action/target 的替代 Plan，并让新 Agent 从现有源码重新验证未提交改动。任一步身份、来源或宿主收据不可验证时停止，保留 Authority 供诊断。
 
 规划或 Replan 在写入草稿后中断时，恢复仍要求覆盖该 Run 的真实 H2/H3 补丁收据；不能伪造补丁来解除租约。恢复器原样保留 Authority 中的 `requestedPreset` 和动态 selector，核对中断 Dispatch 的来源快照及当前文件差异。只有原规划 Feature 允许且不触及禁写路径的草稿可作为替代 Run 的未接收输入；来源摘要、工作区、变更单、基础规划/只读复审范围及批准门禁必须一致。多轮修订 Feature 留在旧 Run 审计中，不将完成标记或未接收的 JSON 提升为 Submission。隔离旧 Host Effect 后封存草稿证据，通过 Kernel 退役旧 Run，再由新规划 Agent 核验现有文件并独立复审。恢复程序也输出 `plan-review-ready` 及完整制品身份，人工批准仍单独进行。
@@ -175,8 +181,18 @@ Runtime generation 位于 Harness 控制根。Rollback 只切换已验证绑定�
 
 ## 修复权限边界
 
-原生 rollout 定位先只读查询 Codex SQLite 会话记录。若 Windows 沙箱仅在该查询返回 `SQLITE_CANTOPEN`（14），定位器可从当前 UUIDv7 时间戳确定的单日 `sessions` 目录中读取唯一匹配文件，并核验首行原生 `session_meta` 的会话 ID、工作区和 CLI 版本。整个过程不写 Codex 数据、不复制数据库、不扫描其他日期或选择其他会话。可读取但缺失/不匹配的数据库记录、数据库损坏、重复文件和元数据不匹配仍阻断；后续 Host 请求/原生工具结果绑定规则不变。此定位修复不授权重启已经退出的 Coordinator；下一次用户命令由 Hook 重新固定源码摘要和意图。
+原生 rollout 定位只读查询 Codex SQLite 中当前逻辑 session 的 `rollout_path`。Codex 续接可能切换到新的分页文件，原始 UUIDv7 日期目录下的旧文件及其 `session_meta` 只能证明历史身份，不能证明当前写入位置。原有“SQLite 不可读就按 UUID 日期定位旧文件”的降级已撤销：`SQLITE_CANTOPEN`（14）立即返回 `CODEX_ROLLOUT_DATABASE_UNAVAILABLE`，在发出 Host 请求、等待回执和创建 Run 之前停止；其他数据库错误保留原错误，可读取但缺失/不匹配的记录仍阻断。恢复路径是上述官方短探针的窄范围沙箱提权，只读取得当前数据库指向，不扫描其他 session、不复制数据库、不修改 Codex 数据。后续请求/调用/输出身份核验继续生效。下一次用户命令仍由 Hook 固定新的源码摘要和意图。
 
 项目 Run 始终只能写其执行目标，不能同时获得 Harness 源码写权限。维护者可以在独立 Harness maintenance 上下文修复源码，再生成 patch plan；H0/H1 按上表继续，H2–H4 必须停止旧执行路径。不得沿用已经失效的 Plan、预检、Lease 或 Runtime Receipt。
 
 source-link Receipt 带开发态标记，不能作为正式发布、签名或生产 cutover 证据；也不能自动提交、发布、删除或迁移旧 Harness。
+
+## 实施续接的推进粒度
+
+实施以完整 Feature 为执行单元，Feature 内的 Step 默认由同一 Agent 串行完成。续接上下文要求将相关未完成验收义务及其 owner 依赖成组推进；存在多个可执行的相关义务时，在同一会话连续处理。完成一个小修复、单个证书或一轮测试，都不是主动结束本轮的理由；完成内部批次后仍继续当前 Feature。
+
+局部实现检查点用于不可避免的交接。遇到具体权限、环境、范围、外部前置条件，或实际宿主、Runtime、上下文限制导致无法继续时，报告准确的停止约束及证据、原定验收批次、实际关闭的义务和下一项可执行动作。不得把“还有代码或证书未完成”“任务较大”或自行设定的批次结束当作阻断。
+
+每次实质修改后执行必要的聚焦检查；完整复验在源码稳定的验收批次或 Feature 边界集中执行。批准的验证合同要求更早执行、出现新失败或后续修改使旧证据失效时，仍须及时复验。最终验收证据绑定最终源码，全部强制检查和覆盖要求保留。
+
+该调整只改变派发的执行节奏，不拆分 Feature、不增加 Lease、不扩大写权限、不重置预算，也不把局部进展提升为完整验收。H2/H3 源码变更须同步绑定并通过受控恢复准备替代 Run；完成项和可验证证据按既有恢复规则保留，业务 Replan 不作为常规操作。

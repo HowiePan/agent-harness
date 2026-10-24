@@ -58,6 +58,8 @@ import { ensurePlanApprovalArtifact, planApprovalSatisfied, planApprovalSnapshot
 import { expandApprovedImplementation } from '../flows/delivery-lifecycle/approved-implementation.mjs';
 import { assessAutomaticPlanSourceCompatibility, assessPlanSourceCompatibility, assessRecoveredImplementationContinuation, assessVerifiedImplementationContinuation, matchingPlanSourceCompatibilityDecision } from './plan-source-compatibility.mjs';
 import { preparePlanRevisionIntent, selectPlanRevisionParent } from './plan-revision.mjs';
+import { readPlanAmendmentScope, resolvePlanAmendmentResult, verifyPlanAmendmentArtifacts } from './plan-amendment-artifacts.mjs';
+import { captureAmendmentBaselines, verifyAmendmentBaselines } from './plan-amendment-baseline.mjs';
 import {
   buildExecutionGrantContext,
   createAgentRuntimeLaunchCapability,
@@ -400,7 +402,7 @@ export const createHarness = async ({ controlRoot: controlRootInput, dataRoot: d
           return pinned;
         }
       }
-      if (intent.action === 'replan') {
+      if (['replan', 'amend'].includes(intent.action)) {
         const released = await api.readVersionRelease(project.id, intent.target);
         assert(released?.state?.status !== 'released', 'REPLAN_VERSION_RELEASED', 'A released version requires a new target or a separately authorized patch release.');
         const states = await authorityStore.list(project.id);
@@ -421,7 +423,11 @@ export const createHarness = async ({ controlRoot: controlRootInput, dataRoot: d
             sourceChanges = { ...basis, changeDigest: digestJson(basis) };
           }
         }
-        intent = preparePlanRevisionIntent({ intent, project, states, sourceDigest: snapshot.digest, sourceChanges });
+        const amendmentScope = intent.action === 'amend'
+          ? await readPlanAmendmentScope(project.policy?.planChangeRequests?.[intent.selector], workspace.root) : null;
+        intent = preparePlanRevisionIntent({ intent, project, states, sourceDigest: snapshot.digest, sourceChanges, amendmentScope });
+        if (intent.action === 'amend') intent.planRevision.implementationBaselines = await captureAmendmentBaselines({
+          states, revision: intent.planRevision, snapshot, evidenceStore, project });
       }
       if (intent.action === 'prerelease') {
         intent = await preparePrereleaseIntent({ intent, extension, project, snapshot, workspace, authorityStore, evidenceStore });
@@ -634,7 +640,7 @@ export const createHarness = async ({ controlRoot: controlRootInput, dataRoot: d
       if (resumeRunId) assert(resumeRunId === plan.run.runId && lineageResolution.selectedRunId === resumeRunId
         && ['continue', 'reattach', 'ordinary-resume'].includes(lineageResolution.action),
       'LIFECYCLE_RESUME_LINEAGE_MISMATCH', 'Resume must continue the exact unfinished Run and immutable plan.');
-      if (plan.intent.action === 'replan') {
+      if (['replan', 'amend'].includes(plan.intent.action)) {
         for (const affected of plan.intent.planRevision.affectedImplementationRuns ?? []) {
           const current = await authorityStore.read(plan.project.id, affected.runId);
           if (current.status === 'superseded' && current.metadata?.supersededByRunId === plan.run.runId && current.metadata?.supersedePlanDigest === plan.planDigest) continue;
@@ -836,7 +842,12 @@ export const createHarness = async ({ controlRoot: controlRootInput, dataRoot: d
         const approvalDecision = latest.decisions.find(decision => decision.id === 'implementation-plan-approved'
           && decision.decision === 'approved' && decision.planDigest === artifact.planDigest
           && decision.artifactDigest === artifact.artifactDigest);
-        approvedPlan = { projectId: latest.projectId, runId: latest.runId, planDigest: artifact.planDigest, artifactDigest: artifact.artifactDigest, sourceDigest: runSourceDigest, originalSourceDigest: latest.sourceDigest, typedPlan: structuredClone(typedPlan), approvalDecision: structuredClone(approvalDecision), ...(sourceCompatibility ? { sourceCompatibility } : {}) };
+        const amendmentBaseline = typedPlan.amendment ? await verifyAmendmentBaselines({ planRun: latest, typedPlan,
+          snapshot: snapshot ?? await captureWorkspace(workspace.root, { excluded: project.workspace.excluded ?? [] }),
+          authorityStore, evidenceStore, archivePath: project.policy?.planArchiveRoot
+            ? `${project.policy.planArchiveRoot}/v${target.slice(1).split('.')[0]}/${target.toLowerCase()}-execution-plan-review.md` : null,
+          archiveDigest: artifact.artifactDigest }) : null;
+        approvedPlan = { projectId: latest.projectId, runId: latest.runId, planDigest: artifact.planDigest, artifactDigest: artifact.artifactDigest, sourceDigest: runSourceDigest, originalSourceDigest: latest.sourceDigest, typedPlan: structuredClone(typedPlan), approvalDecision: structuredClone(approvalDecision), ...(sourceCompatibility ? { sourceCompatibility } : {}), ...(amendmentBaseline ? { amendmentBaseline } : {}) };
       }
       if (input.completionCarryover) approvedPlan = resolveCarryoverApproval({ input, currentApproval: approvedPlan,
         prior: await authorityStore.read(project.id, input.completionCarryover.priorRunId) });
@@ -1050,10 +1061,14 @@ export const createHarness = async ({ controlRoot: controlRootInput, dataRoot: d
       const conversationVisible = dispatch.execution?.runtime?.mode === 'conversation-visible';
       const feature = state.features.find(item => item.id === dispatch.featureId);
       if (dispatch.execution?.result) assertDispatchResultContract(dispatch.execution.result, feature, { conversationVisible });
-      const validatedResult = validateBusinessResult(result, { conversationVisible, repair: Boolean(feature?.metadata?.repairFindingId), feature });
+      let validatedResult = validateBusinessResult(result, { conversationVisible, repair: Boolean(feature?.metadata?.repairFindingId), feature });
       if (runtimeEvidence?.hostResultReceipt?.resultDigest && !runtimeEvidence?.resultRejection && !runtimeEvidence?.hostTerminalFailure) {
         assert(runtimeEvidence.hostResultReceipt.resultDigest === digestJson(result), 'HOST_RESULT_DIGEST_MISMATCH', 'Host result Receipt does not match the native Agent result.');
       }
+      const project = await projectRegistry.get(projectId);
+      const workspaceRoot = state.metadata?.workspace?.root ?? project.workspace.root;
+      const materialization = await resolvePlanAmendmentResult({ state, feature, result: validatedResult, workspaceRoot });
+      validatedResult = materialization.result;
       validateProfileResult({ profile: profileRegistry.get(state.profile.id), state, feature, result: validatedResult });
       if (feature?.metadata?.repairFindingId && validatedResult.status === 'completed') {
         assert(Array.isArray(runtimeEvidence?.verificationReceipts) && runtimeEvidence.verificationReceipts.length > 0, 'REPAIR_VERIFICATION_RECEIPT_REQUIRED', 'A completed repair requires at least one host-preserved verification Receipt.');
@@ -1063,8 +1078,6 @@ export const createHarness = async ({ controlRoot: controlRootInput, dataRoot: d
         const timeoutMs = Number(lease.heartbeatTimeoutMs ?? 120000);
         assert(Date.parse(kernel.now()) - Date.parse(lease.lastHeartbeatAt) < timeoutMs, 'VISIBLE_AGENT_HEARTBEAT_EXPIRED', 'Conversation-visible Agent heartbeat expired before result recording.');
       }
-      const project = await projectRegistry.get(projectId);
-      const workspaceRoot = state.metadata?.workspace?.root ?? project.workspace.root;
       const sourceSnapshotEvidence = await evidenceStore.read(dispatch.sourceSnapshotRef);
       const sourceSnapshot = JSON.parse(sourceSnapshotEvidence.bytes.toString('utf8'));
       const resultingSnapshot = await captureWorkspace(workspaceRoot, { excluded: project.workspace.excluded ?? [] });
@@ -1109,14 +1122,17 @@ export const createHarness = async ({ controlRoot: controlRootInput, dataRoot: d
         assert(digestJson(claimedChangedFiles) === digestJson(actualChangedFiles), 'RESULT_CHANGED_FILES_MISMATCH', 'Runtime changed-files claim does not match the workspace snapshot diff.', { claimedChangedFiles, actualChangedFiles });
       }
       const verifiedResult = { ...validatedResult, changedFiles: actualChangedFiles };
+      await verifyPlanAmendmentArtifacts({ state, feature, result: verifiedResult, workspaceRoot });
       await atomicWriteJson(dispatch.outputRef, verifiedResult, { root: authorityStore.root });
       const preservedRuntimeEvidence = runtimeEvidence ? JSON.parse(JSON.stringify(runtimeEvidence)) : null;
       if (preservedRuntimeEvidence && digestJson(result) !== digestJson(validatedResult)) {
-        const classification = { kind: 'quality-result-classification', version: '1.0', nativeResultDigest: digestJson(result),
+        const classification = { kind: materialization.receipt ? 'plan-amendment-materialization' : 'quality-result-classification', version: '1.0', nativeResultDigest: digestJson(result),
           classifiedResultDigest: digestJson(validatedResult), prerequisiteIds: (validatedResult.deliveryPrerequisites ?? []).map(item => item.id) };
         preservedRuntimeEvidence.qualityClassification = { ...classification, receiptDigest: digestJson(classification) };
       }
-      const evidence = await evidenceStore.put({ result: verifiedResult, runtimeEvidence: preservedRuntimeEvidence, inputSourceDigest: dispatch.sourceDigest, outputSourceDigest: resultingSnapshot.digest, sourceSnapshotRef: dispatch.sourceSnapshotRef }, { ...evidenceMetadata, mediaType: 'application/json', projectId, ...(state.metadata?.workspaceRef ? { workspaceRef: state.metadata.workspaceRef } : {}), runId, epoch: state.epoch, generation: state.generation, featureId: dispatch.featureId, dispatchId, sourceDigest: dispatch.sourceDigest, artifactDigest: state.artifactDigest, policyDigest: state.policyDigest, pluginSetDigest: state.pluginSetDigest, labels: ['agent-result'] });
+      const evidence = await evidenceStore.put({ result: verifiedResult, runtimeEvidence: preservedRuntimeEvidence,
+        ...(materialization.receipt ? { nativeResult: result, outputMaterialization: materialization.receipt } : {}),
+        inputSourceDigest: dispatch.sourceDigest, outputSourceDigest: resultingSnapshot.digest, sourceSnapshotRef: dispatch.sourceSnapshotRef }, { ...evidenceMetadata, mediaType: 'application/json', projectId, ...(state.metadata?.workspaceRef ? { workspaceRef: state.metadata.workspaceRef } : {}), runId, epoch: state.epoch, generation: state.generation, featureId: dispatch.featureId, dispatchId, sourceDigest: dispatch.sourceDigest, artifactDigest: state.artifactDigest, policyDigest: state.policyDigest, pluginSetDigest: state.pluginSetDigest, labels: ['agent-result'] });
       let submitted = await kernel.submit(projectId, runId, { dispatchId, outputRef: dispatch.outputRef, agentId: lease.agentId, packetDigest: dispatch.packetDigest, epoch: state.epoch, generation: state.generation, result: verifiedResult, resultingSourceDigest: resultingSnapshot.digest, evidenceRefs: [evidence.ref] }, { expectedRevision: state.revision, commandId });
       if (feature?.metadata?.stage === 'plan-review' && verifiedResult.status === 'completed') {
         const reconciled = await reconcilePlanReviewFindings({ state: submitted.state, kernel, evidenceStore, commandId });

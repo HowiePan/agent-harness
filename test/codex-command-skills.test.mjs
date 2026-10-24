@@ -458,6 +458,11 @@ test('the same pseudo actions resolve through the explicitly selected Extension 
   const replan = resolveCommandIntent(cardWorldCommandManifest, { action: 'replan', target: 'V3.8.5', arguments: ['change:CR-1'] });
   assert.equal(replan.action, 'replan');
   assert.equal(replan.selector, 'CR-1');
+  const amend = resolveCommandIntent(cardWorldCommandManifest, { action: 'amend', target: 'V3.9.0', arguments: ['change:session-boundary'] });
+  assert.equal(amend.action, 'amend');
+  assert.equal(amend.selector, 'session-boundary');
+  assert.equal(amend.scope, 'version-planning-amendment');
+  assert.deepEqual(parsePseudoCommand('h:engine amend V3.9.0 change:session-boundary').arguments, ['change:session-boundary']);
   assert.equal(release.scope, 'version-release-promotion');
   assert.deepEqual(release.effectClasses, ['formal-version-release']);
 

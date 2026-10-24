@@ -3,6 +3,7 @@ import { withDeps } from '../../../flow-kit/primitives.mjs';
 import { intakeNode, canonicalNode } from '../nodes/intake/index.mjs';
 import { expansionNode } from '../nodes/expansion/index.mjs';
 import { planNode, planReviewNode } from '../nodes/plan/index.mjs';
+import { amendNode, amendReviewNode } from '../nodes/plan/amend.mjs';
 import { implementNode } from '../nodes/implement/index.mjs';
 import { scopeNode } from '../nodes/scope/index.mjs';
 import { docsNode } from '../nodes/docs/index.mjs';
@@ -39,6 +40,7 @@ export const createDeliveryWorkflowDefinition = ({ id = 'delivery-lifecycle', pr
     closeout: [closeoutNode],
     plan: [withDeps(planNode, []), planReviewNode],
     replan: [withDeps(planNode, []), planReviewNode],
+    amend: [amendNode, amendReviewNode],
     implement: [withDeps(implementNode, []), scopeNode, docsNode, qualityNode],
     scope: [withDeps(scopeNode, [])],
     docs: [withDeps(docsNode, [])],

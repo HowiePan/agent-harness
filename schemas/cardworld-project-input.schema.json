@@ -26,7 +26,11 @@
       "kind": { "enum": ["add", "modify", "remove", "defer", "dependency", "technical"] },
       "summary": { "type": "string", "minLength": 1 },
       "requirements": { "type": "array", "items": { "type": "string", "minLength": 1 } },
-      "acceptance": { "type": "array", "items": { "type": "string", "minLength": 1 } }
+      "acceptance": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+      "amendmentScope": { "type": "object" },
+      "amendmentScopeRef": { "type": "object", "required": ["path", "sha256"], "properties": {
+        "path": { "type": "string", "minLength": 1 }, "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+      }, "additionalProperties": false }
     }, "additionalProperties": false } }
   },
   "additionalProperties": false,

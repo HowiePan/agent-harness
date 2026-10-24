@@ -10,6 +10,7 @@ const implementationAllowedPaths = Object.freeze([
 export const CARDWORLD_ACTION_PATHS = Object.freeze({
   requirements: ['docs/requirements.md', 'docs/versions'],
   plan: ['docs/versions', 'docs/requirements.md'],
+  amend: ['docs/versions'],
   implement: [...implementationAllowedPaths],
   scope: ['docs/versions', 'docs/requirements.md'],
   docs: ['docs/versions', 'docs/versions/INDEX.md', 'docs/integration_guide.md'],

@@ -22,6 +22,7 @@ export const createPlanReviewFollowUps = ({ state, feature, result }) => {
   const round = feature.metadata.planReviewRound ?? 1;
   if (round >= state.profile.config.planReviewLimit) return [];
   const plan = reviewedPlanProposal(state);
+  const amendment = state.metadata?.commandIntent?.action === 'amend';
   assert(plan && Array.isArray(review.findings) && review.findings.length > 0,
     'PLAN_REVIEW_FEEDBACK_INCOMPLETE', 'A rejected plan review requires the current plan and actionable findings.');
   const planner = state.features.find(item => item.metadata?.stage === 'version-planning' && !item.metadata.planReviewRound);
@@ -36,12 +37,14 @@ export const createPlanReviewFollowUps = ({ state, feature, result }) => {
   const plannerTask = withTaskFeedback(planner.task, {
     id: 'review-feedback', path: 'planReviewFeedback',
     description: 'The complete preceding plan and exact independent review findings for this revision.',
-    instruction: 'Resolve every independent review finding in a complete replacement plan. Preserve all prior acceptance coverage and project boundaries, and cite the finding or source evidence for each change.',
+    instruction: amendment
+      ? 'Resolve every finding with a corrected bounded delta against the same original approved base. Preserve all other content, scope and acceptance; materialize a new content-addressed revision. Never regenerate the full plan.'
+      : 'Resolve every independent review finding in a complete replacement plan. Preserve all prior acceptance coverage and project boundaries, and cite the finding or source evidence for each change.',
   });
   const reviewerTask = withTaskFeedback(reviewer.task, {
     id: 'previous-review', path: 'planReviewFeedback',
     description: 'The preceding independent review findings that the revised plan must address.',
-    instruction: 'Check every preceding review finding against the revised complete plan, then independently inspect the full scope for remaining blockers. Report each fixed Finding ID in outputs["plan-review"].value.resolvedFindings and add a checkpoint with that exact ID, status resolved, a specific summary and non-empty evidence. Keep unresolved original IDs in the typed plan-review findings; add every newly discovered blocker to the top-level findings array with its ID, severity, summary, affectedPaths and evidence. Do not reopen an existing Authority Finding by duplicating it as a new top-level Finding. An approved result alone never closes a Finding.',
+    instruction: `${amendment ? 'Review the corrected exact delta and all affected producer/consumer boundaries against the same immutable base.' : 'Check every preceding review finding against the revised complete plan, then independently inspect the full scope for remaining blockers.'} Report each fixed Finding ID in outputs["plan-review"].value.resolvedFindings and add a checkpoint with that exact ID, status resolved, a specific summary and non-empty evidence. Keep unresolved original IDs in the typed plan-review findings; add every newly discovered blocker to the top-level findings array with its ID, severity, summary, affectedPaths and evidence. Do not reopen an existing Authority Finding by duplicating it as a new top-level Finding. An approved result alone never closes a Finding.`,
   });
   return [{
     ...structuredClone(planner), ...plannerTask,

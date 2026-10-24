@@ -21,6 +21,7 @@ const defaultActionPaths = Object.freeze({
   requirements: ['docs/requirements.md', 'docs/versions'],
   plan: ['docs/versions', 'docs/requirements.md'],
   replan: ['docs/versions', 'docs/requirements.md'],
+  amend: ['docs/versions'],
   implement: ['src', 'tests', 'docs'],
   scope: ['docs/versions', 'docs/requirements.md'],
   docs: ['docs/versions', 'docs/versions/INDEX.md', 'docs/integration_guide.md'],

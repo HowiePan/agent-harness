@@ -17,7 +17,7 @@ export const assertCompletedPlanCloseoutScope = ({ state, project, repair, expec
   const samePath = value => value && resolve(value).toLowerCase() === resolve(project.workspace.root).toLowerCase();
   assert(state.projectId === project.id && state.revision === expectedRevision
     && ['closure-blocked', 'ready-to-close', 'closed'].includes(state.status)
-    && ['plan', 'replan'].includes(state.metadata?.commandIntent?.action)
+    && ['plan', 'replan', 'amend'].includes(state.metadata?.commandIntent?.action)
     && samePath(state.metadata?.workspace?.root)
     && state.features.length > 0 && state.features.every(feature => feature.state === 'completed'
       && ['version-planning', 'plan-review'].includes(feature.metadata?.stage))

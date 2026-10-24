@@ -42,16 +42,20 @@ export const assessInterruptedWorkspace = ({ state, before, after, effect }) => 
     && spawn.dispatchId === dispatch.dispatchId && spawn.packetDigest === dispatch.packetDigest
     && spawn.promptDigest === lease.runtimeReceipt?.prompt?.promptDigest, code,
   'The abandoned Lease and Feature must retain their original Dispatch identity and paths.');
-  assert(effect.state === 'contained' && effect.outcome?.reason === 'preflight-reconciliation'
-    && effect.outcome.disposition === 'interrupted' && effect.outcome.target === lease.agentId
-    && [effect.outcome.interruptRequestDigest, effect.outcome.interruptResultDigest,
-      effect.outcome.verificationRequestDigest].every(hash)
+  const outcome = effect?.outcome;
+  const interrupted = ['interrupted', 'absent-after-interrupt'].includes(outcome?.disposition)
+    && outcome.target === lease.agentId
+    && [outcome.interruptRequestDigest, outcome.interruptResultDigest, outcome.verificationRequestDigest].every(hash)
+    && (outcome.disposition !== 'absent-after-interrupt' || hash(outcome.observationRequestDigest));
+  const terminal = outcome?.disposition === 'already-terminal'
+    && outcome.observedAgentName === lease.agentId && hash(outcome.observationRequestDigest);
+  assert(effect.state === 'contained' && outcome?.reason === 'preflight-reconciliation' && (interrupted || terminal)
     && effect.canonicalAgentName === lease.agentId && effect.nativeTaskName === spawn.nativeTaskName
     && effect.sessionId === spawn.sessionId && effect.requestDigest === spawn.requestDigest
     && effect.binding?.projectId === state.projectId && effect.binding.runId === state.runId
     && effect.binding.dispatchId === dispatch.dispatchId && effect.binding.packetDigest === dispatch.packetDigest
     && effect.binding.promptDigest === spawn.promptDigest, code,
-  'Source recovery requires the exact native interruption and containment proof.');
+  'Source recovery requires the exact native interruption and containment proof.', { reason: 'native-containment' });
   assert(before?.protocolVersion === '1.0' && before.root === resolve(state.metadata.workspace.root)
     && before.digest === digestJson(before.files) && before.digest === dispatch.sourceDigest
     && after?.root === before.root && after.digest === digestJson(after.files), code,
