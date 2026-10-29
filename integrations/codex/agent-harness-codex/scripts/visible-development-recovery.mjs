@@ -7,12 +7,13 @@ import { verifyDevelopmentSourceManifest } from '../../../../src/application/dev
 import { createLocalDevelopmentInvocation } from '../../../../src/application/local-development-invocation.mjs';
 import { loadProjectHarnessConfig } from '../../../../src/application/project-initialization.mjs';
 import { ExtensionRegistry } from '../../../../src/platform/extensions/registry.mjs';
-import { createCodexRolloutHostExchange } from '../lib/codex-rollout-host-exchange.mjs';
+import { createCodexRolloutHostExchange, readCodexRolloutObservation } from '../lib/codex-rollout-host-exchange.mjs';
 import { createCodexCollaborationHostAdapter } from '../lib/codex-collaboration-host-adapter.mjs';
 import { createHostExchangeDiagnosticWriter } from '../lib/host-exchange-diagnostics.mjs';
 import { assertLocalProcessGateHost } from '../lib/local-process-gate-readiness.mjs';
 import { createLifecycleCommandPlan, validateLifecycleCommandPlan } from '../../../../src/application/lifecycle-command-plan.mjs';
 import { assertDevelopmentReplacementScope } from '../../../../src/application/development-replacement-scope.mjs';
+import { assertRecoverableNativeImplementationResult } from '../../../../src/application/development-terminal-result.mjs';
 
 const emit = value => process.stdout.write(`${JSON.stringify({ protocolVersion: '1.0', ...value })}\n`);
 const fail = (code, message) => { throw Object.assign(new Error(message), { code }); };
@@ -43,7 +44,10 @@ const main = async () => {
     onRejected: createHostExchangeDiagnosticWriter({ controlRoot: manifest.controlRoot, dataRoot: manifest.dataRoot }) });
   try {
     const host = createCodexCollaborationHostAdapter({ exchange: hostExchange.exchange, controlRoot: manifest.controlRoot,
-      dataRoot: manifest.dataRoot, sessionId, waitTimeoutMs: 30000 });
+      dataRoot: manifest.dataRoot, sessionId, waitTimeoutMs: 30000,
+      readSettledObservation: ({ effect, agentId }) => readCodexRolloutObservation({ controlRoot: manifest.controlRoot,
+        dataRoot: manifest.dataRoot, sessionId: effect.sessionId, expectedCwd: manifest.projectRoot,
+        observationRequestDigest: effect.outcome.observationRequestDigest, agentId }) });
     const harness = await createHarness({ controlRoot: manifest.controlRoot, dataRoot: manifest.dataRoot,
       releaseIdentity, extensions, strictProjectIdentity: false,
       agentAdapters: { 'codex-conversation-runtime': host.adapter } });
@@ -64,7 +68,7 @@ const main = async () => {
         return;
       }
     }
-    const salvageTerminalFailure = async () => {
+    const salvageTerminalFailure = async ({ providerOnly = false } = {}) => {
       const active = old.leases.filter(item => item.status === 'active');
       if (active.length !== 1 || old.dispatches.filter(item => ['requested', 'assigned'].includes(item.status)).length !== 1)
         fail('VISIBLE_DEVELOPMENT_RECOVERY_TERMINAL_SCOPE_INVALID', 'Source-drift recovery requires exactly one active bound Dispatch.');
@@ -73,21 +77,19 @@ const main = async () => {
       const feature = old.features.find(item => item.id === dispatch?.featureId);
       const effectId = lease.runtimeReceipt?.hostSpawnReceipt?.effectId;
       const effect = effectId ? await host.journal.read(effectId, { required: true }) : null;
-      if (feature?.metadata?.stage !== 'implementation' || effect?.state !== 'settled'
-        || effect.outcome?.disposition !== 'result-observed' || effect.canonicalAgentName !== lease.agentId
+      if (feature?.metadata?.stage !== 'implementation' || !['settled', 'lease-bound'].includes(effect?.state)
+        || effect.state === 'settled' && effect.outcome?.disposition !== 'result-observed' || effect.canonicalAgentName !== lease.agentId
         || effect.binding?.dispatchId !== dispatch.dispatchId || effect.binding?.packetDigest !== dispatch.packetDigest)
         fail('VISIBLE_DEVELOPMENT_RECOVERY_TERMINAL_UNVERIFIED', 'Source-drift recovery requires the original terminal Host Effect and implementation Dispatch.');
+      const transported = await host.adapter.result({ agentId: lease.agentId, dispatchId: dispatch.dispatchId,
+        visibility: structuredClone(lease.runtimeReceipt.visibility), runtimeReceipt: structuredClone(lease.runtimeReceipt) });
+      if (providerOnly && transported.result?.failureClass !== 'runtime-provider') return false;
+      const settled = await host.journal.read(effectId, { required: true });
+      assertRecoverableNativeImplementationResult({ transported, effect: settled, lease, dispatch, feature });
       let state = await harness.authorityStore.read(projectId, runId);
       state = (await harness.recordHeartbeat(projectId, runId, { leaseId: lease.leaseId,
         dispatchId: dispatch.dispatchId, agentId: lease.agentId, progress: 'terminal-failure-recovery' },
       { expectedRevision: state.revision, commandId: `${commandId}.terminal-heartbeat.${dispatch.dispatchId}` })).state;
-      const transported = await host.adapter.result({ agentId: lease.agentId, dispatchId: dispatch.dispatchId,
-        visibility: structuredClone(lease.runtimeReceipt.visibility), runtimeReceipt: structuredClone(lease.runtimeReceipt) });
-      if (!transported.runtimeEvidence?.hostTerminalFailure
-        || transported.result?.status !== 'failed' || transported.result.changedFiles?.length !== 0
-        || transported.receipt?.resultDigest !== effect.outcome.resultDigest)
-        fail('VISIBLE_DEVELOPMENT_RECOVERY_TERMINAL_UNVERIFIED', 'The original Agent has no matching native terminal failure Receipt.');
-      state = await harness.authorityStore.read(projectId, runId);
       state = (await harness.recordHeartbeat(projectId, runId, { leaseId: lease.leaseId,
         dispatchId: dispatch.dispatchId, agentId: lease.agentId, progress: 'terminal-result-observed' },
       { expectedRevision: state.revision, commandId: `${commandId}.terminal-result-heartbeat.${dispatch.dispatchId}` })).state;
@@ -98,6 +100,7 @@ const main = async () => {
       emit({ kind: 'codex-visible-development-recovery', phase: 'terminal-failure-recorded', projectId, runId,
         dispatchId: dispatch.dispatchId, submissionId: submission?.submissionId,
         changedFiles: submission?.changedFiles ?? [], sourceDigest: submitted.state.sourceDigest });
+      return true;
     };
     let recovery;
     if (old.status === 'superseded') {
@@ -142,6 +145,20 @@ const main = async () => {
             const effectId = lease.runtimeReceipt?.hostSpawnReceipt?.effectId;
             const effect = effectId ? await host.journal.read(effectId, { required: true }) : null;
             if (effect?.state === 'lease-bound') {
+              const feature = old.features.find(item => item.id === lease.featureId);
+              if (feature?.metadata?.stage === 'implementation') {
+                let observed;
+                try { observed = await host.adapter.heartbeatVisibleAgent({ agentId: lease.agentId,
+                  dispatch: old.dispatches.find(item => item.dispatchId === lease.dispatchId),
+                  prompt: lease.runtimeReceipt.prompt, runtimeReceipt: lease.runtimeReceipt }); }
+                catch (error) { if (error.code !== 'CODEX_COLLABORATION_AGENT_NOT_FOUND') throw error; }
+                if (observed?.status === 'failed') {
+                  // A timed-out Coordinator may never have collected the native
+                  // provider failure. Preserve it through normal Submission and
+                  // failure-budget accounting before retiring this transport.
+                  if (await salvageTerminalFailure({ providerOnly: true })) continue;
+                }
+              }
               const fenced = await host.adapter.contain({ agentId: lease.agentId, dispatchId: lease.dispatchId,
                 runtimeReceipt: lease.runtimeReceipt, reason: 'development-run-recovery' });
               emit({ kind: 'codex-visible-development-recovery', phase: 'host-fenced', projectId, runId,

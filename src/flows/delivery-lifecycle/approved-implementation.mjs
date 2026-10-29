@@ -4,6 +4,8 @@ import { validateWorkGraph } from '../../kernel/work-graph.mjs';
 import { uniqueProposalIds } from './proposal-id.mjs';
 import { digestJson } from '../../common/canonical.mjs';
 import { approvedImplementationValueSchema } from './contracts/index.mjs';
+import { compileDeliveryBatches } from './compile-delivery-batches.mjs';
+import { DELIVERY_BATCH_POLICY } from './delivery-batches.mjs';
 
 const packageId = (parent, proposal) => `${parent.id}/${proposal.id}`;
 
@@ -29,6 +31,17 @@ export const expandApprovedImplementation = ({ features, typedPlan, projectId, a
   assert(uniqueProposalIds(owned),
     'IMPLEMENTATION_PROPOSAL_ID_INVALID', 'Project-owned proposal IDs must be unique, safe Feature segments.');
   const byId = new Map(owned.map(item => [item.id, item]));
+  const budgetSource = proposal => {
+    const seen = new Set();
+    let current = proposal;
+    while (current.splitFrom) {
+      const source = byId.get(current.splitFrom);
+      assert(typedPlan.amendment && source && !seen.has(current.id) && source.dependsOn.includes(current.id),
+        'IMPLEMENTATION_SPLIT_LINEAGE_INVALID', 'Split ancestry must bind an amended convergence owner.');
+      seen.add(current.id); current = source;
+    }
+    return current.id;
+  };
   for (const item of owned) {
     assert(Array.isArray(item.dependsOn) && item.dependsOn.every(id => byId.has(id)),
       'IMPLEMENTATION_PROPOSAL_DEPENDENCY_INVALID', `Project-owned proposal ${item.id} depends on an absent or external proposal.`);
@@ -84,14 +97,14 @@ export const expandApprovedImplementation = ({ features, typedPlan, projectId, a
       ...parent,
       ...projection,
       id: packageId(parent, proposal),
-      logicalRoot: `${parent.logicalRoot}:${proposal.id}`,
-      dependsOn: [...new Set([...parent.dependsOn, ...proposal.dependsOn.filter(id => !completed.has(id)).map(id => packageId(parent, byId.get(id))), ...(prior ? [packageId(parent, prior)] : [])])],
+      logicalRoot: `${parent.logicalRoot}:${budgetSource(proposal)}`,
+      dependsOn: [...new Set([...parent.dependsOn, ...proposal.dependsOn.filter(id => !completed.has(id)).map(id => packageId(parent, byId.get(id))), ...(prior && proposal.deliveryPolicy !== DELIVERY_BATCH_POLICY ? [packageId(parent, prior)] : [])])],
       // The Descriptor remains the write authority. Proposal paths guide the Agent;
       // a necessary sibling source file does not force a new user replan.
       allowedPaths: [...parent.allowedPaths],
       contracts: [...new Set([...parent.contracts, ...contracts])],
       attemptLimit: Math.max(parent.attemptLimit ?? 3, 21,
-        ...Object.values(baseline?.progress?.[proposal.id]?.attempts ?? {}).map(item => item.limit ?? 0)),
+        ...Object.values(baseline?.progress?.[budgetSource(proposal)]?.attempts ?? {}).map(item => item.limit ?? 0)),
       metadata: {
         ...parent.metadata,
         outputValueSchemas: { ...parent.metadata.outputValueSchemas,
@@ -99,7 +112,8 @@ export const expandApprovedImplementation = ({ features, typedPlan, projectId, a
         approvedDeliveryPlan: structuredClone(typedPlan),
         approvedProposal: structuredClone(proposal),
         ...(approvedPlanBinding ? { approvedPlanBinding } : {}),
-        ...(baseline?.progress?.[proposal.id] ? { amendmentProgressBaseline: structuredClone(baseline.progress[proposal.id]) } : {}),
+        ...(baseline?.progress?.[budgetSource(proposal)] ? { amendmentProgressBaseline: structuredClone(baseline.progress[budgetSource(proposal)]),
+          amendmentProgressBaselineOwner: budgetSource(proposal) } : {}),
         implementationProgressRetries: 20,
         allowDynamicDecomposition: false,
       },
@@ -108,7 +122,8 @@ export const expandApprovedImplementation = ({ features, typedPlan, projectId, a
   const lastId = packageFeatures.at(-1)?.id;
   const remaining = features.filter(feature => feature.id !== parent.id).map(feature => ({
     ...feature,
-    dependsOn: feature.dependsOn.map(id => id === parent.id ? lastId : id).filter(Boolean),
+    dependsOn: feature.dependsOn.flatMap(id => id === parent.id
+      ? (executable.some(item => item.deliveryPolicy === DELIVERY_BATCH_POLICY) ? packageFeatures.map(item => item.id) : [lastId]) : [id]).filter(Boolean),
   }));
-  return validateWorkGraph([...packageFeatures, ...remaining]);
+  return validateWorkGraph([...packageFeatures.flatMap(compileDeliveryBatches), ...remaining]);
 };

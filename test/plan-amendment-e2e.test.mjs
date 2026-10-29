@@ -8,6 +8,7 @@ import { projectExecutionPolicyDecisionContext } from '../src/platform/registry/
 import { planApprovalSnapshot, reviewedPlanProposal } from '../src/flows/delivery-lifecycle/plan-approval.mjs';
 import { materializePlanAmendment, planAmendmentReference } from '../src/application/plan-amendment-artifacts.mjs';
 import { digestJson } from '../src/common/canonical.mjs';
+import { captureWorkspace, diffWorkspaceSnapshots } from '../src/common/workspace-snapshot.mjs';
 import { createTestExecutionAuthorizationAdapter, createMockVisibleHostAdapter } from './test-support.mjs';
 import { amendmentFixture } from './fixtures/plan-amendment.mjs';
 
@@ -29,15 +30,17 @@ for (const visible of [false, true]) test(`amend command reaches reviewed approv
       contract: { id: 'amendment-test-native', version: '1.0.0', digest: 'd'.repeat(64) },
       assertionId: 'amendment-test-reconciliation', observedAt: new Date().toISOString(), reconciled: [], issues: [] }),
   }) : null;
-  const harness = await createHarness({ controlRoot, dataRoot: resolve(root, 'data'), strictProjectIdentity: false,
+  const harnessOptions = { controlRoot, dataRoot: resolve(root, 'data'), strictProjectIdentity: false,
     releaseIdentity: { version: '1.0.0', artifactDigest: 'a'.repeat(64), verified: true },
     extensions: [extension, ...(codex ? [codex] : [])], agentAdapter: adapter,
-    executionAuthorizationAdapter: createTestExecutionAuthorizationAdapter() });
+    executionAuthorizationAdapter: createTestExecutionAuthorizationAdapter() };
+  let harness = await createHarness(harnessOptions);
   const runtime = { id: 'amendment-memory-test', kind: 'agent-runtime', version: '1.0.0',
     capabilities: ['spawn', 'wait', 'send', 'heartbeat', 'interrupt', 'headless'], permissions: [] };
   const fixture = amendmentFixture();
   let amendmentReviews = 0;
   let scopeBlocked = 0;
+  let formatBlocked = false;
   const handler = async packet => {
     const state = await harness.authorityStore.read(packet.projectId, packet.runId);
     const action = state.metadata.commandIntent.action;
@@ -56,6 +59,14 @@ for (const visible of [false, true]) test(`amend command reaches reviewed approv
           changedFiles: [report], failureClass: 'scope-blocker', blocker: { kind: 'scope', code: 'fixture-missing-scope',
             summary: 'Register the exact missing pointer before creating a replacement draft' } };
       }
+      if (visible && amendmentReviews === 1 && packet.feature.metadata.planReviewRound > 1 && !formatBlocked) {
+        formatBlocked = true;
+        const path = 'docs/amend/format-draft.json';
+        await writeFile(resolve(workspaceRoot, path), '{"preserved":"unaccepted corrected draft"}\n');
+        return { status: 'blocked', summary: 'Corrected delta needs supported structural additions', changedFiles: [path],
+          failureClass: 'protected-plan-blocker', blocker: { kind: 'protected', code: 'PLAN_AMENDMENT_TOO_LARGE',
+            summary: 'The repeated preimages exceed the fixed delta bound' } };
+      }
       const patch = { ...fixture.patch, basePlanDigest: state.metadata.planRevision.parentPlanDigest,
         changeRequestDigest: state.metadata.planRevision.changeRequestDigest };
       patch.changes = [{ path: '/proposedFeatures/1/contracts',
@@ -63,16 +74,25 @@ for (const visible of [false, true]) test(`amend command reaches reviewed approv
         value: [`runtime and consumer boundary for ${state.metadata.planRevision.parentPlanDigest}`] }];
       if (packet.feature.metadata.planReviewRound > 1) patch.changes = [{ ...patch.changes[0],
         value: ['runtime and prerequisite consumer conversion with explicit source lifetime'] }];
+      if (visible) patch.changes[0].value = patch.changes[0].value.map(value => `${value} ${'large-plan-contract '.repeat(16000)}`);
+      const before = await captureWorkspace(workspaceRoot);
       const materialized = await materializePlanAmendment({ revision: state.metadata.planRevision, patch, workspaceRoot });
-      return completed('amendment', 'delivery-plan-amendment-v1', planAmendmentReference(materialized), materialized.artifacts.map(item => item.path));
+      const changedFiles = diffWorkspaceSnapshots(before, await captureWorkspace(workspaceRoot));
+      return completed('amendment', 'delivery-plan-amendment-v1', planAmendmentReference(materialized), changedFiles);
     }
     if (action === 'amend' && stage === 'plan-review') {
       const plan = reviewedPlanProposal(state);
       amendmentReviews += 1;
-      return completed('plan-review', 'delivery-plan-review-v1', { approved: amendmentReviews > 1,
-        findings: amendmentReviews > 1 ? [] : ['A1 requires an explicit consumer source-lifetime contract.'],
+      const value = completed('plan-review', 'delivery-plan-review-v1', { approved: amendmentReviews > 1,
+        findings: amendmentReviews > 1 ? [] : ['PR-1 [P1] A1 requires an explicit consumer source-lifetime contract.'],
+        resolvedFindings: state.findings.some(row => row.id === 'PR-1') ? ['PR-1'] : [],
         basePlanDigest: plan.amendment.basePlanDigest, deltaDigest: plan.amendment.deltaDigest,
         reviewedFeatureIds: ['A1', 'A2'] });
+      value.findings = amendmentReviews === 1 ? [{ id: 'PR-1', severity: 'P1',
+        summary: 'A1 requires an explicit consumer source-lifetime contract.', affectedPaths: ['docs/amend'], evidence: ['source lifetime'] }] : [];
+      value.checkpoints = amendmentReviews === 2 ? [{ id: 'PR-1', status: 'resolved',
+        summary: 'Verified the corrected producer and consumer source lifetime.', evidence: ['exact corrected amendment'] }] : [];
+      return value;
     }
     if (action === 'implement' && stage === 'implementation') {
       const proposal = packet.feature.metadata.approvedProposal;
@@ -146,18 +166,53 @@ for (const visible of [false, true]) test(`amend command reaches reviewed approv
   const secondBlockedDraft = await create('amend', ['change:boundary']);
   const secondBlockedAmendment = await execute(secondBlockedDraft, 'second-scope-blocked-amendment');
   assert.equal(secondBlockedAmendment.state.features.find(item => item.metadata.stage === 'version-planning').state, 'blocked');
-  descriptor.policy.planChangeRequests.boundary.amendmentScope.planPointers.push('/proposedFeatures/1/verification');
+  if (visible) {
+    // A fresh verified Core after repair, with no fabricated scope change.
+    const releaseIdentity = { version: '1.0.0', artifactDigest: 'b'.repeat(64), verified: true };
+    harness = await createHarness({ ...harnessOptions, releaseIdentity });
+    descriptor.harness = { version: releaseIdentity.version, artifactDigest: releaseIdentity.artifactDigest };
+  } else descriptor.policy.planChangeRequests.boundary.amendmentScope.planPointers.push('/proposedFeatures/1/verification');
   await harness.projectRegistry.register(descriptor, { expectedRevision: 2, commandId: 'correct-second-amendment-scope', authorityDecision: {
     actor: 'test', decision: 'approved', action: 'project-execution-policy-change', expiresAt: '2099-01-01T00:00:00.000Z',
     context: projectExecutionPolicyDecisionContext({ input: descriptor }) } });
   const amendment = await create('amend', ['change:boundary']);
   assert.equal(amendment.intent.planRevision.replacesAmendment.runId, secondBlockedDraft.run.runId);
+  if (visible) assert.equal(amendment.intent.planRevision.replacesAmendment.replacementArtifactDigest, 'b'.repeat(64));
   assert.deepEqual(amendment.intent.planRevision.implementationBaselines[0].retirementChain,
     [blockedDraft.run.runId, secondBlockedDraft.run.runId]);
   assert.equal(amendment.logicalTaskKey, original.logicalTaskKey);
   assert.deepEqual(amendment.run.features[0].allowedPaths, ['docs/amend']);
   assert.deepEqual(amendment.run.features[1].allowedPaths, []);
-  const amended = await execute(amendment, 'amend-boundary');
+  let amended = await execute(amendment, 'amend-boundary');
+  let reviewedAmendment = amendment;
+  if (visible) {
+    assert.equal(amended.reason, 'blocked-dependencies');
+    const rejected = amended.state;
+    assert.equal(rejected.findings[0].status, 'open');
+    const originalAttempts = structuredClone(rejected.attempts);
+    const releaseIdentity = { version: '1.0.0', artifactDigest: 'c'.repeat(64), verified: true };
+    harness = await createHarness({ ...harnessOptions, releaseIdentity });
+    descriptor.harness = { version: releaseIdentity.version, artifactDigest: releaseIdentity.artifactDigest };
+    await harness.projectRegistry.register(descriptor, { expectedRevision: 3, commandId: 'repair-amendment-format', authorityDecision: {
+      actor: 'test', decision: 'approved', action: 'project-execution-policy-change', expiresAt: '2099-01-01T00:00:00.000Z',
+      context: projectExecutionPolicyDecisionContext({ input: descriptor }) } });
+    const replacement = await create('amend', ['change:boundary']);
+    const saved = replacement.intent.planRevision.replacesAmendment.preservedDraft;
+    assert.equal(saved.rejectedReview.value.approved, false);
+    assert.equal(saved.openFindings[0].id, 'PR-1');
+    assert.deepEqual(saved.correctedDraft.changedFiles, ['docs/amend/format-draft.json']);
+    assert.deepEqual(replacement.intent.planRevision.implementationBaselines[0].retirementChain,
+      [blockedDraft.run.runId, secondBlockedDraft.run.runId, rejected.runId]);
+    amended = await execute(replacement, 'amend-format-repaired');
+    reviewedAmendment = replacement;
+    const prior = await harness.authorityStore.read(descriptor.id, rejected.runId);
+    assert.equal(prior.status, 'superseded');
+    assert.deepEqual(prior.attempts, originalAttempts);
+    assert.equal(prior.findings[0].status, 'open');
+    assert.equal(amended.state.findings[0].status, 'resolved');
+    assert.equal(amended.state.findings[0].resolution.originRunId, prior.runId);
+    assert.equal(prior.submissions.find(row => row.result.outputs?.['plan-review']).result.outputs['plan-review'].value.approved, false);
+  }
   const retiredDraft = await harness.authorityStore.read(descriptor.id, blockedDraft.run.runId);
   assert.equal(retiredDraft.status, 'superseded');
   assert.equal(retiredDraft.submissions.length, 1);
@@ -169,15 +224,18 @@ for (const visible of [false, true]) test(`amend command reaches reviewed approv
   assert(amendmentEvidence.nativeResult.outputs.amendment.value.deltaRef);
   assert.equal(amendmentEvidence.nativeResult.outputs.amendment.value.plan, undefined);
   assert.equal(amendmentEvidence.outputMaterialization.kind, 'plan-amendment-reference-resolution');
-  assert(amendmentSubmission.result.outputs.amendment.value.plan);
-  assert.equal(amended.state.features.filter(item => item.metadata.stage === 'version-planning').length, 2);
+  assert.equal(amendmentSubmission.result.outputs.amendment.value.plan, undefined);
+  assert(reviewedPlanProposal(amended.state).proposedFeatures.length);
+  assert(Buffer.byteLength(JSON.stringify(amendmentSubmission.result.outputs)) < 256 * 1024);
+  if (visible) assert(Buffer.byteLength(JSON.stringify(reviewedPlanProposal(amended.state))) > 256 * 1024);
+  assert.equal(amended.state.features.filter(item => item.metadata.stage === 'version-planning').length, visible ? 1 : 2);
   const retired = await harness.authorityStore.read(descriptor.id, implementation.state.runId);
   assert.equal(retired.status, 'superseded');
   assert.deepEqual(retired.attempts, oldAttempts);
   assert.equal(retired.features.find(item => item.metadata.approvedProposal?.id === 'A0').state, 'completed');
   const closed = await approveAndClose(amended.state);
   assert.equal(closed.state.status, 'closed');
-  assert.equal(closed.result.receipt.runId, amendment.run.runId);
+  assert.equal(closed.result.receipt.runId, reviewedAmendment.run.runId);
   const next = await create('implement');
   const ready = await harness.createExecutionReadinessReport(next);
   assert.equal(ready.executionReady, true, JSON.stringify(ready));

@@ -6,7 +6,7 @@ import { digestJson } from '../src/common/canonical.mjs';
 import { captureWorkspace } from '../src/common/workspace-snapshot.mjs';
 import { prepareBudgetExtension } from '../src/kernel/attempt-budget.mjs';
 import { writeDevelopmentSourceManifest } from '../src/application/development-source.mjs';
-import { applyMigrationBudgetExtension, approvedBudgetExtensionProgress, verifyMigrationBudgetExtension } from '../src/application/development-budget-migration.mjs';
+import { applyMigrationBudgetExtension, approvedBudgetExtensionProgress, approvedPostPatchBudgetProgress, verifyMigrationBudgetExtension } from '../src/application/development-budget-migration.mjs';
 import { feature, makeFixture } from './test-support.mjs';
 
 test('an H4 migration records its sealed original budget approval once before completion carry-over', async t => {
@@ -60,6 +60,26 @@ test('an H4 migration records its sealed original budget approval once before co
     assert.equal(applied.executionStarted, false); assert.equal(applied.used, 21); assert.equal(applied.afterLimit, 41);
     const after = await fixture.harness.authorityStore.read(state.projectId, state.runId);
     assert.equal(approvedBudgetExtensionProgress(run, after, patchReceipt), true);
+    const idleAnchor = { ...run, authorityDigest: state.authorityDigest, sourceDigest: state.sourceDigest,
+      epoch: state.epoch, generation: state.generation, eventSequence: state.events.at(-1)?.sequence ?? 0 };
+    const h3Receipt = { level: 'H3' };
+    assert.equal(approvedPostPatchBudgetProgress(idleAnchor, after, h3Receipt), true);
+    assert.equal(approvedPostPatchBudgetProgress(idleAnchor, after, { level: 'H2' }), true);
+    for (const change of [r => { r.authorityDigest = 'wrong'; }, r => { r.sourceDigest = 'wrong'; },
+      r => { r.epoch += 1; }, r => { r.generation += 1; }, r => { r.eventSequence += 1; },
+      r => { r.revision += 1; }, r => { r.activeLeaseIds.push('active'); }]) {
+      const invalid = structuredClone(idleAnchor); change(invalid);
+      assert.equal(approvedPostPatchBudgetProgress(invalid, after, h3Receipt), false);
+    }
+    for (const mutate of [s => { s.commands['h4.budget'].payloadDigest = 'wrong'; },
+      s => { s.decisions[0].digest = 'wrong'; }, s => { s.metadata.attemptBudgetExtensions[0].approval.digest = 'wrong'; },
+      s => { s.events.at(-1).additional = 21; }, s => { s.sourceDigest = 'changed'; },
+      s => { s.dispatches.push({ status: 'assigned' }); }]) {
+      const invalid = structuredClone(after); mutate(invalid);
+      assert.equal(approvedPostPatchBudgetProgress(idleAnchor, invalid, h3Receipt), false);
+    }
+    assert.equal(approvedPostPatchBudgetProgress(idleAnchor, after, { level: 'H4' }), false);
+    assert.equal(approvedPostPatchBudgetProgress(idleAnchor, after, patchReceipt), false);
     assert.deepEqual(after.submissions, state.submissions); assert.equal(after.dispatches.length, 0);
     assert.equal((await applyMigrationBudgetExtension({ manifestFile: source.file, patchReceipt, commandId: 'h4.budget' })).reused, true);
     for (const mutate of [s => { s.sourceDigest = 'drift'; }, s => { s.revision += 1; },

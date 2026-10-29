@@ -12,7 +12,7 @@ const latestOutput = (state, stage, port) => {
 
 export const reviewedPlanProposal = state => {
   const patch = latestOutput(state, 'version-planning', 'amendment');
-  return patch ? resolvedPlanAmendment(state.metadata.planRevision, patch)
+  return patch ? resolvedPlanAmendment(state.metadata.planRevision, patch, { workspaceRoot: state.metadata.workspace?.root })
     : latestOutput(state, 'version-planning', 'plan');
 };
 

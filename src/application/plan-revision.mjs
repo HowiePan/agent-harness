@@ -2,7 +2,7 @@ import { digestJson } from '../common/canonical.mjs';
 import { assert } from '../common/errors.mjs';
 import { planApprovalSnapshot, planApprovalSatisfied, reviewedPlanProposal } from '../flows/delivery-lifecycle/plan-approval.mjs';
 import { validateAmendmentScope } from '../flows/delivery-lifecycle/plan-amendment.mjs';
-import { selectAmendmentRetry } from './plan-amendment-retry.mjs';
+import { rejectedAmendmentDraftEvidence, selectAmendmentRetry } from './plan-amendment-retry.mjs';
 export { diffPlanFeatures } from '../flows/delivery-lifecycle/plan-diff.mjs';
 
 const planOutput = state => {
@@ -24,7 +24,13 @@ export const selectPlanRevisionParent = ({ intent, states }) => {
   && state.metadata.commandIntent.workflowId === intent.workflowId
   && state.features.some(feature => feature.metadata?.stage === 'plan-review'))
     .sort((left, right) => String(right.updatedAt).localeCompare(String(left.updatedAt)));
-  return candidates.find(state => planOutput(state) && planApprovalSnapshot(state)) ?? candidates[0] ?? null;
+  const selected = candidates.find(state => planOutput(state) && planApprovalSnapshot(state)) ?? candidates[0] ?? null;
+  if (intent.action === 'amend' && selected && rejectedAmendmentDraftEvidence(selected)) {
+    const original = candidates.find(state => state.runId === selected.metadata.planRevision.parentRunId);
+    if (original?.status === 'closed' && planApprovalSatisfied(original)
+      && planApprovalSnapshot(original)?.planDigest === selected.metadata.planRevision.parentPlanDigest) return original;
+  }
+  return selected;
 };
 
 export const preparePlanRevisionIntent = ({ intent, project, states, sourceDigest, sourceChanges = null, amendmentScope = null }) => {
@@ -54,7 +60,7 @@ export const preparePlanRevisionIntent = ({ intent, project, states, sourceDiges
   const changeRequest = declaration ? { id: intent.selector, ...structuredClone(declaration), digest: digestJson(declaration) } : null;
   const replacesAmendment = intent.action === 'amend' ? selectAmendmentRetry({ states, intent,
     parentRunId: parent.runId, parentPlanDigest: snapshot.planDigest, request: declaration,
-    scope: amendmentScope ?? declaration.amendmentScope }) : null;
+    scope: amendmentScope ?? declaration.amendmentScope, artifactDigest: project.harness?.artifactDigest }) : null;
   if (sourceChanges) assert(parent.sourceDigest !== sourceDigest && sourceChanges.fromSourceDigest === parent.sourceDigest
     && sourceChanges.toSourceDigest === sourceDigest && sourceChanges.parentRunId === parent.runId
     && sourceChanges.snapshotEvidenceRef && Array.isArray(sourceChanges.changedPaths)
@@ -80,6 +86,16 @@ export const preparePlanRevisionIntent = ({ intent, project, states, sourceDiges
   'REPLAN_IMPLEMENTATION_BUSY', 'Active implementation work must reach an idle boundary before replanning.');
   assert(implementationRuns.every(state => !state.findings?.some(finding => finding.status !== 'resolved')),
     'REPLAN_OPEN_FINDINGS', 'Open implementation findings require evidence-backed resolution before the Run can be retired for replanning.');
+  if (intent.action === 'amend') {
+    const completed = new Set(implementationRuns.flatMap(state => [
+      ...(state.metadata?.approvedPlan?.amendmentBaseline?.completedProposalIds ?? []),
+      ...state.features.filter(feature => feature.state === 'completed'
+        && (!feature.metadata?.deliveryBatch || feature.metadata.deliveryBatch.phase === 'convergence'))
+        .map(feature => feature.metadata?.approvedProposal?.id),
+    ]));
+    assert((amendmentScope ?? declaration.amendmentScope).featureSplits?.every(item => !completed.has(item.featureId)) ?? true,
+      'PLAN_AMENDMENT_COMPLETED_SPLIT_DENIED', 'A split cannot reopen an already completed proposal.');
+  }
   return {
     ...intent,
     ...(changeRequest ? { changeRequest } : {}),

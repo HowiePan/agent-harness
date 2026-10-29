@@ -3,7 +3,7 @@ import { lstat, readFile, realpath } from 'node:fs/promises';
 import { dirname, isAbsolute, relative, resolve } from 'node:path';
 import { parsePseudoCommand } from './pseudo-command-router.mjs';
 
-const fail = (code, message) => { throw Object.assign(new Error(message), { code }); };
+const fail = (code, message, details = null) => { throw Object.assign(new Error(message), { code, ...(details ? { details } : {}) }); };
 const samePath = (a, b) => process.platform === 'win32' ? resolve(a).toLowerCase() === resolve(b).toLowerCase() : resolve(a) === resolve(b);
 const inside = (parent, child) => { const part = relative(parent, child); return part === '' || (!part.startsWith('..') && !isAbsolute(part)); };
 const digest = bytes => createHash('sha256').update(bytes).digest('hex');
@@ -52,8 +52,14 @@ export const selectLocalSourceBindingsDir = async ({ event, defaultBindingsDir }
   if (!match) return defaultBindingsDir;
   const parsed = parsePseudoCommand(`h:${match[1]}`);
   if (!parsed || parsed.kind === 'invalid' || parsed.kind === 'init') return defaultBindingsDir;
-  const root = await repositoryRoot(event.cwd ?? process.cwd());
-  const cwd = await realpath(event.cwd ?? process.cwd());
+  return resolveLocalSourceProjectBindingsDir({ cwd: event.cwd ?? process.cwd(), projectAlias: parsed.projectAlias, defaultBindingsDir });
+};
+
+/** Read-only route identity check; does not create a Hook or lifecycle intent. */
+export const resolveLocalSourceProjectBindingsDir = async ({ cwd: inputCwd, projectAlias, defaultBindingsDir }) => {
+  if (!isAbsolute(defaultBindingsDir ?? '')) fail('LOCAL_SOURCE_ROUTE_BINDINGS_REQUIRED', 'Default bindings directory must be absolute.');
+  const root = await repositoryRoot(inputCwd);
+  const cwd = await realpath(inputCwd);
   if (!inside(root, cwd)) fail('LOCAL_SOURCE_ROUTE_WORKSPACE_MISMATCH', 'Hook cwd is outside its Git checkout.');
   const indexBytes = await optionalFile(resolve(defaultBindingsDir, 'project-routes.json'));
   if (!indexBytes) return defaultBindingsDir;
@@ -69,11 +75,14 @@ export const selectLocalSourceBindingsDir = async ({ event, defaultBindingsDir }
       catch { fail('LOCAL_SOURCE_ROUTE_CONFIG_INVALID', `Invalid harness.json at ${current}.`); }
       const alias = config?.binding?.alias;
       if (!alias || typeof alias !== 'string') fail('LOCAL_SOURCE_ROUTE_CONFIG_INVALID', `Missing project alias at ${current}.`);
-      if (!parsed.projectAlias || parsed.projectAlias === alias) {
+      if (!projectAlias || projectAlias === alias) {
         const entries = index.entries.filter(entry => entry.alias === alias && samePath(entry.projectRoot, current));
         if (entries.length !== 1) fail('LOCAL_SOURCE_ROUTE_NOT_REGISTERED', `Project route is not uniquely registered for ${alias} at ${current}.`);
         const selected = entries[0];
-        if (selected.projectId !== config.binding.projectId || selected.configSha256 !== digest(configBytes) || !isAbsolute(selected.bindingsDir) || !inside(await realpath(index.controlRoot), await realpath(selected.bindingsDir))) fail('LOCAL_SOURCE_ROUTE_IDENTITY_MISMATCH', `Registered route is stale or invalid for ${alias}.`);
+        const actualConfigSha256 = digest(configBytes);
+        if (selected.configSha256 !== actualConfigSha256) fail('LOCAL_SOURCE_ROUTE_IDENTITY_MISMATCH', `Registered route is stale or invalid for ${alias}.`,
+          { field: 'configSha256', alias, projectRoot: current, registered: selected.configSha256, actual: actualConfigSha256 });
+        if (selected.projectId !== config.binding.projectId || !isAbsolute(selected.bindingsDir) || !inside(await realpath(index.controlRoot), await realpath(selected.bindingsDir))) fail('LOCAL_SOURCE_ROUTE_IDENTITY_MISMATCH', `Registered route is stale or invalid for ${alias}.`);
         const binding = JSON.parse(await readFile(resolve(selected.bindingsDir, 'bindings.json'), 'utf8'));
         if (!binding.projects?.[alias] || binding.projects[alias].projectId !== selected.projectId || !samePath(binding.projects[alias].workspaceRoot, current) || !samePath(binding.harness.controlRoot, index.controlRoot)) fail('LOCAL_SOURCE_ROUTE_IDENTITY_MISMATCH', `Binding identity mismatch for ${alias}.`);
         return selected.bindingsDir;
@@ -82,5 +91,5 @@ export const selectLocalSourceBindingsDir = async ({ event, defaultBindingsDir }
     if (samePath(current, root)) break;
     current = dirname(current);
   }
-  fail('LOCAL_SOURCE_ROUTE_ALIAS_UNKNOWN', `No registered ancestor project matches ${parsed.projectAlias ?? 'the current directory'}.`);
+  fail('LOCAL_SOURCE_ROUTE_ALIAS_UNKNOWN', `No registered ancestor project matches ${projectAlias ?? 'the current directory'}.`);
 };

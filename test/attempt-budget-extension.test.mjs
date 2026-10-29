@@ -122,6 +122,60 @@ test('implementation budget scope rejects external blockers, a different Feature
   await assert.rejects(verifyImplementationBudgetScope({ ...input, state: moved }), { code: 'IMPLEMENTATION_BUDGET_WORKSPACE_MISMATCH' });
 });
 
+test('committed capacity progress permits a bounded proposal and resumes only after exact approval', async t => {
+  const fixture = await makeFixture(); t.after(fixture.cleanup);
+  const initial = blocked();
+  initial.metadata.commandIntent = { action: 'implement' };
+  initial.metadata.workspace = { root: process.cwd() };
+  initial.metadata.attemptAccounting = 'separate-progress-v1';
+  const submission = initial.submissions[0];
+  submission.dispatchId = 'dispatch-capacity';
+  submission.attemptBudgetKey = 'root:A-02:progress';
+  submission.result = { ...partial, failureClass: 'external-prerequisite-and-incomplete-implementation',
+    blocker: { kind: 'context-limit', summary: 'Capacity reached; another approved local certificate remains.' },
+    checkpoints: [{ id: 'approved-obligation', status: 'completed', evidence: ['proof/new'] }],
+    deliveryPrerequisites: [{ id: 'external-receipt', reason: 'Required before later source removal.' }] };
+  initial.dispatches = [{ dispatchId: submission.dispatchId, featureId: 'A-02', status: 'committed', execution: {
+    implementationContinuation: { policy: 'approved-obligation-progress/1', obligations: [{ id: 'approved-obligation' }] } } }];
+  initial.attempts = { [submission.attemptBudgetKey]: { key: submission.attemptBudgetKey, logicalRoot: 'root:A-02',
+    budgetKind: 'progress', used: 21, failures: 0, limit: 21, exhausted: true,
+    records: [{ submissionId: submission.submissionId, dispatchId: submission.dispatchId }] } };
+  const scope = state => ({ harness: { projectRegistry: { get: async () => ({ workspace: { root: process.cwd() } }) } },
+    state, featureId: 'A-02', currentSourceDigest: state.sourceDigest });
+  await verifyImplementationBudgetScope(scope(initial));
+  for (const kind of ['context-limit', 'context-capacity']) {
+    const copy = structuredClone(initial); copy.submissions[0].result.blocker.kind = kind;
+    await verifyImplementationBudgetScope(scope(copy));
+  }
+  for (const mutate of [s => { s.submissions[0].evidenceRefs = []; },
+    s => { s.submissions[0].result.checkpoints[0].id = 'unapproved'; },
+    s => { s.submissions[0].result.checkpoints[0].evidence = []; },
+    s => { s.submissions[0].result.blocker.kind = 'external-dependency'; },
+    s => { s.submissions[0].result.blocker.kind = 'approval'; },
+    s => { s.submissions[0].result.failureClass = 'external-dependency'; },
+    s => { s.submissions[0].result.status = 'failed'; },
+    s => { s.submissions[0].outputSourceDigest = 'stale'; },
+    s => { s.submissions[0].supersededAt = 'earlier'; },
+    s => { s.dispatches[0].status = 'assigned'; },
+    s => { s.dispatches[0].execution.implementationContinuation.policy = 'unknown'; },
+    s => { s.attempts['root:A-02:progress'].budgetKind = 'failure'; },
+    s => { s.attempts['root:A-02:progress'].records[0].dispatchId = 'other'; },
+    s => { s.submissions.unshift({ ...structuredClone(s.submissions[0]), submissionId: 'prior' }); }]) {
+    const copy = structuredClone(initial); mutate(copy);
+    await assert.rejects(verifyImplementationBudgetScope(scope(copy)), { code: 'IMPLEMENTATION_BUDGET_SCOPE_MISMATCH' });
+  }
+  let state = (await fixture.harness.authorityStore.create(initial, { commandId: 'seed-capacity', payload: {} })).state;
+  assert.throws(() => selectBlockedResumeFeature({ ...state, features: [{ ...state.features[0], state: 'blocked' }] }),
+    { code: 'LIFECYCLE_RESUME_BUDGET_EXHAUSTED' });
+  const proposal = prepareBudgetExtension({ state, ...request, attemptKey: submission.attemptBudgetKey });
+  state = (await fixture.harness.kernel.extendAttemptBudget(state.projectId, state.runId,
+    { proposal, approval: approvalFor(proposal) }, { expectedRevision: state.revision, commandId: 'extend-capacity' })).state;
+  assert.equal(selectBlockedResumeFeature(state), 'A-02');
+  assert.equal(state.attempts[submission.attemptBudgetKey].used, 21);
+  assert.equal(state.attempts[submission.attemptBudgetKey].limit, 41);
+  assert.deepEqual(state.submissions[0].result.deliveryPrerequisites, submission.result.deliveryPrerequisites);
+});
+
 test('managed submissions keep progress and real failures in different bounded ledgers across resume', async t => {
   const fixture = await makeFixture({ profiles: ['engine-delivery'] }); t.after(fixture.cleanup);
   const { harness } = fixture;

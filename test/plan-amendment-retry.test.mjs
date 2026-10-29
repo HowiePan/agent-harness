@@ -51,3 +51,27 @@ test('scope retry rejects live work, accepted output, different bases and broade
   row.input.states.push(structuredClone(row.state));
   assert.throws(() => selectAmendmentRetry(row.input), { code: 'PLAN_AMENDMENT_RETRY_AMBIGUOUS' });
 });
+
+test('a repaired registered runtime replaces an idle unaccepted draft with the exact same request and scope', () => {
+  const { state, input } = fixture();
+  state.artifactDigest = '1'.repeat(64);
+  input.request = { target: input.intent.target, summary: 'Original scope', amendmentScope: state.metadata.planRevision.amendmentScope };
+  input.scope = structuredClone(state.metadata.planRevision.amendmentScope);
+  input.artifactDigest = '2'.repeat(64);
+  const ref = selectAmendmentRetry(input);
+  assert.equal(ref.replacementArtifactDigest, input.artifactDigest);
+  const plan = { harness: { artifactDigest: input.artifactDigest }, intent: { ...input.intent,
+    planRevision: { ...state.metadata.planRevision, replacesAmendment: ref } } };
+  assert.equal(matchesAmendmentRetry(state, plan), true);
+  assert.equal(matchesAmendmentRetry(state, { ...plan, harness: { artifactDigest: '3'.repeat(64) } }), false);
+  assert.equal(matchesAmendmentRetry({ ...state, revision: state.revision + 1 }, plan), false);
+  assert.equal(selectAmendmentRetry({ ...input, artifactDigest: state.artifactDigest }), null);
+  for (const change of [row => row.leases.push({ status: 'active' }),
+    row => row.submissions.push({ result: { status: 'completed' } }), row => { row.status = 'closed'; }]) {
+    const changed = structuredClone(state); change(changed);
+    if (changed.status === 'closed') assert.equal(selectAmendmentRetry({ ...input, states: [changed] }), null);
+    else assert.throws(() => selectAmendmentRetry({ ...input, states: [changed] }), { code: 'PLAN_AMENDMENT_RETRY_UNSAFE' });
+  }
+  input.scope.planPointers.push('/proposedFeatures/2/dependsOn');
+  assert.throws(() => selectAmendmentRetry(input), { code: 'PLAN_AMENDMENT_RETRY_UNSAFE' });
+});

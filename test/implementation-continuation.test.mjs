@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { mkdir, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { sha256, digestJson } from '../src/common/canonical.mjs';
 import { buildImplementationContinuation, hasNewAcceptanceCheckpoint } from '../src/application/implementation-continuation.mjs';
@@ -139,4 +139,62 @@ test('coarser execution preserves all obligations, protected handoffs, acceptanc
     { id: 'runtime-already-passed', status: 'completed', evidence: ['fresh-green-suite'] },
   ] } };
   assert.equal(hasNewAcceptanceCheckpoint(s, s.features[0], result, context), false);
+});
+
+test('scoped external prerequisites stay hash-pinned and cannot become receipt or retirement clearance', async t => {
+  const { s, workspace } = await fixture(t);
+  const plan = JSON.parse(await readFile(resolve(workspace, 'plan.json'), 'utf8'));
+  plan.externalPrerequisites = [{ id: 'receiver-receipt', requiredBefore: 'remove-old-implementation',
+    projectIds: ['receiver-project'], summary: 'Independent receiver must accept the original behavior.',
+    evidence: ['inventory.json#/receiver'], releaseBlocking: false }];
+  const bytes = JSON.stringify(plan);
+  await writeFile(resolve(workspace, 'plan.json'), bytes);
+  s.features[0].metadata.approvedDeliveryPlan.expandedPlan.sha256 = sha256(bytes);
+  const before = digestJson(s);
+  const context = await buildImplementationContinuation(s, s.features[0], workspace);
+  assert.deepEqual(context.externalPrerequisites, plan.externalPrerequisites);
+  assert.match(context.instructions.join('\n'), /does not authorize removal, cross-project writes or fabricated receiver evidence/);
+  assert.match(context.instructions.join('\n'), /continue all feasible local targets, owner dependencies and certificates/);
+  assert.equal(digestJson(s), before);
+  assert.equal(context.obligations.filter(item => item.kind === 'source-exit').length, 1);
+  context.externalPrerequisites[0].requiredBefore = 'changed-by-consumer';
+  assert.deepEqual((await buildImplementationContinuation(s, s.features[0], workspace)).externalPrerequisites, plan.externalPrerequisites);
+  plan.externalPrerequisites = [];
+  await writeFile(resolve(workspace, 'plan.json'), JSON.stringify(plan));
+  await assert.rejects(buildImplementationContinuation(s, s.features[0], workspace), { code: 'IMPLEMENTATION_CONTINUATION_INPUT_STALE' });
+});
+
+test('partial target handoff selects the next existing owner before a missing thin consumer without closing acceptance', async t => {
+  const { s, workspace } = await fixture(t);
+  s.features[0].allowedPaths = ['new'];
+  const plan = JSON.parse(await readFile(resolve(workspace, 'plan.json'), 'utf8'));
+  plan.sourceLifecycleContract.sources[0].finalPaths.push('new/owner', 'new/consumer');
+  const bytes = JSON.stringify(plan);
+  await writeFile(resolve(workspace, 'plan.json'), bytes);
+  s.features[0].metadata.approvedDeliveryPlan.expandedPlan.sha256 = sha256(bytes);
+  await mkdir(resolve(workspace, 'new'));
+  await writeFile(resolve(workspace, 'new/receiver'), 'implemented receiver');
+  await writeFile(resolve(workspace, 'new/owner'), 'owner still requires implementation');
+  let context = await buildImplementationContinuation(s, s.features[0], workspace);
+  const receiver = context.implementationSteps[0];
+  const checkpoint = id => ({ id, status: 'completed', evidence: ['observed-source-and-check'] });
+  s.submissions[0].result.checkpoints = [checkpoint(receiver.id), checkpoint(`${receiver.id}:focused-verification`)];
+  context = await buildImplementationContinuation(s, s.features[0], workspace);
+  assert.equal(context.nextImplementationStep.targetPath, 'new/owner');
+  assert.equal(context.implementationSteps.length, 3);
+  assert.deepEqual(context.workBatch.targetStepIds, context.implementationSteps.map(step => step.id));
+  assert.deepEqual(context.workBatch.pendingTargetStepIds, context.implementationSteps.slice(1).map(step => step.id));
+  assert.equal(context.workBatch.consecutiveDevelopmentHandoffs, 1);
+  assert.equal(hasNewAcceptanceCheckpoint(s, s.features[0], s.submissions[0], context), false);
+  s.submissions[0].result.checkpoints[1].evidence = [];
+  assert.equal((await buildImplementationContinuation(s, s.features[0], workspace)).nextImplementationStep.targetPath, 'new/receiver');
+  s.submissions[0].result.checkpoints = context.implementationSteps.flatMap(step => [checkpoint(step.id), checkpoint(`${step.id}:focused-verification`)]);
+  assert.equal((await buildImplementationContinuation(s, s.features[0], workspace)).nextImplementationStep.targetPath, 'new/consumer');
+  await writeFile(resolve(workspace, 'new/consumer'), 'implemented consumer');
+  const final = await buildImplementationContinuation(s, s.features[0], workspace);
+  assert.equal(final.nextImplementationStep, null);
+  assert.equal(final.workBatch.certificateCandidateIds.length, 1);
+  assert.deepEqual(final.workBatch.pendingTargetStepIds, []);
+  assert.equal(final.obligations.length, context.obligations.length);
+  assert.equal(s.features[0].state, 'blocked');
 });

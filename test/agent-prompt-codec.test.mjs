@@ -130,11 +130,25 @@ test('visible continuation Prompt points to immutable obligations without operat
   const visible = packet();
   visible.execution.runtime = { mode: 'conversation-visible', userVisible: true, hostOrchestrated: true };
   visible.execution.result = createDispatchResultContract(visible.feature, { conversationVisible: true });
-  visible.execution.implementationContinuation = { policy: 'approved-obligation-progress/1', obligations: [{ id: 'obligation:one' }] };
+  visible.execution.implementationContinuation = { policy: 'approved-obligation-progress/1', obligations: [{ id: 'obligation:one' }], workBatch: { targetStepIds: ['target:one'] } };
   const compiled = compileAgentPrompt(visible);
   assert.match(compiled.text, /Read execution.implementationContinuation/);
+  assert.match(compiled.text, /use workBatch for connected owner\/consumer\/proof delivery/);
+  assert.match(compiled.text, /nextImplementationStep is only a starting target/);
+  assert.match(compiled.text, /scoped externalPrerequisites/);
+  assert.match(compiled.text, /preserve that action as blocked and never invent a receipt or extend write authority/);
   assert.match(compiled.text, /repeated passing checks or source edits alone/);
   assert.match(compiled.text, new RegExp(compiled.packetDigest));
+});
+
+test('historical continuation without a work batch preserves its original prompt instructions', () => {
+  const visible = packet();
+  visible.execution.runtime = { mode: 'conversation-visible', userVisible: true, hostOrchestrated: true };
+  visible.execution.result = createDispatchResultContract(visible.feature, { conversationVisible: true });
+  visible.execution.implementationContinuation = { policy: 'approved-obligation-progress/1', obligations: [{ id: 'obligation:one' }] };
+  const compiled = compileAgentPrompt(visible);
+  assert.ok(compiled.text.includes('Read execution.implementationContinuation in the packet: follow its instructions, pinned obligations, scoped externalPrerequisites, prior evidence and implementation order. Continue feasible approved local work when an external receipt blocks only a later action; preserve that action as blocked and never invent a receipt or extend write authority. Report newly closed obligation IDs in checkpoints; repeated passing checks or source edits alone do not establish acceptance progress.\n\n'));
+  assert.doesNotMatch(compiled.text, /use workBatch/);
 });
 
 test('visible prompts preserve explicit Dispatch authority for protected source operations', () => {

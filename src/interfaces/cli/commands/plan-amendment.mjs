@@ -12,9 +12,10 @@ import { verifyDevelopmentSourceManifest } from '../../../application/developmen
 import { createLocalDevelopmentInvocation } from '../../../application/local-development-invocation.mjs';
 import { loadProjectHarnessConfig } from '../../../application/project-initialization.mjs';
 import { selectPlanRevisionParent, preparePlanRevisionIntent } from '../../../application/plan-revision.mjs';
-import { assertAmendmentDocumentPins, materializePlanAmendment, planAmendmentReference, readPlanAmendmentScope } from '../../../application/plan-amendment-artifacts.mjs';
+import { assertAmendmentDocumentPins, compactPlanAmendmentDelta, materializePlanAmendment, planAmendmentReference, readPlanAmendmentScope } from '../../../application/plan-amendment-artifacts.mjs';
 import { captureAmendmentBaselines } from '../../../application/plan-amendment-baseline.mjs';
-import { parseAmendmentJson } from '../../../flows/delivery-lifecycle/amendment-json.mjs';
+import { digestAmendmentJson, parseAmendmentJson } from '../../../flows/delivery-lifecycle/amendment-json.mjs';
+import { inspectPlanAmendment } from '../../../application/plan-amendment-inspection.mjs';
 
 export const resolveAmendmentWorkflow = ({ project, boundExtension, profileId, workflowId }) => {
   const workflows = project.workflows?.length ? project.workflows : (boundExtension.workflows ?? []).filter(item => item.profileId === profileId);
@@ -39,31 +40,25 @@ export const inspectDevelopmentAmendment = async ({ manifestFile, selector, work
   assert(project.extensions.some(item => item.id === boundExtension.id && item.digest === boundExtension.digest),
     'PLAN_AMENDMENT_WORKFLOW_REQUIRED', 'The bound Extension identity must match the Project.');
   const selectedWorkflow = resolveAmendmentWorkflow({ project, boundExtension, workflowId, profileId: config.request.binding.profileId });
-  const states = await new AuthorityStore({ root: manifest.dataRoot, controlRoot: manifest.controlRoot }).list(project.id);
-  // Read-only lookup/validation only: this does not mint a Hook intent, compile a lifecycle Plan or mutate Authority.
-  const lookup = { action: 'amend', target: request.target, workflowId: selectedWorkflow, selector };
-  const parent = selectPlanRevisionParent({ intent: lookup, states });
-  const context = preparePlanRevisionIntent({ intent: lookup, states, project, sourceDigest: parent?.sourceDigest, amendmentScope: scope });
-  assertAmendmentDocumentPins(context.planRevision);
-  for (const document of scope.documents) {
-    const path = assertNoLinkPath(manifest.projectRoot, resolve(manifest.projectRoot, document.source.path), 'amendment input');
-    assert(sha256(await readFile(path)) === document.source.sha256,
-      'PLAN_AMENDMENT_INPUT_STALE', `Amendment input changed: ${document.source.path}`);
+  const bindingsDir = resolve(manifest.dataRoot, 'development', 'local-codex', '.plugin-data');
+  let localRouteVerified = null;
+  try { await readFile(resolve(bindingsDir, 'bindings.json')); localRouteVerified = false; }
+  catch (error) { if (error.code !== 'ENOENT') throw error; }
+  if (localRouteVerified === false) {
+    const { resolveLocalSourceProjectBindingsDir } = await import('../../../../integrations/codex/agent-harness-codex/hooks/local-source-route.mjs');
+    const selected = await resolveLocalSourceProjectBindingsDir({ cwd: manifest.projectRoot,
+      projectAlias: config.request.binding.alias, defaultBindingsDir: bindingsDir });
+    const matches = process.platform === 'win32' ? resolve(selected).toLowerCase() === bindingsDir.toLowerCase() : resolve(selected) === bindingsDir;
+    assert(matches, 'LOCAL_SOURCE_ROUTE_IDENTITY_MISMATCH', 'Amend inspection must match the actual local route binding.');
+    localRouteVerified = true;
   }
-  const baselines = await captureAmendmentBaselines({ states, revision: context.planRevision,
-    snapshot: await captureWorkspace(manifest.projectRoot, { excluded: project.workspace.excluded ?? [] }),
-    evidenceStore: new EvidenceStore({ root: manifest.dataRoot, controlRoot: manifest.controlRoot }), project });
-  return { kind: 'plan-amendment-inspection', projectId: project.id, projectRevision: project.revision,
-    workflowId: selectedWorkflow, selector, changeRequestDigest: digestJson(request),
-    baseRunId: parent.runId, basePlanDigest: context.planRevision.parentPlanDigest,
-    scope, idleImplementationRuns: context.planRevision.affectedImplementationRuns,
-    replacesAmendment: context.planRevision.replacesAmendment ?? null,
-    baselines: baselines.map(item => ({ runId: item.runId, sourceDigest: item.sourceDigest,
-      snapshotEvidenceRef: item.snapshotEvidenceRef, completedProposalIds: item.completed.map(entry => entry.proposalId) })),
-    commandReady: true, executionReady: false, runCreated: false, implementationStarted: false };
+  const inspection = await inspectPlanAmendment({ project, selector, workflowId: selectedWorkflow, workspaceRoot: manifest.projectRoot,
+    authorityStore: new AuthorityStore({ root: manifest.dataRoot, controlRoot: manifest.controlRoot }),
+    evidenceStore: new EvidenceStore({ root: manifest.dataRoot, controlRoot: manifest.controlRoot }) });
+  return { ...inspection, localRouteVerified };
 };
 
-export const materializeDevelopmentAmendment = async ({ manifestFile, runId, patchFile }) => {
+export const materializeDevelopmentAmendment = async ({ manifestFile, runId, patchFile, compact = false }) => {
   const { manifest } = await verifyDevelopmentSourceManifest(manifestFile);
   await createLocalDevelopmentInvocation({ projectRoot: manifest.projectRoot, configPath: manifest.configPath,
     controlRoot: manifest.controlRoot, dataRoot: manifest.dataRoot });
@@ -78,10 +73,15 @@ export const materializeDevelopmentAmendment = async ({ manifestFile, runId, pat
   const scope = state.metadata.planRevision.amendmentScope;
   assert(path.startsWith(`${resolve(manifest.projectRoot, scope.artifactRoot)}${process.platform === 'win32' ? '\\' : '/'}`),
     'PLAN_AMENDMENT_SCOPE_VIOLATION', 'Draft delta must be inside the registered amendment artifact root.');
-  const patch = parseAmendmentJson(await readFile(path, 'utf8'));
+  const original = parseAmendmentJson(await readFile(path, 'utf8'));
+  const patch = compact ? await compactPlanAmendmentDelta({ revision: state.metadata.planRevision,
+    patch: original, workspaceRoot: manifest.projectRoot }) : original;
   const materialized = await materializePlanAmendment({ revision: state.metadata.planRevision, patch, workspaceRoot: manifest.projectRoot });
   const impact = materialized.plan.amendment;
   return { ok: true, outputValue: planAmendmentReference(materialized), artifacts: materialized.artifacts,
+    ...(compact ? { compaction: { sourceDeltaDigest: digestAmendmentJson(original),
+      sourceBytes: Buffer.byteLength(JSON.stringify(original)), deltaBytes: Buffer.byteLength(JSON.stringify(materialized.patch)),
+      equivalence: 'same-result-as-input-delta' } } : {}),
     impact: { affectedFeatureIds: impact.affectedFeatureIds, modifiedFeatureIds: impact.modifiedFeatureIds,
       downstreamFeatureIds: impact.downstreamFeatureIds, deltaDigest: impact.deltaDigest },
     authorityModified: false, implementationStarted: false };

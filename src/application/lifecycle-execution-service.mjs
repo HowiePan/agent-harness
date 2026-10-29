@@ -51,6 +51,7 @@ export const shouldRetryImplementationVerificationPath = ({ feature, result, sta
   return current?.state === 'blocked' && attempt && !attempt.exhausted && attempt.failures <= retries;
 };
 export const shouldContinueImplementationProgress = ({ feature, result, state, submission }) => {
+  if (result.failureClass === 'implementation-sizing-review') return false;
   if (feature?.metadata?.stage !== 'implementation' || result?.status !== 'blocked') return false;
   // A project-owned verification failure can still be active implementation
   // work. The source-progress and cycle checks below make this a bounded
@@ -237,6 +238,13 @@ const continueVisibleLifecyclePlan = async (context, api, planInput, { commandId
         { featureId: blocked.id, reason: 'implement-automatic-continuation' },
         { expectedRevision: state.revision, commandId: `${commandId}.resume.reopen.${blocked.id}` })).state;
     }
+  } else if (state.metadata?.completionCarryover?.progressOnly) {
+    // Starting the sealed replacement is an explicit implement invocation.
+    // Migration itself preserved every blocker and never started work.
+    const featureId = selectBlockedResumeFeature(state);
+    if (featureId) state = (await api.kernel.reopenFeature(plan.project.id, activeRunId,
+      { featureId, reason: 'implement-migrated-partial-continuation' },
+      { expectedRevision: state.revision, commandId: `${commandId}.partial-carryover.reopen.${featureId}` })).state;
   }
   const rounds = [];
   const blockedFeatures = current => current.features
@@ -408,8 +416,12 @@ const continueVisibleLifecyclePlan = async (context, api, planInput, { commandId
         hostResultReceipt = rejected.receipt;
         runtimeEvidence = { ...runtimeEvidence, resultRejection: rejected.rejection };
       }
-      const submitted = await api.recordResult(plan.project.id, activeRunId, dispatch.dispatchId, businessResult, { commandId: `${commandId}.submit.${dispatch.dispatchId}`, runtimeEvidence: { ...runtimeEvidence, hostWaitReceipt: waited?.receipt ?? null, hostResultReceipt } });
+      const submitted = await api.recordResult(plan.project.id, activeRunId, dispatch.dispatchId, businessResult, { commandId: `${commandId}.submit.${dispatch.dispatchId}`,
+        onVerificationProgress: onGateProgress, runtimeEvidence: { ...runtimeEvidence, hostWaitReceipt: waited?.receipt ?? null, hostResultReceipt } });
       state = submitted.state;
+      // Application may reject a claimed delivery completion after actual
+      // verification. Continuation follows the accepted Authority result.
+      businessResult = state.submissions.find(item => item.dispatchId === dispatch.dispatchId)?.result ?? businessResult;
       const qualityScopePaths = businessResult.status === 'blocked' && businessResult.failureClass === 'scope-blocker'
         ? safeQualityScopePaths(feature, businessResult.blocker, plan.run.executionWorkspaceRoot) : [];
       if (rejected && submitted.result.featureState === 'blocked') {

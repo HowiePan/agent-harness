@@ -1,4 +1,7 @@
 import { submissionAttempt } from '../kernel/attempt-budget.mjs';
+import { isIncompleteImplementationResult } from '../common/implementation-result.mjs';
+
+export { isIncompleteImplementationResult } from '../common/implementation-result.mjs';
 
 export const HANDOFF_CORRECTION_POLICY = 'bounded-implementation-handoff/1';
 export const correctionReasonPrefix = (commandId, featureId) => `implementation-handoff-correction:${commandId}:${featureId}:`;
@@ -12,7 +15,8 @@ export const hasTargetImplementationProgress = (state, feature, submission, cont
   const checkpoints = submission.result?.checkpoints ?? [];
   const prior = state.submissions.filter(item => item.featureId === feature.id && item.submissionId !== submission.submissionId);
   if (prior.some(item => [item.inputSourceDigest, item.outputSourceDigest].includes(submission.outputSourceDigest))) return false;
-  return (context.implementationSteps ?? []).some(step => submission.changedFiles?.includes(step.targetPath)
+  return (context.implementationSteps ?? []).some(step => (!context.workBatch?.planDigest || context.workBatch.targetStepIds.includes(step.id))
+    && submission.changedFiles?.some(path => path === step.targetPath || ['directory', 'path'].includes(step.targetKind) && path.startsWith(`${step.targetPath}/`))
     && checkpoints.some(item => item.id === step.id && completed(item))
     && checkpoints.some(item => item.id === `${step.id}:focused-verification` && completed(item)));
 };
@@ -21,8 +25,7 @@ export const hasTargetImplementationProgress = (state, feature, submission, cont
 export const shouldCorrectImplementationHandoff = ({ state, feature, submission, commandId }) => {
   if (!commandId || feature?.metadata?.stage !== 'implementation' || feature.state !== 'blocked'
     || submission?.featureId !== feature.id || !submission.evidenceRefs?.length
-    || submission.result?.status !== 'blocked' || submission.result.failureClass !== 'implementation-incomplete'
-    || submission.result.blocker?.kind !== 'implementation') return false;
+    || !isIncompleteImplementationResult(submission.result)) return false;
   const context = state.dispatches?.find(item => item.dispatchId === submission.dispatchId)?.execution?.implementationContinuation;
   if (context?.correctionPolicy?.id !== HANDOFF_CORRECTION_POLICY) return false;
   const attempt = submissionAttempt(state, feature, submission);
@@ -37,5 +40,6 @@ export const shouldCorrectImplementationHandoff = ({ state, feature, submission,
 
 export const implementationHandoffCorrectionReason = (commandId, feature, context) => {
   const next = context.nextImplementationStep;
+  if (feature.metadata?.deliveryBatch) return `${correctionReasonPrefix(commandId, feature.id)} Complete planned batch ${context.workBatch.id} and its coherent acceptance/checks, not the whole original Feature. Do not repeat one-file/one-certificate voluntary slices. ${next ? `Start with ${next.targetPath} and its real consumer behavior.` : 'Start with the remaining assigned obligations.'} Preserve protected blockers and budget. If actual scope exceeds this moderate batch, record source-backed sizing and a bounded adjustment; do not cram unrelated batches into this Agent.`;
   return `${correctionReasonPrefix(commandId, feature.id)} The previous result only restated unfinished project-owned work; it identified no concrete authority, scope, environment or external prerequisite. Continue implementing, rather than rerunning the missing-certificate check and returning the same gap list. ${next ? `First implement and wire the approved target ${next.targetPath}, implementing any missing owner dependencies before its thin consumer. The target is a starting candidate, not an override of approved dependency order; report the actual implemented step id and its :focused-verification checkpoint with real evidence.` : 'Select the first unresolved approved obligation and implement its final target and consumers.'} Missing project-owned code or certificates are the work to perform, not an external blocker. If an actual prerequisite prevents that action, report its exact identity, attempted action and observed failure in the existing blocker/evidence fields. This is one bounded correction within the same Feature and existing attempt budget, not completion, added authority or a budget reset.`;
 };

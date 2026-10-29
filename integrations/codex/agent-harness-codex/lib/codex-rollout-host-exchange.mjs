@@ -96,7 +96,7 @@ export const readCodexRolloutObservation = async ({ controlRoot, dataRoot, sessi
   let result;
   try { result = JSON.parse(matches[0].agent_status.completed); }
   catch { fail('CODEX_ROLLOUT_HISTORICAL_RESULT_INVALID', 'The original completed Agent result is not structured JSON.'); }
-  return { receipt, result };
+  return { receipt, result, task: structuredClone(matches[0]) };
 };
 
 const validateRequest = (request, sessionId) => {

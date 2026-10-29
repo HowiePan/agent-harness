@@ -1,5 +1,19 @@
 import { assert } from '../common/errors.mjs';
 import { digestJson } from '../common/canonical.mjs';
+import { validateFinding } from '../kernel/quality.mjs';
+
+const carriedOrigin = (state, finding) => {
+  if (finding.source !== 'authority-snapshot' || state.metadata?.commandIntent?.action !== 'amend') return null;
+  const ref = state.metadata.planRevision?.replacesAmendment;
+  const original = ref?.preservedDraft?.openFindings?.find(row => row.id === finding.id);
+  const submission = ref?.preservedDraft?.rejectedReview?.submission;
+  if (!original || ref.replacementArtifactDigest !== state.artifactDigest || !submission
+    || submission.submissionId !== ref.preservedDraft.rejectedReview.submissionId
+    || submission.result?.outputs?.['plan-review']?.value?.approved !== false) return null;
+  const expected = validateFinding({ ...original, source: 'authority-snapshot', openedAt: finding.openedAt });
+  if (digestJson(finding) !== digestJson(expected)) return null;
+  return { runId: ref.runId, submission };
+};
 
 const reviewValue = submission => submission.result?.outputs?.['plan-review']?.value;
 const reviewFeature = (state, id) => state.features.find(feature => feature.id === id
@@ -28,19 +42,21 @@ export const planReviewResolutionCandidates = (state, legacyAssessments = []) =>
   const result = [];
   const legacyIds = legacyAssessments.map(item => item.id);
   assert(new Set(legacyIds).size === legacyIds.length, 'PLAN_REVIEW_RECONCILIATION_INVALID', 'Duplicate legacy assessments.');
-  for (const finding of state.findings.filter(item => item.status === 'open' && item.source === 'review')) {
-    const origin = reviews.find(submission => submission.featureId === finding.featureId
+  for (const finding of state.findings.filter(item => item.status === 'open')) {
+    const carried = carriedOrigin(state, finding);
+    if (finding.source !== 'review' && !carried) continue;
+    const origin = carried?.submission ?? reviews.find(submission => submission.featureId === finding.featureId
       && submission.result.findings?.some(item => item.id === finding.id)
       && finding.evidenceRefs.every(ref => submission.evidenceRefs.includes(ref)));
     if (!origin) continue;
-    const later = reviews.slice(reviews.indexOf(origin) + 1).filter(submission =>
+    const later = carried ? reviews : reviews.slice(reviews.indexOf(origin) + 1).filter(submission =>
       follows(state, submission.featureId, origin.featureId));
     const explicit = later.find(submission => explicitlyResolved(submission, finding.id)
       && !reportedIds(submission).includes(finding.id)
       && !reviews.slice(reviews.indexOf(submission) + 1).some(item => reportedIds(item).includes(finding.id)));
     let resolving = explicit;
     let assessment = null;
-    if (!resolving && legacyIds.includes(finding.id)) {
+    if (!resolving && !carried && legacyIds.includes(finding.id)) {
       assessment = legacyAssessments.find(item => item.id === finding.id);
       resolving = later.find(submission => submission.submissionId === assessment.reviewSubmissionId);
       const blockers = resolving ? [...new Set(reportedIds(resolving))] : [];
@@ -58,10 +74,12 @@ export const planReviewResolutionCandidates = (state, legacyAssessments = []) =>
       'PLAN_REVIEW_RECONCILIATION_INVALID', 'Legacy resolution requires an exact operator assessment, descendant review and explicit resolution of every successor Finding.');
     }
     if (!resolving) continue;
-    const supporting = assessment ? [origin, resolving, latest] : [origin, resolving];
+    const supporting = carried ? [resolving] : assessment ? [origin, resolving, latest] : [origin, resolving];
     result.push({ id: finding.id, submissions: supporting,
-      evidenceRefs: [...new Set(supporting.flatMap(submission => submission.evidenceRefs))],
+      ...(carried ? { carriedOrigin: carried } : {}),
+      evidenceRefs: [...new Set([...(carried ? origin.evidenceRefs : []), ...supporting.flatMap(submission => submission.evidenceRefs)])],
       resolution: { status: 'fixed', kind: 'plan-review-evidence-reconciliation',
+        ...(carried ? { originRunId: carried.runId, originSubmissionId: origin.submissionId } : {}),
         reviewSubmissionId: resolving.submissionId,
         ...(assessment ? { operatorAssessment: structuredClone(assessment), finalReviewSubmissionId: latest.submissionId } : {}),
         summary: assessment?.summary ?? resolving.result.checkpoints.find(item => item.id === finding.id).summary } });
@@ -76,6 +94,10 @@ export const planReviewResolutionCandidates = (state, legacyAssessments = []) =>
 
 /** Verify original committed result bytes and context before issuing any Kernel command. */
 export const verifyPlanReviewResolutionEvidence = async (state, candidates, evidenceStore) => {
+  for (const candidate of candidates.filter(item => item.carriedOrigin)) {
+    await verifyPlanReviewResolutionEvidence({ ...state, runId: candidate.carriedOrigin.runId },
+      [{ submissions: [candidate.carriedOrigin.submission] }], evidenceStore);
+  }
   const submissions = [...new Map(candidates.flatMap(item => item.submissions)
     .map(submission => [submission.submissionId, submission])).values()];
   for (const submission of submissions) {
@@ -85,7 +107,8 @@ export const verifyPlanReviewResolutionEvidence = async (state, candidates, evid
     for (const ref of submission.evidenceRefs) {
       const evidence = await evidenceStore.read(ref);
       const stored = JSON.parse(evidence.bytes.toString('utf8'));
-      assert(evidence.metadata.projectId === state.projectId && evidence.metadata.runId === state.runId
+      assert(stored?.result && typeof stored.result === 'object'
+        && evidence.metadata.projectId === state.projectId && evidence.metadata.runId === state.runId
         && evidence.metadata.featureId === submission.featureId && evidence.metadata.dispatchId === submission.dispatchId
         && evidence.metadata.epoch === submission.epoch && evidence.metadata.generation === submission.generation
         && digestJson(stored.result) === digestJson(submission.result)

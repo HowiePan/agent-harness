@@ -162,7 +162,8 @@ export const resolveRunLineage = ({ plan, states, currentLineage = null, policy 
         && currentLineage?.activeRunId === amendmentRetry.runId
         && candidates.every(candidate => candidate.status === 'closed' || candidate.runId === amendmentRetry.runId)) {
         action = 'supersede-and-start';
-        reasonCode = 'AMENDMENT_SCOPE_CORRECTION_REQUESTED';
+        reasonCode = revision.replacesAmendment.replacementArtifactDigest
+          ? 'AMENDMENT_RUNTIME_REPAIR_REQUESTED' : 'AMENDMENT_SCOPE_CORRECTION_REQUESTED';
       } else if (['replan', 'amend'].includes(plan.intent.action) && parent && parent.authorityDigest === revision.parentAuthorityDigest
         && (!currentLineage?.activeRunId || currentLineage.activeRunId === parent.runId || Boolean(retiredActive))
         && candidates.every(candidate => candidate.status === 'closed' || idle(candidate))

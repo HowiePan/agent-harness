@@ -1,9 +1,13 @@
 import { readFile, writeFile, mkdir, stat } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import { assert } from '../common/errors.mjs';
+import { buildImplementationContinuation } from './implementation-continuation.mjs';
+import { DELIVERY_BATCH_POLICY } from '../flows/delivery-lifecycle/delivery-batches.mjs';
 import { digestJson, sha256 } from '../common/canonical.mjs';
 import { assertNoLinkPath } from '../common/paths.mjs';
 import { parseAmendmentJson, stringifyAmendmentJson } from '../flows/delivery-lifecycle/amendment-json.mjs';
+import { assertAmendmentMembership } from '../flows/delivery-lifecycle/amendment-feature-splits.mjs';
+import { compactAmendmentChanges } from '../flows/delivery-lifecycle/amendment-compaction.mjs';
 import { amendmentArtifactScope, applyAmendmentChanges, applyPlanAmendment, readAmendmentPointer,
   rebindAmendmentReferences, renderPlanAmendmentDelta, validateAmendmentGraph, validateAmendmentScope } from '../flows/delivery-lifecycle/plan-amendment.mjs';
 
@@ -47,6 +51,23 @@ export const assertAmendmentDocumentPins = (revision) => {
     'PLAN_AMENDMENT_INPUT_UNAPPROVED', 'Each document must be an active root input pinned by the approved base, not an ancestor reference.');
 };
 
+/** Opt-in syntax compaction only; materialization still runs every original guard. */
+export const compactPlanAmendmentDelta = async ({ revision, patch, workspaceRoot }) => {
+  const scope = validateAmendmentScope(revision.amendmentScope);
+  assertAmendmentDocumentPins(revision);
+  assert(Array.isArray(patch?.documents) && patch.documents.length === scope.documents.length,
+    'PLAN_AMENDMENT_DOCUMENT_INVALID', 'Compaction requires every registered pinned document.');
+  const compact = structuredClone(patch);
+  compact.changes = compactAmendmentChanges(revision.parentPlan, patch.changes, scope.planPointers);
+  for (const spec of scope.documents) {
+    const entries = compact.documents.filter(row => row.id === spec.id);
+    assert(entries.length === 1, 'PLAN_AMENDMENT_DOCUMENT_INVALID', 'Missing or duplicated document delta.');
+    const base = await readPinned(workspaceRoot, spec.source);
+    entries[0].changes = compactAmendmentChanges(base, entries[0].changes, spec.allowedPointers);
+  }
+  return compact;
+};
+
 export const planAmendmentReference = built => ({ version: 'plan-amendment/1',
   basePlanDigest: built.plan.amendment.basePlanDigest,
   changeRequestDigest: built.plan.amendment.changeRequestDigest, deltaRef: built.plan.amendment.deltaRef });
@@ -71,7 +92,7 @@ export const resolvePlanAmendmentResult = async ({ state, feature, result, works
   if (value.deltaRef) assert(digestJson(reference) === digestJson(value),
     'PLAN_AMENDMENT_BINDING_MISMATCH', 'Compact result does not bind the exact materialized delta.');
   const resolved = { ...result, outputs: { ...result.outputs,
-    amendment: { ...result.outputs.amendment, value: { ...reference, plan: built.plan } } } };
+    amendment: { ...result.outputs.amendment, value: reference } } };
   return { result: resolved, receipt: { kind: 'plan-amendment-reference-resolution', version: '1.0',
     nativeResultDigest: digestJson(result), resolvedResultDigest: digestJson(resolved),
     deltaRef: reference.deltaRef, deltaDigest: built.plan.amendment.deltaDigest,
@@ -100,12 +121,7 @@ export const buildPlanAmendmentArtifacts = async ({ revision, patch, workspaceRo
         'PLAN_AMENDMENT_PROTECTED_FIELD', `Amendment cannot change ${key}.`);
     }
     if (base.proposedFeatures) {
-      assert(digestJson(base.proposedFeatures.map(item => [item.id, item.projectId, item.disposition]))
-        === digestJson(value.proposedFeatures.map(item => [item.id, item.projectId, item.disposition])),
-      'PLAN_AMENDMENT_IDENTITY_CHANGED', 'Expanded proposal membership cannot change.');
-      const modified = base.proposedFeatures.filter((item, index) => digestJson(item) !== digestJson(value.proposedFeatures[index]));
-      assert(modified.every(item => scope.featureIds.includes(item.id)),
-        'PLAN_AMENDMENT_SCOPE_VIOLATION', 'Expanded document changes an unregistered Feature.');
+      assertAmendmentMembership(base, value, scope);
       validateAmendmentGraph(value);
     }
     value = rebindAmendmentReferences(value, rebindings);
@@ -134,6 +150,15 @@ export const buildPlanAmendmentArtifacts = async ({ revision, patch, workspaceRo
   };
   checkReferences(plan);
   outputs.forEach(output => checkReferences(output.value));
+  for (const proposal of plan.proposedFeatures.filter(item => item.disposition === 'project-owned'
+    && item.deliveryPolicy === DELIVERY_BATCH_POLICY)) {
+    await buildImplementationContinuation({ features: [], submissions: [], attempts: {} }, {
+      id: proposal.id, logicalRoot: proposal.id, allowedPaths: proposal.allowedPaths,
+      forbiddenPaths: proposal.forbiddenPaths, metadata: { stage: 'implementation', approvedProposal: proposal,
+        approvedDeliveryPlan: plan } }, workspaceRoot, { readPinnedBytes: async ref =>
+      outputs.find(item => item.path === ref.path)?.bytes
+        ?? await readFile(assertNoLinkPath(workspaceRoot, resolve(workspaceRoot, ref.path), 'planned delivery input')) });
+  }
   return { plan, patch: completedPatch, outputs, artifactRoot: artifacts.artifactRoot };
 };
 

@@ -11,9 +11,10 @@ import { createHarness } from './harness.mjs';
 import { loadProjectHarnessConfig } from './project-initialization.mjs';
 import { CodexHostEffectJournal } from './codex-host-effect-journal.mjs';
 import { assertDevelopmentRunRecoveryEffects, assertH4QualityRestartable } from './development-run-recovery.mjs';
+import { inspectPlanAmendment } from './plan-amendment-inspection.mjs';
 
 /** Preview the replacement graph under the future H4 source before changing its binding. */
-export const previewDevelopmentH4Migration = async ({ plan, manifest, runId }) => {
+export const previewDevelopmentH4Migration = async ({ plan, manifest, runId, forAmendment = null }) => {
   assert(plan.level === 'H4' && plan.activeRuns.length === 1
     && plan.activeRuns[0].runId === runId && plan.activeRuns[0].activeLeaseIds.length === 0
     && plan.activeRuns[0].activeDispatchIds.length === 0,
@@ -50,6 +51,21 @@ export const previewDevelopmentH4Migration = async ({ plan, manifest, runId }) =
       assert(installed && installed.version === item.version, 'DEVELOPMENT_H4_EXTENSION_MISSING', `Future Project is missing Extension ${item.id}.`);
       return { id: item.id, version: item.version, digest: installed.digest };
     }) };
+  if (forAmendment) {
+    assert(implementation, 'DEVELOPMENT_H4_AMENDMENT_SCOPE', 'A planning transition requires the exact idle implementation Run.');
+    const workflowId = prior.metadata.commandIntent.workflowId;
+    assert(extensions.some(extension => extension.workflows?.some(workflow => workflow.id === workflowId)),
+      'DEVELOPMENT_H4_AMENDMENT_SCOPE', 'The future source must retain the registered implementation Workflow.');
+    const inspection = await inspectPlanAmendment({ project: descriptor, selector: forAmendment, workflowId,
+      workspaceRoot: manifest.projectRoot, authorityStore, evidenceStore });
+    const referenced = await Promise.all(inspection.idleImplementationRuns.map(item => authorityStore.read(prior.projectId, item.runId)));
+    const active = referenced.filter(item => !['closed', 'superseded', 'failed', 'incomplete'].includes(item.status));
+    assert(active.length === 1 && active[0].runId === runId,
+      'DEVELOPMENT_H4_AMENDMENT_SCOPE', 'The registered amendment must retire exactly the inspected Run.');
+    return { projectId: prior.projectId, priorRunId: runId, priorRevision: prior.revision,
+      priorAuthorityDigest: prior.authorityDigest, sourceDigest: prior.sourceDigest,
+      transition: 'freeze-until-amendment', inspection, runCreated: false, implementationStarted: false };
+  }
   const parent = assertHarnessWritePath(resolve(controlRoot, '.tmp', 'development-h4-preflight'), 'H4 preview parent', controlRoot);
   await mkdir(parent, { recursive: true });
   const tempRoot = assertHarnessWritePath(await mkdtemp(resolve(parent, 'case-')), 'H4 preview directory', controlRoot);
@@ -109,7 +125,7 @@ export const previewDevelopmentH4Migration = async ({ plan, manifest, runId }) =
       typedPlan: prior.metadata.approvedPlan.typedPlan, projectId: prior.projectId, approvalBinding: prior.metadata.approvedPlan });
     const carryover = createCompletionCarryoverPlan({ prior, replacementFeatures,
       replacementRunId: replacement.run.runId, replacementPlanDigest: replacement.planDigest,
-      patchReceiptDigest: '0'.repeat(64), sourceDigest: replacement.run.sourceDigest });
+      patchReceiptDigest: '0'.repeat(64), sourceDigest: replacement.run.sourceDigest, includeIncomplete: true });
     await verifyCompletionCarryover({ plan: carryover, prior, replacementFeatures, evidenceStore, authorityStore });
     return { projectId: prior.projectId, priorRunId: runId, priorRevision: prior.revision,
       priorAuthorityDigest: prior.authorityDigest, sourceDigest: prior.sourceDigest,

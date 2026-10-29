@@ -9,6 +9,8 @@ import { resolvedPlanAmendment } from '../plan-amendment.mjs';
 import { createPlanReviewFollowUps, DEFAULT_PLAN_REVIEW_LIMIT } from '../plan-review-loop.mjs';
 import { uniqueProposalIds } from '../proposal-id.mjs';
 import { implementationAttemptBudget } from './implementation-progress.mjs';
+import { validateDeliveryBatches, DELIVERY_BATCH_POLICY } from '../delivery-batches.mjs';
+import { assertInheritedBudgetAvailable } from '../compile-delivery-batches.mjs';
 
 export const DELIVERY_STAGES = Object.freeze([
   'requirement-intake', 'requirement-expansion', 'canonical-requirement', 'version-planning', 'plan-review', 'implementation',
@@ -37,6 +39,7 @@ export const createDeliveryLifecycleProfile = (id = 'delivery-lifecycle') => Obj
     return {
       planReviewLimit: config.planReviewLimit ?? DEFAULT_PLAN_REVIEW_LIMIT,
       requireCanonicalDecision: config.requireCanonicalDecision !== false,
+      requireDeliveryBatches: config.requireDeliveryBatches === true,
       requireUserCodeReview: config.requireUserCodeReview !== false,
       requiredFinalGates: [...new Set(config.requiredFinalGates ?? [])],
       requireFinalQualityReview: config.requireFinalQualityReview === true,
@@ -64,7 +67,7 @@ export const createDeliveryLifecycleProfile = (id = 'delivery-lifecycle') => Obj
       try {
         if (feature.metadata?.stage === 'version-planning') {
           assert(!result.outputs?.plan, 'PLAN_AMENDMENT_FULL_REWRITE_DENIED', 'Amend accepts a delta, not an Agent-authored full plan.');
-          resolvedPlanAmendment(state.metadata.planRevision, result.outputs?.amendment?.value);
+          resolvedPlanAmendment(state.metadata.planRevision, result.outputs?.amendment?.value, { workspaceRoot: state.metadata.workspace?.root });
         } else if (feature.metadata?.stage === 'plan-review') {
           const plan = reviewedPlanProposal(state);
           const review = result.outputs?.['plan-review']?.value;
@@ -113,7 +116,7 @@ export const createDeliveryLifecycleProfile = (id = 'delivery-lifecycle') => Obj
     }
     if (feature.metadata?.stage === 'version-planning' && result.status === 'completed') {
       const proposals = state.metadata?.commandIntent?.action === 'amend'
-        ? resolvedPlanAmendment(state.metadata.planRevision, result.outputs?.amendment?.value).proposedFeatures
+        ? resolvedPlanAmendment(state.metadata.planRevision, result.outputs?.amendment?.value, { workspaceRoot: state.metadata.workspace?.root }).proposedFeatures
         : result.outputs?.plan?.value?.proposedFeatures ?? [];
       if (proposals.some(item => (item.projectId === state.projectId) !== (item.disposition === 'project-owned'))) {
         return { ok: false, reason: 'planning-proposal-project-disposition-mismatch' };
@@ -121,6 +124,9 @@ export const createDeliveryLifecycleProfile = (id = 'delivery-lifecycle') => Obj
       if (!uniqueProposalIds(proposals.filter(item => item.projectId === state.projectId))) {
         return { ok: false, reason: 'planning-proposal-id-invalid' };
       }
+      for (const proposal of proposals.filter(item => item.projectId === state.projectId
+        && (item.deliveryPolicy === DELIVERY_BATCH_POLICY || state.metadata?.commandIntent?.action !== 'amend'
+          && state.profile?.config?.requireDeliveryBatches))) validateDeliveryBatches(proposal);
     }
     // A negative review is a valid decision. Preserve its findings instead of
     // rejecting the result and retrying the same unchanged plan.
@@ -141,6 +147,10 @@ export const createDeliveryLifecycleProfile = (id = 'delivery-lifecycle') => Obj
   },
 
   canDispatch(feature, state) {
+    if (feature.metadata?.deliveryBatch) assertInheritedBudgetAvailable(state, feature);
+    if (feature.metadata?.deliveryBatch && Object.values(state.attempts ?? {}).some(item => item.logicalRoot === feature.logicalRoot && item.exhausted)) {
+      return { ok: false, reason: 'shared-attempt-budget-exhausted' };
+    }
     const stage = feature.metadata.stage;
     const config = state.profile.config;
     if (stageIndex(stage) > stageIndex('plan-review') && state.features.some(item => item.metadata?.stage === 'plan-review') && !planReviewApproved(state)) {

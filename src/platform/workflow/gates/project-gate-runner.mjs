@@ -30,7 +30,7 @@ const fileDigest = path => new Promise((resolveDigest, reject) => {
   stream.on('error', reject);
   stream.on('end', () => resolveDigest(hash.digest('hex')));
 });
-const toolchainInputs = async (recipe, cwd) => {
+export const toolchainInputs = async (recipe, cwd) => {
   const name = recipe.command[0].split(/[\\/]/).at(-1).toLowerCase().replace(/\.(exe|cmd|bat)$/, '');
   const args = recipe.command.slice(1);
   const paths = [];
@@ -64,7 +64,7 @@ const executableCandidates = (executable, cwd) => {
   return String(process.env.PATH ?? '').split(delimiter).filter(Boolean).flatMap(directory => extensions.map(extension => resolve(directory, process.platform === 'win32' && !executable.toLowerCase().endsWith(extension.toLowerCase()) ? `${executable}${extension}` : executable)));
 };
 
-const executableAvailable = async (executable, cwd) => {
+export const executableAvailable = async (executable, cwd) => {
   for (const candidate of executableCandidates(executable, cwd)) {
     try { await access(candidate, process.platform === 'win32' ? constants.F_OK : constants.X_OK); return candidate; }
     catch {}

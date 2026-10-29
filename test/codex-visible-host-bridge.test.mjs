@@ -9,6 +9,7 @@ import { createStdioHostExchange } from '../integrations/codex/agent-harness-cod
 import { createVisibleLifecycleIntent, decodeVisibleLifecycleIntent, encodeVisibleLifecycleIntent, validateVisibleLifecycleIntent } from '../integrations/codex/agent-harness-codex/lib/visible-lifecycle-intent.mjs';
 import { digestJson } from '../src/common/canonical.mjs';
 import { harnessTemporaryRoot } from '../src/common/write-boundary.mjs';
+import { assertRecoverableNativeImplementationResult } from '../src/application/development-terminal-result.mjs';
 
 const businessResult = {
   status: 'completed',
@@ -49,11 +50,60 @@ const setup = async (t, { spawnResult = undefined, interruptStops = true } = {})
     assert.deepEqual(request.arguments, {});
     return { agents: [...tasks].map(([agent_name, agent_status]) => ({ agent_name, agent_status })) };
   };
-  const create = (sessionId = 'session-fixture') => createCodexCollaborationHostAdapter({ exchange, controlRoot, dataRoot: resolve(root, 'data'), sessionId, now: () => '2026-09-15T00:00:00.000Z', waitTimeoutMs: 1000 });
+  const create = (sessionId = 'session-fixture', options = {}) => createCodexCollaborationHostAdapter({ exchange, controlRoot, dataRoot: resolve(root, 'data'), sessionId, now: () => '2026-09-15T00:00:00.000Z', waitTimeoutMs: 1000, ...options });
   return { root, tasks, requests, exchange, create };
 };
 
 const spawnInput = { projectId: 'engine', runId: 'run-1', dispatchId: 'dispatch-1', packetDigest: 'a'.repeat(64), promptDigest: 'b'.repeat(64), prompt: 'exact prompt\nwith newline' };
+
+test('recovery collects a bound capacity failure after Coordinator loss, without interrupt or source claims', async t => {
+  const fixture = await setup(t);
+  const host = fixture.create();
+  const spawned = await host.adapter.spawn(spawnInput);
+  const runtimeReceipt = { visibility: spawned.visibility, hostSpawnReceipt: spawned.receipt,
+    prompt: { promptDigest: spawnInput.promptDigest }, resultContractDigest: 'c'.repeat(64) };
+  await host.adapter.confirm({ ...spawnInput, agentId: spawned.agentId, runtimeReceipt });
+  fixture.tasks.set(spawned.agentId, { errored: 'Selected model is at capacity.' });
+  // Recovery uses a new adapter instance, with the original persisted Lease.
+  const recovery = fixture.create();
+  const observed = await recovery.adapter.heartbeatVisibleAgent({ dispatch: spawnInput, prompt: runtimeReceipt.prompt,
+    agentId: spawned.agentId, runtimeReceipt });
+  assert.equal(observed.status, 'failed');
+  const transported = await recovery.adapter.result({ agentId: spawned.agentId, dispatchId: spawnInput.dispatchId, runtimeReceipt });
+  const effect = await recovery.journal.read(spawned.receipt.effectId, { required: true });
+  assertRecoverableNativeImplementationResult({ transported, effect,
+    lease: { agentId: spawned.agentId, runtimeReceipt }, dispatch: spawnInput,
+    feature: { metadata: { stage: 'implementation' } } });
+  assert.equal(transported.result.failureClass, 'runtime-provider');
+  assert.deepEqual(transported.result.changedFiles, []);
+  assert.equal(effect.state, 'settled');
+  assert.equal(fixture.requests.some(request => request.operation === 'interrupt'), false);
+});
+
+test('recovery re-reads only the exact settled native observation after fresh Agent absence', async t => {
+  const fixture = await setup(t);
+  const host = fixture.create();
+  const spawned = await host.adapter.spawn(spawnInput);
+  const runtimeReceipt = { visibility: spawned.visibility, hostSpawnReceipt: spawned.receipt };
+  await host.adapter.confirm({ ...spawnInput, agentId: spawned.agentId, runtimeReceipt });
+  const task = { agent_name: spawned.agentId, agent_status: { completed: JSON.stringify(businessResult) } };
+  fixture.tasks.set(spawned.agentId, task.agent_status);
+  const first = await host.adapter.result({ agentId: spawned.agentId, dispatchId: spawnInput.dispatchId, runtimeReceipt });
+  fixture.tasks.delete(spawned.agentId);
+  await assert.rejects(() => host.adapter.result({ agentId: spawned.agentId, dispatchId: spawnInput.dispatchId, runtimeReceipt }),
+    error => error.code === 'CODEX_COLLABORATION_AGENT_NOT_FOUND');
+  let original = { task, receipt: { sessionId: 'session-fixture', requestDigest: first.receipt.observationRequestDigest, receiptDigest: 'c'.repeat(64) } };
+  const recovery = fixture.create('session-fixture', { readSettledObservation: async () => structuredClone(original) });
+  const observed = await recovery.adapter.heartbeatVisibleAgent({ dispatch: spawnInput, prompt: spawnInput, agentId: spawned.agentId, runtimeReceipt });
+  assert.equal(observed.verified, true);
+  const second = await recovery.adapter.result({ agentId: spawned.agentId, dispatchId: spawnInput.dispatchId, runtimeReceipt });
+  assert.deepEqual(second.result, first.result);
+  assert.deepEqual(second.receipt, first.receipt);
+  assert.notEqual(second.runtimeEvidence.settledObservation.absenceRequestDigest, first.receipt.observationRequestDigest);
+  original.task.agent_status.completed = JSON.stringify({ ...businessResult, changedFiles: ['src/forged'] });
+  await assert.rejects(() => recovery.adapter.result({ agentId: spawned.agentId, dispatchId: spawnInput.dispatchId, runtimeReceipt }),
+    error => error.code === 'CODEX_COLLABORATION_SETTLED_RESULT_MISMATCH');
+});
 
 test('Codex collaboration adapter binds the real native envelope, canonical task, Lease, wait, and result', async t => {
   const fixture = await setup(t);

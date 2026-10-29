@@ -1,5 +1,7 @@
 # 本地源码调试模式
 
+可信项目重新绑定会同时刷新本项目已登记的 `project-routes.json` 配置摘要；不能只更新 `bindings.json`。刷新固定初始化回执的配置摘要、项目身份和路径，原子更新唯一匹配项并保留其他项目路由。未经过重新绑定的配置漂移仍拒绝。`dev amendment-inspect` 同时校验这层实际 Hook 路由，不再仅凭 Registry/开发清单报告入口就绪。
+
 `source-link` 让项目直接使用当前 Agent Harness checkout，无需每次打包、卸载、重装。从项目 checkout 主动运行 `dev` 命令或发送 `h:local` 命令即授权本地源码绑定及 H0–H3 同步；应用层根据这次调用生成绑定具体计划和命令的 Authority Decision，无需人工另行签发。从 Harness checkout 指向项目执行相同写入时仍需外部 Decision。路径、Gate、宿主证明和运行期保护操作继续按原合同检查。完整字段和命令见[配置 API](../reference/configuration-api.md#8-本地源码调试与热更新)。
 
 项目工作区必须已有可解析的 `.git` 元数据。`dev execute` 在写入 Registry 前检查工作区身份；没有 `.git` 时返回 `WORKSPACE_GIT_METADATA_REQUIRED`。
@@ -132,6 +134,8 @@ agent-harness dev recover-run --manifest <manifest.json> --run <run-id>
 
 H4 补丁若没有任何活动 Run，可在已绑定项目 checkout 显式执行 `agent-harness dev migrate --manifest <manifest.json> --no-active-run --command-id <稳定ID>`；补丁计划和应用时都复核零活动 Run，写入独立 `idleRebind` Receipt 并重新绑定，已终结的 Run 不被改写。有唯一闲置实施 Run 时仍使用 `--run <精确ID>` 的原迁移路线；两种参数不能同时提供。
 
+实施 Run 尚无完成子项、但已有正式提交的部分成果时，迁移仍须封存原图、源码和部分 Submission/Evidence。替代 Run 承接全部原始计数、批准追加额度与未完成历史，并保留 scope、外部和预算阻塞；不得按“零完成项”重置额度或把阻塞改成待执行。恢复入口按批准图顺序只重开依赖已完成、证据有效且有剩余额度的可执行任务。`failed` 或 `blocked` 的 `implementation-incomplete` / `implementation-gap` 均可进入原有一次纠正重试，原返回结果和失败计数不改写。
+
 有唯一已完成审查、修复阻塞且无活动 Lease/Dispatch 的质量 Run 时，`dev migrate --run <精确ID>` 先核对来源、源码快照、Host Effect 和 Submission Evidence，再更新 H4 绑定，并以 `development-h4-quality-restart` 将旧 Run 记为失败。旧审查和修复证据留在 Authority；下一次相同 `quality` 命令从历史问题清单开始新一轮有界审查，不继承旧 Run 的轮次。
 
 实施 Agent 可以分批完成已批准的项目内工作。若本轮有经工作区快照核实的源码变更，但仍有项目内计划项，Agent 以 `implementation-incomplete` 返回阻塞结果；Coordinator 在同一 Run 内自动重新打开该 Feature，并让下一轮从当前源码和上次 Submission 继续。续接预算按项目内计划项计算，每项 20 轮、上限 200 轮；无源码进展、回到既有摘要、其他故障或预算耗尽时停止并报告具体阻断。跨项目集成证据、独立审查和发布批准不属于当前项目内实施 Feature 的完成条件。
@@ -153,6 +157,12 @@ H2/H3 导致 Coordinator 已退出时，`dev recover-run` 仅在项目 checkout 
 实施代理因中断被 preflight 隔离、ordinary resume 已废止旧 Transport 后，允许保留其未提交源码草稿。恢复器核对唯一原 Dispatch、Run 级原始快照、原生中断及再次观察回执、完整 Host 绑定和全部源路径差异；越界或来源不明的变更继续拒绝。通过后只记录带前后源码摘要和 Evidence 的 `workspace.interrupted-draft-preserved` 事件，不创建 Submission、不完成 Feature、不恢复旧 Lease。下一次派发重新验证草稿；完成证据承接仍逐项校验原图和原 Submission。该协调器补丁为 H3，经 `dev sync` 和正式开发恢复准备替代 Run。
 
 用户只要求修复到可重新发命令时，可在项目 checkout 使用 `visible-development-recovery.mjs --manifest <manifest> --run <run-id> --prepare-only`。它完成正式退役与封存承接计划，执行带原生 Host 观察的预检，发出 `prepared` 后停止；不创建替代 Run、不派发代理、不执行实施工作。`--retire-only` 仍在退役后立即停止。
+
+若旧 Coordinator 在状态查询时超时，而实施 Agent 已返回原生 `errored`/`failed`，H3 开发恢复先用新鲜原生观察和原 Dispatch/Prompt/结果合同收集提供方失败，通过正常 Submission 释放租约并计入失败预算，再退役旧 Run。没有源码变化的失败也须封存原终态收据、结果摘要和精确三事件事务；不会伪造源码进展或清零历史。缺失 Agent 仍走原生缺失隔离，其他阻断不按提供方失败放行。
+
+补丁计划分别固定受影响 Run 的 Authority `revision` 与末尾 `eventSequence`。恢复事务覆盖校验分别比较两者；一次事务可能产生多个事件，不能用修订号推断事件序号。
+
+已由原生 Host 记账的 `runtime-interrupted` 实施结果，在输入、输出及当前源码摘要相同、派发与租约均已提交、原始终态回执及 Submission/Evidence 身份逐项核验通过且预算未耗尽时，下一次 `implement` 可续接。它不完成 Feature、不重置额度、不接受未归属源码草稿，也不放行权限、外部依赖或合同错误。修改该恢复策略属于 H3；旧绑定仍先经 `dev sync` 和上述 `--prepare-only` 准备替代 Plan，不能把新策略注入旧 Lease。
 
 已提交的 `environment-blocker` 不会因重发实施命令而自动重开。环境修复后，H3 开发恢复可用 `--prepare-only --environment-review <json>` 复核。输入为 `kind=environment-blocker-review`、`actor=operator`，并固定 `projectId/runId/featureId/expectedRevision/submissionDigest/sourceDigest/blockerDigest` 及 `executables`。工具路径须恰好覆盖原 Submission 的 `deliveryPrerequisites[].affectedPaths`；程序只对这些物理可执行文件执行固定 `--version`，不接受自定义参数或 shell。它验证原 Evidence、剩余额度及当前源码，现场捕获成功输出和工具 hash，再以 Evidence 封存到旧 Run 的完成承接记录。失败、身份或源码漂移均不退役；未完成工作不提升为完成，预算历史不重置。这里只支持有已完成实施前缀的 H3 恢复；没有真实补丁收据时不得虚构补丁或直接改 Authority。
 
@@ -193,6 +203,16 @@ source-link Receipt 带开发态标记，不能作为正式发布、签名或生
 
 局部实现检查点用于不可避免的交接。遇到具体权限、环境、范围、外部前置条件，或实际宿主、Runtime、上下文限制导致无法继续时，报告准确的停止约束及证据、原定验收批次、实际关闭的义务和下一项可执行动作。不得把“还有代码或证书未完成”“任务较大”或自行设定的批次结束当作阻断。
 
+外部前置条件按已批准计划的 `requiredBefore` 动作生效。例如，下游签收是旧实现移除的前置条件时，仍须保留旧实现与未完成验收，同时继续不依赖该签收的本项目目标、接线和证书开发。不得伪造签收或扩大跨项目写权限。只有确切的下一项动作被前置条件阻止且已无可行独立工作时，才返回纯外部阻断；不得自行改变已批准的前置条件。新派发携带原样的摘要绑定前置条件，并以部分实现检查点选择下一开发目标；这些检查点不构成聚合验收或旧源码退出证明。
+
+H3 恢复已批准的修订计划时，原修订继承基线使用首次批准实施启动的内容寻址快照重新验证；当前工作区仍须精确匹配封存替代计划，实施源码进展仍须通过来源兼容性和完成证据承接校验。不得把实施后的源码重新当作“只允许规划制品变化”的修订准备快照，也不得跳过原修订证据、用户批准、来源摘要或 Feature 图的核验。
+
 每次实质修改后执行必要的聚焦检查；完整复验在源码稳定的验收批次或 Feature 边界集中执行。批准的验证合同要求更早执行、出现新失败或后续修改使旧证据失效时，仍须及时复验。最终验收证据绑定最终源码，全部强制检查和覆盖要求保留。
 
-该调整只改变派发的执行节奏，不拆分 Feature、不增加 Lease、不扩大写权限、不重置预算，也不把局部进展提升为完整验收。H2/H3 源码变更须同步绑定并通过受控恢复准备替代 Run；完成项和可验证证据按既有恢复规则保留，业务 Replan 不作为常规操作。
+上述完整 Feature 同会话及连通闭包规则只适用于既有不可变 v1 计划。新批准的 [`bounded-delivery/2`](bounded-delivery.md) 预先规划适中批次，编译为多个独立原生 Agent 调度单元，原 Feature 保留最终收口。不得把旧规则套到新批次，也不得仅凭共享文件把全部义务塞入同一会话。路径、外部退出条件、真实证据和共享预算保护继续保留，业务 Replan 不作为常规操作。
+
+新策略的 `workBatch` 固定本批目标、义务、规模与检查，完成后可正常交接。Harness 执行并封存实际检查，最终收口核对当前输入与上游证明并强制新验。候选、历史检查点和局部源码进展均不等于完整验收。H4 若后续应修订，可使用 `dev migrate ... --for-amend <登记变更>` 先验证并冻结旧 Run，只准备 Amend 入口，不启动旧计划替代实施。
+
+本地实现缺口的识别统一覆盖 `failed`/`blocked` 与 `implementation-incomplete`/`implementation-gap`，且 blocker 必须是 `implementation` 或 `implementation-gap`。续接和单次有界纠偏仍要求封存 Evidence 及原记账预算未耗尽，不改写原生结果或重置原预算键。重复零碎交付检查使用相同识别规则；同一已批准批次内不能靠更换上述返回形式逃过规模审查。范围、外部前置、环境、容量及审批阻断仍各自遵循原证据和权限规则。
+
+多次补丁承接后，来源兼容性从原批准启动快照开始，沿摘要绑定的入站 carry-over 逐段验证各 Run 的本地 Submission。每段必须匹配父 Run 的退休声明、替代计划、批准身份、工作区和完整 Feature 图；单独继承的旧预算记录不构成来源桥接。当前源码仍须等于最后一段的输出摘要，不接受未记账的工作区漂移。

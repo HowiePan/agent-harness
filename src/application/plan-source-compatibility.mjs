@@ -5,6 +5,7 @@ import { resolve } from 'node:path';
 import { planApprovalSnapshot, reviewedPlanProposal } from '../flows/delivery-lifecycle/plan-approval.mjs';
 import { CodexHostEffectJournal } from './codex-host-effect-journal.mjs';
 import { readInterruptedWorkspaceDraft } from './interrupted-workspace-recovery.mjs';
+import { completionCarryoverDigest, implementationGraphDigest } from '../kernel/completion-carryover.mjs';
 
 const excludedPath = (path, excluded) => excluded.some(entry => {
   const normalized = String(entry).replaceAll('\\', '/').replace(/^\.\//, '').replace(/\/$/, '');
@@ -67,6 +68,48 @@ export const assessAutomaticPlanSourceCompatibility = ({ planRun, assessment, im
   };
 };
 
+const localSourceSubmissions = run => {
+  const inherited = new Set(run.metadata?.attemptCarryover?.submissionIds ?? []);
+  return (run.submissions ?? []).filter(item => !item.supersededAt
+    && (!inherited.has(item.submissionId)
+      || run.dispatches?.some(dispatch => dispatch.dispatchId === item.dispatchId)));
+};
+
+// A replacement keeps the original approval start. Reconstruct its source
+// prefix through sealed inbound carry-over, never through arbitrary counters.
+const sourceSubmissionLineage = (run, priorRuns, sameRoot) => {
+  const lineage = []; const visited = new Set();
+  let current = run;
+  while (current) {
+    if (visited.has(current.runId)) return null;
+    visited.add(current.runId); lineage.unshift(current);
+    const link = (current.events ?? []).findLast(item => item.type === 'feature.completion-carried-over');
+    if (!link) break;
+    const parents = priorRuns.filter(item => item.runId === link.priorRunId && item.projectId === run.projectId);
+    if (parents.length !== 1) return null;
+    const parent = parents[0]; const claim = parent.metadata?.completionCarryover?.plan;
+    const sameApproval = ['runId', 'planDigest', 'artifactDigest', 'originalSourceDigest', 'sourceDigest']
+      .every(key => parent.metadata?.approvedPlan?.[key] === run.metadata.approvedPlan[key]);
+    if (!sameApproval || !sameRoot(parent.metadata?.workspace?.root)
+      || parent.metadata?.commandIntent?.action !== 'implement'
+      || parent.metadata.commandIntent.target !== run.metadata.commandIntent.target
+      || parent.metadata?.workflow?.id !== run.metadata?.workflow?.id || parent.status !== 'superseded'
+      || parent.leases?.some(item => ['requested', 'active'].includes(item.status))
+      || parent.dispatches?.some(item => ['requested', 'assigned', 'bound'].includes(item.status))
+      || parent.metadata.supersededByRunId !== current.runId
+      || parent.metadata.supersedePlanDigest !== current.metadata?.lifecyclePlanDigest
+      || claim?.priorRunId !== parent.runId || claim.replacementRunId !== current.runId
+      || claim.replacementPlanDigest !== current.metadata?.lifecyclePlanDigest
+      || claim.sourceDigest !== parent.sourceDigest || claim.carryoverDigest !== link.carryoverDigest
+      || claim.carryoverDigest !== completionCarryoverDigest(claim)
+      || !parent.features?.some(item => item.metadata?.stage === 'implementation')
+      || claim.implementationGraphDigest !== implementationGraphDigest(parent.features)
+      || claim.implementationGraphDigest !== implementationGraphDigest(current.features)) return null;
+    current = parent;
+  }
+  return lineage.flatMap(origin => localSourceSubmissions(origin).map(item => ({ item, origin })));
+};
+
 /** Preserve source progress already committed by an implementation Run for this exact approved plan. */
 export const assessVerifiedImplementationContinuation = ({ planRun, planArtifact, priorRuns, currentSourceDigest, workspaceRoot, implementationFeatures, verifiedSourceRecoveries = [] }) => {
   const currentPaths = (implementationFeatures ?? [])
@@ -87,17 +130,17 @@ export const assessVerifiedImplementationContinuation = ({ planRun, planArtifact
       || binding?.runId !== planRun.runId || binding.planDigest !== planArtifact.planDigest
       || binding.artifactDigest !== planArtifact.artifactDigest
       || binding.originalSourceDigest !== planRun.sourceDigest || !binding.sourceDigest) continue;
-    const submitted = (run.submissions ?? []).filter(item => !item.supersededAt);
-    if (!submitted.length || !submitted.some(item => item.changedFiles?.length)) continue;
+    const submitted = sourceSubmissionLineage(run, priorRuns, sameRoot);
+    if (!submitted?.length || !submitted.some(({ item }) => item.changedFiles?.length)) continue;
     let digest = binding.sourceDigest;
     const bridge = () => {
       const matches = verifiedSourceRecoveries.filter(item => item.fromSourceDigest === digest);
       if (matches.length === 1) digest = matches[0].toSourceDigest;
     };
     let valid = true;
-    for (const item of submitted) {
+    for (const { item, origin } of submitted) {
       if (item.inputSourceDigest !== digest) bridge();
-      const feature = run.features?.find(candidate => candidate.id === item.featureId);
+      const feature = origin.features?.find(candidate => candidate.id === item.featureId);
       const paths = item.changedFiles ?? [];
       if (item.inputSourceDigest !== digest || !item.outputSourceDigest || !item.submissionDigest
         || !item.evidenceRefs?.length || !feature
@@ -110,7 +153,7 @@ export const assessVerifiedImplementationContinuation = ({ planRun, planArtifact
     if (valid && digest === currentSourceDigest && digest !== binding.sourceDigest) return {
       mode: 'verified-prior-implementation', priorRunId: run.runId,
       fromSourceDigest: binding.sourceDigest, toSourceDigest: currentSourceDigest,
-      submissionDigests: submitted.map(item => item.submissionDigest),
+      submissionDigests: submitted.map(({ item }) => item.submissionDigest),
     };
   }
   return null;

@@ -31,7 +31,7 @@ export const selectCompletionCarryoverSource = (states, plan) => {
 };
 
 export const createCompletionCarryoverPlan = ({ prior, replacementFeatures, replacementRunId,
-  replacementPlanDigest, patchReceiptDigest, sourceDigest }) => {
+  replacementPlanDigest, patchReceiptDigest, sourceDigest, includeIncomplete = false }) => {
   assert(prior.metadata?.commandIntent?.action === 'implement' && prior.status !== 'closed' && prior.status !== 'superseded',
     'CARRYOVER_SOURCE_RUN_INVALID', 'Completion carry-over requires an unfinished implementation Run.');
   assert(sourceDigest === prior.sourceDigest, 'CARRYOVER_SOURCE_CHANGED', 'Completion carry-over requires the exact authoritative source snapshot.');
@@ -46,7 +46,12 @@ export const createCompletionCarryoverPlan = ({ prior, replacementFeatures, repl
     || (/^[a-f0-9]{64}$/.test(priorWorkflowDigest ?? '') && /^[a-f0-9]{64}$/.test(replacementWorkflowDigest ?? '')),
   'CARRYOVER_WORKFLOW_IDENTITY_INVALID', 'Workflow artifact rebinding requires exact old and new digests.');
   const completed = oldFeatures.filter(feature => feature.state === 'completed');
-  assert(completed.length > 0, 'CARRYOVER_NO_COMPLETIONS', 'No completed implementation Features require carry-over.');
+  const partial = completed.length === 0 && includeIncomplete ? prior.submissions.filter(item =>
+    oldFeatures.some(feature => feature.id === item.featureId)
+    && ['blocked', 'failed'].includes(item.result?.status) && !item.supersededAt
+    && prior.dispatches.some(dispatch => dispatch.dispatchId === item.dispatchId && dispatch.status === 'committed')) : [];
+  assert(completed.length > 0 || partial.length > 0, 'CARRYOVER_NO_COMPLETIONS',
+    'Carry-over requires completed Features or an explicitly verified committed partial implementation.');
   const firstPending = oldFeatures.findIndex(feature => feature.state !== 'completed');
   assert(firstPending >= 0 && oldFeatures.slice(firstPending).every(feature => feature.state !== 'completed'),
     'CARRYOVER_COMPLETION_ORDER_INVALID', 'Completed Features must form the verified prefix of the implementation graph.');
@@ -58,12 +63,20 @@ export const createCompletionCarryoverPlan = ({ prior, replacementFeatures, repl
     return { featureId: feature.id, submissionId: submission.submissionId,
       submissionDigest: submission.submissionDigest, evidenceRefs: [...submission.evidenceRefs] };
   });
+  const partialSubmissions = partial.map(submission => {
+    assert(submission.evidenceRefs?.length > 0
+      && submission.submissionDigest === digestJson(withoutKeys(submission, ['submissionDigest'])),
+    'CARRYOVER_PARTIAL_EVIDENCE_INVALID', 'Partial implementation requires an unchanged committed Submission and Evidence.');
+    return { featureId: submission.featureId, submissionId: submission.submissionId,
+      submissionDigest: submission.submissionDigest, evidenceRefs: [...submission.evidenceRefs] };
+  });
   const body = { protocolVersion: '1.0', kind: 'completion-carryover-plan', projectId: prior.projectId,
     priorRunId: prior.runId, priorAuthorityDigest: prior.authorityDigest, priorRevision: prior.revision,
     replacementRunId, replacementPlanDigest, sourceDigest,
     patchReceiptDigest, implementationGraphDigest: implementationGraphDigest(oldFeatures),
     priorWorkflowDigest, replacementWorkflowDigest,
-    completedSubmissions, firstPendingFeatureId: oldFeatures[firstPending].id };
+    completedSubmissions, firstPendingFeatureId: oldFeatures[firstPending].id,
+    ...(partialSubmissions.length ? { progressOnly: true, partialSubmissions } : {}) };
   return { ...body, carryoverDigest: completionCarryoverDigest(body) };
 };
 
@@ -76,9 +89,9 @@ export const verifyCompletionCarryover = async ({ plan, prior, replacementFeatur
   const expected = createCompletionCarryoverPlan({ prior: { ...prior, status: prior.status === 'superseded' ? 'ready' : prior.status,
     authorityDigest: plan.priorAuthorityDigest, revision: plan.priorRevision }, replacementFeatures,
   replacementRunId: plan.replacementRunId, replacementPlanDigest: plan.replacementPlanDigest,
-  patchReceiptDigest: plan.patchReceiptDigest, sourceDigest: plan.sourceDigest });
+  patchReceiptDigest: plan.patchReceiptDigest, sourceDigest: plan.sourceDigest, includeIncomplete: plan.progressOnly === true });
   assert(expected.carryoverDigest === plan.carryoverDigest, 'CARRYOVER_PLAN_MISMATCH', 'Completion carry-over no longer matches the original Feature and Submission ledger.');
-  for (const item of plan.completedSubmissions) {
+  for (const item of [...plan.completedSubmissions, ...(plan.partialSubmissions ?? [])]) {
     const submission = prior.submissions.find(candidate => candidate.submissionId === item.submissionId);
     for (const ref of item.evidenceRefs) {
       const record = await evidenceStore.read(ref);

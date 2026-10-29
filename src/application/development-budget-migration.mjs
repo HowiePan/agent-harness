@@ -1,7 +1,7 @@
 import { digestJson, withoutKeys } from '../common/canonical.mjs';
 import { assert } from '../common/errors.mjs';
 import { AuthorityStore } from '../kernel/authority-store.mjs';
-import { assertBudgetExtensionApproval } from '../kernel/attempt-budget.mjs';
+import { assertBudgetExtensionApproval, budgetExtensionDigest } from '../kernel/attempt-budget.mjs';
 import { ProjectRegistry } from '../platform/registry/project-registry.mjs';
 import { ExtensionRegistry } from '../platform/extensions/registry.mjs';
 import { previewImplementationBudget, verifyImplementationBudgetScope } from './implementation-budget.mjs';
@@ -51,9 +51,27 @@ export const applyMigrationBudgetExtension = async ({ manifestFile, patchReceipt
 
 /** Only the exact, one-transaction budget addition sealed in the patch can bridge its snapshot. */
 export const approvedBudgetExtensionProgress = (run, state, receipt) => {
+  if (receipt.level !== 'H4' || receipt.migrationRunId !== state.runId) return false;
+  return exactBudgetTransition(run, state, receipt.budgetExtension);
+};
+
+/** An idle H2/H3 patch may precede one separately approved budget transaction. */
+export const approvedPostPatchBudgetProgress = (run, state, receipt) => {
+  if (!['H2', 'H3'].includes(receipt.level) || receipt.budgetExtension) return false;
+  const extension = state.metadata?.attemptBudgetExtensions?.at(-1);
+  if (!extension?.approval) return false;
+  const proposal = withoutKeys(extension, ['approval', 'commandId', 'recordedAt']);
+  const approval = withoutKeys(extension.approval, ['recordedAt', 'digest']);
+  if (!run.authorityDigest || proposal.authorityDigest !== run.authorityDigest
+    || proposal.sourceDigest !== run.sourceDigest || proposal.epoch !== run.epoch || proposal.generation !== run.generation
+    || state.events.at(-1)?.sequence !== run.eventSequence + 1) return false;
+  return exactBudgetTransition(run, state, { proposal, approval });
+};
+
+const exactBudgetTransition = (run, state, budgetExtension) => {
   try {
-    const { proposal, approval } = receipt.budgetExtension ?? {};
-    if (!proposal || receipt.level !== 'H4' || receipt.migrationRunId !== state.runId
+    const { proposal, approval } = budgetExtension ?? {};
+    if (!proposal || proposal.proposalDigest !== budgetExtensionDigest(proposal)
       || run.projectId !== state.projectId || run.runId !== state.runId
       || run.activeLeaseIds.length || run.activeDispatchIds.length
       || state.leases.some(item => ['requested', 'active'].includes(item.status))

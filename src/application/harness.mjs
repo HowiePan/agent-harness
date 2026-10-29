@@ -25,8 +25,11 @@ import { installExtensionPacks } from '../platform/extensions/contract.mjs';
 import { resolveCommandIntent } from '../platform/extensions/command-contract.mjs';
 import { createLifecycleCommandPlan, validateLifecycleCommandPlan } from './lifecycle-command-plan.mjs';
 import { selectBlockedResumeFeature } from './lifecycle-resume.mjs';
+import { verifyInterruptedImplementationResume } from './lifecycle-interruption.mjs';
 import { buildImplementationContinuation } from './implementation-continuation.mjs';
-import { resolveCarryoverApproval } from './implementation-carryover-approval.mjs';
+import { verifyDeliveryBatchResult } from './delivery-verification.mjs';
+import { withVerificationLease } from './delivery-verification-lease.mjs';
+import { resolveCarryoverApproval, readCarryoverApprovalSnapshot } from './implementation-carryover-approval.mjs';
 import { recoverInterruptedWorkspace } from './interrupted-workspace-recovery.mjs';
 import { createExecutionReadinessReport as buildExecutionReadinessReport } from './execution-readiness-service.mjs';
 import { executeHeadlessLifecyclePlan, executeVisibleLifecyclePlan as runVisibleLifecyclePlan } from './lifecycle-execution-service.mjs';
@@ -59,6 +62,7 @@ import { expandApprovedImplementation } from '../flows/delivery-lifecycle/approv
 import { assessAutomaticPlanSourceCompatibility, assessPlanSourceCompatibility, assessRecoveredImplementationContinuation, assessVerifiedImplementationContinuation, matchingPlanSourceCompatibilityDecision } from './plan-source-compatibility.mjs';
 import { preparePlanRevisionIntent, selectPlanRevisionParent } from './plan-revision.mjs';
 import { readPlanAmendmentScope, resolvePlanAmendmentResult, verifyPlanAmendmentArtifacts } from './plan-amendment-artifacts.mjs';
+import { carryAmendmentReviewFindings } from './plan-amendment-finding-carryover.mjs';
 import { captureAmendmentBaselines, verifyAmendmentBaselines } from './plan-amendment-baseline.mjs';
 import {
   buildExecutionGrantContext,
@@ -550,7 +554,13 @@ export const createHarness = async ({ controlRoot: controlRootInput, dataRoot: d
             && digestJson(planned.allowedPaths) === digestJson(feature.metadata.scopeExtensions[0].before)
             && digestJson(feature.allowedPaths) === digestJson(feature.metadata.scopeExtensions.at(-1).after))))
         || feature.metadata?.stage === 'gate-diagnostic'), 'LIFECYCLE_RESUME_FEATURE_MISMATCH', 'Run has Features outside the original lifecycle plan.');
-      return { plan, runId, blockedFeatureId: selectBlockedResumeFeature(state), authorityRevision: state.revision, authorityDigest: state.authorityDigest };
+      const blockedFeatureId = selectBlockedResumeFeature(state);
+      if (blockedFeatureId) {
+        const feature = state.features.find(item => item.id === blockedFeatureId);
+        const submission = [...state.submissions].reverse().find(item => item.featureId === blockedFeatureId);
+        await verifyInterruptedImplementationResume({ state, feature, submission, evidenceStore });
+      }
+      return { plan, runId, blockedFeatureId, authorityRevision: state.revision, authorityDigest: state.authorityDigest };
     },
 
     async startLifecyclePlan(planInput, { commandId, preflightReport, resumeRunId = null } = {}) {
@@ -693,6 +703,7 @@ export const createHarness = async ({ controlRoot: controlRootInput, dataRoot: d
       } else if (lineageResolution.action !== 'return-closed') {
         assert(state.metadata?.lifecyclePlanDigest === plan.planDigest, 'LIFECYCLE_PLAN_RUN_CONFLICT', 'Existing Run is bound to another Command Plan.');
       }
+      state = await carryAmendmentReviewFindings({ state, plan, authorityStore, evidenceStore, kernel, commandId });
       state = await commitCommandDecisions(state);
       for (const candidate of lineageResolution.candidates) {
         if (candidate.runId === state.runId || ['closed', 'incomplete', 'failed', 'superseded'].includes(candidate.status)) continue;
@@ -768,6 +779,7 @@ export const createHarness = async ({ controlRoot: controlRootInput, dataRoot: d
     },
 
     async startRun(input, command) {
+      assert(!input.attemptCarryover, 'ATTEMPT_CARRYOVER_AUTHORITY_REQUIRED', 'Counter transfer is derived only from the verified approved baseline.');
       const project = await projectRegistry.get(input.projectId);
       const workspace = await resolveProjectWorkspace(project, input.executionWorkspaceRoot);
       if (strictProjectIdentity) assert(project.harness && /^[a-f0-9]{64}$/.test(project.harness.artifactDigest ?? ''), 'PROJECT_HARNESS_IDENTITY_REQUIRED', `Project ${project.id} does not bind an exact Harness artifact.`);
@@ -796,6 +808,7 @@ export const createHarness = async ({ controlRoot: controlRootInput, dataRoot: d
       if (input.completionCarryover) assert(snapshot.digest === runSourceDigest,
         'CARRYOVER_WORKSPACE_SOURCE_STALE', 'Workspace changed since the replacement carry-over Plan was captured.');
       let approvedPlan = null;
+      let carryoverPrior = null;
       if (input.metadata?.commandIntent?.action === 'implement' && input.features.some(feature => feature.metadata?.stage === 'implementation') && !input.features.some(feature => feature.metadata?.stage === 'plan-review')) {
         const target = input.metadata?.commandIntent?.target;
         const workflowId = input.metadata?.workflow?.id;
@@ -843,14 +856,17 @@ export const createHarness = async ({ controlRoot: controlRootInput, dataRoot: d
           && decision.decision === 'approved' && decision.planDigest === artifact.planDigest
           && decision.artifactDigest === artifact.artifactDigest);
         const amendmentBaseline = typedPlan.amendment ? await verifyAmendmentBaselines({ planRun: latest, typedPlan,
-          snapshot: snapshot ?? await captureWorkspace(workspace.root, { excluded: project.workspace.excluded ?? [] }),
+          snapshot: input.completionCarryover ? await readCarryoverApprovalSnapshot({ input,
+            prior: carryoverPrior = await authorityStore.read(project.id, input.completionCarryover.priorRunId),
+            currentSnapshot: snapshot, authorityStore, evidenceStore })
+            : snapshot ?? await captureWorkspace(workspace.root, { excluded: project.workspace.excluded ?? [] }),
           authorityStore, evidenceStore, archivePath: project.policy?.planArchiveRoot
             ? `${project.policy.planArchiveRoot}/v${target.slice(1).split('.')[0]}/${target.toLowerCase()}-execution-plan-review.md` : null,
           archiveDigest: artifact.artifactDigest }) : null;
         approvedPlan = { projectId: latest.projectId, runId: latest.runId, planDigest: artifact.planDigest, artifactDigest: artifact.artifactDigest, sourceDigest: runSourceDigest, originalSourceDigest: latest.sourceDigest, typedPlan: structuredClone(typedPlan), approvalDecision: structuredClone(approvalDecision), ...(sourceCompatibility ? { sourceCompatibility } : {}), ...(amendmentBaseline ? { amendmentBaseline } : {}) };
       }
       if (input.completionCarryover) approvedPlan = resolveCarryoverApproval({ input, currentApproval: approvedPlan,
-        prior: await authorityStore.read(project.id, input.completionCarryover.priorRunId) });
+        prior: carryoverPrior ?? await authorityStore.read(project.id, input.completionCarryover.priorRunId) });
       const pluginSet = pluginHost.snapshot();
       const installedCompositionDigest = digestJson({ plugins: pluginSet.manifests, extensions: extensionSet.installed });
       const policyDigest = input.policyDigest ?? digestJson({ profiles: project.profiles, extensions: project.extensions ?? [], ...(project.workflows ? { workflows: project.workflows } : {}), policy: project.policy ?? {}, gateRecipes: project.gateRecipes ?? [], artifactProviders: project.artifactProviders ?? [] });
@@ -881,7 +897,17 @@ export const createHarness = async ({ controlRoot: controlRootInput, dataRoot: d
           ? { ...feature, attemptLimit: Math.max(feature.attemptLimit ?? 3, 21),
             metadata: { ...feature.metadata, approvedDeliveryPlan: structuredClone(approvedPlan.typedPlan), implementationProgressRetries: 20 } }
           : feature) : input.features;
-      return kernel.startRun({ ...input, features, profileConfig, policyDigest, sourceDigest: runSourceDigest, pluginSetDigest: input.pluginSetDigest ?? installedCompositionDigest, metadata: { ...input.metadata, approvedPlan, ...(approvedPlan ? { attemptAccounting: 'separate-progress-v1' } : {}), ...(lifecycleExecution ? { lifecycleExecution } : {}), workspace: structuredClone(workspace), gateRecipes: structuredClone(project.gateRecipes ?? []), projectDescriptorDigest: project.descriptorDigest, extensionSetDigest: extensionSet.digest } }, command);
+      let attemptCarryover = null;
+      if (approvedPlan?.amendmentBaseline && !input.completionCarryover) {
+        const inherited = features.filter(feature => Object.keys(feature.metadata?.amendmentProgressBaseline?.attempts ?? {}).length);
+        const sourceIds = [...new Set(inherited.map(feature => feature.metadata.amendmentProgressBaseline.runId))];
+        if (sourceIds.length) attemptCarryover = { logicalRoots: [...new Set(inherited.map(feature => feature.logicalRoot))],
+          sources: await Promise.all(sourceIds.map(async runId => {
+            const prior = await authorityStore.read(project.id, runId);
+            return { runId, authorityDigest: prior.authorityDigest };
+          })) };
+      }
+      return kernel.startRun({ ...input, ...(attemptCarryover ? { attemptCarryover } : {}), features, profileConfig, policyDigest, sourceDigest: runSourceDigest, pluginSetDigest: input.pluginSetDigest ?? installedCompositionDigest, metadata: { ...input.metadata, approvedPlan, ...(approvedPlan ? { attemptAccounting: 'separate-progress-v1' } : {}), ...(lifecycleExecution ? { lifecycleExecution } : {}), workspace: structuredClone(workspace), gateRecipes: structuredClone(project.gateRecipes ?? []), projectDescriptorDigest: project.descriptorDigest, extensionSetDigest: extensionSet.digest } }, command);
     },
 
     async dispatch(projectId, runId, input, command) {
@@ -1052,8 +1078,8 @@ export const createHarness = async ({ controlRoot: controlRootInput, dataRoot: d
       return kernel.heartbeat(projectId, runId, { leaseId: input.leaseId, agentId: input.agentId, progress: input.progress ?? null }, command);
     },
 
-    async recordResult(projectId, runId, dispatchId, result, { commandId, evidenceMetadata = {}, runtimeEvidence = null }) {
-      const state = await authorityStore.read(projectId, runId);
+    async recordResult(projectId, runId, dispatchId, result, { commandId, evidenceMetadata = {}, runtimeEvidence = null, onVerificationProgress = () => {} }) {
+      let state = await authorityStore.read(projectId, runId);
       if (state.metadata?.logicalTaskKey) await lineageStore.assertActive(projectId, state.metadata.logicalTaskKey, runId);
       const dispatch = state.dispatches.find(item => item.dispatchId === dispatchId);
       const lease = state.leases.find(item => item.dispatchId === dispatchId && item.status === 'active');
@@ -1121,17 +1147,32 @@ export const createHarness = async ({ controlRoot: controlRootInput, dataRoot: d
       } else {
         assert(digestJson(claimedChangedFiles) === digestJson(actualChangedFiles), 'RESULT_CHANGED_FILES_MISMATCH', 'Runtime changed-files claim does not match the workspace snapshot diff.', { claimedChangedFiles, actualChangedFiles });
       }
+      const verifyDelivery = () => verifyDeliveryBatchResult({ state, feature, dispatch,
+        result: { ...validatedResult, changedFiles: actualChangedFiles }, workspaceRoot, project, evidenceStore,
+        dataRoot: authorityStore.root, controlRoot, onProgress: onVerificationProgress });
+      const deliveryVerification = feature.metadata?.deliveryBatch && validatedResult.status === 'completed'
+        ? await withVerificationLease({ kernel, authorityStore, state, lease, commandId }, verifyDelivery)
+        : await verifyDelivery();
+      state = await authorityStore.read(projectId, runId);
+      assert(!deliveryVerification.receipts.some(item => item.sourceDrift), 'DELIVERY_VERIFICATION_SOURCE_DRIFT',
+        'A verification command changed source inputs; its result cannot be accepted as proof.');
+      validatedResult = deliveryVerification.result;
       const verifiedResult = { ...validatedResult, changedFiles: actualChangedFiles };
       await verifyPlanAmendmentArtifacts({ state, feature, result: verifiedResult, workspaceRoot });
       await atomicWriteJson(dispatch.outputRef, verifiedResult, { root: authorityStore.root });
-      const preservedRuntimeEvidence = runtimeEvidence ? JSON.parse(JSON.stringify(runtimeEvidence)) : null;
+      const preservedRuntimeEvidence = runtimeEvidence || deliveryVerification.receipts.length || deliveryVerification.nativeResult
+        ? { ...JSON.parse(JSON.stringify(runtimeEvidence ?? {})),
+          ...(deliveryVerification.receipts.length ? { deliveryVerification: deliveryVerification.receipts.map(item => ({
+            evidenceRef: item.evidenceRef, checkId: item.check.id, status: item.status, cacheHit: item.cacheHit })) } : {}) } : null;
       if (preservedRuntimeEvidence && digestJson(result) !== digestJson(validatedResult)) {
-        const classification = { kind: materialization.receipt ? 'plan-amendment-materialization' : 'quality-result-classification', version: '1.0', nativeResultDigest: digestJson(result),
+        const classification = { kind: materialization.receipt ? 'plan-amendment-materialization'
+          : deliveryVerification.nativeResult ? 'delivery-verification-classification' : 'quality-result-classification', version: '1.0', nativeResultDigest: digestJson(result),
           classifiedResultDigest: digestJson(validatedResult), prerequisiteIds: (validatedResult.deliveryPrerequisites ?? []).map(item => item.id) };
         preservedRuntimeEvidence.qualityClassification = { ...classification, receiptDigest: digestJson(classification) };
       }
       const evidence = await evidenceStore.put({ result: verifiedResult, runtimeEvidence: preservedRuntimeEvidence,
         ...(materialization.receipt ? { nativeResult: result, outputMaterialization: materialization.receipt } : {}),
+        ...(deliveryVerification.nativeResult ? { nativeResult: result } : {}),
         inputSourceDigest: dispatch.sourceDigest, outputSourceDigest: resultingSnapshot.digest, sourceSnapshotRef: dispatch.sourceSnapshotRef }, { ...evidenceMetadata, mediaType: 'application/json', projectId, ...(state.metadata?.workspaceRef ? { workspaceRef: state.metadata.workspaceRef } : {}), runId, epoch: state.epoch, generation: state.generation, featureId: dispatch.featureId, dispatchId, sourceDigest: dispatch.sourceDigest, artifactDigest: state.artifactDigest, policyDigest: state.policyDigest, pluginSetDigest: state.pluginSetDigest, labels: ['agent-result'] });
       let submitted = await kernel.submit(projectId, runId, { dispatchId, outputRef: dispatch.outputRef, agentId: lease.agentId, packetDigest: dispatch.packetDigest, epoch: state.epoch, generation: state.generation, result: verifiedResult, resultingSourceDigest: resultingSnapshot.digest, evidenceRefs: [evidence.ref] }, { expectedRevision: state.revision, commandId });
       if (feature?.metadata?.stage === 'plan-review' && verifiedResult.status === 'completed') {

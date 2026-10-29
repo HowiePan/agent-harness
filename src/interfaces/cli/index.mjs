@@ -27,6 +27,7 @@ import { applyProjectInitializationPlan, createProjectInitializationPlan, loadPr
 import { verifyDevelopmentSourceManifest, writeDevelopmentSourceManifest } from '../../application/development-source.mjs';
 import { createDevelopmentPatchPlan, rollbackDevelopmentPatch } from '../../application/development-patch.mjs';
 import { recoverDevelopmentRun } from '../../application/development-run-recovery.mjs';
+import { retirePlanningOutput } from '../../application/development-planning-retirement.mjs';
 import { recordDevelopmentPlanSourceCompatibility } from '../../application/development-plan-source-compatibility.mjs';
 import { assertDevelopmentCloseoutDecisionScope, assertDevelopmentPlanDecisionScope } from '../../application/development-closeout-decision.mjs';
 import { closeDevelopmentReviewedPlan } from '../../application/development-plan-closeout.mjs';
@@ -90,9 +91,10 @@ agent-harness dev apply --plan <json|-> --manifest <json> [--command-id <id>] [-
 agent-harness dev verify|doctor --manifest <json>
 agent-harness dev sync --manifest <json> [--command-id <id>] [--decision <json>]
 agent-harness dev amendment-inspect --manifest <json> --change <id> [--workflow <id>]
-agent-harness dev amendment-materialize --manifest <json> --run <id> --patch <json>
-agent-harness dev migrate --manifest <json> (--run <id> | --no-active-run) --command-id <id> [--decision <json>] [--budget-extension <json|->]
+agent-harness dev amendment-materialize --manifest <json> --run <id> --patch <json> [--compact]
+agent-harness dev migrate --manifest <json> (--run <id> | --no-active-run) --command-id <id> [--decision <json>] [--budget-extension <json|->] [--for-amend <change-id>]
 agent-harness dev recover-run --manifest <json> --run <id> [--command-id <id>]
+agent-harness dev preserve-planning-result --manifest <json> --run <id> --command-id <id>
 agent-harness dev patch plan|status --manifest <json>
 agent-harness dev patch apply --manifest <json> --plan <json|-> [--command-id <id>] [--decision <json>]
 agent-harness dev patch rollback --manifest <json> --target-manifest <json> [--command-id <id>] [--decision <json>]
@@ -224,7 +226,7 @@ if (command === 'dev' && subject === 'sync') {
 if (command === 'dev' && ['amendment-inspect', 'amendment-materialize'].includes(subject)) {
   const output = subject === 'amendment-inspect'
     ? await inspectDevelopmentAmendment({ manifestFile: take('--manifest'), selector: take('--change'), workflowId: take('--workflow') })
-    : await materializeDevelopmentAmendment({ manifestFile: take('--manifest'), runId: take('--run'), patchFile: take('--patch') });
+    : await materializeDevelopmentAmendment({ manifestFile: take('--manifest'), runId: take('--run'), patchFile: take('--patch'), compact: has('--compact') });
   console.log(JSON.stringify(output, null, 2));
   process.exit(0);
 }
@@ -238,6 +240,7 @@ if (command === 'dev' && subject === 'plan-closeout') {
 if (command === 'dev' && subject === 'migrate') {
   const result = await migrateDevelopmentSource(take('--manifest'), { runId: take('--run'),
     noActiveRun: argv.includes('--no-active-run'),
+    forAmendment: take('--for-amend'),
     budgetExtension: take('--budget-extension') ? await jsonInput('--budget-extension') : null,
     decision: await externalDevelopmentDecision(take('--decision')),
     commandId: take('--command-id') });
@@ -246,6 +249,11 @@ if (command === 'dev' && subject === 'migrate') {
 }
 if (command === 'dev' && subject === 'recover-run') {
   const output = await recoverDevelopmentRun({ manifestFile: take('--manifest'), runId: take('--run'), commandId: take('--command-id') ?? newId('dev-recover-run') });
+  console.log(JSON.stringify({ ok: true, ...output }, null, 2));
+  process.exit(0);
+}
+if (command === 'dev' && subject === 'preserve-planning-result') {
+  const output = await retirePlanningOutput({ manifestFile: take('--manifest'), runId: take('--run'), commandId: take('--command-id') });
   console.log(JSON.stringify({ ok: true, ...output }, null, 2));
   process.exit(0);
 }

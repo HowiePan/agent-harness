@@ -39,6 +39,20 @@ test('approved implementation preserves hierarchical proposal IDs and dependenci
   assert.equal(features[0].metadata.approvedProposal.id, 'V3.9.0/F-00');
 });
 
+test('amended split children retain their original logical budget root and progress baseline', () => {
+  const anchor = proposal('F01', ['F01-receiver']);
+  const child = { ...proposal('F01-receiver'), splitFrom: 'F01' };
+  const typedPlan = { amendment: {}, proposedFeatures: [anchor, child] };
+  const baseline = { runId: 'prior', attempts: { 'implement:V1:F01:progress': { budgetKind: 'progress', used: 21, limit: 41 } }, checkpoints: [{ id: 'prior-proof' }] };
+  const approvalBinding = { projectId: 'engine', runId: 'reviewed', planDigest: 'a'.repeat(64), artifactDigest: 'b'.repeat(64),
+    typedPlan, amendmentBaseline: { progress: { F01: baseline } } };
+  const features = expandApprovedImplementation({ features: [parent], typedPlan, projectId: 'engine', approvalBinding });
+  assert.deepEqual(features.map(item => item.logicalRoot), ['implement:V1:F01', 'implement:V1:F01']);
+  assert(features.every(item => item.attemptLimit === 41 && item.metadata.amendmentProgressBaseline.attempts['implement:V1:F01:progress'].used === 21));
+  assert.throws(() => expandApprovedImplementation({ features: [parent], typedPlan: { proposedFeatures: [anchor, child] }, projectId: 'engine' }),
+    { code: 'IMPLEMENTATION_SPLIT_LINEAGE_INVALID' });
+});
+
 test('implementation approval context binds the exact plan without granting its proposed paths', () => {
   const typedPlan = { proposedFeatures: [proposal('F00')] };
   const approvalBinding = { projectId: 'engine', runId: 'reviewed-run', planDigest: 'a'.repeat(64),

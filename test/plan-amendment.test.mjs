@@ -153,9 +153,10 @@ test('materialization preserves exact integer and decimal tokens while native ou
   const result = { status: 'completed', outputs: { amendment: { value: reference } } };
   const resolved = await resolvePlanAmendmentResult({ state, feature, result, workspaceRoot: root });
   assert.equal(result.outputs.amendment.value.plan, undefined);
-  assert(resolved.result.outputs.amendment.value.plan);
+  assert.equal(resolved.result.outputs.amendment.value.plan, undefined);
   await verifyPlanAmendmentArtifacts({ state, feature, result: resolved.result, workspaceRoot: root });
-  await assert.rejects(resolvePlanAmendmentResult({ state, feature, result: resolved.result, workspaceRoot: root }),
+  const fullRewrite = structuredClone(result); fullRewrite.outputs.amendment.value.plan = built.plan;
+  await assert.rejects(resolvePlanAmendmentResult({ state, feature, result: fullRewrite, workspaceRoot: root }),
     { code: 'PLAN_AMENDMENT_FULL_REWRITE_DENIED' });
   const bad = structuredClone(result); bad.outputs.amendment.value.deltaRef.sha256 = 'd'.repeat(64);
   await assert.rejects(resolvePlanAmendmentResult({ state, feature, result: bad, workspaceRoot: root }),

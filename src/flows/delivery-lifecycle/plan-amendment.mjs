@@ -1,6 +1,8 @@
 import { sha256 } from '../../common/canonical.mjs';
 import { digestAmendmentJson as digestJson, stringifyAmendmentJson } from './amendment-json.mjs';
 import { assert } from '../../common/errors.mjs';
+import { assertAmendmentMembership, validateFeatureSplitScope } from './amendment-feature-splits.mjs';
+import { readAmendmentReference } from './amendment-reference.mjs';
 
 export const AMENDMENT_VERSION = 'plan-amendment/1';
 const hash = value => /^[a-f0-9]{64}$/.test(value ?? '');
@@ -28,7 +30,8 @@ export const applyAmendmentChanges = (base, changes, allowedPointers) => {
   const output = structuredClone(base);
   const seen = [];
   for (const change of changes) {
-    assert(change && Object.keys(change).sort().join(',') === 'expectedDigest,path,value'
+    const adding = change?.op === 'add';
+    assert(change && Object.keys(change).sort().join(',') === (adding ? 'expectedDigest,op,path,value' : 'expectedDigest,path,value')
       && hash(change.expectedDigest) && allowedPointers.some(path => {
         tokens(path);
         return change.path === path || change.path.startsWith(`${path}/`);
@@ -37,12 +40,28 @@ export const applyAmendmentChanges = (base, changes, allowedPointers) => {
     assert(!seen.some(path => path === change.path || path.startsWith(`${change.path}/`) || change.path.startsWith(`${path}/`)),
       'PLAN_AMENDMENT_OVERLAPPING_CHANGES', 'Duplicate and overlapping changes are forbidden.');
     seen.push(change.path);
-    assert(digestJson(readAmendmentPointer(base, change.path)) === change.expectedDigest,
-      'PLAN_AMENDMENT_BASE_STALE', `Amendment preimage changed: ${change.path}`);
-    assert(digestJson(change.value) !== change.expectedDigest,
-      'PLAN_AMENDMENT_EMPTY_CHANGE', `No-op replacement: ${change.path}`);
-    const parent = parts.slice(0, -1).reduce((value, key) => value[key], output);
-    parent[parts.at(-1)] = structuredClone(change.value);
+    const parentAt = object => parts.slice(0, -1).reduce((value, key) => {
+      assert(value && typeof value === 'object' && Object.hasOwn(value, key),
+        'PLAN_AMENDMENT_REFERENCE_MISSING', `Missing amendment parent: ${change.path}`);
+      return value[key];
+    }, object);
+    const parent = parentAt(output), original = parentAt(base), key = parts.at(-1);
+    if (adding) {
+      assert(original && typeof original === 'object' && parent && typeof parent === 'object'
+        && !Object.hasOwn(original, key) && !Object.hasOwn(parent, key),
+      'PLAN_AMENDMENT_ADD_INVALID', `Add requires an absent original member: ${change.path}`);
+      assert(digestJson(original) === change.expectedDigest,
+        'PLAN_AMENDMENT_BASE_STALE', `Amendment parent preimage changed: ${change.path}`);
+      if (Array.isArray(original)) assert(/^(0|[1-9]\d*)$/.test(key)
+        && Number.isSafeInteger(Number(key)) && Number(key) === parent.length && Number(key) >= original.length,
+      'PLAN_AMENDMENT_ADD_INVALID', 'Arrays permit ordered tail additions only, never insertion or sparse members.');
+    } else {
+      assert(digestJson(readAmendmentPointer(base, change.path)) === change.expectedDigest,
+        'PLAN_AMENDMENT_BASE_STALE', `Amendment preimage changed: ${change.path}`);
+      assert(digestJson(change.value) !== change.expectedDigest,
+        'PLAN_AMENDMENT_EMPTY_CHANGE', `No-op replacement: ${change.path}`);
+    }
+    parent[key] = structuredClone(change.value);
   }
   return output;
 };
@@ -53,9 +72,10 @@ export const validateAmendmentScope = scope => {
     && new Set(scope.featureIds).size === scope.featureIds.length
     && scope.featureIds.every(id => typeof id === 'string' && id.trim())
     && Array.isArray(scope.planPointers) && Array.isArray(scope.documents) && scope.documents.length <= 16
-    && Object.keys(scope).every(key => ['version', 'artifactRoot', 'featureIds', 'planPointers', 'documents', 'baselineCompatibilityPaths'].includes(key))
+    && Object.keys(scope).every(key => ['version', 'artifactRoot', 'featureIds', 'planPointers', 'documents', 'baselineCompatibilityPaths', 'featureSplits', 'batchPolicy'].includes(key))
     && (scope.baselineCompatibilityPaths ?? []).every(safePath),
   'PLAN_AMENDMENT_SCOPE_REQUIRED', 'Amend requires an explicit registered, bounded amendmentScope.');
+  validateFeatureSplitScope(scope);
   for (const path of scope.planPointers) {
     tokens(path);
     assert(!['/features', '/target', '/targetLayout', '/protectedOperations', '/amendment'].some(key => path === key || path.startsWith(`${key}/`)),
@@ -142,12 +162,9 @@ export const applyPlanAmendment = (revision, patch) => {
   assert(Buffer.byteLength(JSON.stringify(patch)) <= 2 * 1024 * 1024,
     'PLAN_AMENDMENT_TOO_LARGE', 'The complete delta exceeds 2 MiB and requires Replan.');
   let next = applyAmendmentChanges(base, patch.changes, scope.planPointers);
-  assert(digestJson(base.features) === digestJson(next.features)
-    && digestJson(base.proposedFeatures.map(item => [item.projectId, item.id, item.disposition]))
-      === digestJson(next.proposedFeatures.map(item => [item.projectId, item.id, item.disposition])),
+  assert(digestJson(base.features) === digestJson(next.features),
   'PLAN_AMENDMENT_IDENTITY_CHANGED', 'Adding, removing or reassigning a proposal requires Replan.');
-  const modified = base.proposedFeatures.filter((item, index) => digestJson(item) !== digestJson(next.proposedFeatures[index])).map(item => item.id);
-  assert(modified.every(id => scope.featureIds.includes(id)), 'PLAN_AMENDMENT_SCOPE_VIOLATION', 'Delta changes an unregistered Feature.');
+  const modified = assertAmendmentMembership(base, next, scope);
   next = rebindAmendmentReferences(next, documents);
   validateAmendmentGraph(next);
   const downstream = new Set(scope.featureIds);
@@ -166,7 +183,15 @@ export const applyPlanAmendment = (revision, patch) => {
   } };
 };
 
-export const resolvedPlanAmendment = (revision, value) => {
+export const resolvedPlanAmendment = (revision, value, { workspaceRoot } = {}) => {
+  if (value?.deltaRef && !value.plan) {
+    const plan = applyPlanAmendment(revision, readAmendmentReference(revision, value, workspaceRoot));
+    assert(value.version === AMENDMENT_VERSION && value.basePlanDigest === plan.amendment.basePlanDigest
+      && value.changeRequestDigest === plan.amendment.changeRequestDigest
+      && digestJson(value.deltaRef) === digestJson(plan.amendment.deltaRef),
+    'PLAN_AMENDMENT_BINDING_MISMATCH', 'The compact result must bind the exact reconstructed plan.');
+    return plan;
+  }
   if (!value?.plan) return applyPlanAmendment(revision, value);
   const scope = validateAmendmentScope(revision.amendmentScope);
   const plan = value.plan;
@@ -181,10 +206,9 @@ export const resolvedPlanAmendment = (revision, value) => {
     && Array.isArray(amendment.documentBindings) && amendment.documentBindings.length === scope.documents.length,
   'PLAN_AMENDMENT_BINDING_MISMATCH', 'Resolved plan must retain the exact immutable delta reference and registered affected set.');
   const base = revision.parentPlan;
-  assert(digestJson(base.features) === digestJson(plan.features)
-    && digestJson(base.proposedFeatures.map(item => [item.projectId, item.id, item.disposition]))
-      === digestJson(plan.proposedFeatures.map(item => [item.projectId, item.id, item.disposition])),
+  assert(digestJson(base.features) === digestJson(plan.features),
   'PLAN_AMENDMENT_IDENTITY_CHANGED', 'Resolved amendment changed proposal identities.');
+  assertAmendmentMembership(base, rebindAmendmentReferences(plan, amendment.documentBindings, true), scope);
   for (const [index, item] of base.proposedFeatures.entries()) if (!scope.featureIds.includes(item.id)) {
     assert(digestJson(item) === digestJson(rebindAmendmentReferences(plan.proposedFeatures[index], amendment.documentBindings, true)),
       'PLAN_AMENDMENT_SCOPE_VIOLATION', 'An unaffected resolved proposal changed.');
@@ -199,7 +223,7 @@ export const renderPlanAmendmentDelta = patch => {
   for (const document of [{ id: 'typed-plan', changes: patch.changes }, ...patch.documents]) {
     rows.push(`## ${document.id}`, '');
     for (const change of document.changes) rows.push(`### ${change.path}`, '',
-      `原值摘要：${change.expectedDigest}`, '', '```json', stringifyAmendmentJson(change.value), '```', '');
+      `${change.op === 'add' ? '新增成员；原父值摘要' : '原值摘要'}：${change.expectedDigest}`, '', '```json', stringifyAmendmentJson(change.value), '```', '');
   }
   return `${rows.join('\n')}\n`;
 };

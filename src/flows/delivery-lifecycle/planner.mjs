@@ -54,6 +54,7 @@ export const createDeliveryLifecyclePlanner = ({
   const profileConfig = {
     ...Object.assign({}, ...profileConfigKeys.map(key => project.policy?.profileConfigs?.[key] ?? {})),
     requiredFinalGates: gateIds,
+    requireDeliveryBatches: project.policy?.deliveryBatchPolicy === 'bounded-delivery/2',
     requireCanonicalDecision: full || (intent.action === 'requirements' && intent.scope !== 'version-planning'),
     requireUserCodeReview: full || intent.action === 'deliver' || exhaustive,
     requireFinalQualityReview: full || quality || intent.action === 'implement' || intent.action === 'deliver',

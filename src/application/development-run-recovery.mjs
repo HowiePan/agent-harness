@@ -16,7 +16,7 @@ import { expandApprovedImplementation } from '../flows/delivery-lifecycle/approv
 import { createCompletionCarryoverPlan, verifyCompletionCarryover } from '../kernel/completion-carryover.mjs';
 import { assertPlanningReplacementScope, developmentRecoveryArguments, isPlanningRecovery } from './development-planning-recovery.mjs';
 import { recoverInterruptedWorkspace, readInterruptedWorkspaceDraft } from './interrupted-workspace-recovery.mjs';
-import { approvedBudgetExtensionProgress } from './development-budget-migration.mjs';
+import { approvedBudgetExtensionProgress, approvedPostPatchBudgetProgress } from './development-budget-migration.mjs';
 import { environmentBlockedFeatures, reviewDevelopmentEnvironment } from './development-environment-review.mjs';
 
 const activeLeaseIds = state => state.leases.filter(lease => lease.status === 'active').map(lease => lease.leaseId).sort();
@@ -89,8 +89,12 @@ export const assertDevelopmentRunRecoveryEffects = (state, effects) => {
 export const terminalFailureProgress = async (run, state, evidenceStore) => {
   if (run.activeLeaseIds?.length !== 1 || run.activeDispatchIds?.length !== 1
     || state.revision !== run.revision + 3 || state.sourceDigest === null) return false;
-  const events = state.events.filter(event => event.sequence > run.revision + 1);
-  if (events.length !== 3 || events[0].type !== 'lease.heartbeat'
+  // A transaction may emit several events. Its Authority revision is not an
+  // event sequence; new patch receipts pin both independent counters.
+  const priorSequence = run.eventSequence ?? run.revision;
+  const events = state.events.filter(event => event.sequence > priorSequence);
+  if (events.length !== 3 || !events.every((event, index) => event.sequence === priorSequence + index + 1)
+    || events[0].type !== 'lease.heartbeat'
     || events[0].progress !== 'terminal-failure-recovery'
     || events[1].type !== 'lease.heartbeat' || events[1].progress !== 'terminal-result-observed'
     || events[2].type !== 'submission.committed' || events[2].status !== 'blocked'
@@ -103,17 +107,41 @@ export const terminalFailureProgress = async (run, state, evidenceStore) => {
     || submission.dispatchId !== run.activeDispatchIds[0]
     || submission.featureId !== events[2].featureId || feature?.metadata?.stage !== 'implementation'
     || lease?.agentId !== submission.agentId || dispatch?.packetDigest !== lease?.packetDigest
-    || submission.result?.status !== 'failed' || submission.result?.failureClass !== 'runtime-provider'
-    || !submission.changedFiles?.length || submission.outputSourceDigest !== state.sourceDigest
-    || submission.inputSourceDigest === state.sourceDigest
+    || !['failed', 'blocked'].includes(submission.result?.status)
+    || !Array.isArray(submission.changedFiles) || submission.outputSourceDigest !== state.sourceDigest
+    || (submission.changedFiles.length === 0) !== (submission.inputSourceDigest === state.sourceDigest)
     || submission.submissionDigest !== digestJson(withoutKeys(submission, ['submissionDigest']))
     || submission.evidenceRefs?.length !== 1) return false;
   const evidence = await evidenceStore.read(submission.evidenceRefs[0]);
   const record = JSON.parse(evidence.bytes.toString('utf8'));
   const terminal = record.runtimeEvidence?.hostTerminalFailure;
   const hostResult = record.runtimeEvidence?.hostResultReceipt;
+  if (!terminal && submission.changedFiles.length > 0 && submission.result.status === 'blocked' && !record.runtimeEvidence?.resultRejection) {
+    return evidence.metadata.projectId === state.projectId && evidence.metadata.runId === state.runId
+      && evidence.metadata.featureId === submission.featureId && evidence.metadata.dispatchId === submission.dispatchId
+      && record.inputSourceDigest === submission.inputSourceDigest
+      && record.outputSourceDigest === submission.outputSourceDigest
+      && digestJson(record.result) === digestJson(submission.result)
+      && digestJson(submission.result.changedFiles) === digestJson(submission.changedFiles)
+      && hostResult?.provider === 'codex-host' && hostResult.operation === 'result'
+      && hostResult.agentId === submission.agentId && hostResult.dispatchId === submission.dispatchId
+      && hostResult.effectId === lease.runtimeReceipt?.hostSpawnReceipt?.effectId
+      && hostResult.resultDigest === digestJson(submission.result)
+      && /^[a-f0-9]{64}$/.test(hostResult.observationRequestDigest ?? '')
+      && !hostResult.terminalFailureDigest && !hostResult.rejectionDigest;
+  }
   const { receiptDigest, ...body } = terminal ?? {};
-  return evidence.metadata.projectId === state.projectId && evidence.metadata.runId === state.runId
+  if (submission.changedFiles.length === 0 && (terminal?.version !== '1.0'
+    || !/^[a-f0-9]{64}$/.test(terminal.nativeStatusDigest ?? '')
+    || terminal.resultContractDigest !== lease.runtimeReceipt?.resultContractDigest
+    || terminal.observationRequestDigest !== hostResult?.observationRequestDigest
+    || hostResult?.provider !== 'codex-host' || hostResult.operation !== 'result'
+    || !/^[a-f0-9]{64}$/.test(hostResult.observationRequestDigest ?? '')
+    || digestJson(submission.result.changedFiles) !== digestJson(submission.changedFiles))) return false;
+  return submission.result.failureClass === 'runtime-provider'
+    && submission.result.status === 'failed' && submission.result.blocker?.kind === 'runtime-provider'
+    && !record.runtimeEvidence?.resultRejection
+    && evidence.metadata.projectId === state.projectId && evidence.metadata.runId === state.runId
     && evidence.metadata.featureId === submission.featureId && evidence.metadata.dispatchId === submission.dispatchId
     && record.inputSourceDigest === submission.inputSourceDigest
     && record.outputSourceDigest === submission.outputSourceDigest
@@ -130,7 +158,7 @@ export const terminalFailureProgress = async (run, state, evidenceStore) => {
     && hostResult.resultDigest === terminal.resultDigest;
 };
 
-const currentPatchReceipt = async (manifest, state, evidenceStore) => {
+export const currentPatchReceipt = async (manifest, state, evidenceStore) => {
   const root = resolve(manifest.dataRoot, 'development', 'patches');
   const entries = await readdir(root, { withFileTypes: true });
   const matches = [];
@@ -152,7 +180,8 @@ const currentPatchReceipt = async (manifest, state, evidenceStore) => {
           ? await readInterruptedWorkspaceDraft({ state, evidenceStore,
             controlRoot: manifest.controlRoot, dataRoot: manifest.dataRoot }) : null;
         const covered = receipt.budgetExtension ? approvedBudgetExtensionProgress(run, state, receipt)
-          : unchanged || draft?.patchReceiptDigest === receipt.receiptDigest || await terminalFailureProgress(run, state, evidenceStore);
+          : unchanged || draft?.patchReceiptDigest === receipt.receiptDigest
+            || approvedPostPatchBudgetProgress(run, state, receipt) || await terminalFailureProgress(run, state, evidenceStore);
         if (covered) { matches.push(receipt); break; }
       }
     }
@@ -428,7 +457,9 @@ export const recoverDevelopmentRun = async ({ manifestFile, runId, commandId, cw
       continuation: 'new-quality-command-ready' };
   }
   const completedImplementation = state.metadata?.commandIntent?.action === 'implement'
-    && state.features.some(feature => feature.metadata?.stage === 'implementation' && feature.state === 'completed');
+    && (state.features.some(feature => feature.metadata?.stage === 'implementation' && feature.state === 'completed')
+      || state.submissions.some(submission => state.features.some(feature => feature.id === submission.featureId
+        && feature.metadata?.stage === 'implementation')));
   let completionCarryover = null;
   if (completedImplementation) {
     const typedPlan = state.metadata?.approvedPlan?.typedPlan;
@@ -439,7 +470,7 @@ export const recoverDevelopmentRun = async ({ manifestFile, runId, commandId, cw
     'CARRYOVER_REPLACEMENT_WORKFLOW_MISMATCH', 'Replacement Features do not bind the approved current Workflow.');
     const carryoverPlan = createCompletionCarryoverPlan({ prior: state, replacementFeatures,
       replacementRunId: plan.run.runId, replacementPlanDigest: plan.planDigest,
-      patchReceiptDigest: receipt.receiptDigest, sourceDigest: plan.run.sourceDigest });
+      patchReceiptDigest: receipt.receiptDigest, sourceDigest: plan.run.sourceDigest, includeIncomplete: true });
     await verifyCompletionCarryover({ plan: carryoverPlan, prior: state, replacementFeatures,
       evidenceStore: harness.evidenceStore, authorityStore: harness.authorityStore });
     completionCarryover = { plan: carryoverPlan, replacementPlan: plan };
@@ -552,7 +583,8 @@ export const refreshPendingDevelopmentCarryover = async ({ manifestFile, command
   const replacementFeatures = expandApprovedImplementation({ features: plan.run.features, typedPlan, projectId, approvalBinding: prior.metadata.approvedPlan });
   const carryoverPlan = createCompletionCarryoverPlan({ prior: { ...prior, status: 'ready' }, replacementFeatures,
     replacementRunId: plan.run.runId, replacementPlanDigest: plan.planDigest,
-    patchReceiptDigest: previous.plan.patchReceiptDigest, sourceDigest: plan.run.sourceDigest });
+    patchReceiptDigest: previous.plan.patchReceiptDigest, sourceDigest: plan.run.sourceDigest,
+    includeIncomplete: previous.plan.progressOnly === true });
   await verifyCompletionCarryover({ plan: carryoverPlan, prior, replacementFeatures,
     evidenceStore: harness.evidenceStore, authorityStore: harness.authorityStore });
   const output = { projectId, priorRunId: prior.runId, priorReplacementRunId: previous.plan.replacementRunId,

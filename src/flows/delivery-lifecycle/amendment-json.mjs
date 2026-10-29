@@ -4,6 +4,7 @@ import { sha256 } from '../../common/canonical.mjs';
 const exactKey = '$harness.exact-plan-number';
 const exact = value => value && typeof value === 'object' && Object.keys(value).length === 1
   && typeof value[exactKey] === 'string';
+export { exact as isExactAmendmentNumber };
 
 /** Inventory bounds may exceed IEEE-754: retain their original numeric tokens. */
 export const parseAmendmentJson = text => {

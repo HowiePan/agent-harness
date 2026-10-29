@@ -1,4 +1,5 @@
 import { deliveryNode, deliveryTask } from '../node.mjs';
+import { deliveryPlanningInstructions } from '../../delivery-batches.mjs';
 
 const inputs = [
   { id: 'approved-base', source: 'intent', path: 'planRevision', required: true,
@@ -12,13 +13,17 @@ export const amendNode = deliveryNode('plan', 'amend', 'version-planning', [], {
   task: deliveryTask({
     role: { id: 'plan-amender', description: 'Authors only a bounded delta against an approved immutable plan.' },
     objective: 'Resolve the registered local planning defect without regenerating unchanged plan content.',
+    constraints: ['Apply bounded delivery rules only to registered affected proposals when amendmentScope.batchPolicy.policy is bounded-delivery/2; unchanged proposals retain their immutable policy.',
+      ...deliveryPlanningInstructions.slice(1)],
     instructions: [
       'Inspect the approved base and current source consumers. Restrict every modification to amendmentScope and trace it to the registered change request.',
       'Author a delta file with version, basePlanDigest, changeRequestDigest, changes and documents. Each change has path, expectedDigest of its original JSON value and replacement value. In the final delivery-plan-amendment-v1 output return the materializer outputValue: version, basePlanDigest, changeRequestDigest and deltaRef {path,sha256}. Do not transcribe a large patch or provide a machine-derived plan.',
-      'Keep proposal identities, final architecture, protected effects and unrelated acceptance unchanged. Respect actual producer dependencies, native signatures, source lifetimes, module/manifest/Schema/test wiring and acceptance owners. Never solve a dependency cycle by dropping an assertion or silently extending source lifetime.',
+      'Keep original proposal identities, final architecture, protected effects and unrelated acceptance unchanged. Only registered amendmentScope.featureSplits permit appended project-owned child proposals with splitFrom and the exact registered prefix. Retain the original proposal as convergence owner, all its contracts/checks and its budget ancestry; do not rename/delete/reorder originals. Children retain original prerequisites, remain inside original paths and feed the convergence owner. Respect native signatures, source lifetimes and consumer wiring.',
+      'When amendmentScope.batchPolicy is registered, give every affected owned Feature explicit deliveryBatches within its maxBatchesPerFeature (at most 20). Each batch needs id, objective, acceptance, verification and sizing {basis,reserve}. Size by complete behavior chains and implementation/consumer/proof/integration costs, not a certificate quota. Do not compress oversized work to meet the count. Scenario coverage is applicability across development situations, never a required single-dispatch completion percentage. Reviewers must assess estimates and complete obligation coverage; the count alone is not proof of fit.',
       'Write the draft delta only inside amendmentScope.artifactRoot. Use the official dev amendment-materialize command with the verified development manifest, this Run ID and --patch <draft.json>. It generates immutable content-addressed document copies, amendment.json, changes.md and plan.json, rebinds references, and returns compact outputValue with the exact delta reference. Application verifies that file, preserves the native result and records a digest-bound resolution Receipt.',
       'Do not edit any base plan/inventory or implementation source. A materializer scope, identity or graph rejection is not permission to weaken its checks. Return an exact protected blocker if this change requires broader Replan.',
       'After review rejection, produce a corrected delta against the same original base. New delta bytes use a new generated directory; retain prior review artifacts and findings.',
+      'Avoid retransmitting unchanged contracts in whole-array replacements. The materializer supports --compact to derive an exactly equivalent smaller delta from pinned originals. An op:add entry creates only an absent object member or ordered numeric array tail and pins expectedDigest to its original parent. The complete resulting delta still must fit 2 MiB; compaction never waives scope, graph, source identity or review.',
     ],
     inputs,
     steps: [
@@ -26,7 +31,7 @@ export const amendNode = deliveryNode('plan', 'amend', 'version-planning', [], {
       { id: 'patch', instruction: 'Author bounded replacements with original-value digests and evidence for each change.' },
       { id: 'materialize', instruction: 'Use deterministic materialization; inspect graph, references and unchanged content before returning the delta.' },
     ],
-    constraints: ['No business implementation, base-file rewriting, feature identity changes, acceptance deletion or Authority edits.'],
+    constraints: ['No business implementation, base-file rewriting, unregistered feature splits, acceptance deletion or Authority edits.'],
     acceptance: ['Every delta entry has a registered bound, exact preimage and source-backed reason.',
       'Generated artifacts reproduce the delta and preserve unchanged plan content.',
       'Dependencies are acyclic and all referenced inputs exist; every affected retirement and consumer has an executable owner and check.'],
@@ -43,11 +48,13 @@ export const amendReviewNode = deliveryNode('plan-review', 'plan-review', 'plan-
       'Check all registered change requirements, every affected native declaration/signature, source retirement deadline, dependency, module/manifest/Schema/test path and acceptance owner. Follow references into downstream consumers even when they are outside the write scope.',
       'Reject unregistered changes, missing producer capabilities, cycles, dangling or prematurely retired types, dropped assertions, historical binaries substituted for fresh-port acceptance, and unsupported API withdrawal. Report actionable findings; do not expand scope silently.',
       'Return plan-review with approved, findings, basePlanDigest, deltaDigest and reviewedFeatureIds. Bind basePlanDigest to the original approved base, deltaDigest to the exact typed amendment and reviewedFeatureIds to every registered affected Feature. An old review or user approval cannot approve this delta.',
+      'When planRevision.replacesAmendment.preservedDraft contains a rejected review, inspect its candidate, corrected draft and every openFindings entry. Those Findings remain open. For each verified fix, report its exact ID in plan-review.resolvedFindings and a checkpoint with that ID, status resolved, a specific summary and non-empty evidence. Keep unresolved IDs in the typed findings; do not duplicate existing Authority Findings in top-level findings. Approval alone closes none.',
     ],
     inputs,
     steps: [{ id: 'inspect', instruction: 'Inspect the delta, impact boundary, deterministic artifacts and all registered acceptance.' },
       { id: 'decide', instruction: 'Return a digest-bound independent review; preserve unresolved Finding identities.' }],
-    constraints: ['No writes, implementation, inherited approval or implicit scope expansion.'],
+    constraints: ['No writes, implementation, inherited approval or implicit scope expansion.',
+      'For bounded-delivery/2 scope, review moderate session sizing/cohesion, the 20-delivery estimate including reserve, all four original obligation kinds, dependency/proof input order, exact checks and stable shared budget ancestry. Reject tiny repetitive slices, giant sessions disguised by estimates, and missing final convergence. Scenario applicability is not a dispatch completion quota.'],
     acceptance: ['The exact delta and affected Feature set are reviewed independently.',
       'No affected contract, producer, consumer or check is left without an executable owner.'],
   }),

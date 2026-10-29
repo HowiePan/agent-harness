@@ -13,6 +13,7 @@ import { scheduleFeatures, validateWorkGraph } from './work-graph.mjs';
 import { assertDispatchResultContract, validateBusinessResult, validateProfileResult } from '../platform/execution/result-contract.mjs';
 import { completionCarryoverDigest, verifyCompletionCarryover } from './completion-carryover.mjs';
 import { assertBudgetExtensionApproval, prepareBudgetExtension, selectAttemptBudget, submissionAttempt } from './attempt-budget.mjs';
+import { resolveAttemptCarryover } from './attempt-carryover.mjs';
 
 const activeLease = lease => ['requested', 'active'].includes(lease.status);
 const activeDispatch = dispatch => ['requested', 'assigned'].includes(dispatch.status);
@@ -109,6 +110,8 @@ export class HarnessKernel {
   async startRun(input, command) {
     const profile = this.profile(input.profileId);
     const features = validateWorkGraph(input.features);
+    assert(!(input.completionCarryover && input.attemptCarryover), 'ATTEMPT_CARRYOVER_CONFLICT', 'Use one authorized counter transfer route.');
+    const attemptCarryover = await resolveAttemptCarryover(input, features, this.authorityStore);
     let priorCarryover = null;
     if (input.completionCarryover) {
       const { priorRunId, carryoverDigest } = input.completionCarryover;
@@ -198,11 +201,43 @@ export class HarnessKernel {
       }
       state.metadata.completionCarryover = { priorRunId: prior.runId, priorAuthorityDigest: prior.authorityDigest,
         carryoverDigest: plan.carryoverDigest, completedFeatureIds: [...completedIds], firstPendingFeatureId: pending.id,
+        ...(plan.progressOnly ? { progressOnly: true } : {}),
         ...(lastPendingSubmission ? { pendingHistory: { failureClass: lastPendingSubmission.result?.failureClass ?? null,
           summary: lastPendingSubmission.result?.summary ?? null, blocker: structuredClone(lastPendingSubmission.result?.blocker ?? null),
           evidenceRefs: [...(lastPendingSubmission.evidenceRefs ?? [])] } } : {}) };
       event(state, 'feature.completion-carried-over', { priorRunId: prior.runId,
         carryoverDigest: plan.carryoverDigest, completedFeatureIds: [...completedIds] }, this.now);
+      if (plan.progressOnly) {
+        const transferred = await resolveAttemptCarryover({ projectId: input.projectId, runId: input.runId,
+          attemptCarryover: { sources: [{ runId: prior.runId, authorityDigest: prior.authorityDigest }],
+            logicalRoots: [...roots] } }, state.features, this.authorityStore);
+        state.attempts = transferred.attempts;
+        state.submissions = transferred.submissions;
+        state.evidenceRefs = [...new Set(state.submissions.flatMap(item => item.evidenceRefs ?? []))];
+        state.metadata.attemptCarryover = transferred.receipt;
+        state.metadata.attemptBudgetExtensions = structuredClone(transferred.extensions);
+        for (const feature of state.features) {
+          const original = prior.features.find(item => item.id === feature.id);
+          if (!['blocked', 'failed-budget'].includes(original?.state)) continue;
+          feature.state = original.state;
+          feature.blocker = structuredClone(original.blocker);
+          if (original.submissionId) feature.submissionId = original.submissionId;
+        }
+        event(state, 'attempts.carried-over', transferred.receipt, this.now);
+      }
+      state.status = deriveStatus(state, profile);
+    }
+    if (attemptCarryover) {
+      state.attempts = attemptCarryover.attempts;
+      state.submissions = attemptCarryover.submissions;
+      state.evidenceRefs = [...new Set(state.submissions.flatMap(item => item.evidenceRefs))];
+      state.metadata.attemptCarryover = attemptCarryover.receipt;
+      state.metadata.attemptBudgetExtensions = attemptCarryover.extensions;
+      for (const feature of state.features.filter(item => attemptCarryover.exhausted.includes(item.id))) {
+        feature.state = 'failed-budget';
+        feature.blocker = { kind: 'attempt-budget-carryover', summary: 'The inherited allowance is exhausted; an explicit bounded budget approval is required.' };
+      }
+      event(state, 'attempts.carried-over', attemptCarryover.receipt, this.now);
       state.status = deriveStatus(state, profile);
     }
     profile.validateRun(state);
@@ -216,13 +251,18 @@ export class HarnessKernel {
     const snapshotEvidence = await this.evidenceStore.read(input.sourceSnapshotRef);
     return this.authorityStore.transact(projectId, runId, { expectedRevision: command.expectedRevision, commandId: command.commandId, payload: input }, state => {
       assert(!terminalRun(state), 'RUN_TERMINAL', 'A terminal Run cannot schedule new work.');
+      assert(!state.decisions.some(item => item.action === 'freeze-execution' && item.decision === 'approved'),
+        'RUN_EXECUTION_FROZEN', 'This Run is frozen for a reviewed replacement; it cannot dispatch work.');
       assert(snapshotEvidence.metadata.projectId === projectId && snapshotEvidence.metadata.runId === runId && snapshotEvidence.metadata.epoch === state.epoch && snapshotEvidence.metadata.generation === state.generation && snapshotEvidence.metadata.sourceDigest === state.sourceDigest, 'SOURCE_SNAPSHOT_CONTEXT_MISMATCH', 'Scheduling requires a workspace snapshot bound to the current Authority source.');
       const profile = this.profile(state.profile.id);
       const activeFeatures = [...new Set([...state.leases.filter(activeLease).map(lease => lease.featureId), ...state.dispatches.filter(activeDispatch).map(dispatch => dispatch.featureId)])];
       const capacity = Math.max(0, Number(input.maxConcurrency ?? 1) - activeFeatures.length);
       const featureGateIds = new Set((state.metadata?.gateRecipes ?? []).filter(recipe => recipe.scope === 'feature').map(recipe => recipe.id));
       const gateComplete = feature => feature.gatePlan.filter(id => featureGateIds.has(id)).every(id => state.gates.some(gate => gate.id === id && gate.scope === 'feature' && gate.featureId === feature.id && gate.status === 'passed' && gate.sourceDigest === state.sourceDigest));
-      const selected = scheduleFeatures({ features: state.features, activeFeatureIds: activeFeatures, limit: capacity, canDispatch: feature => profile.canDispatch(feature, state).ok && feature.dependsOn.every(id => gateComplete(state.features.find(item => item.id === id))), candidateFeatureIds: input.candidateFeatureIds ?? null });
+      const selected = scheduleFeatures({ features: state.features, activeFeatureIds: activeFeatures, limit: capacity,
+        canDispatch: feature => !Object.values(state.attempts).some(item => item.logicalRoot === feature.logicalRoot && item.exhausted)
+          && profile.canDispatch(feature, state).ok && feature.dependsOn.every(id => gateComplete(state.features.find(item => item.id === id))),
+        candidateFeatureIds: input.candidateFeatureIds ?? null });
       const dispatches = selected.map(feature => {
         const dispatchId = this.id('dispatch');
         const outputRef = resolve(this.authorityStore.root, 'outputs', state.projectId, state.runId, `epoch-${state.epoch}`, `generation-${state.generation}`, `${dispatchId}.json`);
@@ -497,6 +537,11 @@ export class HarnessKernel {
     return this.authorityStore.transact(projectId, runId, { expectedRevision: command.expectedRevision, commandId: command.commandId, payload: input }, state => {
       assertMutableRun(state);
       assert(input.id && input.actor && input.decision, 'DECISION_INVALID', 'Decision requires id, actor, and decision.');
+      if (input.action === 'freeze-execution') assert(input.decision === 'approved'
+        && input.context?.projectId === projectId && input.context?.runId === runId
+        && input.context?.sourceDigest === state.sourceDigest && input.context?.priorAuthorityDigest === state.authorityDigest
+        && !state.leases.some(activeLease) && !state.dispatches.some(activeDispatch),
+      'EXECUTION_FREEZE_CONTEXT_MISMATCH', 'Execution freeze requires the exact idle Run, source and Authority.');
       assert(!state.decisions.some(item => item.id === input.id), 'DECISION_DUPLICATE', `Decision already exists: ${input.id}`);
       const decision = { ...structuredClone(input), recordedAt: this.now(), digest: digestJson(input) };
       state.decisions.push(decision);

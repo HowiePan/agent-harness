@@ -74,6 +74,7 @@ export const createCardWorldProjectDescriptor = ({
       ...structuredClone(extensions),
     ],
     policy: {
+      deliveryBatchPolicy: 'bounded-delivery/2',
       agentExecutionMode: resolvedAgentExecutionMode,
       defaultRuntimePlugin: runtimePluginId,
       runtimePlugins,
