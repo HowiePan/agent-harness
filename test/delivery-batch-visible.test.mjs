@@ -9,7 +9,7 @@ import { planApprovalSnapshot } from '../src/flows/delivery-lifecycle/plan-appro
 import { createMockVisibleHostAdapter } from './test-support.mjs';
 import { proposal, completion } from './delivery-batch-support.mjs';
 
-test('native-visible adapter dispatches distinct bounded Agents and executes real checks without an Agent CLI', async t => {
+for (const repairInput of [false, true]) test(`native-visible bounded deliveries run real checks${repairInput ? ' and auto-repair a proven input blocker' : ''} without an Agent CLI`, async t => {
   const controlRoot = resolve(process.cwd());
   const root = await mkdtemp(resolve(harnessTemporaryRoot(), 'bounded-visible-'));
   t.after(() => rm(root, { recursive: true, force: true }));
@@ -18,6 +18,15 @@ test('native-visible adapter dispatches distinct bounded Agents and executes rea
   await mkdir(resolve(workspaceRoot, 'src'));
   await writeFile(resolve(workspaceRoot, 'src/receiver.mjs'), 'export const receive = x => x * 3;');
   await writeFile(resolve(workspaceRoot, 'verify.mjs'), "import assert from 'node:assert/strict'; import {receive} from './src/receiver.mjs'; assert.equal(receive(4),8);");
+  const approvedProposal = proposal();
+  if (repairInput) {
+    await mkdir(resolve(workspaceRoot, 'src/tests/suites'), { recursive: true });
+    await writeFile(resolve(workspaceRoot, 'src/Cargo.toml'), '[[test]]\nname="receiver"\npath="tests/suites/receiver.rs"\n');
+    await writeFile(resolve(workspaceRoot, 'src/tests/suites/receiver.rs'), 'receiver test source');
+    const check = approvedProposal.deliveryBatches[0].checks[0];
+    check.command.push('--test', 'receiver');
+    check.inputs.push('src/Cargo.toml', 'src/tests/receiver.rs');
+  }
   const extension = await loadExtensionPack('./src/flows/delivery-lifecycle/index.mjs', { controlRoot });
   const runtime = await loadExtensionPack('./integrations/codex/extensions/codex-runtime.mjs', { controlRoot });
   const packets = new Map(); const spawned = [];
@@ -26,9 +35,13 @@ test('native-visible adapter dispatches distinct bounded Agents and executes rea
       const packet = packets.get(input.dispatchId); const feature = packet.feature;
       const output = (port, schemaId, value) => ({ status: 'completed', summary: 'Observed fixture result.', changedFiles: [],
         outputs: { [port]: { schemaId, value, evidenceRefs: ['fixture:inspection'] } } });
-      if (feature.metadata.stage === 'version-planning') return output('plan', 'delivery-plan-v1', { features: ['F01'], proposedFeatures: [proposal()] });
+      if (feature.metadata.stage === 'version-planning') return output('plan', 'delivery-plan-v1', { features: ['F01'], proposedFeatures: [approvedProposal] });
       if (feature.metadata.stage === 'plan-review') return output('plan-review', 'delivery-plan-review-v1', { approved: true, findings: [] });
       if (feature.metadata.deliveryBatch?.id === 'receiver') {
+        if (repairInput && spawned.filter(item => item.feature.id === feature.id).length === 1) return {
+          status: 'blocked', summary: 'Observed missing conventional test input; explicit manifest target exists.', changedFiles: [],
+          failureClass: 'external-blocker', blocker: { kind: 'prerequisite', code: 'delivery-check-input-rebinding-required',
+            summary: 'Manifest-declared test source needs Host input binding.' } };
         await writeFile(resolve(workspaceRoot, 'src/receiver.mjs'), 'export const receive = x => x * 2;');
         return completion(feature, ['src/receiver.mjs']);
       }
@@ -66,9 +79,15 @@ test('native-visible adapter dispatches distinct bounded Agents and executes rea
   await harness.kernel.closeRun(descriptor.id, approved.state.runId, {}, { expectedRevision: approved.state.revision, commandId: 'fixture-close-plan' });
   const implemented = await execute('implement');
   const deliveries = spawned.filter(packet => packet.feature.metadata.deliveryBatch);
-  assert.equal(deliveries.length, 2);
+  assert.equal(deliveries.length, repairInput ? 3 : 2);
   assert.notEqual(deliveries[0].dispatchId, deliveries[1].dispatchId);
   assert(deliveries.every(packet => packet.execution.runtime.mode === 'conversation-visible'));
   assert(implemented.state.features.filter(feature => feature.metadata.deliveryBatch).every(feature => feature.state === 'completed'));
   assert.equal(implemented.state.features.find(feature => feature.metadata.stage === 'scope-resolution').state, 'blocked');
+  if (repairInput) {
+    assert.equal(implemented.state.decisions.filter(item => item.kind === 'verification-input-repair').length, 1);
+    assert.equal(deliveries[1].execution.implementationContinuation.workBatch.verificationInputBindings[0].bindings.length, 1);
+    assert.deepEqual(implemented.state.features.find(feature => feature.id === deliveries[1].feature.id).metadata.deliveryBatch.checks,
+      approvedProposal.deliveryBatches[0].checks);
+  }
 });

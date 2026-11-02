@@ -18,6 +18,7 @@ import { assertPlanningReplacementScope, developmentRecoveryArguments, isPlannin
 import { recoverInterruptedWorkspace, readInterruptedWorkspaceDraft } from './interrupted-workspace-recovery.mjs';
 import { approvedBudgetExtensionProgress, approvedPostPatchBudgetProgress } from './development-budget-migration.mjs';
 import { environmentBlockedFeatures, reviewDevelopmentEnvironment } from './development-environment-review.mjs';
+import { assertDeliveryOutputRejection, inspectDeliveryOutputRejection } from './delivery-output-rejection.mjs';
 
 const activeLeaseIds = state => state.leases.filter(lease => lease.status === 'active').map(lease => lease.leaseId).sort();
 const activeDispatchIds = state => state.dispatches.filter(dispatch => ['requested', 'assigned'].includes(dispatch.status)).map(dispatch => dispatch.dispatchId).sort();
@@ -190,7 +191,7 @@ export const currentPatchReceipt = async (manifest, state, evidenceStore) => {
   return matches[0];
 };
 
-export const assessUnacceptedTerminalResult = ({ feature, result, before, after }) => {
+export const assessUnacceptedTerminalResult = ({ feature, result, before, after, outputRejection = null, workspaceRoot = null }) => {
   const nativeResult = validateBusinessResult(result, { conversationVisible: true, feature });
   assert(nativeResult.status === 'completed' && before?.digest && after?.digest,
     'DEVELOPMENT_RUN_RETIREMENT_RESULT_MISMATCH', 'Retirement requires a completed result and two source snapshots.');
@@ -198,12 +199,13 @@ export const assessUnacceptedTerminalResult = ({ feature, result, before, after 
   const claimedChangedFiles = [...new Set(nativeResult.changedFiles.map(path => String(path).replaceAll('\\', '/')))].sort();
   const rejectedPaths = claimedChangedFiles.filter(path => !feature.allowedPaths.some(root => pathWithin(root, path))
     || feature.forbiddenPaths.some(root => pathWithin(root, path)));
-  assert(rejectedPaths.length > 0, 'DEVELOPMENT_RUN_RETIREMENT_REJECTION_UNVERIFIED',
+  if (!rejectedPaths.length && outputRejection) assertDeliveryOutputRejection({ feature, rejection: outputRejection, workspaceRoot });
+  assert(rejectedPaths.length > 0 || outputRejection, 'DEVELOPMENT_RUN_RETIREMENT_REJECTION_UNVERIFIED',
     'The pinned Feature does not substantiate rejection of the completed result.');
   const changedPaths = diffWorkspaceSnapshots(before, after);
   assert(claimedChangedFiles.every(path => changedPaths.includes(path)),
     'DEVELOPMENT_RUN_RETIREMENT_CLAIM_DRIFT', 'The original result claims a file absent from the current source delta.');
-  return { claimedChangedFiles, rejectedPaths,
+  return { claimedChangedFiles, rejectedPaths, ...(!rejectedPaths.length && outputRejection ? { outputRejection } : {}),
     unclaimedChangedPaths: changedPaths.filter(path => !claimedChangedFiles.includes(path)) };
 };
 
@@ -252,6 +254,12 @@ export const commitUnacceptedDevelopmentRetirement = async ({ authorityStore, ev
   const runId = state.runId;
   const evidence = await evidenceStore.read(evidenceRef);
   const record = JSON.parse(evidence.bytes.toString('utf8'));
+  const outputRejected = record.rejection?.code === 'MANAGED_PATH_LINK_FORBIDDEN';
+  if (outputRejected) {
+    assertDeliveryOutputRejection({ feature, rejection: record.rejection, workspaceRoot: state.metadata?.workspace?.root });
+    assert(digestJson(record.originalResult) === resultDigest,
+      'DEVELOPMENT_RUN_RETIREMENT_EVIDENCE_INVALID', 'Output rejection must preserve the unchanged original native result.');
+  }
   assert(evidence.metadata.projectId === projectId && evidence.metadata.runId === runId
     && evidence.metadata.epoch === state.epoch && evidence.metadata.generation === state.generation
     && evidence.metadata.featureId === feature.id && evidence.metadata.dispatchId === dispatch.dispatchId
@@ -268,8 +276,8 @@ export const commitUnacceptedDevelopmentRetirement = async ({ authorityStore, ev
     && record.sourceDelta?.observedSourceDigest === observedSourceDigest
     && digestJson(record.sourceDelta.claimedChangedFiles) === digestJson(claimedChangedFiles)
     && digestJson(record.sourceDelta.unclaimedChangedPaths) === digestJson(unclaimedChangedPaths)
-    && record.rejection?.code === 'FEATURE_PATH_NOT_ALLOWED'
-    && record.rejection.rejectedPaths?.length > 0,
+    && (outputRejected || record.rejection?.code === 'FEATURE_PATH_NOT_ALLOWED'
+      && record.rejection.rejectedPaths?.length > 0),
   'DEVELOPMENT_RUN_RETIREMENT_EVIDENCE_INVALID', 'Retirement evidence does not bind the current Run, Host result, rejection, and source delta.');
   const outcome = { projectId, priorRunId: runId, evidenceRef, patchReceiptDigest, observedSourceDigest,
     claimedChangedFiles, unclaimedChangedPaths, continuation: 'replan-command-ready' };
@@ -286,8 +294,9 @@ export const commitUnacceptedDevelopmentRetirement = async ({ authorityStore, ev
       activeLease.status = 'superseded'; activeLease.supersededAt = at; activeLease.supersededReason = 'unaccepted-terminal-result';
       activeDispatch.status = 'superseded'; activeDispatch.supersededAt = at; activeDispatch.supersededReason = 'unaccepted-terminal-result';
       activeFeature.state = 'blocked';
-      activeFeature.blocker = { kind: 'runtime-contract', code: 'FEATURE_PATH_NOT_ALLOWED',
-        summary: 'Completed Agent result was rejected by the pinned Feature path contract.' };
+      activeFeature.blocker = { kind: 'runtime-contract', code: record.rejection.code,
+        summary: outputRejected ? 'Completed Agent result remains unaccepted because a pinned verification output traverses a link.'
+          : 'Completed Agent result was rejected by the pinned Feature path contract.' };
       currentState.status = 'failed';
       currentState.evidenceRefs.push(...[evidenceRef].filter(ref => !currentState.evidenceRefs.includes(ref)));
       currentState.metadata = { ...currentState.metadata,
@@ -304,7 +313,7 @@ export const commitUnacceptedDevelopmentRetirement = async ({ authorityStore, ev
 };
 
 /** Preserve a rejected native completion without assigning later workspace edits to its Feature. */
-export const retireUnacceptedDevelopmentRun = async ({ manifestFile, runId, commandId, cwd = process.cwd() }) => {
+export const retireUnacceptedDevelopmentRun = async ({ manifestFile, runId, commandId, cwd = process.cwd(), onProgress }) => {
   assert(commandId && runId, 'DEVELOPMENT_RUN_RETIREMENT_INPUT_REQUIRED', 'Retirement requires a Run and stable command ID.');
   const { manifest, releaseIdentity } = await verifyDevelopmentSourceManifest(manifestFile);
   await createLocalDevelopmentInvocation({ projectRoot: manifest.projectRoot, configPath: manifest.configPath,
@@ -360,15 +369,22 @@ export const retireUnacceptedDevelopmentRun = async ({ manifestFile, runId, comm
   const project = await harness.projectRegistry.get(projectId);
   const workspaceRoot = state.metadata.workspace.root;
   const after = await captureWorkspace(workspaceRoot, { excluded: project.workspace.excluded ?? [] });
-  const { claimedChangedFiles, rejectedPaths, unclaimedChangedPaths } = assessUnacceptedTerminalResult({
-    feature, result: observed.result, before, after });
+  let assessment;
+  try { assessment = assessUnacceptedTerminalResult({ feature, result: observed.result, before, after }); }
+  catch (error) {
+    if (error.code !== 'DEVELOPMENT_RUN_RETIREMENT_REJECTION_UNVERIFIED') throw error;
+    const outputRejection = await inspectDeliveryOutputRejection({ feature, workspaceRoot, onProgress });
+    assessment = assessUnacceptedTerminalResult({ feature, result: observed.result, before, after, outputRejection, workspaceRoot });
+  }
+  const { claimedChangedFiles, rejectedPaths, unclaimedChangedPaths } = assessment;
   const evidence = await harness.evidenceStore.put({
     kind: 'unaccepted-terminal-result-retirement', version: '1.0',
     priorAuthorityDigest: state.authorityDigest, patchReceiptDigest: patch.receiptDigest,
     hostEffectDigest: effect.effectDigest, hostObservationReceipt: observed.receipt,
     originalResult: observed.result, originalResultDigest: effect.outcome.resultDigest,
-    rejection: { code: 'FEATURE_PATH_NOT_ALLOWED', rejectedPaths },
+    rejection: assessment.outputRejection ?? { code: 'FEATURE_PATH_NOT_ALLOWED', rejectedPaths },
     sourceDelta: { fromSourceDigest: before.digest, observedSourceDigest: after.digest,
+      observedSnapshot: after,
       claimedChangedFiles, unclaimedChangedPaths, attribution: 'unaccepted-agent-claim-and-unattributed-later-changes' },
   }, { mediaType: 'application/json', projectId, runId, epoch: state.epoch, generation: state.generation,
     featureId: feature.id, dispatchId: dispatch.dispatchId, sourceDigest: dispatch.sourceDigest,

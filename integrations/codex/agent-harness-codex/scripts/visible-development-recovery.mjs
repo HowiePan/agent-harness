@@ -63,7 +63,8 @@ const main = async () => {
         || effect?.state === 'settled' && effect.outcome?.disposition === 'result-observed'
           && !effect.outcome.terminalFailureDigest && !effect.outcome.rejectionDigest) {
         const retired = await retireUnacceptedDevelopmentRun({ manifestFile, runId,
-          commandId: `${old.metadata.lifecycleInvocationId}.unaccepted-retire.${runId}` });
+          commandId: `${old.metadata.lifecycleInvocationId}.unaccepted-retire.${runId}`,
+          onProgress: event => emit({ kind: 'codex-visible-development-recovery', phase: 'retirement-verification', event }) });
         emit({ kind: 'codex-visible-development-recovery', phase: 'run-retired', ...retired });
         return;
       }

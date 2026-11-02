@@ -135,6 +135,30 @@ test('source-linked project hooks route native tool evidence without a packaged 
   assert.equal(result.requestId, request.requestId);
   assert.equal(result.agentCount, 0);
 
+  // Model Host/tool dispatch latency without a minute-long wall-clock test.
+  const wallClock = Date.now();
+  let elapsed = 0;
+  const clock = t.mock.method(Date, 'now', () => wallClock + elapsed);
+  try {
+    const delayedOutput = new PassThrough();
+    const delayedProbe = runLocalSourceHostProbe({ bindingsDir, sessionId: 'local-source-session', output: delayedOutput, transport: 'hook' });
+    const [delayedChunk] = await once(delayedOutput, 'data');
+    const delayedRequest = JSON.parse(delayedChunk.toString());
+    elapsed = 62000;
+    await handleLocalSourceHook({ hook_event_name: 'PostToolUse', tool_name: 'list_agents', tool_use_id: 'native-tool-delayed-probe', tool_input: {}, tool_response: { agents: [] }, session_id: 'local-source-session', turn_id: 'local-source-turn' }, { bindingsDir });
+    const delayedResult = await delayedProbe;
+    assert.equal(delayedResult.ok, true);
+    assert.equal(delayedResult.requestId, delayedRequest.requestId);
+
+    elapsed = 0;
+    const missingOutput = new PassThrough();
+    const missingProbe = runLocalSourceHostProbe({ bindingsDir, sessionId: 'local-source-session', output: missingOutput, transport: 'hook' });
+    const timedOut = assert.rejects(missingProbe, { code: 'CODEX_HOST_HOOK_RESPONSE_TIMEOUT' });
+    await once(missingOutput, 'data');
+    elapsed = 120001;
+    await timedOut;
+  } finally { clock.mock.restore(); }
+
   const staleManifest = JSON.parse(await readFile(source.file, 'utf8'));
   const changedPath = 'integrations/codex/agent-harness-codex/hooks/local-source-hook.mjs';
   staleManifest.files.find(item => item.path === changedPath).sha256 = '0'.repeat(64);

@@ -20,6 +20,7 @@ import { ensurePlanApprovalArtifact } from '../flows/delivery-lifecycle/plan-app
 import { performance } from 'node:perf_hooks';
 import { qualityRepairScopeCandidates } from '../kernel/quality.mjs';
 import { resolvePlanAmendmentResult } from './plan-amendment-artifacts.mjs';
+import { INPUT_BINDING_BLOCKER, inspectVerificationInputRepairs } from './verification-input-recovery.mjs';
 
 const recoverableResultCodes = new Set(['REPAIR_CHECKPOINT_REQUIRED', 'REPAIR_CHECKPOINT_EVIDENCE_REQUIRED', 'REPAIR_FINDING_CHECKPOINT_REQUIRED', 'QUALITY_DIAGNOSTIC_DISPOSITION_REQUIRED', 'QUALITY_PREREQUISITE_INVALID', 'PROFILE_RESULT_REJECTED', 'RESULT_OUTPUT_PORTS_MISMATCH', 'RESULT_OUTPUT_SCHEMA_ID_MISMATCH', 'RESULT_OUTPUT_VALUE_SCHEMA_INVALID']);
 export const visibleLifecycleStopReason = state => {
@@ -227,22 +228,32 @@ const continueVisibleLifecyclePlan = async (context, api, planInput, { commandId
   const activeRunId = state.runId;
   if (resume) {
     assert(activeRunId === resume.runId, 'LIFECYCLE_RESUME_RUN_MISMATCH', 'Lifecycle execution selected a different Run.');
-    assert(selectBlockedResumeFeature(state) === resume.blockedFeatureId,
+    const inputBindingRepairs = await inspectVerificationInputRepairs(state, plan.run.executionWorkspaceRoot, project.workspace.excluded ?? []);
+    assert(selectBlockedResumeFeature(state, { inputBindingRepairs }) === resume.blockedFeatureId,
       'LIFECYCLE_RESUME_FEATURE_MISMATCH', 'The blocked Feature set changed after resume planning.');
     if (resume.blockedFeatureId) {
       const blocked = state.features.find(feature => feature.id === resume.blockedFeatureId);
       assert(blocked?.state === 'blocked', 'LIFECYCLE_RESUME_FEATURE_STALE', 'The selected blocked Feature changed before reopening.');
       assert(!state.leases.some(lease => lease.status === 'active') && !state.dispatches.some(dispatch => ['requested', 'assigned'].includes(dispatch.status)),
         'LIFECYCLE_RESUME_TRANSPORT_ACTIVE', 'Blocked Feature cannot be reopened while transport is active.');
-      state = (await api.kernel.reopenFeature(plan.project.id, activeRunId,
+      const repaired = inputBindingRepairs.some(item => item.featureId === blocked.id)
+        ? await api.repairVerificationInputBlocker(plan.project.id, activeRunId, blocked.id, `${commandId}.resume`) : null;
+      assert(!inputBindingRepairs.some(item => item.featureId === blocked.id) || repaired,
+        'VERIFICATION_INPUT_REPAIR_STALE', 'Input binding proof changed before reopening.');
+      state = repaired?.state ?? (await api.kernel.reopenFeature(plan.project.id, activeRunId,
         { featureId: blocked.id, reason: 'implement-automatic-continuation' },
         { expectedRevision: state.revision, commandId: `${commandId}.resume.reopen.${blocked.id}` })).state;
     }
   } else if (state.metadata?.completionCarryover?.progressOnly) {
     // Starting the sealed replacement is an explicit implement invocation.
     // Migration itself preserved every blocker and never started work.
-    const featureId = selectBlockedResumeFeature(state);
-    if (featureId) state = (await api.kernel.reopenFeature(plan.project.id, activeRunId,
+    const inputBindingRepairs = await inspectVerificationInputRepairs(state, plan.run.executionWorkspaceRoot, project.workspace.excluded ?? []);
+    const featureId = selectBlockedResumeFeature(state, { inputBindingRepairs });
+    const repaired = featureId && inputBindingRepairs.some(item => item.featureId === featureId)
+      ? await api.repairVerificationInputBlocker(plan.project.id, activeRunId, featureId, `${commandId}.partial-carryover`) : null;
+    assert(!inputBindingRepairs.some(item => item.featureId === featureId) || repaired,
+      'VERIFICATION_INPUT_REPAIR_STALE', 'Input binding proof changed before reopening.');
+    if (featureId) state = repaired?.state ?? (await api.kernel.reopenFeature(plan.project.id, activeRunId,
       { featureId, reason: 'implement-migrated-partial-continuation' },
       { expectedRevision: state.revision, commandId: `${commandId}.partial-carryover.reopen.${featureId}` })).state;
   }
@@ -424,7 +435,11 @@ const continueVisibleLifecyclePlan = async (context, api, planInput, { commandId
       businessResult = state.submissions.find(item => item.dispatchId === dispatch.dispatchId)?.result ?? businessResult;
       const qualityScopePaths = businessResult.status === 'blocked' && businessResult.failureClass === 'scope-blocker'
         ? safeQualityScopePaths(feature, businessResult.blocker, plan.run.executionWorkspaceRoot) : [];
-      if (rejected && submitted.result.featureState === 'blocked') {
+      const inputRepair = businessResult.blocker?.code === INPUT_BINDING_BLOCKER
+        ? await api.repairVerificationInputBlocker(plan.project.id, activeRunId, feature.id, `${commandId}.input-repair.${dispatch.dispatchId}`) : null;
+      if (inputRepair) {
+        state = inputRepair.state;
+      } else if (rejected && submitted.result.featureState === 'blocked') {
         const reopened = await api.kernel.reopenFeature(plan.project.id, activeRunId, {
           featureId: feature.id,
           reason: `${rejected.result.summary}. Reinspect the current source and correct the rejected result before reporting completion.`,

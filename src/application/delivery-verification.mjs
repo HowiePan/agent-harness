@@ -1,4 +1,4 @@
-import { readFile, readdir, lstat } from 'node:fs/promises';
+import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { digestJson, sha256 } from '../common/canonical.mjs';
 import { assert } from '../common/errors.mjs';
@@ -10,40 +10,48 @@ import { DEFAULT_PROCESS_OUTPUTS } from '../platform/plugins/execution/managed-o
 import { executableAvailable, toolchainInputs } from '../platform/workflow/gates/project-gate-runner.mjs';
 import { classifyFragmentedDeliveryHandoff } from '../flows/delivery-lifecycle/delivery-feedback.mjs';
 import { envelope } from '../platform/plugins/contracts.mjs';
+import { fingerprintDeliveryPaths, inspectDeliveryPaths } from './delivery-paths.mjs';
+import { resolveVerificationInputs, assertVerificationBindingStable } from './verification-input-bindings.mjs';
+export { fingerprintDeliveryPaths } from './delivery-paths.mjs';
 
 const manifest = { id: 'delivery-process-verification', kind: 'gate-executor', version: '1.0.0',
   capabilities: ['process', 'managed-outputs'], permissions: ['gate.execute'],
   execution: { outputs: DEFAULT_PROCESS_OUTPUTS, sandbox: { mode: 'optional' } } };
 
-export const fingerprintDeliveryPaths = async (root, paths) => {
-  const entries = [];
-  const visit = async path => {
-    const absolute = assertNoLinkPath(root, resolve(root, path), 'delivery verification input');
-    let stat;
-    try { stat = await lstat(absolute); } catch (error) {
-      if (error.code !== 'ENOENT') throw error;
-      entries.push([path, null]); return;
-    }
-    assert(!stat.isSymbolicLink(), 'DELIVERY_VERIFICATION_LINK', 'Linked proof inputs are not reusable.');
-    if (stat.isDirectory()) {
-      entries.push([path, 'directory']);
-      for (const name of (await readdir(absolute)).sort()) await visit(`${path}/${name}`);
-    } else entries.push([path, sha256(await readFile(absolute))]);
-  };
-  for (const path of [...new Set(paths)].sort()) await visit(path);
-  return digestJson(entries);
-};
-
 const checkRecipe = check => ({ id: `delivery-check-${digestJson(check)}`, command: check.command,
   cwd: check.cwd ?? '.', timeoutMs: check.timeoutMs ?? 300000 });
 
 /** Deterministic checks only. This runner cannot dispatch an Agent or implement code. */
-export const executeDeliveryCheck = async ({ check, workspaceRoot, excluded = [], dataRoot, controlRoot,
-  evidenceStore, sourceContext = {}, forceFresh = false, onProgress = () => {} }) => {
+export const executeDeliveryCheck = async ({ check: approvedCheck, workspaceRoot, excluded = [], dataRoot, controlRoot,
+  evidenceStore, sourceContext = {}, forceFresh = false, onProgress = () => {},
+  inputScope = null, pinnedInputBinding = null }) => {
+  const inputBinding = await resolveVerificationInputs({ check: approvedCheck, workspaceRoot,
+    allowedPaths: inputScope?.allowedPaths ?? [], forbiddenPaths: inputScope?.forbiddenPaths ?? [], excluded });
+  let bindingError = null;
+  try { assertVerificationBindingStable(pinnedInputBinding, inputBinding); }
+  catch (error) {
+    if (error.code !== 'DELIVERY_INPUT_BINDING_DRIFT') throw error;
+    bindingError = { code: error.code, message: error.message };
+  }
+  const check = inputBinding.effectiveCheck;
   const recipe = checkRecipe(check);
+  await inspectDeliveryPaths(workspaceRoot, check.outputs, onProgress);
   const before = await captureWorkspace(workspaceRoot, { excluded });
-  const inputDigest = await fingerprintDeliveryPaths(workspaceRoot, check.inputs);
-  const outputDigest = await fingerprintDeliveryPaths(workspaceRoot, check.outputs);
+  if (bindingError || inputBinding.missingInputs.length) {
+    const error = bindingError ?? { code: 'DELIVERY_VERIFICATION_INPUT_MISSING',
+      message: `Required verification inputs are missing: ${inputBinding.missingInputs.join(', ')}` };
+    const body = { kind: 'delivery-verification-receipt', version: '1.0', check: structuredClone(check),
+      approvedCheck: structuredClone(approvedCheck), inputBinding, status: 'environment-failed', sourceDrift: false,
+      sourceBefore: before.digest, sourceAfter: before.digest, cacheHit: false,
+      executorReceipt: envelope(manifest, 'receipt', { operation: 'gate', gateId: recipe.id,
+        status: 'environment-failed', exitCode: null, stdout: '', stderr: error.message, environmentError: error }) };
+    onProgress({ phase: 'verification-input-missing', checkId: check.id, paths: inputBinding.missingInputs });
+    const evidence = await evidenceStore.put(body, { ...sourceContext, sourceDigest: before.digest,
+      mediaType: 'application/json', labels: ['delivery-verification'] });
+    return { ...body, evidenceRef: evidence.ref };
+  }
+  const inputDigest = await fingerprintDeliveryPaths(workspaceRoot, check.inputs, onProgress);
+  const outputDigest = await fingerprintDeliveryPaths(workspaceRoot, check.outputs, onProgress);
   const commandRoot = assertNoLinkPath(workspaceRoot, resolve(workspaceRoot, recipe.cwd), 'delivery check cwd');
   const executable = await executableAvailable(check.command[0], commandRoot);
   const tools = [];
@@ -55,7 +63,8 @@ export const executeDeliveryCheck = async ({ check, workspaceRoot, excluded = []
   }
   const toolchainDigest = digestJson({ tools, scripts: await toolchainInputs(recipe, commandRoot) });
   const environmentDigest = digestJson({ platform: process.platform, arch: process.arch, env: process.env });
-  const key = { gateId: recipe.id, specDigest: digestJson(check), sourceDigest: inputDigest,
+  const key = { gateId: recipe.id, specDigest: digestJson({ check, approvedCheckDigest: inputBinding.approvedCheckDigest,
+    bindings: inputBinding.bindings }), sourceDigest: inputDigest,
     artifactDigest: sourceContext.artifactDigest ?? null,
     policyDigest: digestJson({ projectId: sourceContext.projectId, workspaceRoot, declared: sourceContext.policyDigest ?? null }),
     toolchainDigest, environmentDigest, pluginDigest: digestJson(manifest) };
@@ -78,10 +87,11 @@ export const executeDeliveryCheck = async ({ check, workspaceRoot, excluded = []
     receipt = await executor.execute({ id: recipe.id, commandId: recipe.id, args: [], recipe, ...sourceContext });
   }
   const after = await captureWorkspace(workspaceRoot, { excluded });
-  const stable = before.digest === after.digest && inputDigest === await fingerprintDeliveryPaths(workspaceRoot, check.inputs);
-  const body = { kind: 'delivery-verification-receipt', version: '1.0', check: structuredClone(check), key,
+  const stable = before.digest === after.digest && inputDigest === await fingerprintDeliveryPaths(workspaceRoot, check.inputs, onProgress);
+  const body = { kind: 'delivery-verification-receipt', version: '1.0', check: structuredClone(check),
+    approvedCheck: structuredClone(approvedCheck), inputBinding, key,
     status: stable ? receipt.payload.status : 'failed', sourceDrift: !stable,
-    inputDigest, outputDigest: await fingerprintDeliveryPaths(workspaceRoot, check.outputs),
+    inputDigest, outputDigest: await fingerprintDeliveryPaths(workspaceRoot, check.outputs, onProgress),
     executorReceipt: receipt, cacheHit: Boolean(cacheOriginRef), cacheOriginRef,
     sourceBefore: before.digest, sourceAfter: after.digest };
   const evidence = await evidenceStore.put(body, { ...sourceContext, sourceDigest: before.digest,
@@ -124,6 +134,8 @@ export const verifyDeliveryBatchResult = async ({ state, feature, dispatch, resu
     assert(check.outputs.every(path => outputs.some(root => path === root || path.startsWith(`${root}/`))),
       'DELIVERY_CHECK_OUTPUT_SCOPE', 'Verification outputs require the current Feature or declared transient-output authority.');
     const receipt = await executeDeliveryCheck({ check, workspaceRoot, excluded: project.workspace.excluded,
+      inputScope: { allowedPaths: feature.allowedPaths, forbiddenPaths: feature.forbiddenPaths },
+      pinnedInputBinding: context.workBatch?.verificationInputBindings?.find(item => item.approvedCheckDigest === digestJson(check)),
       evidenceStore, dataRoot, controlRoot, forceFresh: batch.checks.includes(check) && batch.phase === 'convergence',
       onProgress: event => onProgress?.({ ...event, deliveryBatchId: batch.id, checkId: check.id }),
       sourceContext: { projectId: state.projectId, runId: state.runId, featureId: feature.id, dispatchId: dispatch.dispatchId,

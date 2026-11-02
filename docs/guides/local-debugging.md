@@ -174,6 +174,8 @@ H2/H3 导致 Coordinator 已退出时，`dev recover-run` 仅在项目 checkout 
 
 ## generation 与回滚
 
+验证输出遇到链接导致原生完成结果未被接收时，`visible-development-recovery.mjs --retire-only` 可在真实 H3 补丁同步后处理该闲置边界。程序重新核验原生 rollout、原 Dispatch/Lease、结果摘要、源码差异及固定检查的实际输出链接；结构检查先于内容哈希，并持续报告检查进度。它封存原结果与完整观察快照，通过既有退役事务释放旧 Lease，不生成完成 Submission，不改变预算或旧完成项，不删除缓存或放行链接。后续 Amend 只把完全归属原结果、无额外未知修改的快照作为待复验草稿输入；原 Authority 来源身份保留。验证输出应在新批准计划中限定到检查专有产物，不能把共享缓存根作为证明目录。
+
 ### 已批准规划的收口修复
 
 `dev plan-closeout --manifest <绑定> --run <规划 Run> --repair <修复输入.json> --expected-revision <当前修订> --command-id <稳定 ID> [--check]` 仅修复已完成规划的控制投影，不启动或恢复 Feature，不复用旧 Lease、预检或 Runtime Receipt。它要求从登记项目 checkout 发起，全部 Feature 均为已完成的规划/只读复审，当前谱系及精确计划/Markdown 摘要匹配既存用户批准，无活动 Lease 或待处理 Dispatch。H2/H3 同步后的未来执行仍必须创建新的 Plan/Run；此入口不能接续旧 Feature，也不转移旧批准到新 Run。
@@ -216,3 +218,11 @@ H3 恢复已批准的修订计划时，原修订继承基线使用首次批准�
 本地实现缺口的识别统一覆盖 `failed`/`blocked` 与 `implementation-incomplete`/`implementation-gap`，且 blocker 必须是 `implementation` 或 `implementation-gap`。续接和单次有界纠偏仍要求封存 Evidence 及原记账预算未耗尽，不改写原生结果或重置原预算键。重复零碎交付检查使用相同识别规则；同一已批准批次内不能靠更换上述返回形式逃过规模审查。范围、外部前置、环境、容量及审批阻断仍各自遵循原证据和权限规则。
 
 多次补丁承接后，来源兼容性从原批准启动快照开始，沿摘要绑定的入站 carry-over 逐段验证各 Run 的本地 Submission。每段必须匹配父 Run 的退休声明、替代计划、批准身份、工作区和完整 Feature 图；单独继承的旧预算记录不构成来源桥接。当前源码仍须等于最后一段的输出摘要，不接受未记账的工作区漂移。
+
+## 执行修复与计划修订的边界
+
+批准计划保持不可变。确定性的执行输入绑定修正使用独立的 `verification-input-binding/1.0.0` 回执，不要求为技术路径问题重新 Amend。当前支持：检查命令的唯一 `--test NAME`、已声明且在原 Feature 路径内的 `Cargo.toml`、唯一显式 `[[test]] name/path`，共同证明缺失的约定测试路径对应现存入口。解析器有版本，原路径、实际路径、清单摘要、原/有效检查摘要随 Dispatch 封存；原命令、覆盖义务、输出目录、缓存要求、超时、权限和预算均保留。存在歧义、链接、越界或无法证明时禁止猜测，不搜索替代测试、不造占位文件。缺少必需输入时，Host 在进程和缓存使用前返回有 Evidence 的环境失败。
+
+同一 Coordinator 遇到已记账的 `delivery-check-input-rebinding-required` 前置阻断，或后续 `implement` 续接该阻断时，先重新证明源码与绑定，再记录 `actor=harness, decision=verified` 的技术 Decision，通过 Kernel 重开原 Feature。每个 Feature 只允许一个源 Submission 使用此修复证明，中断在记录证明与重开之间可幂等恢复；新失败不能反复消费旧证明。剩余额度、原图和批准内容不变。派发后绑定身份变化时验收失败，不能静默切换入口。未解决的单项检查前置条件不应阻止本批其他可行开发。
+
+需求、架构、消费者依赖边界、验收语义、执行命令、写入授权或预算改变，仍进入相应修订/批准流程；不能以自动修复伪造批准。新增确定性解析器应遵循同一证据与边界合同并添加正反例回归。这里的修复属于应用层 H3；source-link 同步后仍须通过正式恢复事务封存替代 Plan/Run，不热替换旧 Lease。

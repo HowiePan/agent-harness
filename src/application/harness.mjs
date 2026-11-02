@@ -25,6 +25,7 @@ import { installExtensionPacks } from '../platform/extensions/contract.mjs';
 import { resolveCommandIntent } from '../platform/extensions/command-contract.mjs';
 import { createLifecycleCommandPlan, validateLifecycleCommandPlan } from './lifecycle-command-plan.mjs';
 import { selectBlockedResumeFeature } from './lifecycle-resume.mjs';
+import { inspectVerificationInputRepairs, applyVerificationInputRepair } from './verification-input-recovery.mjs';
 import { verifyInterruptedImplementationResume } from './lifecycle-interruption.mjs';
 import { buildImplementationContinuation } from './implementation-continuation.mjs';
 import { verifyDeliveryBatchResult } from './delivery-verification.mjs';
@@ -554,7 +555,8 @@ export const createHarness = async ({ controlRoot: controlRootInput, dataRoot: d
             && digestJson(planned.allowedPaths) === digestJson(feature.metadata.scopeExtensions[0].before)
             && digestJson(feature.allowedPaths) === digestJson(feature.metadata.scopeExtensions.at(-1).after))))
         || feature.metadata?.stage === 'gate-diagnostic'), 'LIFECYCLE_RESUME_FEATURE_MISMATCH', 'Run has Features outside the original lifecycle plan.');
-      const blockedFeatureId = selectBlockedResumeFeature(state);
+      const inputBindingRepairs = await inspectVerificationInputRepairs(state, workspace.root, project.workspace.excluded ?? []);
+      const blockedFeatureId = selectBlockedResumeFeature(state, { inputBindingRepairs });
       if (blockedFeatureId) {
         const feature = state.features.find(item => item.id === blockedFeatureId);
         const submission = [...state.submissions].reverse().find(item => item.featureId === blockedFeatureId);
@@ -910,6 +912,12 @@ export const createHarness = async ({ controlRoot: controlRootInput, dataRoot: d
       return kernel.startRun({ ...input, ...(attemptCarryover ? { attemptCarryover } : {}), features, profileConfig, policyDigest, sourceDigest: runSourceDigest, pluginSetDigest: input.pluginSetDigest ?? installedCompositionDigest, metadata: { ...input.metadata, approvedPlan, ...(approvedPlan ? { attemptAccounting: 'separate-progress-v1' } : {}), ...(lifecycleExecution ? { lifecycleExecution } : {}), workspace: structuredClone(workspace), gateRecipes: structuredClone(project.gateRecipes ?? []), projectDescriptorDigest: project.descriptorDigest, extensionSetDigest: extensionSet.digest } }, command);
     },
 
+    async repairVerificationInputBlocker(projectId, runId, featureId, commandId) {
+      const state = await authorityStore.read(projectId, runId);
+      const project = await projectRegistry.get(projectId);
+      return applyVerificationInputRepair({ state, featureId, project, kernel, evidenceStore, commandId });
+    },
+
     async dispatch(projectId, runId, input, command) {
       const state = await authorityStore.read(projectId, runId);
       if (state.metadata?.sourceManifest) await assertSourceManifestCurrent(state.metadata.sourceManifest);
@@ -949,7 +957,7 @@ export const createHarness = async ({ controlRoot: controlRootInput, dataRoot: d
         const executionByFeatureId = Object.fromEntries(await Promise.all(input.candidateFeatureIds.map(async featureId => {
           const feature = state.features.find(item => item.id === featureId);
           assert(feature, 'FEATURE_NOT_FOUND', `Unknown candidate Feature: ${featureId}`);
-          const continuation = await buildImplementationContinuation(state, feature, workspaceRoot);
+          const continuation = await buildImplementationContinuation(state, feature, workspaceRoot, { excluded: project.workspace.excluded ?? [] });
           return [featureId, { ...(continuation ? { implementationContinuation: continuation } : {}), prompt: structuredClone(promptBinding), result: createDispatchResultContract(feature, { conversationVisible: runtimePolicy.mode === 'conversation-visible' }), runtime: { mode: runtimePolicy.mode, userVisible: runtimePolicy.userVisible, hostOrchestrated: runtimePolicy.hostOrchestrated, ...(runtimeManifest.capabilities.includes('typed-output-envelope-v1') ? { resultDialect: 'typed-output-envelope-v1' } : {}) } }];
         })));
         return kernel.schedule(projectId, runId, { ...scheduledInput, executionByFeatureId }, command);
@@ -968,7 +976,7 @@ export const createHarness = async ({ controlRoot: controlRootInput, dataRoot: d
       for (const featureId of strategy.payload.featureIds) {
         const feature = state.features.find(item => item.id === featureId);
         const execution = { prompt: structuredClone(promptBinding), result: createDispatchResultContract(feature, { conversationVisible: runtimePolicy.mode === 'conversation-visible' }), ...(runtimePolicy ? { runtime: { mode: runtimePolicy.mode, userVisible: runtimePolicy.userVisible, hostOrchestrated: runtimePolicy.hostOrchestrated, ...(runtimeManifest.capabilities.includes('typed-output-envelope-v1') ? { resultDialect: 'typed-output-envelope-v1' } : {}) } } : {}) };
-        const continuation = await buildImplementationContinuation(state, feature, workspaceRoot);
+        const continuation = await buildImplementationContinuation(state, feature, workspaceRoot, { excluded: project.workspace.excluded ?? [] });
         if (continuation) execution.implementationContinuation = continuation;
         if (modelRouterPluginId) {
           const request = { featureId, role: feature.ownerRole, capabilities: feature.metadata.requiredCapabilities ?? [], risk: Number(feature.metadata.risk ?? 0) };

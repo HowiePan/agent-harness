@@ -15,7 +15,8 @@ export const resolveProbeSessionId = ({ explicitSessionId, environmentSessionId 
   return sessionId;
 };
 
-export const runLocalSourceHostProbe = async ({ bindingsDir, sessionId, output = process.stdout, responseTimeoutMs = 60000, transport = 'rollout' } = {}) => {
+// Inherit the transport's bounded response window, as the Coordinator does.
+export const runLocalSourceHostProbe = async ({ bindingsDir, sessionId, output = process.stdout, responseTimeoutMs, transport = 'rollout' } = {}) => {
   if (typeof sessionId !== 'string' || !sessionId.length) throw Object.assign(new Error('Local Host probe requires the current Codex session ID.'), { code: 'LOCAL_SOURCE_HOST_PROBE_SESSION_REQUIRED' });
   const { bindings } = await loadLocalSourceBindings(bindingsDir);
   const { controlRoot, dataRoot } = bindings.harness;

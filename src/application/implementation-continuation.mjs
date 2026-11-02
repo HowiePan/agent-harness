@@ -7,6 +7,7 @@ import { HANDOFF_CORRECTION_POLICY } from './implementation-handoff.mjs';
 import { buildImplementationWorkBatch } from './implementation-work-batch.mjs';
 import { validateDeliveryBatches, DELIVERY_BATCH_POLICY } from '../flows/delivery-lifecycle/delivery-batches.mjs';
 import { deliveryBatchFeedback } from '../flows/delivery-lifecycle/delivery-feedback.mjs';
+import { bindContinuationVerificationInputs } from './verification-input-bindings.mjs';
 import { fingerprintDeliveryPaths } from './delivery-verification.mjs';
 import { mergeImplementationObligations } from './implementation-obligations.mjs';
 
@@ -15,7 +16,7 @@ const obligation = (kind, key, detail) => ({ id: `obligation:${digestJson({ kind
 const completed = checkpoint => checkpoint.status === 'completed' && checkpoint.evidence?.length > 0;
 
 /** Resolve only hash-pinned local plan data, never a conversational replacement plan. */
-export const buildImplementationContinuation = async (state, feature, workspaceRoot, { readPinnedBytes = null } = {}) => {
+export const buildImplementationContinuation = async (state, feature, workspaceRoot, { readPinnedBytes = null, excluded = [] } = {}) => {
   const proposal = feature.metadata?.deliveryOwnerProposal ?? feature.metadata?.approvedProposal;
   if (feature.metadata?.stage !== 'implementation' || !proposal) return null;
   const typed = feature.metadata.approvedDeliveryPlan;
@@ -155,7 +156,7 @@ export const buildImplementationContinuation = async (state, feature, workspaceR
   }
   const visibleIds = batch ? new Set([...batch.obligationIds, ...workBatch.targetStepIds,
     ...workBatch.targetStepIds.map(id => `${id}:focused-verification`)]) : null;
-  return {
+  const continuation = {
     policy: ACCEPTANCE_CONTINUATION_POLICY, proposalId: proposal.id, sourceDigest: state.sourceDigest,
     pinnedInputs: { expandedPlan: typed?.expandedPlan ?? null, sourceInventory: typed?.sourceInventory ?? null },
     obligations: batch ? obligations.filter(item => batch.obligationIds.includes(item.id)) : obligations,
@@ -204,6 +205,9 @@ export const buildImplementationContinuation = async (state, feature, workspaceR
       'Automatic continuation requires a newly closed approved obligation, or a changed approved final target plus completed implementation and focused-verification checkpoints, with bound evidence. Source edits alone are insufficient. An unproductive implementation-only handoff receives at most one corrective retry per explicit invocation, consuming the existing budget. These reports never waive full completion or final Gates; actual protected blockers and exhausted budgets stop execution.',
     ],
   };
+  const additionalChecks = batch?.phase === 'convergence' ? state.features.filter(item => item.logicalRoot === feature.logicalRoot
+    && item.id !== feature.id && item.state === 'completed').flatMap(item => item.metadata?.deliveryBatch?.checks ?? []) : [];
+  return bindContinuationVerificationInputs({ continuation, feature, workspaceRoot, excluded, additionalChecks });
 };
 
 /** A partial milestone report is continuation evidence, never final acceptance. */

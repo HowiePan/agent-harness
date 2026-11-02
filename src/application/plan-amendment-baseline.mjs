@@ -4,6 +4,7 @@ import { diffWorkspaceSnapshots } from '../common/workspace-snapshot.mjs';
 import { rebindAmendmentReferences } from '../flows/delivery-lifecycle/plan-amendment.mjs';
 import { matchesAmendmentRetry, rejectedAmendmentDraftEvidence } from './plan-amendment-retry.mjs';
 import { verifyBlockedDraftArtifacts } from './plan-amendment-draft-artifacts.mjs';
+import { verifyUnacceptedAmendmentBaseline } from './plan-amendment-unaccepted-baseline.mjs';
 
 const implementation = feature => feature.metadata?.stage === 'implementation';
 const convergence = feature => !feature.metadata?.deliveryBatch || feature.metadata.deliveryBatch.phase === 'convergence';
@@ -62,12 +63,19 @@ export const captureAmendmentBaselines = async ({ states, revision, snapshot, ev
       ?? prior.dispatches.findLast(dispatch => dispatch.sourceDigest === prior.sourceDigest && dispatch.sourceSnapshotRef)?.sourceSnapshotRef;
     let outputBaseline = null;
     let before;
-    if (inheritedBaseline?.snapshotKind) {
-      assert(inheritedBaseline.snapshotKind === 'committed-result-output',
+    if (!inheritedBaseline && prior.metadata?.unacceptedTerminalResult) {
+      ref = prior.metadata.unacceptedTerminalResult.evidenceRef;
+      const record = JSON.parse((await evidenceStore.read(ref)).bytes.toString('utf8'));
+      outputBaseline = { snapshotKind: 'unaccepted-result-output', outputSnapshot: structuredClone(record.sourceDelta?.observedSnapshot) };
+      before = await verifyUnacceptedAmendmentBaseline(prior, { ...outputBaseline, snapshotEvidenceRef: ref }, evidenceStore);
+    } else if (inheritedBaseline?.snapshotKind) {
+      assert(['committed-result-output', 'unaccepted-result-output'].includes(inheritedBaseline.snapshotKind),
         'PLAN_AMENDMENT_BASELINE_EVIDENCE_INVALID', 'Unsupported inherited implementation snapshot.');
       outputBaseline = { snapshotKind: inheritedBaseline.snapshotKind, terminalSubmissionId: inheritedBaseline.terminalSubmissionId,
         outputSnapshot: structuredClone(inheritedBaseline.outputSnapshot) };
-      before = await verifyOutputBaseline(prior, { ...outputBaseline, snapshotEvidenceRef: ref }, evidenceStore);
+      before = inheritedBaseline.snapshotKind === 'unaccepted-result-output'
+        ? await verifyUnacceptedAmendmentBaseline(prior, { ...outputBaseline, snapshotEvidenceRef: ref }, evidenceStore)
+        : await verifyOutputBaseline(prior, { ...outputBaseline, snapshotEvidenceRef: ref }, evidenceStore);
     } else if (!ref) {
       const last = prior.submissions.at(-1);
       const dispatch = prior.dispatches.find(item => item.dispatchId === last?.dispatchId && item.status === 'committed');
@@ -145,10 +153,12 @@ export const verifyAmendmentBaselines = async ({ planRun, typedPlan, snapshot, a
       && predecessor.metadata.supersedePlanDigest === planRun.metadata.lifecyclePlanDigest)
       || ['failed', 'incomplete'].includes(prior.status),
     'PLAN_AMENDMENT_BASELINE_RUN_CHANGED', 'The baseline implementation must remain safely retired.');
-    const before = baseline.snapshotKind === 'committed-result-output'
-      ? await verifyOutputBaseline(prior, baseline, evidenceStore)
-      : JSON.parse((await evidenceStore.read(baseline.snapshotEvidenceRef)).bytes.toString('utf8'));
-    assert(before.digest === baseline.sourceDigest && prior.sourceDigest === baseline.sourceDigest,
+    const before = baseline.snapshotKind === 'unaccepted-result-output'
+      ? await verifyUnacceptedAmendmentBaseline(prior, baseline, evidenceStore)
+      : baseline.snapshotKind === 'committed-result-output' ? await verifyOutputBaseline(prior, baseline, evidenceStore)
+        : JSON.parse((await evidenceStore.read(baseline.snapshotEvidenceRef)).bytes.toString('utf8'));
+    assert(before.digest === (baseline.snapshotKind === 'unaccepted-result-output' ? baseline.outputSnapshot.digest : baseline.sourceDigest)
+      && prior.sourceDigest === baseline.sourceDigest,
       'PLAN_AMENDMENT_BASELINE_SOURCE_CHANGED', 'The retired implementation source identity changed.');
     const changes = diffWorkspaceSnapshots(before, snapshot);
     const preparations = new Map(baseline.preparationPaths.map(file => [file.path, file.sha256]));

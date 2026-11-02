@@ -3,6 +3,7 @@ import { submissionAttempt } from '../kernel/attempt-budget.mjs';
 import { isInterruptedImplementationSubmission } from './lifecycle-interruption.mjs';
 import { ACCEPTANCE_CONTINUATION_POLICY, hasNewAcceptanceCheckpoint } from './implementation-continuation.mjs';
 import { hasTargetImplementationProgress, isIncompleteImplementationResult } from './implementation-handoff.mjs';
+import { digestJson } from '../common/canonical.mjs';
 
 // A capacity handoff may preserve local progress while a later protected action
 // still awaits an external receipt. Reuse the committed Dispatch's proof scope;
@@ -60,16 +61,20 @@ export const selectQualityContinuationRun = (states, intent) => {
 
 // A continuation may retry an unfinished implementation, but cannot turn an
 // approval, exhausted budget, or unrelated blocked stage into executable work.
-const assertResumableFeature = (state, feature) => {
+const assertResumableFeature = (state, feature, inputBindingRepairs) => {
   assert(['implementation', 'quality', 'quality-repair', 'quality-recheck', 'quality-closeout'].includes(feature.metadata?.stage),
     'LIFECYCLE_RESUME_BLOCKED_STAGE', 'The blocked Feature is not a resumable implementation or quality stage.');
   const submission = [...state.submissions].reverse().find(item => item.featureId === feature.id);
   assert(submission?.result?.failureClass !== 'implementation-sizing-review', 'DELIVERY_BATCH_SIZING_REVIEW_REQUIRED',
     'Repeated incomplete handoffs require a bounded batch sizing/strategy review before more implementation dispatches.');
   const inScopeFix = isResumableImplementationSubmission(state, feature, submission);
+  const inputBindingRepair = inputBindingRepairs.some(item => item.kind === 'verification-input-repair'
+    && item.featureId === feature.id && item.submissionId === submission?.submissionId
+    && item.sourceDigest === state.sourceDigest
+    && item.approvedChecksDigest === digestJson(feature.metadata?.deliveryBatch?.checks));
   const providerFailure = submission?.result?.status === 'failed' && submission.result.failureClass === 'runtime-provider'
     && submission.result.blocker?.kind === 'runtime-provider';
-  assert((feature.metadata?.stage === 'implementation' && inScopeFix) || providerFailure
+  assert((feature.metadata?.stage === 'implementation' && (inScopeFix || inputBindingRepair)) || providerFailure
     || isInterruptedImplementationSubmission(state, feature, submission),
     'LIFECYCLE_RESUME_BLOCKER_REQUIRES_REVIEW', 'The blocked Feature is not an in-scope fix or a retryable provider failure.');
   const attempt = submissionAttempt(state, feature, submission);
@@ -77,13 +82,13 @@ const assertResumableFeature = (state, feature) => {
   return feature.id;
 };
 
-export const selectBlockedResumeFeature = state => {
+export const selectBlockedResumeFeature = (state, { inputBindingRepairs = [] } = {}) => {
   const blocked = state.features.filter(feature => feature.state === 'blocked');
   if (!blocked.length) return null;
-  if (blocked.length === 1) return assertResumableFeature(state, blocked[0]);
+  if (blocked.length === 1) return assertResumableFeature(state, blocked[0], inputBindingRepairs);
   const eligible = blocked.filter(feature => {
     if (!(feature.dependsOn ?? []).every(id => state.features.some(item => item.id === id && item.state === 'completed'))) return false;
-    try { assertResumableFeature(state, feature); return true; } catch { return false; }
+    try { assertResumableFeature(state, feature, inputBindingRepairs); return true; } catch { return false; }
   });
   // The approved graph order is stable; reopen one executable frontier only.
   // Other scope, external, approval and exhausted blockers remain untouched.
