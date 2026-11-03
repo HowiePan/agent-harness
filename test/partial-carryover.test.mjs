@@ -66,4 +66,17 @@ test('idle migration before the first child completion preserves partial evidenc
   assert.deepEqual(replacement.features.map(row => [row.id, row.state, row.blocker]), prior.features.map(row => [row.id, row.state, row.blocker]));
   assert.equal(selectBlockedResumeFeature(replacement), 'spatial');
   assert.equal(replacement.leases.length, 0); assert.equal(replacement.dispatches.length, 0);
+  // A replacement that did only auxiliary diagnosis still has the original
+  // partial business history. A second patch must not demand a fake new worker.
+  const nextPlan = createCompletionCarryoverPlan({ prior: replacement, replacementFeatures: features,
+    replacementRunId: 'replacement-2', replacementPlanDigest: 'e'.repeat(64), patchReceiptDigest: 'f'.repeat(64),
+    sourceDigest, includeIncomplete: true });
+  assert.equal(nextPlan.partialSubmissions.length, 2);
+  await verifyCompletionCarryover({ plan: nextPlan, prior: replacement, replacementFeatures: features, evidenceStore, authorityStore });
+  const forged = structuredClone(replacement);
+  forged.events.find(event => event.type === 'attempts.carried-over').sources[0].authorityDigest = '0'.repeat(64);
+  const forgedPlan = createCompletionCarryoverPlan({ prior: forged, replacementFeatures: features,
+    replacementRunId: 'replacement-2', replacementPlanDigest: 'e'.repeat(64), patchReceiptDigest: 'f'.repeat(64), sourceDigest, includeIncomplete: true });
+  await assert.rejects(verifyCompletionCarryover({ plan: forgedPlan, prior: forged, replacementFeatures: features, evidenceStore, authorityStore }),
+    { code: 'CARRYOVER_EVIDENCE_CONTEXT_MISMATCH' });
 });

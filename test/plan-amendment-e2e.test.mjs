@@ -1,13 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, writeFile, readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { createHarness, createInMemoryRuntime, loadExtensionPack, harnessTemporaryRoot } from '../src/index.mjs';
 import { createDeliveryProjectDescriptor } from '../src/flows/delivery-lifecycle/descriptor.mjs';
 import { projectExecutionPolicyDecisionContext } from '../src/platform/registry/project-registry.mjs';
 import { planApprovalSnapshot, reviewedPlanProposal } from '../src/flows/delivery-lifecycle/plan-approval.mjs';
 import { materializePlanAmendment, planAmendmentReference } from '../src/application/plan-amendment-artifacts.mjs';
-import { digestJson } from '../src/common/canonical.mjs';
+import { digestJson, sha256 } from '../src/common/canonical.mjs';
 import { captureWorkspace, diffWorkspaceSnapshots } from '../src/common/workspace-snapshot.mjs';
 import { createTestExecutionAuthorizationAdapter, createMockVisibleHostAdapter } from './test-support.mjs';
 import { amendmentFixture } from './fixtures/plan-amendment.mjs';
@@ -47,6 +47,18 @@ for (const visible of [false, true]) test(`amend command reaches reviewed approv
     const stage = packet.feature.metadata.stage;
     const completed = (port, schemaId, value, changedFiles = []) => ({ status: 'completed', summary: 'Synthetic command contract verified', changedFiles,
       outputs: { [port]: { schemaId, value, evidenceRefs: ['fixture:source-inspection'] } } });
+    if (stage === 'execution-diagnostic') {
+      const spec = packet.feature.metadata.intervention;
+      assert.deepEqual(packet.feature.allowedPaths, []);
+      return completed('diagnosis', 'execution-diagnosis-v1', {
+        sourceSubmissionId: spec.sourceSubmissionId, contractDigest: spec.contractDigest,
+        conclusion: 'contract-change', reason: 'The fixture requires an explicitly reviewed consumer lifetime or amendment scope change.',
+        evidence: [{ path: 'src/main.mjs', sha256: sha256(await readFile(resolve(workspaceRoot, 'src/main.mjs'))) }],
+        repairPaths: [], remainingWork: [{ work: 'Consumer lifetime and approved scope', existingImplementation: 'The stable source remains present.',
+          remainingDevelopment: 'Change the approved dependency or scope through Amend.', verification: 'Independent plan review and user approval.',
+          unknowns: [], units: 1 }],
+      });
+    }
     if (action === 'plan' && stage === 'version-planning') return completed('plan', 'delivery-plan-v1', fixture.parentPlan);
     if (action === 'plan' && stage === 'plan-review') return completed('plan-review', 'delivery-plan-review-v1', { approved: true, findings: [] });
     if (action === 'amend' && stage === 'version-planning') {
@@ -215,8 +227,12 @@ for (const visible of [false, true]) test(`amend command reaches reviewed approv
   }
   const retiredDraft = await harness.authorityStore.read(descriptor.id, blockedDraft.run.runId);
   assert.equal(retiredDraft.status, 'superseded');
-  assert.equal(retiredDraft.submissions.length, 1);
-  assert.equal(retiredDraft.submissions[0].result.status, 'blocked');
+  const businessSubmissions = retiredDraft.submissions.filter(row => !retiredDraft.features.some(feature => feature.id === row.featureId && feature.kind === 'execution-diagnostic'));
+  assert.equal(businessSubmissions.length, 1);
+  assert.equal(businessSubmissions[0].result.status, 'blocked');
+  const diagnosis = retiredDraft.submissions.find(row => row.result.outputs?.diagnosis);
+  assert.equal(diagnosis.result.outputs.diagnosis.value.conclusion, 'contract-change');
+  assert.deepEqual(diagnosis.result.changedFiles, []);
   assert.equal(amended.reason, 'implementation-plan-user-approval-required');
   assert.equal(amendmentReviews, 2);
   const amendmentSubmission = amended.state.submissions.find(item => item.result.outputs?.amendment);

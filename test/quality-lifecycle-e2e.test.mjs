@@ -33,7 +33,11 @@ test('environment Gate failures do not become source-repair Findings', () => {
     sourceDigest: 'a'.repeat(64),
     features: [{ id: 'quality', state: 'completed', metadata: { qualityReview: true, qualityFindingPolicy: 'repair-and-rereview', qualityRoot: 'quality:fixture', reviewRound: 1 } }],
   };
-  assert.equal(createQualityGateDiagnosticReview({ state, gateResults: [{ id: 'wasm', status: 'environment-failed', evidenceRefs: ['access-denied'] }] }), null);
+  const review = createQualityGateDiagnosticReview({ state, gateResults: [{ id: 'wasm', status: 'environment-failed', evidenceRefs: ['access-denied'] }] });
+  assert.deepEqual(review.allowedPaths, []);
+  assert.deepEqual(review.metadata.diagnostics, []);
+  assert.equal(review.metadata.environmentDiagnostics[0].status, 'environment-failed');
+  assert.match(review.task.instructions.join(' '), /not an invented source Finding/);
 });
 
 test('a quality Finding cannot turn verification output into a source-edit allowance', () => {
@@ -310,6 +314,10 @@ const createHost = ({ workspace, failFirstWait = false, runningWaitCount = 0, fa
         const pinned = task.packet.feature.metadata.qualityCloseout;
         return finish({ result: result({ summary: 'Pinned quality evidence is ready for fresh final Gates.', checkpoint: 'closeout-evidence', outputs: { closeout: { schemaId: 'quality-closeout-evidence-v1', value: { priorRunId: pinned.priorRunId, sourceDigest: pinned.sourceDigest, ready: true }, evidenceRefs: ['host:closeout-evidence'] } } }), receipt: { operation: 'result', stage } });
       }
+      if (stage === 'execution-diagnostic') return finish({ result: {
+        status: 'blocked', summary: 'Fixture provides no verified remedy for the original failure.', changedFiles: [],
+        failureClass: 'external-prerequisite', blocker: { kind: 'prerequisite', summary: 'No repair capability exists in this fixture.' } },
+      receipt: { operation: 'result', stage } });
       assert.equal(stage, 'quality-recheck');
       const gateDiagnostic = task.packet.feature.metadata.diagnostics?.find(item => item.id.startsWith('gate:'));
       if (gateDiagnostic) {
@@ -678,21 +686,22 @@ test('spawn-before-bind failure contains the prior Agent and never opens the nex
   assert.equal(state.dispatches.filter(dispatch => dispatch.status === 'requested').length, 1);
 });
 
-test('terminal Agent failure is committed and blocks the lifecycle before any next Agent starts', async t => {
+test('terminal Agent failure is committed and diagnosed without starting another business Agent', async t => {
   const fixture = await setup({ failFirstResult: true });
   t.after(() => rm(fixture.root, { recursive: true, force: true }));
   const preflight = await fixture.harness.createExecutionReadinessReport(fixture.plan);
   const stopped = await fixture.harness.executeVisibleLifecyclePlan(fixture.plan, { commandId: 'quality-terminal-stop', preflightReport: preflight, maxConcurrency: 10 });
   assert.equal(stopped.status, 'attention-required');
   assert.equal(stopped.reason, 'all-remaining-blocked');
-  assert.equal(stopped.blockedFeatures.length, 1);
+  assert.equal(stopped.blockedFeatures.filter(item => !item.id.startsWith('diagnostic/')).length, 1);
   assert.equal(stopped.blockedFeatures[0].id, stopped.state.features[0].id);
   assert.deepEqual(stopped.blockedFeatures[0].allowedPaths, []);
-  assert.equal(fixture.host.stats.spawnCount, 1);
-  assert.equal(fixture.host.stats.terminalCount, 1);
+  assert.equal(fixture.host.stats.spawnCount, 2);
+  assert.equal(fixture.host.stats.terminalCount, 2);
   assert.equal(fixture.host.stats.maxActive, 1);
   assert.equal(stopped.rounds.filter(round => Object.hasOwn(round, 'physicalLimit')).every(round => round.physicalLimit === 1), true);
-  assert.equal(stopped.state.submissions.length, 1);
+  assert.equal(stopped.state.submissions.length, 2);
+  assert.equal(stopped.state.features.filter(item => item.kind === 'execution-diagnostic').length, 1);
   assert.equal(stopped.state.submissions[0].result.status, 'failed');
   assert.equal(stopped.state.leases.filter(lease => lease.status === 'active').length, 0);
 });
@@ -703,10 +712,11 @@ test('rejected native repair result records observed edits and closes its Lease'
   const preflight = await fixture.harness.createExecutionReadinessReport(fixture.plan);
   const stopped = await fixture.harness.executeVisibleLifecyclePlan(fixture.plan, { commandId: 'quality-rejected-repair', preflightReport: preflight, maxConcurrency: 1 });
   assert.equal(stopped.status, 'attention-required');
-  assert.equal(stopped.state.submissions.at(-1).result.status, 'failed');
-  assert.deepEqual(stopped.state.submissions.at(-1).result.changedFiles, ['README.md']);
+  const rejected = stopped.state.submissions.find(item => item.result.failureClass === 'runtime-contract');
+  assert.equal(rejected.result.status, 'failed');
+  assert.deepEqual(rejected.result.changedFiles, ['README.md']);
   assert.equal(stopped.state.leases.filter(lease => lease.status === 'active').length, 0);
-  assert.equal(fixture.host.stats.spawnCount, 2);
+  assert.equal(fixture.host.stats.spawnCount, 3);
 });
 
 test('invalid completed repair checkpoint is preserved and retried in the same visible lifecycle', async t => {

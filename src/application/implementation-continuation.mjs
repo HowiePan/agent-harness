@@ -168,6 +168,8 @@ export const buildImplementationContinuation = async (state, feature, workspaceR
     implementationSteps: batch ? implementationSteps.filter(item => workBatch.targetStepIds.includes(item.id)) : implementationSteps,
     nextImplementationStep: batch ? implementationSteps.find(item => workBatch.pendingTargetStepIds.includes(item.id)) ?? null : nextImplementationStep,
     workBatch,
+    interruptionResolution: [...(state.decisions ?? [])].reverse().find(item => item.kind === 'execution-intervention'
+      && item.featureId === feature.id && item.decision === 'verified') ?? null,
     ...(batch ? { deliveryFeedback: deliveryBatchFeedback(state, feature) } : {}),
     externalPrerequisites: structuredClone(expanded?.externalPrerequisites ?? []),
     history: [...(inherited?.history ?? []), ...history].slice(-3).map(item => ({ submissionId: item.submissionId,

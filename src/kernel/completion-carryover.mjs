@@ -4,6 +4,8 @@ import { assert } from '../common/errors.mjs';
 const mutableFeatureKeys = ['state', 'submissionId', 'blocker', 'reopenedAt', 'reopenReason',
   'recoveryDisposition', 'recoveryEvidenceRefs'];
 const implementation = state => state.features.filter(feature => feature.metadata?.stage === 'implementation');
+const partialOrigin = (state, submissionId) => [...state.events].reverse().find(event => event.type === 'attempts.carried-over'
+  && event.submissionIds?.includes(submissionId) && event.sources?.length);
 const staticFeature = feature => {
   const stable = withoutKeys(feature, mutableFeatureKeys);
   if (!stable.metadata?.workflow) return stable;
@@ -49,7 +51,9 @@ export const createCompletionCarryoverPlan = ({ prior, replacementFeatures, repl
   const partial = completed.length === 0 && includeIncomplete ? prior.submissions.filter(item =>
     oldFeatures.some(feature => feature.id === item.featureId)
     && ['blocked', 'failed'].includes(item.result?.status) && !item.supersededAt
-    && prior.dispatches.some(dispatch => dispatch.dispatchId === item.dispatchId && dispatch.status === 'committed')) : [];
+    && (prior.dispatches.some(dispatch => dispatch.dispatchId === item.dispatchId && dispatch.status === 'committed')
+      || prior.features.some(feature => feature.id === item.featureId && feature.submissionId === item.submissionId)
+        && partialOrigin(prior, item.submissionId))) : [];
   assert(completed.length > 0 || partial.length > 0, 'CARRYOVER_NO_COMPLETIONS',
     'Carry-over requires completed Features or an explicitly verified committed partial implementation.');
   const firstPending = oldFeatures.findIndex(feature => feature.state !== 'completed');
@@ -98,6 +102,27 @@ export const verifyCompletionCarryover = async ({ plan, prior, replacementFeatur
       let sourceRun = prior;
       const visited = new Set();
       while (record.metadata.runId !== sourceRun.runId) {
+        const partial = (plan.partialSubmissions ?? []).some(candidate => candidate.submissionId === item.submissionId);
+        if (partial) {
+          const origin = partialOrigin(sourceRun, item.submissionId);
+          const link = [...sourceRun.events].reverse().find(event => event.type === 'feature.completion-carried-over');
+          const pin = origin?.sources.find(candidate => candidate.runId === link?.priorRunId);
+          assert(authorityStore && pin && !visited.has(sourceRun.runId),
+            'CARRYOVER_EVIDENCE_CONTEXT_MISMATCH', 'Partial Evidence requires its exact inbound transfer, not diagnostic-only activity or copied history.');
+          visited.add(sourceRun.runId);
+          const parent = await authorityStore.read(prior.projectId, pin.runId);
+          const parentPlan = parent.metadata?.completionCarryover?.plan;
+          const parentItem = parentPlan?.partialSubmissions?.find(candidate => candidate.submissionId === item.submissionId
+            && candidate.submissionDigest === item.submissionDigest && digestJson(candidate.evidenceRefs) === digestJson(item.evidenceRefs));
+          assert(parent.authorityDigest === pin.authorityDigest && parent.status === 'superseded'
+            && parent.metadata.supersededByRunId === sourceRun.runId
+            && parent.metadata.supersedePlanDigest === sourceRun.metadata.lifecyclePlanDigest
+            && parentPlan?.carryoverDigest === link.carryoverDigest && parentItem
+            && parent.submissions.some(candidate => candidate.submissionId === item.submissionId && candidate.submissionDigest === submission.submissionDigest),
+          'CARRYOVER_EVIDENCE_CONTEXT_MISMATCH', 'Partial Evidence transfer differs from the sealed parent Authority.');
+          sourceRun = parent;
+          continue;
+        }
         // Superseding a replacement Run records its outbound carry-over in
         // metadata; the immutable start event retains its inbound provenance.
         const link = [...sourceRun.events].reverse().find(event => event.type === 'feature.completion-carried-over')

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, writeFile, readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { createHarness, loadExtensionPack, harnessTemporaryRoot } from '../src/index.mjs';
 import { createDeliveryProjectDescriptor } from '../src/flows/delivery-lifecycle/descriptor.mjs';
@@ -8,8 +8,14 @@ import { projectExecutionPolicyDecisionContext } from '../src/platform/registry/
 import { planApprovalSnapshot } from '../src/flows/delivery-lifecycle/plan-approval.mjs';
 import { createMockVisibleHostAdapter } from './test-support.mjs';
 import { proposal, completion } from './delivery-batch-support.mjs';
+import { sha256 } from '../src/common/canonical.mjs';
 
-for (const repairInput of [false, true]) test(`native-visible bounded deliveries run real checks${repairInput ? ' and auto-repair a proven input blocker' : ''} without an Agent CLI`, async t => {
+for (const mode of ['ordinary', 'input', 'capacity', 'unknown', 'clarification', 'clarification-exhausted-resume', 'contract', 'over-capacity']) test(`native-visible bounded deliveries: ${mode}, with genuine checks and no Agent CLI`, async t => {
+  const repairInput = mode === 'input';
+  const resumeBoundary = mode === 'clarification-exhausted-resume';
+  const clarificationMode = mode.startsWith('clarification');
+  const reviewMode = ['capacity', 'unknown', 'contract', 'over-capacity'].includes(mode) || clarificationMode;
+  const expectedStop = ['contract', 'over-capacity'].includes(mode) || resumeBoundary;
   const controlRoot = resolve(process.cwd());
   const root = await mkdtemp(resolve(harnessTemporaryRoot(), 'bounded-visible-'));
   t.after(() => rm(root, { recursive: true, force: true }));
@@ -17,8 +23,10 @@ for (const repairInput of [false, true]) test(`native-visible bounded deliveries
   await mkdir(resolve(workspaceRoot, '.git'), { recursive: true });
   await mkdir(resolve(workspaceRoot, 'src'));
   await writeFile(resolve(workspaceRoot, 'src/receiver.mjs'), 'export const receive = x => x * 3;');
+  await writeFile(resolve(workspaceRoot, 'historical.log'), 'Unaccepted historical evidence.');
   await writeFile(resolve(workspaceRoot, 'verify.mjs'), "import assert from 'node:assert/strict'; import {receive} from './src/receiver.mjs'; assert.equal(receive(4),8);");
   const approvedProposal = proposal();
+  if (resumeBoundary) approvedProposal.deliveryBatchReserve = 1;
   if (repairInput) {
     await mkdir(resolve(workspaceRoot, 'src/tests/suites'), { recursive: true });
     await writeFile(resolve(workspaceRoot, 'src/Cargo.toml'), '[[test]]\nname="receiver"\npath="tests/suites/receiver.rs"\n');
@@ -37,7 +45,29 @@ for (const repairInput of [false, true]) test(`native-visible bounded deliveries
         outputs: { [port]: { schemaId, value, evidenceRefs: ['fixture:inspection'] } } });
       if (feature.metadata.stage === 'version-planning') return output('plan', 'delivery-plan-v1', { features: ['F01'], proposedFeatures: [approvedProposal] });
       if (feature.metadata.stage === 'plan-review') return output('plan-review', 'delivery-plan-review-v1', { approved: true, findings: [] });
+      if (feature.kind === 'execution-diagnostic' && feature.metadata.intervention.subject.deliveryBatch?.id === 'receiver') {
+        assert.deepEqual(feature.allowedPaths, []);
+        const spec = feature.metadata.intervention;
+        const log = { path: 'historical.log', sha256: sha256(await readFile(resolve(workspaceRoot, 'historical.log'))) };
+        return output('diagnosis', 'execution-diagnosis-v1', {
+          sourceSubmissionId: spec.sourceSubmissionId, contractDigest: spec.contractDigest,
+          conclusion: mode === 'contract' ? 'contract-change' : 'in-scope',
+          reason: 'Source inspection separates existing receiver from the remaining implementation and verification.',
+          evidence: [{ path: 'src/receiver.mjs', sha256: sha256(await readFile(resolve(workspaceRoot, 'src/receiver.mjs'))) },
+            ...(clarificationMode && !spec.correctionOf ? [log] : [])],
+          ...(clarificationMode && spec.correctionOf ? { observations: [log] } : {}),
+          repairPaths: ['src/receiver.mjs'], remainingWork: [{ work: 'Receiver behavior', existingImplementation: 'Receiver module exists.',
+            remainingDevelopment: 'Fix its multiplication.', verification: 'All original behavior checks.',
+            unknowns: !clarificationMode ? [] : !spec.correctionOf ? ['All original checks remain pending.'] : [{ question: 'All original checks remain pending.',
+              classification: 'verification-pending', action: 'Run all declared checks after the fix.', verification: 'The entire original behavior check.', unitsIncluded: true }],
+            units: mode === 'over-capacity' ? 9 : 2 }],
+        });
+      }
       if (feature.metadata.deliveryBatch?.id === 'receiver') {
+        if (reviewMode && spawned.filter(item => item.feature.id === feature.id).length === 1) return {
+          status: 'blocked', summary: mode === 'unknown' ? 'A newly named issue needs diagnosis.' : 'Worker claims estimate exceeds capacity.', changedFiles: [],
+          failureClass: mode === 'unknown' ? 'previously-unseen-problem' : 'capacity-mismatch',
+          blocker: { kind: mode === 'unknown' ? 'unknown-new-problem' : 'capacity', summary: 'Worker conclusion requires independent source review.' } };
         if (repairInput && spawned.filter(item => item.feature.id === feature.id).length === 1) return {
           status: 'blocked', summary: 'Observed missing conventional test input; explicit manifest target exists.', changedFiles: [],
           failureClass: 'external-blocker', blocker: { kind: 'prerequisite', code: 'delivery-check-input-rebinding-required',
@@ -77,13 +107,43 @@ for (const repairInput of [false, true]) test(`native-visible bounded deliveries
     runId: planned.state.runId, planDigest: snapshot.planDigest, artifactDigest: snapshot.artifactDigest },
   { expectedRevision: planned.state.revision, commandId: 'fixture-approval' });
   await harness.kernel.closeRun(descriptor.id, approved.state.runId, {}, { expectedRevision: approved.state.revision, commandId: 'fixture-close-plan' });
-  const implemented = await execute('implement');
+  let implemented;
+  if (resumeBoundary) {
+    const apply = harness.applyInterruptionReview;
+    let processLoss = true;
+    harness.applyInterruptionReview = async (...args) => {
+      if (processLoss) { processLoss = false; throw new Error('simulated process loss before diagnostic assessment'); }
+      return apply(...args);
+    };
+    await assert.rejects(execute('implement'), /simulated process loss/);
+    const prior = (await harness.authorityStore.list(descriptor.id)).find(item => item.metadata.commandIntent?.action === 'implement');
+    const resume = await harness.createLifecycleResumePlan({ projectId: descriptor.id, runId: prior.runId, executionWorkspaceRoot: workspaceRoot });
+    assert.equal(resume.blockedFeatureId, null);
+    const preflightReport = await harness.createExecutionReadinessReport(resume.plan);
+    assert.equal(preflightReport.executionReady, true);
+    implemented = await harness.executeVisibleLifecyclePlan(resume.plan, { commandId: 'fixture-resume', preflightReport, maxConcurrency: 1, resume });
+    assert.equal(implemented.interruption.category, 'recovery-budget');
+    assert.equal(implemented.coordination.userInputRequired, true);
+  } else implemented = await execute('implement');
   const deliveries = spawned.filter(packet => packet.feature.metadata.deliveryBatch);
-  assert.equal(deliveries.length, repairInput ? 3 : 2);
-  assert.notEqual(deliveries[0].dispatchId, deliveries[1].dispatchId);
+  assert.equal(deliveries.length, expectedStop ? 1 : repairInput || reviewMode ? 3 : 2,
+    JSON.stringify({ reason: implemented.reason, interruption: implemented.interruption,
+      features: implemented.state.features.map(item => ({ id: item.id, state: item.state, dependsOn: item.dependsOn })),
+      attempts: implemented.state.attempts }));
+  if (!expectedStop) assert.notEqual(deliveries[0].dispatchId, deliveries[1].dispatchId);
   assert(deliveries.every(packet => packet.execution.runtime.mode === 'conversation-visible'));
-  assert(implemented.state.features.filter(feature => feature.metadata.deliveryBatch).every(feature => feature.state === 'completed'));
-  assert.equal(implemented.state.features.find(feature => feature.metadata.stage === 'scope-resolution').state, 'blocked');
+  assert.equal(implemented.state.features.filter(feature => feature.metadata.deliveryBatch).every(feature => feature.state === 'completed'), !expectedStop);
+  assert.equal(implemented.state.features.find(feature => feature.metadata.stage === 'scope-resolution').state, expectedStop ? 'pending' : 'blocked');
+  assert.equal(implemented.interruption.action, 'stop');
+  assert(implemented.interruption.evidenceRef);
+  if (reviewMode) {
+    const diagnostic = spawned.find(item => item.feature.metadata.intervention?.subject.deliveryBatch?.id === 'receiver');
+    assert(diagnostic);
+    assert.equal(implemented.state.metadata.interruptionLedger.filter(item => item.logicalRoot === deliveries[0].feature.logicalRoot).length, mode === 'clarification' ? 2 : 1);
+    assert.deepEqual(implemented.state.features.find(item => item.id === deliveries[0].feature.id).metadata.deliveryBatch.checks, approvedProposal.deliveryBatches[0].checks);
+    if (!expectedStop) assert(deliveries[1].execution.implementationContinuation.interruptionResolution);
+    else assert.equal(implemented.state.features.find(item => item.id === deliveries[0].feature.id).state, 'blocked');
+  }
   if (repairInput) {
     assert.equal(implemented.state.decisions.filter(item => item.kind === 'verification-input-repair').length, 1);
     assert.equal(deliveries[1].execution.implementationContinuation.workBatch.verificationInputBindings[0].bindings.length, 1);

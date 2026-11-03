@@ -78,9 +78,9 @@ Invoke the Hook-provided Coordinator directly through the command tool with `yie
 
 Service every emitted `codex-visible-host-request` before waiting on the process again, then poll the same process session. An unresolved request may be re-emitted as a visibility reminder: deduplicate by the exact `requestId` plus `requestDigest`, call the native tool exactly once, and keep waiting for the Host-bound result. Never inspect the pending directory as a substitute for the live process stream, never relaunch a Coordinator except for the pre-Run retry explicitly allowed above, and never wait for process completion while an emitted Host request is unserviced.
 
-Never interpret command arguments as shell text. Never append free-form prompt text to change the declared scope. Runtime, model, tools, Gate recipes, paths, and concurrency come only from the Project Descriptor and approved Extension Registry. A missing/invalid binding is attention-required; do not repair it by searching the repository or other drives.
+Arguments are never shell text or scope-changing prompts. Runtime, model, tools, Gates, paths and concurrency come from the approved Descriptor/Registry. Missing bindings require diagnosis, never a disk search.
 
-If the user asks to evaluate, explain, dry-run, or not start, report the resolved intent and prerequisites only. This instruction overrides a manifest's state-changing default for that turn and creates no Authority.
+Evaluation, explanation, dry-run or no-start requests override Manifest mutation defaults: report only; create no Authority.
 
 When explaining a quality command, distinguish the Command Intent from its first Feature. A `review-and-repair` command first creates path-scoped repair Features for complete, open Findings pinned from the authoritative Quality Target, then runs a read-only review Feature (`allowedPaths=[]`). An Authority-committed review Submission may create further repair Features and a fresh re-review within the Run's review budget. Findings outside the project source boundary stay open and cannot be used to grant cross-project repair paths. New Plans express the review as `sourcePolicy=read-only` plus `qualityFindingPolicy=repair-and-rereview`; `review-only` uses `qualityFindingPolicy=record-only`. Report the exact Authority phase and evidence instead of inferring the whole Run is read-only from a review Feature.
 
@@ -96,4 +96,4 @@ Budget exhaustion does not require Replan. Prepare an exact addition with read-o
 
 For `amend <target> change:<ID>`, require the current Hook intent and registered amendmentScope. Use the same native Coordinator protocol for its delta planner and independent reviewer. Materialize against the immutable approved base. Show the new artifact and require exact human approval; the command is not approval. Preserve verified unaffected completions and budget history. Changes beyond scope require Replan. Follow [the contract](../../references/pseudo-command-contract.md); never reconstruct an intent or start implement automatically.
 
-Prefer proven input repairs to Amend.
+Use bounded-interruption/1 before Amend. On Coordinator exit consume coordination-recovery/1: preserve the goal, finish authorized diagnosis, independent maintenance and formal recovery preparation before requesting user action. Exit grants neither completion nor replay authority.

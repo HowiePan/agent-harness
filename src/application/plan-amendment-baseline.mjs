@@ -2,7 +2,7 @@ import { assert } from '../common/errors.mjs';
 import { digestJson, withoutKeys } from '../common/canonical.mjs';
 import { diffWorkspaceSnapshots } from '../common/workspace-snapshot.mjs';
 import { rebindAmendmentReferences } from '../flows/delivery-lifecycle/plan-amendment.mjs';
-import { matchesAmendmentRetry, rejectedAmendmentDraftEvidence } from './plan-amendment-retry.mjs';
+import { matchesAmendmentRetry, rejectedAmendmentDraftEvidence, hasCompletedAmendmentWork } from './plan-amendment-retry.mjs';
 import { verifyBlockedDraftArtifacts } from './plan-amendment-draft-artifacts.mjs';
 import { verifyUnacceptedAmendmentBaseline } from './plan-amendment-unaccepted-baseline.mjs';
 
@@ -46,7 +46,7 @@ export const captureAmendmentBaselines = async ({ states, revision, snapshot, ev
         && predecessor.metadata.supersedePlanDigest === draft.metadata.lifecyclePlanDigest
         && draft.metadata?.commandIntent?.action === 'amend'
         && draft.metadata.planRevision.parentPlanDigest === revision.parentPlanDigest
-        && (!draft.submissions.some(row => row.result?.status === 'completed') || rejectedAmendmentDraftEvidence(draft)),
+        && (!hasCompletedAmendmentWork(draft) || rejectedAmendmentDraftEvidence(draft)),
       'PLAN_AMENDMENT_BASELINE_RUN_CHANGED', 'Retired implementation does not bind the preceding unaccepted amendment.');
       predecessor = draft;
     }
@@ -144,7 +144,7 @@ export const verifyAmendmentBaselines = async ({ planRun, typedPlan, snapshot, a
         && predecessor.metadata.supersedePlanDigest === retiredDraft.metadata.lifecyclePlanDigest
         && retiredDraft.status === 'superseded' && retiredDraft.metadata?.commandIntent?.action === 'amend'
         && retiredDraft.metadata.planRevision.parentPlanDigest === revision.parentPlanDigest
-        && (!retiredDraft.submissions.some(row => row.result?.status === 'completed') || rejectedAmendmentDraftEvidence(retiredDraft)),
+        && (!hasCompletedAmendmentWork(retiredDraft) || rejectedAmendmentDraftEvidence(retiredDraft)),
       'PLAN_AMENDMENT_BASELINE_RUN_CHANGED', 'Amendment retirement chain is not an unaccepted draft lineage.');
       predecessor = retiredDraft;
     }

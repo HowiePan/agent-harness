@@ -210,17 +210,17 @@ export const createQualityFollowUpFeatures = ({ state, feature, findings, result
 
 export const createQualityGateDiagnosticReview = ({ state, gateResults, qualityRoot: requestedQualityRoot = null, metadata: scopeMetadata = null }) => {
   if (state?.profile?.config?.repairOnly) return null;
-  // Environment failures need host/toolchain repair, not a source-code Finding.
-  const failed = gateResults.filter(gate => gate.status === 'failed');
+  // Diagnose environment failures too, without inventing a source Finding.
+  const failed = gateResults.filter(gate => ['failed', 'environment-failed', 'budget-exceeded'].includes(gate.status));
   if (!failed.length) return null;
   const prior = [...state.features].reverse().find(feature => feature.metadata?.qualityReview === true && feature.metadata?.qualityFindingPolicy === 'repair-and-rereview');
-  if (!prior || !state.features.every(feature => feature.state === 'completed')) return null;
+  if (!prior || !state.features.filter(feature => feature.kind !== 'execution-diagnostic').every(feature => feature.state === 'completed')) return null;
   const qualityRoot = requestedQualityRoot ?? prior.metadata.qualityRoot ?? prior.logicalRoot;
   if (qualityReviewBudgetExhausted(state, qualityRoot)) return null;
   const signature = sha256(`${qualityRoot}:${state.sourceDigest}:${failed.map(gate => gate.id).sort().join(',')}`);
   const id = `quality-gate-diagnostic-${signature.slice(0, 24)}`;
   if (state.features.some(feature => feature.id === id)) return null;
-  const diagnostics = failed.map(gate => ({
+  const diagnostics = failed.filter(gate => gate.status === 'failed').map(gate => ({
     id: `gate:${gate.id}:${state.sourceDigest.slice(0, 12)}`,
     summary: `Required ${gate.id} Gate returned ${gate.status} on the current source.`,
     evidence: gate.evidenceRefs,
@@ -229,8 +229,11 @@ export const createQualityGateDiagnosticReview = ({ state, gateResults, qualityR
   const taskProjection = taskFeatureProjection(defineNodeTaskContract({
     role: { id: 'quality-reviewer', description: 'Independently diagnoses required Gate failures on the current source.' },
     objective: 'Identify the source defect behind each failed Gate, with exact evidence and repair paths.',
-    instructions: ['Inspect every failed Gate receipt and its current-source evidence.', 'Return a Finding with precise affectedPaths for a source defect, or fresh evidence that the failure no longer reproduces.', 'Review the complete quality scope for remaining P0-P3 defects.'],
-    inputs: [{ id: 'quality-root', source: 'feature', path: 'qualityRoot', required: true, description: 'The scope of the required review.' }],
+    instructions: ['Inspect every failed Gate receipt and its current-source evidence.', 'Return a Finding with precise affectedPaths for a source defect, or fresh evidence that the failure no longer reproduces.',
+      'For environment or timeout failures inspect the source, configuration and tool route. A missing external tool, authority or prerequisite is a deliveryPrerequisite, not an invented source Finding. Report an in-scope Finding only when current source/configuration evidence proves the defect. Never waive the failed Gate or change its command, thresholds or required outputs.',
+      'Review the complete quality scope for remaining P0-P3 defects.'],
+    inputs: [{ id: 'quality-root', source: 'feature', path: 'qualityRoot', required: true, description: 'The scope of the required review.' },
+      { id: 'gate-environment', source: 'feature', path: 'environmentDiagnostics', required: false, description: 'Environment/timeout Gate receipts to classify without inventing source Findings.' }],
     steps: [{ id: 'diagnose', instruction: 'Reproduce and classify every failed Gate.' }, { id: 'report', instruction: 'Report evidence-backed Findings and diagnostic dispositions.' }],
     constraints: ['Remain read-only.', 'Do not modify source or broaden a repair without an evidence-backed Finding.'],
     acceptance: ['Every Gate diagnostic has a current-source disposition.', 'Every source defect has exact affected paths and evidence.'],
@@ -244,7 +247,9 @@ export const createQualityGateDiagnosticReview = ({ state, gateResults, qualityR
     metadata: {
       ...structuredClone(prior.metadata.qualityContext ?? {}), stage: 'quality-recheck', sourcePolicy: 'read-only',
       qualityFindingPolicy: 'repair-and-rereview', qualityReview: true, qualityRoot, reviewRound,
-      reviewSourceDigest: state.sourceDigest, diagnostics, qualityContext: structuredClone(scopeMetadata?.qualityContext ?? prior.metadata.qualityContext ?? {}),
+      reviewSourceDigest: state.sourceDigest, diagnostics,
+      environmentDiagnostics: failed.filter(gate => gate.status !== 'failed').map(gate => ({ id: gate.id, status: gate.status, evidenceRefs: gate.evidenceRefs })),
+      qualityContext: structuredClone(scopeMetadata?.qualityContext ?? prior.metadata.qualityContext ?? {}),
       ...(scopeMetadata ? structuredClone(scopeMetadata) : {}),
     },
   };

@@ -26,7 +26,8 @@ import { resolveCommandIntent } from '../platform/extensions/command-contract.mj
 import { createLifecycleCommandPlan, validateLifecycleCommandPlan } from './lifecycle-command-plan.mjs';
 import { selectBlockedResumeFeature } from './lifecycle-resume.mjs';
 import { inspectVerificationInputRepairs, applyVerificationInputRepair } from './verification-input-recovery.mjs';
-import { verifyInterruptedImplementationResume } from './lifecycle-interruption.mjs';
+import { reviewableInterruptions, hasPendingIntervention, scheduleInterruptionReview, applyInterruptionReview, isBoundIntervention } from './interruption-review.mjs';
+import { verifyInterruptedImplementationResume, isInterruptedImplementationSubmission } from './lifecycle-interruption.mjs';
 import { buildImplementationContinuation } from './implementation-continuation.mjs';
 import { verifyDeliveryBatchResult } from './delivery-verification.mjs';
 import { withVerificationLease } from './delivery-verification-lease.mjs';
@@ -554,9 +555,9 @@ export const createHarness = async ({ controlRoot: controlRootInput, dataRoot: d
           || (feature.metadata?.stage === 'quality-repair' && feature.metadata.scopeExtensions?.length > 0
             && digestJson(planned.allowedPaths) === digestJson(feature.metadata.scopeExtensions[0].before)
             && digestJson(feature.allowedPaths) === digestJson(feature.metadata.scopeExtensions.at(-1).after))))
-        || feature.metadata?.stage === 'gate-diagnostic'), 'LIFECYCLE_RESUME_FEATURE_MISMATCH', 'Run has Features outside the original lifecycle plan.');
+        || feature.metadata?.stage === 'gate-diagnostic' || isBoundIntervention(state, feature)), 'LIFECYCLE_RESUME_FEATURE_MISMATCH', 'Run has Features outside the original lifecycle plan.');
       const inputBindingRepairs = await inspectVerificationInputRepairs(state, workspace.root, project.workspace.excluded ?? []);
-      const blockedFeatureId = selectBlockedResumeFeature(state, { inputBindingRepairs });
+      const blockedFeatureId = selectBlockedResumeFeature(state, { inputBindingRepairs, interruptionReviews: reviewableInterruptions(state), pendingIntervention: hasPendingIntervention(state) });
       if (blockedFeatureId) {
         const feature = state.features.find(item => item.id === blockedFeatureId);
         const submission = [...state.submissions].reverse().find(item => item.featureId === blockedFeatureId);
@@ -910,6 +911,44 @@ export const createHarness = async ({ controlRoot: controlRootInput, dataRoot: d
           })) };
       }
       return kernel.startRun({ ...input, ...(attemptCarryover ? { attemptCarryover } : {}), features, profileConfig, policyDigest, sourceDigest: runSourceDigest, pluginSetDigest: input.pluginSetDigest ?? installedCompositionDigest, metadata: { ...input.metadata, approvedPlan, ...(approvedPlan ? { attemptAccounting: 'separate-progress-v1' } : {}), ...(lifecycleExecution ? { lifecycleExecution } : {}), workspace: structuredClone(workspace), gateRecipes: structuredClone(project.gateRecipes ?? []), projectDescriptorDigest: project.descriptorDigest, extensionSetDigest: extensionSet.digest } }, command);
+    },
+
+    async scheduleInterruptionReview(projectId, runId, featureId, commandId) {
+      const state = await authorityStore.read(projectId, runId);
+      const project = await projectRegistry.get(projectId);
+      return scheduleInterruptionReview({ state, featureId, project, kernel, evidenceStore, commandId });
+    },
+
+    async canRecoverNativeInterruption(projectId, runId, featureId) {
+      const state = await authorityStore.read(projectId, runId);
+      const feature = state.features.find(item => item.id === featureId);
+      const submission = state.submissions.findLast(item => item.featureId === featureId);
+      if (!isInterruptedImplementationSubmission(state, feature, submission)) return false;
+      try { await verifyInterruptedImplementationResume({ state, feature, submission, evidenceStore }); return true; }
+      catch (error) { if (error.code === 'LIFECYCLE_RESUME_INTERRUPTION_UNVERIFIED') return false; throw error; }
+    },
+
+    async recordInterruptionDecision(projectId, runId, decision, commandId) {
+      const state = await authorityStore.read(projectId, runId);
+      assert(decision.problem.sourceDigest === state.sourceDigest, 'INTERRUPTION_DECISION_STALE', 'Decision must bind current source.');
+      const existing = state.decisions.find(item => item.id === `interruption/${decision.decisionDigest}`);
+      if (existing) {
+        assert(digestJson(existing.policyDecision) === digestJson(decision), 'INTERRUPTION_DECISION_CONFLICT', 'An existing decision cannot be rebound.');
+        return { state, result: existing };
+      }
+      const evidence = await evidenceStore.put(decision, { projectId, runId, epoch: state.epoch, generation: state.generation,
+        featureId: decision.problem.featureId ?? null, sourceDigest: state.sourceDigest,
+        mediaType: 'application/json', labels: ['interruption-decision'] });
+      return kernel.recordDecision(projectId, runId, { id: `interruption/${decision.decisionDigest}`, actor: 'harness', decision: 'recorded',
+        kind: 'execution-interruption', policyDecision: decision, evidenceRef: evidence.ref },
+      { expectedRevision: state.revision, commandId });
+    },
+
+    async applyInterruptionReview(projectId, runId, featureId, commandId) {
+      const state = await authorityStore.read(projectId, runId);
+      const feature = state.features.find(item => item.id === featureId);
+      const project = await projectRegistry.get(projectId);
+      return applyInterruptionReview({ state, feature, project, kernel, evidenceStore, commandId });
     },
 
     async repairVerificationInputBlocker(projectId, runId, featureId, commandId) {

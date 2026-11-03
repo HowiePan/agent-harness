@@ -4,6 +4,7 @@ import { assert } from '../../common/errors.mjs';
 import { assertJsonSchema, assertSchemaDefinition } from '../../common/json-schema.mjs';
 import { assertKnownFindingDispositions, assertKnownFindingInventory } from './known-finding-inventory.mjs';
 import { classifyQualityFindings, qualityFindingInScope } from './quality-classification.mjs';
+import { isIntervention } from '../../kernel/intervention.mjs';
 
 const businessResultSchema = JSON.parse(readFileSync(new URL('../../../schemas/result.schema.json', import.meta.url), 'utf8'));
 export const VISIBLE_AGENT_RESULT_CONTRACT_VERSION = '1.2';
@@ -85,6 +86,12 @@ export const validateBusinessResult = (input, { conversationVisible = false, rep
 };
 
 export const validateProfileResult = ({ profile, state, feature, result }) => {
+  if (isIntervention(feature)) {
+    assert(feature.allowedPaths.length === 0 && state.metadata?.interruptionLedger?.some(item => item.id === feature.id
+      && item.sourceSubmissionId === feature.metadata?.intervention?.sourceSubmissionId),
+    'INTERVENTION_AUTHORITY_REQUIRED', 'Diagnostic results require a Kernel-reserved read-only Feature.');
+    return result;
+  }
   if (typeof profile.validateResult !== 'function') return result;
   const verdict = profile.validateResult({ state: structuredClone(state), feature: structuredClone(feature), result: structuredClone(result) });
   assert(verdict?.ok === true, 'PROFILE_RESULT_REJECTED', `Profile ${profile.id} rejected the Agent result.`, { reason: verdict?.reason ?? null });

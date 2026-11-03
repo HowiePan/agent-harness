@@ -1,0 +1,114 @@
+import { digestJson } from '../common/canonical.mjs';
+import { assert } from '../common/errors.mjs';
+import { submissionAttempt } from './attempt-budget.mjs';
+import { validateWorkGraph } from './work-graph.mjs';
+import { INTERRUPTION_POLICY, MAX_INTERVENTIONS_PER_ROOT, featureContractDigest, interventionAllowance } from '../common/interruption-contract.mjs';
+
+export const INTERVENTION_LIMIT = MAX_INTERVENTIONS_PER_ROOT;
+export const isIntervention = feature => feature?.kind === 'execution-diagnostic';
+export const isExecutionComplete = feature => feature.state === 'completed'
+  || isIntervention(feature) && ['blocked', 'failed-budget', 'cancelled'].includes(feature.state);
+export const profileState = state => ({ ...state, features: state.features.filter(feature => !isIntervention(feature)) });
+
+export const carryInterventions = async ({ state, prior, roots, evidenceStore }) => {
+  for (const feature of prior.features.filter(item => isIntervention(item))) {
+    const binding = feature.metadata?.intervention;
+    const parent = state.features.find(item => item.id === binding?.sourceFeatureId && roots.has(item.logicalRoot));
+    if (!parent || binding.sourceDigest !== state.sourceDigest || state.features.some(item => item.id === feature.id)) continue;
+    assert(feature.allowedPaths.length === 0 && binding.contractDigest === featureContractDigest(parent)
+      && state.metadata.interruptionLedger?.some(item => item.id === feature.id && item.sourceSubmissionId === binding.sourceSubmissionId),
+    'INTERVENTION_CARRYOVER_INVALID', 'Diagnostic transfer requires its exact reservation and unchanged parent.');
+    const result = feature.submissionId ? prior.submissions.find(item => item.submissionId === feature.submissionId) : null;
+    if (result) {
+      assert(result.submissionDigest === digestJson(Object.fromEntries(Object.entries(result).filter(([key]) => key !== 'submissionDigest')))
+        && result.inputSourceDigest === result.outputSourceDigest && result.outputSourceDigest === state.sourceDigest,
+      'INTERVENTION_CARRYOVER_INVALID', 'Transferred diagnostic requires an unchanged read-only Submission.');
+      for (const ref of result.evidenceRefs) {
+        const evidence = await evidenceStore.read(ref);
+        assert(evidence.metadata.projectId === prior.projectId && evidence.metadata.runId === prior.runId
+          && evidence.metadata.featureId === feature.id && evidence.metadata.dispatchId === result.dispatchId
+          && evidence.metadata.sourceDigest === result.inputSourceDigest,
+        'INTERVENTION_CARRYOVER_EVIDENCE', 'Diagnostic transfer must verify the original evidence binding.');
+      }
+      state.submissions.push(structuredClone(result));
+      state.evidenceRefs = [...new Set([...state.evidenceRefs, ...result.evidenceRefs])];
+    }
+    assert(['pending', 'completed', 'blocked', 'failed-budget'].includes(feature.state),
+      'INTERVENTION_CARRYOVER_ACTIVE', 'Active diagnostic transport cannot transfer.');
+    state.features.push(structuredClone(feature));
+    for (const [key, attempt] of Object.entries(prior.attempts).filter(([, item]) => item.logicalRoot === feature.logicalRoot)) {
+      state.attempts[key] = structuredClone(attempt);
+    }
+  }
+};
+
+/** Neutral, read-only work reservation. A worker cannot mint execution authority. */
+export const reserveIntervention = (state, input, evidence, now) => {
+  const source = state.features.find(item => item.id === input.sourceFeatureId);
+  assert(!state.metadata?.operatorStop?.requested, 'OPERATOR_EXECUTION_STOPPED', 'The user has stopped this execution.');
+  const submission = state.submissions.findLast(item => item.featureId === source?.id && !item.supersededAt);
+  assert(source?.state === 'blocked' && !isIntervention(source) && submission?.submissionId === input.sourceSubmissionId
+    && submission.outputSourceDigest && submission.evidenceRefs?.length,
+  'INTERVENTION_SOURCE_INVALID', 'Diagnostic requires the exact current committed blocker.');
+  assert(!state.leases.some(item => ['requested', 'active'].includes(item.status))
+    && !state.dispatches.some(item => ['requested', 'assigned'].includes(item.status))
+    && !state.decisions.some(item => item.action === 'freeze-execution' && item.decision === 'approved'),
+  'INTERVENTION_NOT_IDLE', 'Diagnostic reservation requires idle unfrozen execution.');
+  const attempt = submissionAttempt(state, source, submission);
+  assert(attempt && !attempt.exhausted && !Object.values(state.attempts).some(item => item.logicalRoot === source.logicalRoot && item.exhausted),
+    'INTERVENTION_BUDGET_EXHAUSTED', 'Diagnostics cannot evade exhausted execution budgets.');
+  const body = JSON.parse(evidence.bytes.toString('utf8'));
+  assert(evidence.metadata.projectId === state.projectId && evidence.metadata.runId === state.runId
+    && evidence.metadata.epoch === state.epoch && evidence.metadata.generation === state.generation
+    && evidence.metadata.featureId === source.id && evidence.metadata.sourceDigest === state.sourceDigest
+    && body.decisionDigest === digestJson(Object.fromEntries(Object.entries(body).filter(([key]) => key !== 'decisionDigest')))
+    && body.policy === INTERRUPTION_POLICY && body.action === 'diagnose' && body.problem.submissionId === submission.submissionId
+    && body.problem.sourceDigest === state.sourceDigest && body.problem.logicalRoot === source.logicalRoot,
+  'INTERVENTION_EVIDENCE_INVALID', 'Reservation must bind a genuine current diagnostic decision.');
+  assert(body.problem.contractDigest === featureContractDigest(source), 'INTERVENTION_CONTRACT_MISMATCH', 'Diagnostic must bind the unchanged original contract.');
+  const ledger = state.metadata.interruptionLedger ?? [];
+  const correctionOf = input.feature.metadata?.intervention?.correctionOf;
+  const correction = correctionOf ? state.submissions.find(item => item.submissionId === correctionOf && !item.supersededAt) : null;
+  const diagnostic = correction && state.features.find(item => item.id === correction.featureId);
+  const assessment = state.decisions.find(item => item.id === body.problem.assessmentId);
+  const validCorrection = Boolean(correction && isIntervention(diagnostic) && diagnostic.state === 'completed'
+    && correction.result?.status === 'completed' && correction.inputSourceDigest === state.sourceDigest
+    && correction.outputSourceDigest === state.sourceDigest && correction.changedFiles.length === 0
+    && diagnostic.metadata.intervention.sourceSubmissionId === submission.submissionId
+    && ledger.some(item => item.id === diagnostic.id)
+    && assessment?.kind === 'execution-intervention-assessment' && assessment.decision === 'verified'
+    && assessment.disposition === 'correction-required' && assessment.reviewSubmissionId === correctionOf
+    && assessment.sourceSubmissionId === submission.submissionId && assessment.featureId === source.id
+    && assessment.sourceDigest === state.sourceDigest && assessment.contractDigest === featureContractDigest(source)
+    && body.problem.correctionOf === correctionOf
+    && input.feature.metadata.intervention.assessmentId === assessment.id
+    && !ledger.some(item => item.correctionOf === correctionOf));
+  assert(!correctionOf || validCorrection, 'INTERVENTION_CORRECTION_INVALID', 'Clarification requires the exact unaccepted diagnosis and verified source-bound assessment.');
+  assert(body.budget.limit === interventionAllowance(source)
+    && ledger.filter(item => item.logicalRoot === source.logicalRoot).length < interventionAllowance(source)
+    && (validCorrection || !ledger.some(item => item.logicalRoot === source.logicalRoot && item.fingerprint === body.fingerprint)),
+  'INTERVENTION_LIMIT_REACHED', 'Repeated unchanged evidence or exhausted recovery allowance cannot create more diagnostics.');
+  const candidate = validateWorkGraph([...state.features, input.feature]).at(-1);
+  assert(isIntervention(candidate) && candidate.id === `diagnostic/${digestJson({ root: source.logicalRoot, submissionId: submission.submissionId,
+    ...(correctionOf ? { correctionOf } : {}) })}`
+    && candidate.allowedPaths.length === 0 && candidate.dependsOn.length === 0 && candidate.gatePlan.length === 0
+    && candidate.attemptLimit === 1 && candidate.logicalRoot === `diagnostic:${source.logicalRoot}`
+    && candidate.metadata.intervention?.sourceFeatureId === source.id
+    && candidate.metadata.intervention.sourceSubmissionId === submission.submissionId
+    && candidate.metadata.intervention.sourceDigest === state.sourceDigest
+    && candidate.metadata.intervention.contractDigest === body.problem.contractDigest
+    && candidate.metadata.intervention.decisionRef === input.evidenceRef,
+  'INTERVENTION_FEATURE_INVALID', 'A diagnostic must be a single-attempt read-only task for the bound blocker.');
+  state.features.push(candidate);
+  state.metadata.interruptionLedger = [...ledger, { id: candidate.id, logicalRoot: source.logicalRoot,
+    sourceDigest: state.sourceDigest, fingerprint: body.fingerprint, action: 'diagnose',
+    sourceSubmissionId: submission.submissionId, ...(correctionOf ? { correctionOf, assessmentId: assessment.id } : {}),
+    evidenceRefs: [input.evidenceRef], reservedAt: now() }];
+  return { featureId: candidate.id, scheduled: true };
+};
+
+export const assertInterventionReadOnly = (feature, input, dispatch) => {
+  if (!isIntervention(feature)) return;
+  assert(input.result.changedFiles.length === 0 && input.resultingSourceDigest === dispatch.sourceDigest,
+    'INTERVENTION_SOURCE_WRITE_DENIED', 'Diagnostics must preserve the exact workspace source and cannot accept source writes.');
+};

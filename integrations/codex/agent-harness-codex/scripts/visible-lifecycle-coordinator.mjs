@@ -18,6 +18,8 @@ import { classifyLocalIncident } from '../../../../src/application/local-inciden
 import { resolveCommandIntent } from '../../../../src/platform/extensions/command-contract.mjs';
 import { selectImplementationContinuationRun, selectQualityContinuationRun } from '../../../../src/application/lifecycle-resume.mjs';
 import { retireUnresumableQualityRun } from '../../../../src/application/quality-run-retirement.mjs';
+import { describeInterruptionError } from '../../../../src/application/interruption-outcome.mjs';
+import { coordinationRecoveryDirective } from '../../../../src/application/coordination-recovery.mjs';
 
 const samePath = (left, right) => process.platform === 'win32'
   ? resolve(left).toLowerCase() === resolve(right).toLowerCase()
@@ -239,10 +241,15 @@ const main = async () => {
 };
 
 main().catch(error => {
+  error.details = { ...error.details, interruption: error.details?.interruption
+    ?? describeInterruptionError(error, { phase: localIncidentContext?.phase ?? 'startup' }) };
   if (localIncidentContext) {
     const incident = classifyLocalIncident({ error, ...localIncidentContext });
     const retry = preRunProcessGateRetry({ error, phase: localIncidentContext.phase, runCreationAttempted });
     emit({ kind: 'codex-visible-lifecycle-error', code: incident.code, message: error?.message ?? String(error), incident, details: error?.details ?? null,
+      coordination: coordinationRecoveryDirective({ incident, interruption: error.details.interruption,
+        commandId: localIncidentContext.commandId, intentDigest: localIncidentContext.intentDigest,
+        planDigest: localIncidentContext.planDigest, runId: localIncidentContext.runId }),
       commandId: localIncidentContext.commandId, intentDigest: localIncidentContext.intentDigest,
       ...(localIncidentContext.planDigest ? { planDigest: localIncidentContext.planDigest } : {}),
       ...(retry ? { retry } : {}),

@@ -1,3 +1,5 @@
+import { describeReadinessInterruption } from '../../../../src/application/interruption-outcome.mjs';
+
 const boundedText = (value, fallback, limit) => {
   const text = typeof value === 'string' && value.length ? value : fallback;
   return text.length <= limit ? text : `${text.slice(0, limit - 1)}…`;
@@ -45,6 +47,7 @@ export const createPreflightLifecycleEvent = ({ commandId, intentDigest, planDig
   intentDigest,
   planDigest,
   executionReady: report.executionReady,
+  ...(!report.executionReady ? { interruption: describeReadinessInterruption(report) } : {}),
   reportDigest: report.reportDigest,
   expiresAt: report.expiresAt,
   checkSummary: {

@@ -1,16 +1,21 @@
 import { assert } from '../common/errors.mjs';
 import { digestJson, withoutKeys } from '../common/canonical.mjs';
 import { validateFinding } from '../kernel/quality.mjs';
+import { isBoundIntervention } from './interruption-review.mjs';
 
 const idle = state => !state.leases.some(row => row.status === 'active')
   && !state.dispatches.some(row => ['requested', 'assigned'].includes(row.status));
+
+export const hasCompletedAmendmentWork = state => state.submissions.some(row => row.result?.status === 'completed'
+  && !state.features.some(feature => feature.id === row.featureId && isBoundIntervention(state, feature)));
 
 /** Only a rejected, unapproved candidate followed by this bounded format blocker. */
 export const rejectedAmendmentDraftEvidence = state => {
   if (state.metadata?.commandIntent?.action !== 'amend'
     || state.decisions?.some(row => row.id === 'implementation-plan-approved' && row.decision === 'approved')
-    || state.features.some(row => !['version-planning', 'plan-review'].includes(row.metadata?.stage))) return null;
-  const submitted = state.submissions.filter(row => !row.supersededAt);
+    || state.features.some(row => !isBoundIntervention(state, row) && !['version-planning', 'plan-review'].includes(row.metadata?.stage))) return null;
+  const auxiliary = new Set(state.features.filter(row => isBoundIntervention(state, row)).map(row => row.id));
+  const submitted = state.submissions.filter(row => !row.supersededAt && !auxiliary.has(row.featureId));
   const stage = row => state.features.find(feature => feature.id === row.featureId)?.metadata?.stage;
   const reviews = submitted.filter(row => stage(row) === 'plan-review' && row.result?.status === 'completed');
   if (reviews.some(row => row.result.outputs?.['plan-review']?.value?.approved === true)) return null;
@@ -75,7 +80,7 @@ export const isBlockedAmendmentDraft = state => state.metadata?.commandIntent?.a
     && row.blocker?.kind === 'scope')
   && (state.submissions.some(row => row.result?.status === 'blocked' && row.result.failureClass === 'scope-blocker')
     || state.metadata.unacceptedPlanningResult?.evidenceRef && state.submissions.length === 0)
-  && !state.submissions.some(row => row.result?.status === 'completed');
+  && !hasCompletedAmendmentWork(state);
 
 const extendsScope = (before, after) => {
   const same = (a, b) => digestJson(a) === digestJson(b);

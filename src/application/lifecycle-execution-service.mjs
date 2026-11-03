@@ -21,6 +21,10 @@ import { performance } from 'node:perf_hooks';
 import { qualityRepairScopeCandidates } from '../kernel/quality.mjs';
 import { resolvePlanAmendmentResult } from './plan-amendment-artifacts.mjs';
 import { INPUT_BINDING_BLOCKER, inspectVerificationInputRepairs } from './verification-input-recovery.mjs';
+import { reviewableInterruptions, hasPendingIntervention, interruptionContext, applyPendingInterruptionReviews } from './interruption-review.mjs';
+import { decideInterruption, interventionHistory } from './interruption-policy.mjs';
+import { isIntervention, isExecutionComplete, profileState } from '../kernel/intervention.mjs';
+import { sealInterruptionOutcome, describeInterruptionError } from './interruption-outcome.mjs';
 
 const recoverableResultCodes = new Set(['REPAIR_CHECKPOINT_REQUIRED', 'REPAIR_CHECKPOINT_EVIDENCE_REQUIRED', 'REPAIR_FINDING_CHECKPOINT_REQUIRED', 'QUALITY_DIAGNOSTIC_DISPOSITION_REQUIRED', 'QUALITY_PREREQUISITE_INVALID', 'PROFILE_RESULT_REJECTED', 'RESULT_OUTPUT_PORTS_MISMATCH', 'RESULT_OUTPUT_SCHEMA_ID_MISMATCH', 'RESULT_OUTPUT_VALUE_SCHEMA_INVALID']);
 export const visibleLifecycleStopReason = state => {
@@ -137,11 +141,12 @@ const rejectVisibleResult = ({ error, result, receipt, runtimeReceipt, agentId, 
   };
 };
 
-const runHeadlessLifecyclePlan = async (context, api, planInput, { commandId, preflightReport, maxConcurrency, maxRounds = 100, forceFreshGates = true, onGateProgress = null } = {}) => {
+const runHeadlessLifecyclePlan = async (context, api, planInput, { commandId, preflightReport, maxConcurrency, maxRounds = 100,
+  forceFreshGates = true, onGateProgress = null, continuedStart = null, gateDiagnosticAttempts = 0 } = {}) => {
   const { authorityStore } = context;
   assert(commandId, 'COMMAND_ID_REQUIRED', 'Lifecycle execution requires a command ID.');
-  let started;
-  try { started = await api.startLifecyclePlan(planInput, { commandId, preflightReport }); }
+  let started = continuedStart;
+  if (!started) try { started = await api.startLifecyclePlan(planInput, { commandId, preflightReport }); }
   catch (error) {
     if (error.code !== 'EXECUTION_READINESS_EXPIRED') throw error;
     const refreshed = await api.createExecutionReadinessReport(planInput, { onGateProgress });
@@ -155,11 +160,35 @@ const runHeadlessLifecyclePlan = async (context, api, planInput, { commandId, pr
   assert(state.status !== 'superseded', 'LIFECYCLE_PLAN_RUN_SUPERSEDED', 'Lifecycle execution cannot resume a superseded Run.');
   if (runtimePolicy.hostOrchestrated) return { status: 'attention-required', reason: 'user-visible-runtime-requires-host-orchestration', planDigest: plan.planDigest, state };
   const activeRunId = state.runId;
+  state = await applyPendingInterruptionReviews(api, state, commandId);
+  const retryFailedGates = async results => {
+    if (gateDiagnosticAttempts >= 5 || plan.intent.action === 'prerelease'
+      || !results.some(gate => ['failed', 'environment-failed', 'budget-exceeded'].includes(gate.status))) return null;
+    state = await authorityStore.read(plan.project.id, activeRunId);
+    if (!state.features.every(isExecutionComplete) || !api.profileRegistry.get(state.profile.id).createGateDiagnosticReview) return null;
+    const scheduled = await api.kernel.scheduleGateDiagnosticReview(plan.project.id, activeRunId, { gateResults: results },
+      { expectedRevision: state.revision, commandId: `${commandId}.gate-diagnostic.${state.revision}` });
+    if (!scheduled.result.scheduled) return null;
+    return runHeadlessLifecyclePlan(context, api, planInput, { commandId, preflightReport, maxConcurrency, maxRounds,
+      forceFreshGates, onGateProgress, continuedStart: { ...started, state: scheduled.state }, gateDiagnosticAttempts: gateDiagnosticAttempts + 1 });
+  };
   const coordinator = new RunCoordinator({ harness: api, onGateProgress });
-  const execution = await coordinator.run({ projectId: plan.project.id, runId: activeRunId, runtimePluginId: plan.run.runtimePluginId, maxConcurrency,
+  let execution;
+  for (;;) {
+    execution = await coordinator.run({ projectId: plan.project.id, runId: activeRunId, runtimePluginId: plan.run.runtimePluginId, maxConcurrency,
     maxRounds: plan.intent.preset === 'release-exhaustive' || (plan.intent.action === 'produce' && state.profile.id === 'collection-batch') ? Infinity : maxRounds });
-  state = await authorityStore.read(plan.project.id, activeRunId);
-  if (!state.features.every(feature => feature.state === 'completed')) {
+    state = await authorityStore.read(plan.project.id, activeRunId);
+    const beforeReview = state.revision;
+    state = await applyPendingInterruptionReviews(api, state, commandId);
+    if (state.revision !== beforeReview) continue;
+    const review = reviewableInterruptions(state)[0];
+    if (!review) break;
+    const scheduled = await api.scheduleInterruptionReview(plan.project.id, activeRunId, review.feature.id,
+      `${commandId}.diagnose.${review.decision.problem.submissionId}`);
+    if (!scheduled) break;
+    state = scheduled.state;
+  }
+  if (!state.features.every(isExecutionComplete)) {
     if (state.profile.id === 'collection-batch' && plan.intent.action === 'produce') {
       const exhaustion = api.profileRegistry.get(state.profile.id).project(state).collectionExhaustion;
       if (exhaustion?.onlyEngineRemaining && plan.stopCondition.requiredFinalGates?.includes('collection-produce-exhaustion-verify')) {
@@ -177,18 +206,21 @@ const runHeadlessLifecyclePlan = async (context, api, planInput, { commandId, pr
   }
   const gateRunner = new ProjectGateRunner({ harness: api, onProgress: onGateProgress });
   const featureGates = await runPendingFeatureGates({ harness: api, projectId: plan.project.id, runId: activeRunId, onProgress: onGateProgress });
-  if (!featureGates.ok) return { status: 'attention-required', reason: 'feature-gates-not-passed', planDigest: plan.planDigest, execution, gates: featureGates.results, state: featureGates.state };
+  if (!featureGates.ok) return await retryFailedGates(featureGates.results)
+    ?? { status: 'attention-required', reason: 'feature-gates-not-passed', planDigest: plan.planDigest, execution, gates: featureGates.results, state: featureGates.state };
   const stableGateIds = (featureGates.state.metadata?.gateRecipes ?? []).filter(recipe => recipe.scope === 'stable' && recipe.required !== false).map(recipe => recipe.id);
   if (stableGateIds.length) {
     const stable = (state.profile.config.repairOnly ? previousFreshGates(featureGates.state, 'stable', stableGateIds) : null) ?? await gateRunner.run({ projectId: plan.project.id, runId: activeRunId, scope: 'stable', forceFresh: true, gateIds: stableGateIds });
-    if (!stable.results.every(gate => gate.status === 'passed')) return { status: 'attention-required', reason: 'stable-gates-not-passed', planDigest: plan.planDigest, execution, gates: stable, state: stable.state };
+    if (!stable.results.every(gate => gate.status === 'passed')) return await retryFailedGates(stable.results)
+      ?? { status: 'attention-required', reason: 'stable-gates-not-passed', planDigest: plan.planDigest, execution, gates: stable, state: stable.state };
   }
   const gates = plan.stopCondition.requiredFinalGates?.length
     ? (state.profile.config.repairOnly ? previousFreshGates(state, 'final', plan.stopCondition.requiredFinalGates) : null) ?? await gateRunner.run({ projectId: plan.project.id, runId: activeRunId, scope: 'final', forceFresh: forceFreshGates, gateIds: plan.stopCondition.requiredFinalGates })
     : { results: [], state };
   state = await authorityStore.read(plan.project.id, activeRunId);
-  if (!gates.results.every(gate => gate.status === 'passed')) return { status: 'attention-required', reason: 'final-gates-not-passed', planDigest: plan.planDigest, execution, gates, state };
-  const closure = api.profileRegistry.get(state.profile.id).canClose(state);
+  if (!gates.results.every(gate => gate.status === 'passed')) return await retryFailedGates(gates.results)
+    ?? { status: 'attention-required', reason: 'final-gates-not-passed', planDigest: plan.planDigest, execution, gates, state };
+  const closure = api.profileRegistry.get(state.profile.id).canClose(profileState(state));
   if (!closure.ok) return { ...(await finishExhaustedQualityRun(api, plan, state, commandId, closure.reason)
     ?? { status: 'attention-required', reason: closure.reason, planDigest: plan.planDigest, state }), execution, gates };
   const closed = await api.kernel.closeRun(plan.project.id, activeRunId, {}, { expectedRevision: state.revision, commandId: `${commandId}.close` });
@@ -224,12 +256,18 @@ const continueVisibleLifecyclePlan = async (context, api, planInput, { commandId
   const configuredLimit = resolveConcurrencyLimit(project.policy?.maxConcurrency, project.policy?.maxConcurrency === AUTO_CONCURRENCY ? AUTO_CONCURRENCY_LIMIT : 1);
   const requestedLimit = resolveConcurrencyLimit(maxConcurrency, configuredLimit);
   const physicalLimit = runtimeManifest.capabilities.includes('workspace-shared') ? 1 : requestedLimit;
-  let state = started.state;
+  const pendingReviewAtEntry = hasPendingIntervention(started.state);
+  let state = await applyPendingInterruptionReviews(api, started.state, commandId);
   const activeRunId = state.runId;
   if (resume) {
     assert(activeRunId === resume.runId, 'LIFECYCLE_RESUME_RUN_MISMATCH', 'Lifecycle execution selected a different Run.');
     const inputBindingRepairs = await inspectVerificationInputRepairs(state, plan.run.executionWorkspaceRoot, project.workspace.excluded ?? []);
-    assert(selectBlockedResumeFeature(state, { inputBindingRepairs }) === resume.blockedFeatureId,
+    const interruptionReviews = reviewableInterruptions(state);
+    // Settling a committed diagnostic can reopen the parent, reserve a
+    // clarification, or exhaust its allowance. Let the shared loop resolve
+    // that new frontier; it is not drift of the original resume selection.
+    assert(pendingReviewAtEntry ? resume.blockedFeatureId === null
+      : selectBlockedResumeFeature(state, { inputBindingRepairs, interruptionReviews, pendingIntervention: hasPendingIntervention(state) }) === resume.blockedFeatureId,
       'LIFECYCLE_RESUME_FEATURE_MISMATCH', 'The blocked Feature set changed after resume planning.');
     if (resume.blockedFeatureId) {
       const blocked = state.features.find(feature => feature.id === resume.blockedFeatureId);
@@ -240,20 +278,25 @@ const continueVisibleLifecyclePlan = async (context, api, planInput, { commandId
         ? await api.repairVerificationInputBlocker(plan.project.id, activeRunId, blocked.id, `${commandId}.resume`) : null;
       assert(!inputBindingRepairs.some(item => item.featureId === blocked.id) || repaired,
         'VERIFICATION_INPUT_REPAIR_STALE', 'Input binding proof changed before reopening.');
-      state = repaired?.state ?? (await api.kernel.reopenFeature(plan.project.id, activeRunId,
+      const reviewed = !repaired && interruptionReviews.some(item => item.feature.id === blocked.id)
+        ? await api.scheduleInterruptionReview(plan.project.id, activeRunId, blocked.id, `${commandId}.resume.diagnose`) : null;
+      state = repaired?.state ?? reviewed?.state ?? (await api.kernel.reopenFeature(plan.project.id, activeRunId,
         { featureId: blocked.id, reason: 'implement-automatic-continuation' },
         { expectedRevision: state.revision, commandId: `${commandId}.resume.reopen.${blocked.id}` })).state;
     }
-  } else if (state.metadata?.completionCarryover?.progressOnly) {
+  } else if (state.metadata?.completionCarryover?.progressOnly && !pendingReviewAtEntry) {
     // Starting the sealed replacement is an explicit implement invocation.
     // Migration itself preserved every blocker and never started work.
     const inputBindingRepairs = await inspectVerificationInputRepairs(state, plan.run.executionWorkspaceRoot, project.workspace.excluded ?? []);
-    const featureId = selectBlockedResumeFeature(state, { inputBindingRepairs });
+    const interruptionReviews = reviewableInterruptions(state);
+    const featureId = selectBlockedResumeFeature(state, { inputBindingRepairs, interruptionReviews, pendingIntervention: hasPendingIntervention(state) });
     const repaired = featureId && inputBindingRepairs.some(item => item.featureId === featureId)
       ? await api.repairVerificationInputBlocker(plan.project.id, activeRunId, featureId, `${commandId}.partial-carryover`) : null;
     assert(!inputBindingRepairs.some(item => item.featureId === featureId) || repaired,
       'VERIFICATION_INPUT_REPAIR_STALE', 'Input binding proof changed before reopening.');
-    if (featureId) state = repaired?.state ?? (await api.kernel.reopenFeature(plan.project.id, activeRunId,
+    const reviewed = featureId && !repaired && interruptionReviews.some(item => item.feature.id === featureId)
+      ? await api.scheduleInterruptionReview(plan.project.id, activeRunId, featureId, `${commandId}.partial-carryover.diagnose`) : null;
+    if (featureId) state = repaired?.state ?? reviewed?.state ?? (await api.kernel.reopenFeature(plan.project.id, activeRunId,
       { featureId, reason: 'implement-migrated-partial-continuation' },
       { expectedRevision: state.revision, commandId: `${commandId}.partial-carryover.reopen.${featureId}` })).state;
   }
@@ -276,16 +319,17 @@ const continueVisibleLifecyclePlan = async (context, api, planInput, { commandId
     }));
   const retryFailedGates = async results => {
     if (plan.intent.action === 'prerelease') return null;
-    if (gateDiagnosticAttempts >= 5 || !results.some(gate => gate.status === 'failed')) return null;
+    if (gateDiagnosticAttempts >= 5 || !results.some(gate => ['failed', 'environment-failed', 'budget-exceeded'].includes(gate.status))) return null;
     state = await authorityStore.read(plan.project.id, activeRunId);
     const profile = api.profileRegistry.get(state.profile.id);
     if (!profile.createGateDiagnosticReview) return null;
     if (state.leases.some(lease => lease.status === 'active')
       || state.dispatches.some(dispatch => ['requested', 'assigned'].includes(dispatch.status))) return null;
-    if (!state.features.every(feature => feature.state === 'completed')) return null;
+    if (!state.features.every(isExecutionComplete)) return null;
     const scheduled = await api.kernel.scheduleGateDiagnosticReview(plan.project.id, activeRunId, { gateResults: results }, { expectedRevision: state.revision, commandId: `${commandId}.gate-diagnostic.${state.revision}` });
     if (!scheduled.result.scheduled) return null;
-    const resumed = await continueVisibleLifecyclePlan(context, api, planInput, { commandId, preflightReport, maxConcurrency, maxRounds, forceFreshGates, onGateProgress, gateDiagnosticAttempts: gateDiagnosticAttempts + 1, continuedStart: started });
+    const resumed = await continueVisibleLifecyclePlan(context, api, planInput, { commandId, preflightReport, maxConcurrency, maxRounds, forceFreshGates, onGateProgress,
+      gateDiagnosticAttempts: gateDiagnosticAttempts + 1, continuedStart: { ...started, state: scheduled.state } });
     return { ...resumed, rounds: [...rounds, ...(resumed.rounds ?? [])] };
   };
   const coordinatorRoundLimit = plan.intent.preset === 'release-exhaustive' || plan.intent.action === 'implement'
@@ -296,13 +340,19 @@ const continueVisibleLifecyclePlan = async (context, api, planInput, { commandId
     const timing = { spawnMs: 0, waitMs: 0, resultMs: 0 };
     state = await authorityStore.read(plan.project.id, activeRunId);
     if (state.status === 'closed') return { status: 'closed', planDigest: plan.planDigest, rounds, state, ...await completionReceipts(api, authorityStore.root, plan, state) };
+    if (state.metadata?.operatorStop?.requested) {
+      for (const lease of state.leases.filter(item => item.status === 'active')) await trustedAgentAdapter.contain({
+        agentId: lease.agentId, dispatchId: lease.dispatchId, runtimeReceipt: lease.runtimeReceipt,
+        hostSpawnReceipt: lease.runtimeReceipt?.hostSpawnReceipt, reason: 'user-stop' });
+      return { status: 'attention-required', reason: 'user-stop', planDigest: plan.planDigest, rounds, state };
+    }
     const activeLeases = state.leases.filter(lease => lease.status === 'active');
     let featureGates = null;
     if (!activeLeases.length) {
       featureGates = await runPendingFeatureGates({ harness: api, projectId: plan.project.id, runId: activeRunId, onProgress: onGateProgress });
       state = featureGates.state;
       let requested = state.dispatches.filter(dispatch => dispatch.status === 'requested');
-      if (!requested.length && !state.features.every(feature => feature.state === 'completed')) {
+      if (!requested.length && !state.features.every(isExecutionComplete)) {
         const scheduled = await api.dispatch(plan.project.id, activeRunId, { maxConcurrency: physicalLimit, runtimePluginId: plan.run.runtimePluginId }, { expectedRevision: state.revision, commandId: `${commandId}.schedule.${state.revision}` });
         state = scheduled.state;
         requested = scheduled.result.dispatches;
@@ -357,7 +407,7 @@ const continueVisibleLifecyclePlan = async (context, api, planInput, { commandId
     state = await authorityStore.read(plan.project.id, activeRunId);
     const leases = state.leases.filter(lease => lease.status === 'active');
     if (!leases.length) {
-      if (state.features.every(feature => feature.state === 'completed')) break;
+      if (state.features.every(isExecutionComplete)) break;
       if (featureGates && !featureGates.ok) {
         if (state.profile.id === 'collection-batch' && plan.intent.action === 'produce') {
           const retried = await retryFailedGates(featureGates.results);
@@ -382,6 +432,12 @@ const continueVisibleLifecyclePlan = async (context, api, planInput, { commandId
         }
       }
       const reason = visibleLifecycleStopReason(state);
+      const review = reviewableInterruptions(state)[0];
+      if (review) {
+        const scheduled = await api.scheduleInterruptionReview(plan.project.id, activeRunId, review.feature.id,
+          `${commandId}.diagnose.${review.decision.problem.submissionId}`);
+        if (scheduled) { state = scheduled.state; continue; }
+      }
       rounds.push({ round: completedRounds + 1, status: 'attention-required', reason });
       return { status: 'attention-required', reason, planDigest: plan.planDigest, rounds, blockedFeatures: blockedFeatures(state), state };
     }
@@ -433,50 +489,74 @@ const continueVisibleLifecyclePlan = async (context, api, planInput, { commandId
       // Application may reject a claimed delivery completion after actual
       // verification. Continuation follows the accepted Authority result.
       businessResult = state.submissions.find(item => item.dispatchId === dispatch.dispatchId)?.result ?? businessResult;
+      if (isIntervention(feature)) {
+        const reviewed = await api.applyInterruptionReview(plan.project.id, activeRunId, feature.id,
+          `${commandId}.review.${dispatch.dispatchId}`);
+        if (reviewed) state = reviewed.state;
+        continue;
+      }
       const qualityScopePaths = businessResult.status === 'blocked' && businessResult.failureClass === 'scope-blocker'
         ? safeQualityScopePaths(feature, businessResult.blocker, plan.run.executionWorkspaceRoot) : [];
-      const inputRepair = businessResult.blocker?.code === INPUT_BINDING_BLOCKER
+      const submission = state.submissions.find(item => item.dispatchId === dispatch.dispatchId);
+      const inputReady = businessResult.blocker?.code === INPUT_BINDING_BLOCKER
+        && (await inspectVerificationInputRepairs(state, plan.run.executionWorkspaceRoot, project.workspace.excluded ?? []))
+          .some(item => item.featureId === feature.id);
+      const eligible = [
+        ['input-binding', inputReady],
+        ['native-interruption', businessResult.failureClass === 'runtime-interrupted'
+          && await api.canRecoverNativeInterruption(plan.project.id, activeRunId, feature.id)],
+        ['result-correction', rejected && submitted.result.featureState === 'blocked'],
+        ['quality-scope', businessResult.status === 'blocked' && businessResult.failureClass === 'scope-blocker' && qualityScopePaths.length > 0],
+        ['verification-path', shouldRetryImplementationVerificationPath({ feature, result: businessResult, state })],
+        ['implementation-progress', shouldContinueImplementationProgress({ feature, result: businessResult, state, submission })],
+        ['handoff-correction', shouldCorrectImplementationHandoff({ state, feature: state.features.find(item => item.id === feature.id), submission, commandId })],
+        ['collection-progress', shouldContinueCollectionProgress({ feature, result: businessResult, state, submission })],
+      ];
+      const policy = decideInterruption({ ...interruptionContext(state, feature), capabilities: eligible.map(([id, ready]) => ({
+        id, operation: 'repair', available: Boolean(ready), authorized: Boolean(ready), evidenceBound: Boolean(ready) })) });
+      const selected = policy.capabilityId;
+      if (selected) state = (await api.recordInterruptionDecision(plan.project.id, activeRunId, policy,
+        `${commandId}.interruption.${dispatch.dispatchId}`)).state;
+      const inputRepair = selected === 'input-binding'
         ? await api.repairVerificationInputBlocker(plan.project.id, activeRunId, feature.id, `${commandId}.input-repair.${dispatch.dispatchId}`) : null;
       if (inputRepair) {
         state = inputRepair.state;
-      } else if (rejected && submitted.result.featureState === 'blocked') {
+      } else if (selected === 'native-interruption') {
+        state = (await api.kernel.reopenFeature(plan.project.id, activeRunId, { featureId: feature.id,
+          reason: 'Verified original native interruption and unchanged source; continue the same task within its existing allowance.' },
+        { expectedRevision: state.revision, commandId: `${commandId}.native-interruption.${dispatch.dispatchId}` })).state;
+      } else if (selected === 'result-correction') {
         const reopened = await api.kernel.reopenFeature(plan.project.id, activeRunId, {
           featureId: feature.id,
           reason: `${rejected.result.summary}. Reinspect the current source and correct the rejected result before reporting completion.`,
         }, { expectedRevision: state.revision, commandId: `${commandId}.reopen.${dispatch.dispatchId}` });
         state = reopened.state;
-      } else if (businessResult.status === 'blocked' && businessResult.failureClass === 'scope-blocker'
-        && state.features.find(item => item.id === feature.id)?.state === 'blocked'
-        && qualityScopePaths.length > 0) {
+      } else if (selected === 'quality-scope') {
         const added = qualityScopePaths;
         const reopened = await api.kernel.reopenFeature(plan.project.id, activeRunId, {
           featureId: feature.id, additionalAllowedPaths: added,
           reason: `Continue the same quality repair from the committed scope blocker. The additional source paths ${added.join(', ')} were checked against the pinned project repair scope; retain prior repair and verification evidence.`,
         }, { expectedRevision: state.revision, commandId: `${commandId}.quality-scope-reopen.${dispatch.dispatchId}` });
         state = reopened.state;
-      } else if (shouldRetryImplementationVerificationPath({ feature, result: businessResult, state })) {
+      } else if (selected === 'verification-path') {
         const reopened = await api.kernel.reopenFeature(plan.project.id, activeRunId, {
           featureId: feature.id,
           reason: `The verification path is outside this Dispatch's output allowance. Inspect the check's output route and repair it only within allowedPaths, then retry the check. If no in-scope repair exists, report the exact path and blocker again. Prior evidence: ${businessResult.blocker?.summary ?? businessResult.summary}`,
         }, { expectedRevision: state.revision, commandId: `${commandId}.verification-path-reopen.${dispatch.dispatchId}` });
         state = reopened.state;
-      } else if (shouldContinueImplementationProgress({ feature, result: businessResult, state,
-        submission: state.submissions.find(item => item.dispatchId === dispatch.dispatchId) })) {
+      } else if (selected === 'implementation-progress') {
         const reopened = await api.kernel.reopenFeature(plan.project.id, activeRunId, {
           featureId: feature.id,
           reason: `Implementation or acceptance progress was submitted, but the approved project-owned implementation remains incomplete. Continue the next final-target step and remaining obligations from current source and prior evidence. Partial implementation checkpoints are not final acceptance. Prior progress: ${businessResult.summary}`,
         }, { expectedRevision: state.revision, commandId: `${commandId}.implementation-progress-reopen.${dispatch.dispatchId}` });
         state = reopened.state;
-      } else if (shouldCorrectImplementationHandoff({ state,
-        feature: state.features.find(item => item.id === feature.id),
-        submission: state.submissions.find(item => item.dispatchId === dispatch.dispatchId), commandId })) {
+      } else if (selected === 'handoff-correction') {
         const continuation = dispatch.execution.implementationContinuation;
         const reopened = await api.kernel.reopenFeature(plan.project.id, activeRunId, {
           featureId: feature.id, reason: implementationHandoffCorrectionReason(commandId, feature, continuation),
         }, { expectedRevision: state.revision, commandId: `${commandId}.implementation-handoff-correction.${dispatch.dispatchId}` });
         state = reopened.state;
-      } else if (shouldContinueCollectionProgress({ feature, result: businessResult, state,
-        submission: state.submissions.find(item => item.dispatchId === dispatch.dispatchId) })) {
+      } else if (selected === 'collection-progress') {
         const reopened = await api.kernel.reopenFeature(plan.project.id, activeRunId, {
           featureId: feature.id,
           reason: `Verified Collection source progress was submitted, and in-scope work remains. Continue from the current source and prior Submission. Prior progress: ${businessResult.summary}`,
@@ -491,7 +571,7 @@ const continueVisibleLifecyclePlan = async (context, api, planInput, { commandId
     rounds.push({ round: completedRounds, status: 'progressed', revision: state.revision, physicalLimit, timing: Object.fromEntries(Object.entries(timing).map(([key, value]) => [key, Math.round(value)])), elapsedMs: Math.round(performance.now() - roundStarted) });
   }
   state = await authorityStore.read(plan.project.id, activeRunId);
-  if (!state.features.every(feature => feature.state === 'completed')) return { status: 'attention-required', reason: 'visible-coordinator-round-limit', planDigest: plan.planDigest, rounds, state };
+  if (!state.features.every(isExecutionComplete)) return { status: 'attention-required', reason: 'visible-coordinator-round-limit', planDigest: plan.planDigest, rounds, state };
   const gateRunner = new ProjectGateRunner({ harness: api, onProgress: onGateProgress });
   const featureGates = await runPendingFeatureGates({ harness: api, projectId: plan.project.id, runId: activeRunId, onProgress: onGateProgress });
   if (!featureGates.ok) return { status: 'attention-required', reason: 'feature-gates-not-passed', planDigest: plan.planDigest, rounds, gates: featureGates.results, state: featureGates.state };
@@ -505,7 +585,7 @@ const continueVisibleLifecyclePlan = async (context, api, planInput, { commandId
     : { results: [], state };
   state = await authorityStore.read(plan.project.id, activeRunId);
   if (!gates.results.every(gate => gate.status === 'passed')) return await retryFailedGates(gates.results) ?? { status: 'attention-required', reason: 'final-gates-not-passed', planDigest: plan.planDigest, rounds, gates, state };
-  const closure = api.profileRegistry.get(state.profile.id).canClose(state);
+  const closure = api.profileRegistry.get(state.profile.id).canClose(profileState(state));
   if (!closure.ok) return { ...(await finishExhaustedQualityRun(api, plan, state, commandId, closure.reason)
     ?? { status: 'attention-required', reason: closure.reason, planDigest: plan.planDigest, state }), rounds, gates };
   const closed = await api.kernel.closeRun(plan.project.id, activeRunId, {}, { expectedRevision: state.revision, commandId: `${commandId}.close` });
@@ -516,5 +596,16 @@ const withPlanArtifact = async (context, result) => result?.state
   ? { ...result, planApprovalArtifact: await ensurePlanApprovalArtifact(context.authorityStore.root, result.state) }
   : result;
 
-export const executeHeadlessLifecyclePlan = async (context, api, planInput, options = {}) => withPlanArtifact(context, await runHeadlessLifecyclePlan(context, api, planInput, options));
-export const executeVisibleLifecyclePlan = async (context, api, planInput, options = {}) => withPlanArtifact(context, await continueVisibleLifecyclePlan(context, api, planInput, { ...options, continuedStart: null, gateDiagnosticAttempts: 0 }));
+const executeWithInterruptionPolicy = async (context, api, plan, operation) => {
+  try {
+    const result = await operation();
+    return withPlanArtifact(context, await sealInterruptionOutcome(context, api, plan, result));
+  } catch (error) {
+    error.details = { ...error.details, interruption: describeInterruptionError(error, { plan }) };
+    throw error;
+  }
+};
+export const executeHeadlessLifecyclePlan = async (context, api, planInput, options = {}) => executeWithInterruptionPolicy(context, api, planInput,
+  () => runHeadlessLifecyclePlan(context, api, planInput, options));
+export const executeVisibleLifecyclePlan = async (context, api, planInput, options = {}) => executeWithInterruptionPolicy(context, api, planInput,
+  () => continueVisibleLifecyclePlan(context, api, planInput, { ...options, continuedStart: null, gateDiagnosticAttempts: 0 }));

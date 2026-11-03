@@ -14,6 +14,7 @@ import { assertDispatchResultContract, validateBusinessResult, validateProfileRe
 import { completionCarryoverDigest, verifyCompletionCarryover } from './completion-carryover.mjs';
 import { assertBudgetExtensionApproval, prepareBudgetExtension, selectAttemptBudget, submissionAttempt } from './attempt-budget.mjs';
 import { resolveAttemptCarryover } from './attempt-carryover.mjs';
+import { reserveIntervention, assertInterventionReadOnly, isIntervention, isExecutionComplete, profileState, carryInterventions } from './intervention.mjs';
 
 const activeLease = lease => ['requested', 'active'].includes(lease.status);
 const activeDispatch = dispatch => ['requested', 'assigned'].includes(dispatch.status);
@@ -86,8 +87,8 @@ const event = (state, type, payload, now) => {
 const deriveStatus = (state, profile) => {
   if (terminalRun(state)) return state.status;
   if (state.leases.some(activeLease) || state.dispatches.some(activeDispatch)) return 'running';
-  if (state.features.every(feature => feature.state === 'completed')) return profile.canClose(state).ok && qualityCanClose(state.findings) ? 'ready-to-close' : 'closure-blocked';
-  const remaining = state.features.filter(feature => feature.state !== 'completed');
+  if (state.features.every(isExecutionComplete)) return profile.canClose(profileState(state)).ok && qualityCanClose(state.findings) ? 'ready-to-close' : 'closure-blocked';
+  const remaining = state.features.filter(feature => !isExecutionComplete(feature));
   if (remaining.every(feature => ['blocked', 'failed-budget', 'cancelled'].includes(feature.state))) return 'all-remaining-blocked';
   return 'ready';
 };
@@ -130,6 +131,7 @@ export class HarnessKernel {
       assert(prior.sourceDigest === input.sourceDigest, 'CARRYOVER_SOURCE_CHANGED', 'Replacement source differs from the retired Run.');
       priorCarryover = { prior, plan: approved.plan };
     }
+    assert(features.every(feature => !isIntervention(feature)), 'INTERVENTION_RESERVATION_REQUIRED', 'Initial task input cannot mint diagnostic authority.');
     const profileConfig = profile.validateConfig(structuredClone(input.profileConfig ?? {}), features);
     if (input.initialFindings?.length) {
       assert((profileConfig.repairOnly === true || profileConfig.repairKnownBeforeReview === true)
@@ -165,8 +167,12 @@ export class HarnessKernel {
       events: [{ sequence: 1, type: 'run.started', at, epoch: 1, generation: 1, profileId: profile.id }],
     };
     assert(state.sourceDigest && state.pluginSetDigest, 'RUN_DIGESTS_REQUIRED', 'Run requires source and plugin-set digests.');
+    delete state.metadata.interruptionLedger;
+    delete state.metadata.operatorStop;
     if (priorCarryover) {
       const { prior, plan } = priorCarryover;
+      state.metadata.interruptionLedger = structuredClone(prior.metadata?.interruptionLedger ?? []);
+      if (prior.metadata?.operatorStop) state.metadata.operatorStop = structuredClone(prior.metadata.operatorStop);
       const completedIds = new Set(plan.completedSubmissions.map(item => item.featureId));
       for (const feature of state.features.filter(item => completedIds.has(item.id))) {
         const source = prior.features.find(item => item.id === feature.id);
@@ -216,6 +222,8 @@ export class HarnessKernel {
         state.evidenceRefs = [...new Set(state.submissions.flatMap(item => item.evidenceRefs ?? []))];
         state.metadata.attemptCarryover = transferred.receipt;
         state.metadata.attemptBudgetExtensions = structuredClone(transferred.extensions);
+        state.metadata.interruptionLedger = transferred.interruptions;
+        if (transferred.operatorStop) state.metadata.operatorStop = structuredClone(transferred.operatorStop);
         for (const feature of state.features) {
           const original = prior.features.find(item => item.id === feature.id);
           if (!['blocked', 'failed-budget'].includes(original?.state)) continue;
@@ -233,6 +241,8 @@ export class HarnessKernel {
       state.evidenceRefs = [...new Set(state.submissions.flatMap(item => item.evidenceRefs))];
       state.metadata.attemptCarryover = attemptCarryover.receipt;
       state.metadata.attemptBudgetExtensions = attemptCarryover.extensions;
+      state.metadata.interruptionLedger = attemptCarryover.interruptions;
+      if (attemptCarryover.operatorStop) state.metadata.operatorStop = structuredClone(attemptCarryover.operatorStop);
       for (const feature of state.features.filter(item => attemptCarryover.exhausted.includes(item.id))) {
         feature.state = 'failed-budget';
         feature.blocker = { kind: 'attempt-budget-carryover', summary: 'The inherited allowance is exhausted; an explicit bounded budget approval is required.' };
@@ -240,7 +250,12 @@ export class HarnessKernel {
       event(state, 'attempts.carried-over', attemptCarryover.receipt, this.now);
       state.status = deriveStatus(state, profile);
     }
-    profile.validateRun(state);
+    if (priorCarryover) await carryInterventions({ state, prior: priorCarryover.prior, roots: new Set(features.map(item => item.logicalRoot)), evidenceStore: this.evidenceStore });
+    if (attemptCarryover) for (const pin of attemptCarryover.receipt.sources) {
+      await carryInterventions({ state, prior: await this.authorityStore.read(input.projectId, pin.runId),
+        roots: new Set(attemptCarryover.receipt.logicalRoots), evidenceStore: this.evidenceStore });
+    }
+    profile.validateRun(profileState(state));
     return this.authorityStore.create(state, { commandId: command.commandId, payload: input });
   }
 
@@ -251,6 +266,7 @@ export class HarnessKernel {
     const snapshotEvidence = await this.evidenceStore.read(input.sourceSnapshotRef);
     return this.authorityStore.transact(projectId, runId, { expectedRevision: command.expectedRevision, commandId: command.commandId, payload: input }, state => {
       assert(!terminalRun(state), 'RUN_TERMINAL', 'A terminal Run cannot schedule new work.');
+      assert(!state.metadata?.operatorStop?.requested, 'OPERATOR_EXECUTION_STOPPED', 'The user has stopped this execution.');
       assert(!state.decisions.some(item => item.action === 'freeze-execution' && item.decision === 'approved'),
         'RUN_EXECUTION_FROZEN', 'This Run is frozen for a reviewed replacement; it cannot dispatch work.');
       assert(snapshotEvidence.metadata.projectId === projectId && snapshotEvidence.metadata.runId === runId && snapshotEvidence.metadata.epoch === state.epoch && snapshotEvidence.metadata.generation === state.generation && snapshotEvidence.metadata.sourceDigest === state.sourceDigest, 'SOURCE_SNAPSHOT_CONTEXT_MISMATCH', 'Scheduling requires a workspace snapshot bound to the current Authority source.');
@@ -261,7 +277,9 @@ export class HarnessKernel {
       const gateComplete = feature => feature.gatePlan.filter(id => featureGateIds.has(id)).every(id => state.gates.some(gate => gate.id === id && gate.scope === 'feature' && gate.featureId === feature.id && gate.status === 'passed' && gate.sourceDigest === state.sourceDigest));
       const selected = scheduleFeatures({ features: state.features, activeFeatureIds: activeFeatures, limit: capacity,
         canDispatch: feature => !Object.values(state.attempts).some(item => item.logicalRoot === feature.logicalRoot && item.exhausted)
-          && profile.canDispatch(feature, state).ok && feature.dependsOn.every(id => gateComplete(state.features.find(item => item.id === id))),
+          && profile.canDispatch(isIntervention(feature) ? state.features.find(item => item.id === feature.metadata.intervention.sourceFeatureId) : feature,
+            profileState(state)).ok
+          && feature.dependsOn.every(id => gateComplete(state.features.find(item => item.id === id))),
         candidateFeatureIds: input.candidateFeatureIds ?? null });
       const dispatches = selected.map(feature => {
         const dispatchId = this.id('dispatch');
@@ -397,6 +415,7 @@ export class HarnessKernel {
         assert(!feature.forbiddenPaths.some(path => pathWithin(path, file)), 'FEATURE_PATH_FORBIDDEN', `Feature ${feature.id} changed a forbidden path: ${file}`);
       }
       assert(input.resultingSourceDigest, 'RESULTING_SOURCE_DIGEST_REQUIRED', 'Submission requires the resulting workspace source digest.');
+      assertInterventionReadOnly(feature, input, dispatch);
       if (result.status === 'completed') assert((input.evidenceRefs ?? []).length > 0, 'COMPLETION_EVIDENCE_REQUIRED', 'Completed Features require content-addressed evidence.');
       const submission = { submissionId: this.id('submission'), dispatchId: dispatch.dispatchId, leaseId: lease.leaseId, featureId: feature.id, agentId: lease.agentId, epoch: state.epoch, generation: state.generation, inputSourceDigest: dispatch.sourceDigest, outputSourceDigest: input.resultingSourceDigest, changedFiles, result: structuredClone(result), evidenceRefs: [...new Set(input.evidenceRefs ?? [])], submittedAt: this.now() };
       const budget = result.status === 'completed' ? null : selectAttemptBudget({ state, feature, submission, profile });
@@ -452,6 +471,7 @@ export class HarnessKernel {
         ? profile.createFollowUpFeatures({ state: structuredClone(state), feature: structuredClone(feature), findings: structuredClone(findings), result: structuredClone(result) })
         : [];
       if (followUps.length) {
+        assert(followUps.every(item => !isIntervention(item)), 'INTERVENTION_RESERVATION_REQUIRED', 'Profile follow-ups cannot mint diagnostic reservations.');
         const existingIds = new Set(state.features.map(item => item.id));
         const normalized = validateWorkGraph([...state.features, ...followUps]);
         state.features.push(...normalized.filter(item => !existingIds.has(item.id)));
@@ -537,6 +557,15 @@ export class HarnessKernel {
     return this.authorityStore.transact(projectId, runId, { expectedRevision: command.expectedRevision, commandId: command.commandId, payload: input }, state => {
       assertMutableRun(state);
       assert(input.id && input.actor && input.decision, 'DECISION_INVALID', 'Decision requires id, actor, and decision.');
+      if (['stop-execution', 'resume-execution'].includes(input.action)) {
+        assert(['user', 'human-user'].includes(input.actor) && input.decision === 'approved'
+          && input.context?.projectId === projectId && input.context?.runId === runId
+          && input.context?.sourceDigest === state.sourceDigest && input.context?.priorAuthorityDigest === state.authorityDigest,
+        'OPERATOR_STOP_AUTHORITY_REQUIRED', 'Only an exact user Decision can stop or resume execution.');
+        if (input.action === 'resume-execution') assert(!state.leases.some(activeLease) && !state.dispatches.some(activeDispatch),
+          'OPERATOR_RESUME_EFFECT_ACTIVE', 'Resume requires contained or formally recovered prior transport.');
+        state.metadata.operatorStop = { requested: input.action === 'stop-execution', decisionId: input.id, at: this.now() };
+      }
       if (input.action === 'freeze-execution') assert(input.decision === 'approved'
         && input.context?.projectId === projectId && input.context?.runId === runId
         && input.context?.sourceDigest === state.sourceDigest && input.context?.priorAuthorityDigest === state.authorityDigest
@@ -682,9 +711,22 @@ export class HarnessKernel {
     });
   }
 
+  async scheduleIntervention(projectId, runId, input, command) {
+    const evidence = await this.evidenceStore.read(input.evidenceRef);
+    return this.authorityStore.transact(projectId, runId,
+      { expectedRevision: command.expectedRevision, commandId: command.commandId, payload: input }, state => {
+        assertMutableRun(state);
+        const result = reserveIntervention(state, input, evidence, this.now);
+        event(state, 'execution.intervention-reserved', { ...result, sourceFeatureId: input.sourceFeatureId, evidenceRef: input.evidenceRef }, this.now);
+        state.status = deriveStatus(state, this.profile(state.profile.id));
+        return result;
+      });
+  }
+
   async reopenFeature(projectId, runId, input, command) {
     return this.authorityStore.transact(projectId, runId, { expectedRevision: command.expectedRevision, commandId: command.commandId, payload: input }, state => {
       assertMutableRun(state);
+      assert(!state.metadata?.operatorStop?.requested, 'OPERATOR_EXECUTION_STOPPED', 'The user has stopped this execution.');
       const feature = state.features.find(item => item.id === input.featureId);
       assert(feature?.state === 'blocked', 'FEATURE_NOT_REOPENABLE', 'Only a blocked Feature with remaining budget can be reopened.');
       const last = [...state.submissions].reverse().find(item => item.featureId === feature.id);
@@ -717,7 +759,7 @@ export class HarnessKernel {
       assertMutableRun(state);
       const profile = this.profile(state.profile.id);
       assert(typeof profile.createGateDiagnosticReview === 'function', 'GATE_DIAGNOSTIC_REVIEW_UNSUPPORTED', 'The Run profile does not support Gate diagnostic review.');
-      assert(state.features.every(feature => feature.state === 'completed') && !state.leases.some(activeLease), 'GATE_DIAGNOSTIC_REVIEW_NOT_READY', 'Gate diagnosis requires completed Features and no active Lease.');
+      assert(state.features.every(isExecutionComplete) && !state.leases.some(activeLease), 'GATE_DIAGNOSTIC_REVIEW_NOT_READY', 'Gate diagnosis requires completed Features and no active Lease.');
       const failed = input.gateResults.filter(gate => gate.status !== 'passed');
       assert(failed.length > 0 && failed.every(gate => state.gates.some(record => record.id === gate.id && record.status === gate.status && record.sourceDigest === state.sourceDigest && gate.evidenceRefs?.every(ref => record.evidenceRefs.includes(ref)))), 'GATE_DIAGNOSTIC_EVIDENCE_STALE', 'Failed Gate evidence must bind the current source.');
       const candidate = profile.createGateDiagnosticReview({ state: structuredClone(state), gateResults: structuredClone(input.gateResults) });
@@ -787,8 +829,8 @@ export class HarnessKernel {
     assert(current.revision === command.expectedRevision, 'REVISION_CONFLICT', 'Authority revision changed before closure.', { expected: command.expectedRevision, actual: current.revision });
     assert(!terminalRun(current), 'RUN_TERMINAL', 'A terminal Run cannot be closed again.');
     const profile = this.profile(current.profile.id);
-    const closure = profile.canClose(current);
-    assert(current.features.every(feature => feature.state === 'completed'), 'FEATURES_INCOMPLETE', 'All Features must be completed before closure.');
+    const closure = profile.canClose(profileState(current));
+    assert(current.features.every(isExecutionComplete), 'FEATURES_INCOMPLETE', 'All business Features must be completed before closure.');
     assert(qualityCanClose(current.findings), 'QUALITY_FINDINGS_OPEN', 'All P0-P3 findings must be resolved before closure.');
     assert(current.gates.every(gate => gate.status === 'passed' && gate.sourceDigest === current.sourceDigest), 'GATES_NOT_PASSED', 'All current Gate results must pass on the active source before closure.');
     const gateRecipes = current.metadata?.gateRecipes ?? [];
@@ -820,8 +862,8 @@ export class HarnessKernel {
       assert(['incomplete', 'failed'].includes(input.status) && typeof input.reason === 'string' && input.reason.length > 0,
         'RUN_FINISH_INVALID', 'Run finish requires an incomplete or failed outcome and a reason.');
       if (input.status === 'incomplete') {
-        assert(input.reason === 'quality-review-limit-reached' && state.features.every(feature => feature.state === 'completed')
-          && this.profile(state.profile.id).canClose(state).reason === 'quality-review-limit-reached',
+        assert(input.reason === 'quality-review-limit-reached' && state.features.every(isExecutionComplete)
+          && this.profile(state.profile.id).canClose(profileState(state)).reason === 'quality-review-limit-reached',
         'RUN_QUALITY_INCOMPLETE_UNVERIFIED', 'A bounded quality outcome requires completed Features and an exhausted current-source review budget.');
       } else {
         assert(evidence.length > 0 && evidence.every(record => record.metadata.projectId === projectId && record.metadata.runId === runId),

@@ -17,6 +17,8 @@ export const resolveAttemptCarryover = async (input, features, store) => {
   const sources = [];
   const attempts = {};
   const submissions = new Map();
+  const interventions = new Map();
+  const operatorStops = [];
   const exhausted = new Set();
   for (const pin of spec.sources) {
     assert(pin.runId !== input.runId, 'ATTEMPT_CARRYOVER_INVALID', 'A Run cannot inherit itself.');
@@ -26,6 +28,12 @@ export const resolveAttemptCarryover = async (input, features, store) => {
       && !prior.dispatches.some(item => ['requested', 'assigned'].includes(item.status)),
     'ATTEMPT_CARRYOVER_SOURCE_CHANGED', 'Counter transfer requires the exact idle prior Authority.');
     sources.push(prior);
+    if (prior.metadata?.operatorStop) operatorStops.push(prior.metadata.operatorStop);
+    for (const item of prior.metadata?.interruptionLedger ?? []) if (roots.has(item.logicalRoot)) {
+      const existing = interventions.get(item.id);
+      assert(!existing || digestJson(existing) === digestJson(item), 'INTERVENTION_CARRYOVER_CONFLICT', 'Intervention history cannot change across Runs.');
+      interventions.set(item.id, structuredClone(item));
+    }
     const owned = new Set(prior.features.filter(item => roots.has(item.logicalRoot)).map(item => item.id));
     for (const [key, item] of Object.entries(prior.attempts).filter(([, value]) => roots.has(value.logicalRoot))) {
       assert(item.key === key && Number.isSafeInteger(used(item)) && used(item) >= 0,
@@ -58,6 +66,12 @@ export const resolveAttemptCarryover = async (input, features, store) => {
     assert(attempts[key] && used(attempts[key]) >= used(item) && attempts[key].limit >= item.limit,
       'ATTEMPT_CARRYOVER_STALE', 'A newer counter or approved allowance exists for this stable root.');
   }
+  for (const prior of all.filter(item => family.has(item.runId) && item.runId !== input.runId)) {
+    for (const item of prior.metadata?.interruptionLedger ?? []) if (roots.has(item.logicalRoot)) {
+      assert(interventions.has(item.id) && digestJson(interventions.get(item.id)) === digestJson(item),
+        'INTERVENTION_CARRYOVER_STALE', 'A later intervention reservation cannot be discarded during recovery.');
+    }
+  }
   for (const [key, item] of Object.entries(attempts)) {
     item.exhausted = used(item) >= item.limit;
     if (!item.exhausted) continue;
@@ -66,7 +80,8 @@ export const resolveAttemptCarryover = async (input, features, store) => {
     assert(anchor, 'ATTEMPT_CARRYOVER_ANCHOR_REQUIRED', 'An exhausted counter needs its stable original Feature for explicit budget approval.');
     exhausted.add(anchor.id);
   }
-  return { attempts, submissions: [...submissions.values()], exhausted: [...exhausted],
+  return { attempts, submissions: [...submissions.values()], exhausted: [...exhausted], interruptions: [...interventions.values()],
+    operatorStop: operatorStops.sort((left, right) => String(right.at).localeCompare(String(left.at)))[0] ?? null,
     receipt: { sources: spec.sources, logicalRoots: spec.logicalRoots, submissionIds: [...submissions.keys()] },
     extensions: sources.flatMap(source => source.metadata?.attemptBudgetExtensions ?? []) };
 };
