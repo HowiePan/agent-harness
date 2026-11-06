@@ -20,6 +20,7 @@ import { selectImplementationContinuationRun, selectQualityContinuationRun } fro
 import { retireUnresumableQualityRun } from '../../../../src/application/quality-run-retirement.mjs';
 import { describeInterruptionError } from '../../../../src/application/interruption-outcome.mjs';
 import { coordinationRecoveryDirective } from '../../../../src/application/coordination-recovery.mjs';
+import { preserveVisibleResult } from '../lib/visible-lifecycle-result.mjs';
 
 const samePath = (left, right) => process.platform === 'win32'
   ? resolve(left).toLowerCase() === resolve(right).toLowerCase()
@@ -229,7 +230,8 @@ const main = async () => {
     if (result.planApprovalArtifact) emit({ kind: 'codex-visible-lifecycle-event', phase: 'plan-review-ready', commandId: intent.commandId,
       status: result.planApprovalArtifact.reviewApproved ? 'awaiting-user-approval' : 'independent-review-rejected',
       artifact: result.planApprovalArtifact });
-    emit({ kind: 'codex-visible-lifecycle-event', phase: 'complete', commandId: intent.commandId, intentDigest: intent.intentDigest, planDigest: plan.planDigest, status: result.status, result });
+    const summary = await preserveVisibleResult({ result, dataRoot: intent.harness.dataRoot, controlRoot: intent.harness.controlRoot, commandId: intent.commandId });
+    emit({ kind: 'codex-visible-lifecycle-event', phase: 'complete', commandId: intent.commandId, intentDigest: intent.intentDigest, planDigest: plan.planDigest, status: result.status, result: summary });
     if (localIncidentContext && result.status === 'attention-required' && result.reason && !['implementation-plan-user-approval-required', 'plan-scope-review-not-approved'].includes(result.reason)) {
       const incident = classifyLocalIncident({ error: result.reason, ...localIncidentContext });
       emit({ kind: 'codex-visible-lifecycle-incident', code: incident.code, incident, details: { reason: result.reason } });

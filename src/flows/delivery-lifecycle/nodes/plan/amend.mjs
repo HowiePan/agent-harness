@@ -1,5 +1,6 @@
 import { deliveryNode, deliveryTask } from '../node.mjs';
 import { deliveryPlanningInstructions } from '../../delivery-batches.mjs';
+import { sourceExitPlanningInstructions, sourceExitReviewInstruction } from '../../plan-source-exits.mjs';
 
 const inputs = [
   { id: 'approved-base', source: 'intent', path: 'planRevision', required: true,
@@ -13,8 +14,6 @@ export const amendNode = deliveryNode('plan', 'amend', 'version-planning', [], {
   task: deliveryTask({
     role: { id: 'plan-amender', description: 'Authors only a bounded delta against an approved immutable plan.' },
     objective: 'Resolve the registered local planning defect without regenerating unchanged plan content.',
-    constraints: ['Apply bounded delivery rules only to registered affected proposals when amendmentScope.batchPolicy.policy is bounded-delivery/2; unchanged proposals retain their immutable policy.',
-      ...deliveryPlanningInstructions.slice(1)],
     instructions: [
       'Inspect the approved base and current source consumers. Restrict every modification to amendmentScope and trace it to the registered change request.',
       'Author a delta file with version, basePlanDigest, changeRequestDigest, changes and documents. Each change has path, expectedDigest of its original JSON value and replacement value. In the final delivery-plan-amendment-v1 output return the materializer outputValue: version, basePlanDigest, changeRequestDigest and deltaRef {path,sha256}. Do not transcribe a large patch or provide a machine-derived plan.',
@@ -23,7 +22,10 @@ export const amendNode = deliveryNode('plan', 'amend', 'version-planning', [], {
       'Write the draft delta only inside amendmentScope.artifactRoot. Use the official dev amendment-materialize command with the verified development manifest, this Run ID and --patch <draft.json>. It generates immutable content-addressed document copies, amendment.json, changes.md and plan.json, rebinds references, and returns compact outputValue with the exact delta reference. Application verifies that file, preserves the native result and records a digest-bound resolution Receipt.',
       'Do not edit any base plan/inventory or implementation source. A materializer scope, identity or graph rejection is not permission to weaken its checks. Return an exact protected blocker if this change requires broader Replan.',
       'After review rejection, produce a corrected delta against the same original base. New delta bytes use a new generated directory; retain prior review artifacts and findings.',
+      'Before a consumer-allocation scope blocker, reconcile exact consumers/assertions to existing executable owners and their complete compilation closures. Include ordered shared-helper writers, focused selectors, actual remaining mechanism/consumer/proof/integration costs and each unchanged batch capacity. Do this planning analysis within the registered artifactRoot; missing estimates alone do not prove a protected contract change. Keep convergence as verification after its concrete development producers. If the complete work does not fit, identify the smallest necessary protected pointer with evidence; never compress estimates or drop assertions.',
+      'When planRevision.recoveryDraft is present, inspect its digest-bound candidate and evidence first. Reuse verified draft work and helper checkpoints under the current resource policy. It is unaccepted input: validate or correct it against this original base, materialize under this Run, and require fresh independent review and exact human approval. Do not transfer planning completion or old approval.',
       'Avoid retransmitting unchanged contracts in whole-array replacements. The materializer supports --compact to derive an exactly equivalent smaller delta from pinned originals. An op:add entry creates only an absent object member or ordered numeric array tail and pins expectedDigest to its original parent. The complete resulting delta still must fit 2 MiB; compaction never waives scope, graph, source identity or review.',
+      ...sourceExitPlanningInstructions,
     ],
     inputs,
     steps: [
@@ -31,7 +33,8 @@ export const amendNode = deliveryNode('plan', 'amend', 'version-planning', [], {
       { id: 'patch', instruction: 'Author bounded replacements with original-value digests and evidence for each change.' },
       { id: 'materialize', instruction: 'Use deterministic materialization; inspect graph, references and unchanged content before returning the delta.' },
     ],
-    constraints: ['No business implementation, base-file rewriting, unregistered feature splits, acceptance deletion or Authority edits.'],
+    constraints: ['No business implementation, base-file rewriting, unregistered feature splits, acceptance deletion or Authority edits.',
+      'Apply bounded delivery rules to registered affected proposals; unchanged proposals retain their immutable policy.', ...deliveryPlanningInstructions.slice(1)],
     acceptance: ['Every delta entry has a registered bound, exact preimage and source-backed reason.',
       'Generated artifacts reproduce the delta and preserve unchanged plan content.',
       'Dependencies are acyclic and all referenced inputs exist; every affected retirement and consumer has an executable owner and check.'],
@@ -47,6 +50,7 @@ export const amendReviewNode = deliveryNode('plan-review', 'plan-review', 'plan-
       'Remain read-only. Inspect the typed amendment, immutable base, generated full plan and exact source evidence. Review the delta and affected consumer/producer boundaries; unchanged Features are checked by deterministic equality and whole-graph/reference validation, not regenerated.',
       'Check all registered change requirements, every affected native declaration/signature, source retirement deadline, dependency, module/manifest/Schema/test path and acceptance owner. Follow references into downstream consumers even when they are outside the write scope.',
       'Reject unregistered changes, missing producer capabilities, cycles, dangling or prematurely retired types, dropped assertions, historical binaries substituted for fresh-port acceptance, and unsupported API withdrawal. Report actionable findings; do not expand scope silently.',
+      sourceExitReviewInstruction,
       'Return plan-review with approved, findings, basePlanDigest, deltaDigest and reviewedFeatureIds. Bind basePlanDigest to the original approved base, deltaDigest to the exact typed amendment and reviewedFeatureIds to every registered affected Feature. An old review or user approval cannot approve this delta.',
       'When planRevision.replacesAmendment.preservedDraft contains a rejected review, inspect its candidate, corrected draft and every openFindings entry. Those Findings remain open. For each verified fix, report its exact ID in plan-review.resolvedFindings and a checkpoint with that ID, status resolved, a specific summary and non-empty evidence. Keep unresolved IDs in the typed findings; do not duplicate existing Authority Findings in top-level findings. Approval alone closes none.',
     ],

@@ -1,10 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { digestJson, withoutKeys } from '../src/common/canonical.mjs';
-import { rejectedAmendmentDraftEvidence, selectAmendmentRetry, matchesAmendmentRetry } from '../src/application/plan-amendment-retry.mjs';
+import { rejectedAmendmentDraftEvidence, diagnosedAmendmentScopeEvidence, selectAmendmentRetry, matchesAmendmentRetry } from '../src/application/plan-amendment-retry.mjs';
 import { verifyBlockedDraftArtifacts } from '../src/application/plan-amendment-draft-artifacts.mjs';
 import { amendmentFixture } from './fixtures/plan-amendment.mjs';
 import { validateFinding } from '../src/kernel/quality.mjs';
+import { featureContractDigest } from '../src/common/interruption-contract.mjs';
 import { carryAmendmentReviewFindings } from '../src/application/plan-amendment-finding-carryover.mjs';
 import { planReviewResolutionCandidates, verifyPlanReviewResolutionEvidence } from '../src/application/plan-review-reconciliation.mjs';
 
@@ -61,6 +62,211 @@ const fixture = () => {
     request, scope: revision.amendmentScope, artifactDigest: '2'.repeat(64) };
   return { state, args, records, final };
 };
+
+const reconciliationFixture = () => {
+  const data = fixture(), { state } = data;
+  const repair = state.features[2], blocked = state.submissions[2];
+  repair.metadata.planReviewRound = 2;
+  repair.allowedPaths = [state.metadata.planRevision.amendmentScope.artifactRoot];
+  repair.logicalRoot = 'planner'; repair.forbiddenPaths = []; repair.acceptance = ['Reconcile consumers.'];
+  repair.blocker = { kind: 'scope', code: 'ALLOCATION_UNPROVEN', summary: 'Consumer allocation needs reconciliation.' };
+  blocked.result.blocker = repair.blocker; blocked.result.failureClass = 'scope-blocker';
+  blocked.submissionDigest = digestJson(withoutKeys(blocked, ['submissionDigest']));
+  state.profile = { config: { planReviewLimit: 6 } };
+  const diagnostic = { submissionId: 'diagnosed', featureId: 'diagnostic', dispatchId: 'diagnostic-dispatch',
+    inputSourceDigest: state.sourceDigest, outputSourceDigest: state.sourceDigest, changedFiles: [], evidenceRefs: ['diagnostic-evidence'],
+    result: { status: 'completed', outputs: { diagnosis: { value: { conclusion: 'unresolved',
+      sourceSubmissionId: blocked.submissionId, contractDigest: featureContractDigest(repair) } } } } };
+  diagnostic.submissionDigest = digestJson(diagnostic);
+  state.features.push({ id: 'diagnostic', kind: 'execution-diagnostic', state: 'completed', submissionId: diagnostic.submissionId,
+    allowedPaths: [], metadata: { intervention: { sourceFeatureId: repair.id, sourceSubmissionId: blocked.submissionId,
+      sourceDigest: state.sourceDigest, contractDigest: featureContractDigest(repair) } } });
+  state.metadata.interruptionLedger = [{ id: 'diagnostic', sourceSubmissionId: blocked.submissionId }];
+  state.submissions.push(diagnostic);
+  state.dispatches.push({ dispatchId: diagnostic.dispatchId, status: 'committed', submissionId: diagnostic.submissionId });
+  return data;
+};
+
+const scopeCorrectionFixture = () => {
+  const { state: original, args: priorArgs, records, final } = reconciliationFixture();
+  const ref = selectAmendmentRetry(priorArgs), state = structuredClone(original);
+  state.runId = 'scope-draft'; state.revision = 37; state.artifactDigest = priorArgs.artifactDigest;
+  const revision = state.metadata.planRevision;
+  revision.replacesAmendment = ref;
+  revision.parentPlan.proposedFeatures[0].projectId = state.projectId;
+  revision.parentPlan.proposedFeatures[0].deliveryBatches = [{ id: 'original', sizing: { capacityUnits: 36 } }];
+  revision.amendmentScope.batchPolicy = { policy: 'bounded-delivery/2', maxBatchesPerFeature: 20 };
+  revision.amendmentScope.documents = [{ id: 'expanded', source: { path: 'base.json', sha256: 'a'.repeat(64) },
+    outputPath: 'docs/amend/expanded.json', allowedPointers: [...revision.amendmentScope.planPointers] }];
+  state.features = state.features.slice(2);
+  state.submissions = state.submissions.slice(2);
+  state.dispatches = state.dispatches.slice(2);
+  state.findings = ref.preservedDraft.openFindings.map(finding => validateFinding({
+    ...finding, source: 'authority-snapshot', openedAt: 'carried' }));
+  const diagnostic = state.submissions.at(-1);
+  Object.assign(diagnostic.result.outputs.diagnosis.value, { conclusion: 'contract-change', repairPaths: [] });
+  diagnostic.submissionDigest = digestJson(withoutKeys(diagnostic, ['submissionDigest']));
+  const request = { target: priorArgs.intent.target, amendmentScope: structuredClone(revision.amendmentScope) };
+  revision.changeRequestDigest = digestJson(request);
+  const scope = structuredClone(revision.amendmentScope);
+  scope.featureIds.push('A0'); scope.planPointers.push('/proposedFeatures/0/deliveryBatches');
+  scope.documents[0].allowedPointers.push('/proposedFeatures/0/deliveryBatches');
+  const args = { ...priorArgs, states: [state], request: { ...request, amendmentScope: scope }, scope, artifactDigest: '3'.repeat(64) };
+  for (const row of state.submissions) {
+    const dispatch = state.dispatches.find(item => item.dispatchId === row.dispatchId);
+    records[row.evidenceRefs[0]] = { metadata: { projectId: state.projectId, runId: state.runId,
+      featureId: row.featureId, dispatchId: row.dispatchId, sourceDigest: row.inputSourceDigest }, bytes: Buffer.from(JSON.stringify({
+      result: row.result, sourceSnapshotRef: dispatch.sourceSnapshotRef,
+      inputSourceDigest: row.inputSourceDigest, outputSourceDigest: row.outputSourceDigest })) };
+    if (dispatch.sourceSnapshotRef) records[dispatch.sourceSnapshotRef].metadata.runId = state.runId;
+  }
+  return { original, state, args, records, final };
+};
+
+test('a diagnosed registered batch correction retains rejected ancestry and review allowance across another Run', () => {
+  const { state, args } = scopeCorrectionFixture();
+  const before = digestJson(state), ref = selectAmendmentRetry(args);
+  assert.equal(ref.preservedDraft.rejectedReview.originRunId, 'draft');
+  assert.equal(ref.preservedDraft.reviewRoundsUsed, 1);
+  assert.deepEqual(ref.preservedDraft.openFindings, state.metadata.planRevision.replacesAmendment.preservedDraft.openFindings);
+  assert.equal(ref.preservedDraft.scopeCorrection.sourceDigest, state.sourceDigest);
+  assert.equal(ref.preservedDraft.correctedDraft.submissionId, state.submissions[0].submissionId);
+  const plan = { harness: { artifactDigest: args.artifactDigest }, intent: { ...args.intent,
+    planRevision: { ...state.metadata.planRevision, amendmentScope: args.scope,
+      changeRequestDigest: digestJson(args.request), replacesAmendment: ref } } };
+  assert(matchesAmendmentRetry(state, plan));
+  assert(matchesAmendmentRetry({ ...state, status: 'superseded' }, plan));
+  assert.equal(digestJson(state), before);
+  assert.equal(state.attempts.progress.used, 21);
+  assert.throws(() => selectAmendmentRetry({ ...args, request: { target: args.intent.target,
+    amendmentScope: state.metadata.planRevision.amendmentScope }, scope: state.metadata.planRevision.amendmentScope }),
+  { code: 'PLAN_AMENDMENT_RETRY_UNSAFE' });
+});
+
+test('diagnosed batch corrections reject unbound claims, scope drift, completed work and allowance resets', () => {
+  for (const mutate of [
+    row => row.state.leases.push({ status: 'active' }),
+    row => row.state.findings.push({ id: 'unrelated', status: 'open' }),
+    row => { row.state.findings[0].summary = 'different'; },
+    row => { row.state.sourceDigest = 'drift'; },
+    row => { row.state.submissions.at(-1).result.outputs.diagnosis.value.conclusion = 'unresolved'; },
+    row => { row.state.submissions.at(-1).result.outputs.diagnosis.value.repairPaths = ['scope.json']; },
+    row => { row.state.submissions.at(-1).result.outputs.diagnosis.value.sourceSubmissionId = 'different'; },
+    row => { row.state.submissions.at(-1).changedFiles = ['src/unauthorized']; },
+    row => { row.state.submissions.at(-1).outputSourceDigest = 'drift'; },
+    row => { row.state.dispatches.at(-1).status = 'requested'; },
+    row => { row.state.metadata.interruptionLedger = []; },
+    row => row.state.submissions.push({ result: { status: 'completed' } }),
+    row => row.state.decisions.push({ id: 'implementation-plan-approved', decision: 'approved' }),
+    row => { row.state.metadata.planRevision.replacesAmendment.preservedDraft.reviewRoundsUsed = 6; },
+    row => { row.args.scope.batchPolicy.maxBatchesPerFeature = 21; },
+    row => { row.args.scope.featureSplits = [{ featureId: 'A0', prefix: 'A0-', maxNewFeatures: 2 }]; },
+    row => row.args.scope.planPointers.push('/proposedFeatures/0/allowedPaths'),
+    row => { row.args.scope.documents[0].allowedPointers.pop(); },
+    row => { row.args.scope.featureIds.reverse(); },
+    row => { row.state.metadata.planRevision.parentPlan.proposedFeatures[0].projectId = 'other'; },
+    row => { row.state.metadata.planRevision.implementationBaselines = [{ completed: [{ proposalId: 'A0' }] }]; },
+  ]) {
+    const row = scopeCorrectionFixture(); mutate(row);
+    assert.throws(() => selectAmendmentRetry(row.args), { code: 'PLAN_AMENDMENT_RETRY_UNSAFE' });
+  }
+});
+
+test('multi-generation batch correction verifies diagnostic bytes and the original review Authority', async () => {
+  const { original, state: prior, args, records, final } = scopeCorrectionFixture();
+  assert(diagnosedAmendmentScopeEvidence(prior));
+  const evidenceStore = { read: async ref => records[ref] };
+  const verify = () => verifyBlockedDraftArtifacts({ drafts: [prior], snapshot: final, artifactRoot: 'docs/amend', evidenceStore });
+  assert.deepEqual([...await verify()], ['docs/amend/fix.json']);
+  const diagnosticEvidence = prior.submissions.at(-1).evidenceRefs[0], saved = records[diagnosticEvidence];
+  records[diagnosticEvidence] = { ...saved, bytes: Buffer.from('{}') };
+  await assert.rejects(verify(), { code: 'PLAN_AMENDMENT_DRAFT_ARTIFACT_INVALID' });
+  records[diagnosticEvidence] = saved;
+  const ref = selectAmendmentRetry(args);
+  delete ref.replacementArtifactDigest; // Registered correction also works without a second Runtime change.
+  const plan = { planDigest: 'fresh-plan', harness: { artifactDigest: args.artifactDigest }, intent: { ...args.intent,
+    planRevision: { ...prior.metadata.planRevision, amendmentScope: args.scope,
+      changeRequestDigest: digestJson(args.request), replacesAmendment: ref } } };
+  const state = { projectId: prior.projectId, runId: 'fresh', revision: 1, findings: [], submissions: [],
+    features: [], artifactDigest: args.artifactDigest, metadata: { lifecyclePlanDigest: plan.planDigest,
+      commandIntent: plan.intent, planRevision: plan.intent.planRevision } };
+  const input = { state, plan, evidenceStore, commandId: 'fresh',
+    authorityStore: { read: async (_project, id) => id === prior.runId ? prior : original },
+    kernel: { recordFinding: async (_project, _run, finding) => {
+      state.findings.push(validateFinding({ ...finding, status: 'open', openedAt: 'new' }));
+      state.revision++; return { state };
+    } } };
+  await carryAmendmentReviewFindings(input);
+  assert.equal(state.findings.length, 2);
+  const result = { status: 'completed', changedFiles: [], findings: [], outputs: { 'plan-review': { value: {
+    approved: true, findings: [], resolvedFindings: ['mapping', 'inputs'] } } },
+  checkpoints: ['mapping', 'inputs'].map(id => ({ id, status: 'resolved', summary: 'Verified new correction', evidence: ['exact-contract'] })) };
+  state.features.push({ id: 'fresh-review', state: 'completed', allowedPaths: [], dependsOn: [],
+    metadata: { stage: 'plan-review', sourcePolicy: 'read-only' } });
+  const submission = { submissionId: 'fresh-review-result', featureId: 'fresh-review', dispatchId: 'fresh-dispatch',
+    result, inputSourceDigest: 'new', outputSourceDigest: 'new', evidenceRefs: ['fresh-evidence'] };
+  submission.submissionDigest = digestJson(submission); state.submissions.push(submission);
+  records['fresh-evidence'] = { metadata: { projectId: state.projectId, runId: state.runId,
+    featureId: submission.featureId, dispatchId: submission.dispatchId }, bytes: Buffer.from(JSON.stringify({
+    result, inputSourceDigest: 'new', outputSourceDigest: 'new' })) };
+  const candidates = planReviewResolutionCandidates(state);
+  assert.equal(candidates.length, 2);
+  assert(candidates.every(item => item.carriedOrigin.runId === original.runId));
+  await verifyPlanReviewResolutionEvidence(state, candidates, evidenceStore);
+  original.submissions = [];
+  await assert.rejects(carryAmendmentReviewFindings({ ...input, state: { ...state, findings: [], submissions: [] } }),
+    { code: 'PLAN_AMENDMENT_FINDING_CARRYOVER_INVALID' });
+});
+
+test('a repaired runtime can restart source-bound planning reconciliation without scope or review-budget expansion', () => {
+  const { state, args } = reconciliationFixture();
+  const saved = digestJson(state);
+  const ref = selectAmendmentRetry(args);
+  assert.equal(ref.preservedDraft.reviewRoundsUsed, 1);
+  assert.deepEqual(ref.preservedDraft.openFindings, state.findings);
+  assert.equal(digestJson(state), saved);
+  for (const mutate of [
+    s => { s.submissions.at(-1).result.outputs.diagnosis.value.conclusion = 'contract-change'; },
+    s => { s.submissions.at(-1).outputSourceDigest = 'different'; },
+    s => { s.submissions.at(-1).changedFiles = ['docs/amend/unclaimed']; },
+    s => { s.features[2].allowedPaths = ['src']; },
+    s => { s.profile.config.planReviewLimit = 1; },
+    s => { s.metadata.interruptionLedger = []; },
+    s => { s.features.at(-1).metadata.intervention.contractDigest = 'different'; },
+    s => { s.features.at(-1).metadata.intervention.sourceDigest = 'different'; },
+    s => { s.submissions.at(-1).result.outputs.diagnosis.value.sourceSubmissionId = 'different'; },
+  ]) {
+    const changed = structuredClone(state); mutate(changed);
+    assert.throws(() => selectAmendmentRetry({ ...args, states: [changed] }), { code: 'PLAN_AMENDMENT_RETRY_UNSAFE' });
+  }
+  const changedScope = structuredClone(args.scope); changedScope.planPointers.push('/proposedFeatures/0/dependsOn');
+  assert.throws(() => selectAmendmentRetry({ ...args, scope: changedScope }), { code: 'PLAN_AMENDMENT_RETRY_UNSAFE' });
+});
+
+test('retry accepts reviewed registered new children but rejects unrelated or excess identities', () => {
+  const { state, args } = reconciliationFixture();
+  const revision = state.metadata.planRevision;
+  const parent = revision.amendmentScope.featureIds[0];
+  revision.amendmentScope.featureSplits = [{ featureId: parent, prefix: `${parent}-`, maxNewFeatures: 1 }];
+  revision.changeRequestDigest = digestJson(args.request);
+  const planner = state.submissions[0], review = state.submissions[1];
+  planner.result.outputs.amendment.value.changeRequestDigest = revision.changeRequestDigest;
+  planner.submissionDigest = digestJson(withoutKeys(planner, ['submissionDigest']));
+  const originalIds = [...review.result.outputs['plan-review'].value.reviewedFeatureIds];
+  const ids = [...originalIds, `${parent}-new`];
+  const check = candidateIds => {
+    review.result.outputs['plan-review'].value.reviewedFeatureIds = candidateIds;
+    review.submissionDigest = digestJson(withoutKeys(review, ['submissionDigest']));
+    return selectAmendmentRetry(args);
+  };
+  assert(check(ids));
+  for (const candidateIds of [[...ids, `${parent}-extra`], [...originalIds, 'unrelated'],
+    ids.slice(1), [...ids, ids.at(-1)]]) {
+    assert.throws(() => check(candidateIds), { code: 'PLAN_AMENDMENT_RETRY_UNSAFE' });
+  }
+  revision.parentPlan.proposedFeatures.push({ id: `${parent}-new` });
+  assert.throws(() => check(ids), { code: 'PLAN_AMENDMENT_RETRY_UNSAFE' });
+});
 
 test('runtime repair retries only the exact rejected amendment and retains feedback and counters', () => {
   const { state, args } = fixture();

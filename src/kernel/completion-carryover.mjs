@@ -1,4 +1,4 @@
-import { digestJson, withoutKeys } from '../common/canonical.mjs';
+import { digestJson, digestJsonOmitting, withoutKeys } from '../common/canonical.mjs';
 import { assert } from '../common/errors.mjs';
 
 const mutableFeatureKeys = ['state', 'submissionId', 'blocker', 'reopenedAt', 'reopenReason',
@@ -7,10 +7,11 @@ const implementation = state => state.features.filter(feature => feature.metadat
 const partialOrigin = (state, submissionId) => [...state.events].reverse().find(event => event.type === 'attempts.carried-over'
   && event.submissionIds?.includes(submissionId) && event.sources?.length);
 const staticFeature = feature => {
-  const stable = withoutKeys(feature, mutableFeatureKeys);
+  // Read-only hash projection, never a replacement Feature or mutable Authority.
+  const stable = Object.fromEntries(Object.entries(feature).filter(([key]) => !mutableFeatureKeys.includes(key)));
   if (!stable.metadata?.workflow) return stable;
   return { ...stable, metadata: { ...stable.metadata,
-    workflow: withoutKeys(stable.metadata.workflow, ['artifactDigest']) } };
+    workflow: Object.fromEntries(Object.entries(stable.metadata.workflow).filter(([key]) => key !== 'artifactDigest')) } };
 };
 const workflowDigest = features => {
   const values = [...new Set(features.map(feature => feature.metadata?.workflow?.artifactDigest ?? null))];
@@ -19,7 +20,7 @@ const workflowDigest = features => {
 };
 export const implementationGraphDigest = features => digestJson(features.filter(feature => feature.metadata?.stage === 'implementation')
   .map(staticFeature));
-export const completionCarryoverDigest = plan => digestJson(withoutKeys(plan, ['carryoverDigest']));
+export const completionCarryoverDigest = plan => digestJsonOmitting(plan, ['carryoverDigest']);
 
 export const selectCompletionCarryoverSource = (states, plan) => {
   const sources = states.filter(candidate => candidate.status === 'superseded'

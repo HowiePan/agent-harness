@@ -1,0 +1,28 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {writeFile,mkdir,unlink} from 'node:fs/promises';
+import {resolve} from 'node:path';
+import {makeFixture} from './test-support.mjs';
+import {captureWorkspace} from '../src/common/workspace-snapshot.mjs';
+import {applyConfiguredFileBoundary} from '../src/common/configured-file-boundary.mjs';
+import {inspectPendingConfigurationRebase} from '../src/application/development-configuration-rebase.mjs';
+test('configuration-only rebase preserves scope and rejects source or authority expansion',async t=>{
+ const f=await makeFixture();t.after(f.cleanup);
+ const boundary={version:'project-boundary/1',sourceRoots:['engine'],sharedPaths:[],artifactRoots:['.local'],protectedPaths:[]};
+ const old={schemaVersion:'1.0',project:{input:{id:'project'}}};
+ const file=resolve(f.workspace,'harness.json');await writeFile(file,JSON.stringify(old));
+ const snapshot=await captureWorkspace(f.workspace);
+ const project={workspace:{root:f.workspace},policy:applyConfiguredFileBoundary({policy:{}},boundary).policy};
+ const prior={status:'superseded',features:[],projectId:f.projectId,runId:'config',epoch:1,generation:1,sourceDigest:snapshot.digest,authorityDigest:'pinned'};
+ const record=await f.harness.evidenceStore.put({snapshot,config:old,policy:project.policy.projectFilePolicy,artifactRoots:['.local'],priorAuthorityDigest:'pinned'},
+ {projectId:f.projectId,runId:'config',epoch:1,generation:1,sourceDigest:snapshot.digest,mediaType:'application/json'});
+ const current={...old,schemaVersion:'1.1',project:{...old.project,fileBoundary:boundary}};
+ await writeFile(file,JSON.stringify(current));
+ const input={prior,project,evidenceStore:f.harness.evidenceStore,baselineRef:record.ref};
+ assert.equal((await inspectPendingConfigurationRebase(input)).acceptanceCredit,false);
+ await writeFile(resolve(f.workspace,'unrelated.rs'),'changed');
+ await assert.rejects(inspectPendingConfigurationRebase(input),{code:'CONFIGURATION_REBASE_INVALID'});
+ await unlink(resolve(f.workspace,'unrelated.rs'));
+ await writeFile(file,JSON.stringify({...current,project:{...current.project,fileBoundary:{...boundary,sourceRoots:['engine','other']}}}));
+ await assert.rejects(inspectPendingConfigurationRebase(input),{code:'CONFIGURATION_REBASE_INVALID'});
+});

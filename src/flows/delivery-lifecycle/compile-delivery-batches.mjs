@@ -1,4 +1,5 @@
 import { assert } from '../../common/errors.mjs';
+import { cloneJson } from '../../common/clone-json.mjs';
 import { defineNodeTaskContract, taskFeatureProjection } from '../../common/task-contract.mjs';
 import { validateDeliveryBatches, deliveryBatchProjection, DELIVERY_BATCH_POLICY } from './delivery-batches.mjs';
 import { approvedImplementationValueSchema } from './contracts/index.mjs';
@@ -6,7 +7,7 @@ import { digestJson } from '../../common/canonical.mjs';
 
 const compactProposal = proposal => {
   const { deliveryBatches: _batches, ...value } = proposal;
-  return structuredClone(value);
+  return cloneJson(value);
 };
 
 /** Lower approved deliveries to ordinary native Agent Features, never a CLI worker. */
@@ -22,6 +23,8 @@ export const compileDeliveryBatches = feature => {
   const idFor = batch => batch.phase === 'convergence' ? feature.id : `${feature.id}/delivery/${batch.id}`;
   return plan.batches.map(batch => {
     const projection = deliveryBatchProjection(proposal, batch);
+    const acceptance = [...projection.contracts.map(value => typeof value === 'string' ? value : JSON.stringify(value)),
+      ...projection.verification.map(value => `Verify: ${typeof value === 'string' ? value : JSON.stringify(value)}`)];
     const { taskDigest: _digest, ...task } = feature.task;
     const nextTask = taskFeatureProjection(defineNodeTaskContract({
       ...task, objective: batch.objective,
@@ -35,11 +38,14 @@ export const compileDeliveryBatches = feature => {
       ],
       steps: [{ id: 'inspect', instruction: 'Inspect the approved batch, current source, dependency evidence and feasible paths.' },
         { id: 'deliver', instruction: batch.objective }, { id: 'verify', instruction: 'Run the declared checks, retain exact checkpoints and report the complete batch.' }],
-      acceptance: [...projection.contracts, ...projection.verification.map(value => `Verify: ${typeof value === 'string' ? value : JSON.stringify(value)}`)],
+      // Split children can hold their obligations only in the batches. Keep the
+      // original empty result contract while giving the Task its approved criteria.
+      acceptance: acceptance.length ? acceptance : [...batch.acceptance, ...batch.verification.map(value => `Verify: ${value}`)],
     }));
     return { ...feature, ...nextTask, id: idFor(batch),
       dependsOn: [...new Set([...feature.dependsOn, ...batch.dependsOn.map(id => idFor(plan.batches.find(item => item.id === id)))])],
-      allowedPaths: [...batch.allowedPaths], contracts: [...projection.contracts],
+      allowedPaths: [...batch.allowedPaths],
+      contracts: projection.contracts.map(value => typeof value === 'string' ? value : JSON.stringify(value)),
       conflictKeys: [...(batch.conflictKeys ?? [])],
       metadata: { ...feature.metadata, approvedDeliveryPlan: sourcePlan,
         deliveryOwnerProposal: compactProposal(proposal),

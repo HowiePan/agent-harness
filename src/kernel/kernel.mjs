@@ -2,6 +2,8 @@ import { resolve } from 'node:path';
 import { digestJson, newId, withoutKeys } from '../common/canonical.mjs';
 import { assert, fail } from '../common/errors.mjs';
 import { safeSegment } from '../common/paths.mjs';
+import { assertFeatureFileAccess, projectPathAdjustments, validateProjectFilePolicy } from '../common/project-file-policy.mjs';
+import { cloneJson } from '../common/clone-json.mjs';
 import { assertHardRecoveryDecision, hardRecoveryCapability } from '../platform/recovery/authorization.mjs';
 import { readRecoveryVerification } from '../platform/recovery/verification.mjs';
 import { readRecoveryResolution } from '../platform/recovery/resolution.mjs';
@@ -73,6 +75,7 @@ export const buildDispatchPacket = (state, dispatch, feature) => {
   sourceDigest: dispatch.sourceDigest ?? state.sourceDigest, sourceSnapshotRef: dispatch.sourceSnapshotRef, policyDigest: state.policyDigest, pluginSetDigest: state.pluginSetDigest, artifactDigest: state.artifactDigest,
   gates: structuredClone(dispatch.gateSnapshot ?? state.gates),
   execution: structuredClone(dispatch.execution ?? {}),
+  ...(state.metadata?.projectFilePolicy ? { projectFilePolicy: structuredClone(state.metadata.projectFilePolicy) } : {}),
   ...(state.metadata?.workspace ? { workspace: structuredClone(state.metadata.workspace) } : {}),
   ...(state.metadata?.workspaceRef ? { workspaceRef: structuredClone(state.metadata.workspaceRef) } : {}),
   ...(state.metadata?.sourceToolBinding ? { sourceToolBinding: structuredClone(state.metadata.sourceToolBinding) } : {}),
@@ -109,6 +112,7 @@ export class HarnessKernel {
   }
 
   async startRun(input, command) {
+    validateProjectFilePolicy(input.metadata?.projectFilePolicy);
     const profile = this.profile(input.profileId);
     const features = validateWorkGraph(input.features);
     assert(!(input.completionCarryover && input.attemptCarryover), 'ATTEMPT_CARRYOVER_CONFLICT', 'Use one authorized counter transfer route.');
@@ -152,7 +156,7 @@ export class HarnessKernel {
       policyDigest: input.policyDigest ?? digestJson(profileConfig),
       pluginSetDigest: input.pluginSetDigest,
       artifactDigest: input.artifactDigest ?? null,
-      metadata: structuredClone(input.metadata ?? {}),
+      metadata: cloneJson(input.metadata ?? {}),
       features,
       dispatches: [],
       leases: [],
@@ -280,7 +284,7 @@ export class HarnessKernel {
           && profile.canDispatch(isIntervention(feature) ? state.features.find(item => item.id === feature.metadata.intervention.sourceFeatureId) : feature,
             profileState(state)).ok
           && feature.dependsOn.every(id => gateComplete(state.features.find(item => item.id === id))),
-        candidateFeatureIds: input.candidateFeatureIds ?? null });
+        candidateFeatureIds: input.candidateFeatureIds ?? null, projectFilePolicy: state.metadata?.projectFilePolicy });
       const dispatches = selected.map(feature => {
         const dispatchId = this.id('dispatch');
         const outputRef = resolve(this.authorityStore.root, 'outputs', state.projectId, state.runId, `epoch-${state.epoch}`, `generation-${state.generation}`, `${dispatchId}.json`);
@@ -409,11 +413,11 @@ export class HarnessKernel {
         }
         return nextFinding;
       });
-      const pathWithin = (root, file) => file === root || file.startsWith(`${root.replace(/\/$/, '')}/`);
       for (const file of changedFiles) {
-        assert(feature.allowedPaths.some(path => pathWithin(path, file)), 'FEATURE_PATH_NOT_ALLOWED', `Feature ${feature.id} changed an unauthorized path: ${file}`);
-        assert(!feature.forbiddenPaths.some(path => pathWithin(path, file)), 'FEATURE_PATH_FORBIDDEN', `Feature ${feature.id} changed a forbidden path: ${file}`);
+        assertFeatureFileAccess({ feature, policy: state.metadata?.projectFilePolicy, path: file });
       }
+      const scopeAdjustments = projectPathAdjustments({ feature, policy: state.metadata?.projectFilePolicy, changedFiles, result });
+      if (scopeAdjustments.length) event(state, 'feature.project-local-scope-adjusted', { featureId: feature.id, adjustments: scopeAdjustments }, this.now);
       assert(input.resultingSourceDigest, 'RESULTING_SOURCE_DIGEST_REQUIRED', 'Submission requires the resulting workspace source digest.');
       assertInterventionReadOnly(feature, input, dispatch);
       if (result.status === 'completed') assert((input.evidenceRefs ?? []).length > 0, 'COMPLETION_EVIDENCE_REQUIRED', 'Completed Features require content-addressed evidence.');
@@ -513,7 +517,7 @@ export class HarnessKernel {
         let body;
         try { body = JSON.parse(record.bytes.toString('utf8')); } catch { assert(false, 'GATE_EVIDENCE_INVALID', 'Gate Evidence must contain a JSON result.'); }
         const expectedStatus = body.sourceDrift ? 'failed' : body.executorReceipt?.payload?.status;
-        assert(body.recipe?.id === gate.id && digestJson(body.recipe) === digestJson({ scope: 'feature', required: true, ...declared, command: declared.command.map(String) }) && (body.recipe.scope ?? 'feature') === gate.scope && body.status === gate.status && body.specDigest === gate.specDigest && body.specDigest === digestJson({ recipe: body.recipe, featureId: gate.featureId, command: body.recipe.command, cwd: body.recipe.cwd ?? '.', timeoutMs: body.recipe.timeoutMs ?? 300000 }) && body.spec?.featureId === gate.featureId && body.sourceBefore === gate.sourceDigest && (body.sourceDrift === (body.sourceAfter !== gate.sourceDigest)) && expectedStatus === gate.status && body.executorReceipt?.type === 'receipt' && body.executorReceipt.payload?.operation === 'gate' && body.executorReceipt.payload?.gateId === gate.id && body.executorReceipt.pluginId === body.executorPlugin?.id && body.executorReceipt.pluginVersion === body.executorPlugin?.version && (!gate.forcedFresh || body.cacheHit === false) && body.cacheHit === Boolean(input.cacheHit) && (!body.cacheHit || body.cacheOriginRef), 'GATE_EVIDENCE_INVALID', 'Gate Evidence does not substantiate the recorded result.');
+        assert(body.recipe?.id === gate.id && digestJson(body.recipe) === digestJson({ scope: 'feature', required: true, ...declared, command: declared.command.map(String) }) && (body.recipe.scope ?? 'feature') === gate.scope && body.status === gate.status && body.specDigest === gate.specDigest && body.specDigest === digestJson({ recipe: body.recipe, featureId: gate.featureId, command: body.recipe.command, cwd: body.recipe.cwd ?? '.', timeoutMs: body.recipe.timeoutMs ?? 0 }) && body.spec?.featureId === gate.featureId && body.sourceBefore === gate.sourceDigest && (body.sourceDrift === (body.sourceAfter !== gate.sourceDigest)) && expectedStatus === gate.status && body.executorReceipt?.type === 'receipt' && body.executorReceipt.payload?.operation === 'gate' && body.executorReceipt.payload?.gateId === gate.id && body.executorReceipt.pluginId === body.executorPlugin?.id && body.executorReceipt.pluginVersion === body.executorPlugin?.version && (!gate.forcedFresh || body.cacheHit === false) && body.cacheHit === Boolean(input.cacheHit) && (!body.cacheHit || body.cacheOriginRef), 'GATE_EVIDENCE_INVALID', 'Gate Evidence does not substantiate the recorded result.');
         if (!body.cacheHit) assert(body.executorReceipt.payload.specDigest === digestJson(body.spec) && body.spec.projectId === projectId && body.spec.runId === runId && body.spec.epoch === state.epoch && body.spec.generation === state.generation && body.spec.sourceDigest === state.sourceDigest && body.spec.featureId === gate.featureId, 'GATE_INVOCATION_MISMATCH', 'Gate Receipt does not bind the current invocation.');
       }
       state.gates = state.gates.filter(item => !(item.id === gate.id && item.scope === gate.scope && item.featureId === gate.featureId));
@@ -791,7 +795,7 @@ export class HarnessKernel {
       for (const dispatch of state.dispatches.filter(activeDispatch)) { dispatch.status = 'superseded'; dispatch.supersededAt = this.now(); dispatch.supersededReason = 'run-superseded'; }
       state.status = 'superseded';
       state.metadata = { ...(state.metadata ?? {}), supersededByRunId: input.replacementRunId, supersedePlanDigest: input.planDigest, supersededReason: input.reason ?? 'replacement-lifecycle-plan',
-        ...(input.completionCarryover ? { completionCarryover: structuredClone(input.completionCarryover) } : {}) };
+        ...(input.completionCarryover ? { completionCarryover: cloneJson(input.completionCarryover) } : {}) };
       event(state, 'run.superseded', { replacementRunId: input.replacementRunId, planDigest: input.planDigest }, this.now);
       return { runId, replacementRunId: input.replacementRunId, planDigest: input.planDigest, status: state.status };
     });

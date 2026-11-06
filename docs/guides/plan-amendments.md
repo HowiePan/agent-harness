@@ -53,7 +53,7 @@ Application 接收原生结果前再次计算制品，拒绝内容、原始来�
 
 适中批次的新策略为 [`bounded-delivery/2`](bounded-delivery.md)。登记 `batchPolicy.policy` 后，物化器验证完整批次合同、精确义务覆盖、容量/预留与证明依赖；执行器将批次编译为独立原生调度单元并运行真实检查。旧版只有 `maxBatchesPerFeature` 的登记是兼容输入，不能据此宣称通用批次执行已启用。局部批次完成不得继承为原提案完成，实际预算计数必须从 Authority 承接。
 
-规划因登记范围缺项返回 scope-blocker 且没有任何 completed Submission 时，可先补正变更登记及 scope hash，再由用户发起同一 selector 的新 amend。新 Plan 固定旧草稿的 revision/Authority/Plan/source 摘要，保留原批准基线、受影响 Feature、制品根、固定输入和既有 pointer 上界；活动 Lease、已接收输出、未解决 Finding、范围缩减或身份改变均阻断替换。通过新命令预检后，Kernel 才退役旧草稿并创建新 Run。此前已封存的实施成果按完整退役链、原 Submission/Evidence 和当前源码重新核验后承接；旧阻断和计数不清空。登记补正与只读 inspect 本身不创建或退役任何 Run。
+规划因登记范围缺项返回 scope-blocker 且没有已完成规划或复审结果时，可先补正变更登记及 scope hash，再由用户发起同一 selector 的新 amend。新 Plan 固定旧草稿的 revision/Authority/Plan/source 摘要，保留原批准基线、原受影响 Feature、制品根、固定输入和既有 pointer 上界。若旧草稿无任何制品输出，可在原受影响 Feature 列表末尾追加批准基线中本项目尚未完成的 Feature，沿用原批次策略和拆分限制。活动 Lease、已接收规划输出、未解决 Finding、范围缩减或身份改变均阻断替换。通过新命令预检后，Kernel 才退役旧草稿并创建新 Run。此前已封存的实施成果按完整退役链、原 Submission/Evidence 和当前源码重新核验后承接。登记补正与只读 inspect 本身不创建或退役任何 Run。
 
 另一条窄恢复分支处理已接收候选、独立审查拒绝、随后修订被 `PLAN_AMENDMENT_TOO_LARGE` 阻断的闲置 Amend：仅当绑定 Runtime 经修复发生变化、登记请求与范围完全相同、没有批准时，下一次用户命令可固定替换旧 Run。候选、被拒审查及修订 Submission 必须有原摘要、已提交 Dispatch/Evidence 和精确文件快照；审查结果仍为未通过，修订稿只作待核验输入。仅这次被拒审查原样登记的 open Findings 可承接：Application 核验原封存审查，经 Kernel 在新 Run 保持 open；其他未解决 Finding 阻断替换。新独立只读审查须逐 ID 返回 resolvedFindings、具体 checkpoint 及证据，核验原审查与新审查封存字节后才由 Kernel 关闭新 Run 中对应问题；approved 本身不能关闭问题，旧 Run 的原问题和拒绝结论不修改。新 Run 重新规划与独立审查，不继承规划完成或批准；原实施完成项、预算记录及整条退役链继续逐项复验。候选/草稿漂移、额外未声明制品、活动工作、不同请求或任何已通过审查均拒绝此分支。
 
@@ -62,6 +62,12 @@ Application 接收原生结果前再次计算制品，拒绝内容、原始来�
 承接仅允许登记的精确准备文件、受限修订制品及本次精确审阅归档改变；业务源码漂移、Evidence 缺失或歧义均拒绝承接。没有可信快照时不猜测完成，按正常增量复验处理。中断与补丁恢复沿用原 Host Receipt、H0–H4 和单命令规则。
 
 范围阻断时已提交的规划审计文件可以随退役链保留，但不能把整个制品目录列为自动兼容。Application 逐项核对原 committed Dispatch、Submission 摘要及 Evidence，再将现场被声明文件重建到原输入快照，要求得到原 outputSourceDigest。文件被修改、证据缺失或目录内出现未声明制品均拒绝承接；连续多轮范围补正沿整条退役链复验。
+
+范围未决与规划核算分开处理：规划节点先对消费者/断言、编译闭包、共享辅助代码和完整批次成本建立可执行归属，再判断原容量是否足够。未来实施的开发成本不等于本次只读诊断成本；缺少分析时先在原合同内补齐分析，不能据此直接扩大范围。确实无法确定的外部依赖或合同边界允许声明未计入单位，继续阻断；不得为了通过格式校验伪造成本。诊断工作完成即提交 completed，结论仍可 unresolved，不能将“诊断完成”视为“业务问题解决”。
+
+绑定 Runtime 修复后的窄替换也支持：审查拒绝后、后续规划被 scope-blocker 阻断，且有原提交、原合同和相同源码摘要绑定的只读未决诊断。仍须请求及范围完全相同、原精确制品证据有效、无活动工作、未获批准且审查额度尚余；可识别登记拆分允许的新子提案审查身份。既有 open Findings 保持 open，已用审查轮次累计到新 Run，不因替换清零。此能力不证明业务容量足够，也不授权扩大路径、修改旧 Prompt 或自动开始实施。
+
+若上述替换 Run 的首轮规划已完成消费者/成本对账并被 scope-blocker 阻断，最新正式只读诊断确认 `contract-change`，用户可先批准最小登记补正，再用同一 selector 的新 Amend 正式续接。该分支只允许追加原批准基底中本项目未完成 Feature 的 `/proposedFeatures/<index>/deliveryBatches` 指针，typed 与每份固定 expanded 同步；原 scope 身份顺序、指针、输入、制品根、兼容路径、拆分限制和批次策略不缩减或更改。不能据此调整 Feature 路径、前置、合同或创建新身份。必须无活动工作、无新接收的规划/通过审查/用户批准，且尚有原审查额度。诊断须绑定本次 blocked Submission、原合同及当前源码，零写入且 repairPaths 为空；按原封存 Evidence 再验字节，不能用诊断擅授写权。旧候选、原始审查及其原 Run、未关闭问题、当前对账制品和累计审查轮次跨代保留；额外 Finding、证据/源码漂移或预算耗尽仍阻断。补正与 inspect 不修改 Run，下一条用户命令通过预检后才退役和替换。新规划及独立审查必须处理原问题，再由用户批准新摘要。
 
 ## 验证
 

@@ -5,6 +5,7 @@ import { prepareBudgetExtension } from '../kernel/attempt-budget.mjs';
 import { createLocalDevelopmentInvocation } from './local-development-invocation.mjs';
 import { loadProjectHarnessConfig } from './project-initialization.mjs';
 import { isResumableImplementationSubmission } from './lifecycle-resume.mjs';
+import { inspectRestoredCoordination } from './development-coordination-review.mjs';
 
 const samePath = (left, right) => process.platform === 'win32'
   ? resolve(left).toLowerCase() === resolve(right).toLowerCase() : resolve(left) === resolve(right);
@@ -14,9 +15,15 @@ export const verifyImplementationBudgetScope = async ({ harness, state, developm
   const project = await harness.projectRegistry.get(state.projectId);
   const feature = state.features.find(item => item.id === state.submissions.at(-1)?.featureId);
   const submission = state.submissions.at(-1);
+  let coordinationRestored = false;
+  if (submission?.result?.blocker?.code === 'host-check-order-and-retirement-evidence-input') {
+    await inspectRestoredCoordination({state,feature,authorityStore:harness.authorityStore,
+      evidenceStore:harness.evidenceStore,excluded:project.workspace.excluded??[]});
+    coordinationRestored = true;
+  }
   assert((featureId === undefined || featureId === feature?.id)
     && state.metadata?.commandIntent?.action === 'implement' && feature?.metadata?.stage === 'implementation'
-    && isResumableImplementationSubmission(state, feature, submission),
+    && (isResumableImplementationSubmission(state, feature, submission) || coordinationRestored),
   'IMPLEMENTATION_BUDGET_SCOPE_MISMATCH', 'Budget addition requires an unfinished project-owned implementation, not an approval or external dependency.');
   assert(state.metadata?.workspace?.root && samePath(state.metadata.workspace.root, project.workspace.root)
     && samePath(process.cwd(), project.workspace.root), 'IMPLEMENTATION_BUDGET_WORKSPACE_MISMATCH', 'Use the exact registered project checkout.');

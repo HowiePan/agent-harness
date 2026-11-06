@@ -39,6 +39,19 @@ test('approved implementation preserves hierarchical proposal IDs and dependenci
   assert.equal(features[0].metadata.approvedProposal.id, 'V3.9.0/F-00');
 });
 
+test('approved implementation displays structured references exactly and retains typed result contracts', () => {
+  const p = { ...proposal('F00'), contracts: [{ specificationRef: 'plan.json#/contracts/0' }],
+    verification: [{ specificationRef: 'plan.json#/verification/0', capabilityProducer: 'F00' }] };
+  const before = structuredClone(p);
+  const [feature] = expandApprovedImplementation({ features: [parent], typedPlan: { proposedFeatures: [p] }, projectId: 'engine' });
+  assert.deepEqual(p, before);
+  assert(feature.task.acceptance.includes(`Contract 1: ${JSON.stringify(p.contracts[0])}`));
+  assert(feature.task.acceptance.includes(`Verify 1: ${JSON.stringify(p.verification[0])}`));
+  assert.deepEqual(feature.metadata.approvedProposal, p);
+  assert.deepEqual(feature.contracts, p.contracts.map(item => JSON.stringify(item)));
+  assert.deepEqual(feature.metadata.outputValueSchemas.implement.properties.completedContracts.items.enum, p.contracts);
+});
+
 test('amended split children retain their original logical budget root and progress baseline', () => {
   const anchor = proposal('F01', ['F01-receiver']);
   const child = { ...proposal('F01-receiver'), splitFrom: 'F01' };
@@ -141,6 +154,19 @@ test('object verification survives JSON transport and object key reordering', ()
   ]) assert.equal(verify(entries).ok, false);
   assert.match(verify([{ ...entry, status: 'passed' }]).reason,
     /successful entries require status completed and non-empty evidenceRefs/);
+});
+
+test('structured completion contracts survive transport and reject substituted declarations', () => {
+  const declaration={owner:'F00',specificationRef:'docs/plan.json#/contracts/0'};
+  const feature=expandApprovedImplementation({features:[parent],typedPlan:{proposedFeatures:[{
+    ...proposal('F00'),contracts:[declaration],verification:[],
+  }]},projectId:'engine'})[0];
+  const result={status:'completed',summary:'Contract proved.',changedFiles:[],outputs:{implement:{schemaId:'delivery-implementation-v1',
+    evidenceRefs:['evidence:test'],value:{proposalId:'F00',changedFiles:[],completedContracts:[structuredClone(declaration)],verificationResults:[]}}}};
+  const validated=validateBusinessResult(result,{conversationVisible:true,feature});
+  assert.equal(deliveryLifecycleProfile.validateResult({state:{},feature,result:validated}).ok,true);
+  validated.outputs.implement.value.completedContracts[0].owner='F01';
+  assert.equal(deliveryLifecycleProfile.validateResult({state:{},feature,result:validated}).ok,false);
 });
 
 test('object verification cannot substitute duplicate evidence for a distinct approved item', () => {

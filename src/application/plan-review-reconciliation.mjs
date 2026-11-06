@@ -7,12 +7,15 @@ const carriedOrigin = (state, finding) => {
   const ref = state.metadata.planRevision?.replacesAmendment;
   const original = ref?.preservedDraft?.openFindings?.find(row => row.id === finding.id);
   const submission = ref?.preservedDraft?.rejectedReview?.submission;
-  if (!original || ref.replacementArtifactDigest !== state.artifactDigest || !submission
+  const correction = ref?.preservedDraft?.scopeCorrection;
+  const registeredCorrection = correction?.sourceDigest === ref?.sourceDigest
+    && Boolean(correction?.sourceSubmissionId && correction?.submissionId && correction?.evidenceRefs?.length);
+  if (!original || !(ref.replacementArtifactDigest === state.artifactDigest || registeredCorrection) || !submission
     || submission.submissionId !== ref.preservedDraft.rejectedReview.submissionId
     || submission.result?.outputs?.['plan-review']?.value?.approved !== false) return null;
   const expected = validateFinding({ ...original, source: 'authority-snapshot', openedAt: finding.openedAt });
   if (digestJson(finding) !== digestJson(expected)) return null;
-  return { runId: ref.runId, submission };
+  return { runId: ref.preservedDraft.rejectedReview.originRunId ?? ref.runId, submission };
 };
 
 const reviewValue = submission => submission.result?.outputs?.['plan-review']?.value;

@@ -67,3 +67,17 @@ test('plan review exhaustion stops the loop without approving the plan', () => {
   assert.equal(planApprovalSnapshot(state).reviewApproved, false);
   assert.deepEqual(profile.canClose(state), { ok: false, reason: 'plan-scope-review-not-approved' });
 });
+
+test('runtime replacement keeps consumed review rounds within the original limit', () => {
+  const { state, reviewer } = seed();
+  const profile = createDeliveryLifecycleProfile();
+  state.metadata.planRevision = { replacesAmendment: { preservedDraft: { reviewRoundsUsed: 2 } } };
+  assert.deepEqual(profile.createFollowUpFeatures({ state, feature: reviewer,
+    result: state.submissions.at(-1).result, findings: [] }), []);
+  state.metadata.planRevision.replacesAmendment.preservedDraft.reviewRoundsUsed = 1;
+  const next = profile.createFollowUpFeatures({ state, feature: reviewer, result: state.submissions.at(-1).result, findings: [] });
+  assert.equal(next.length, 2);
+  assert.equal(next[1].metadata.planReviewRound, 2);
+  assert.deepEqual(profile.createFollowUpFeatures({ state, feature: next[1],
+    result: state.submissions.at(-1).result, findings: [] }), []);
+});

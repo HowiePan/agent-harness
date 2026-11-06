@@ -12,6 +12,29 @@ import { assertDevelopmentRunRecoveryEffects, assertH4QualityRestartable, hasRej
 
 const record = (path, sha256 = 'a'.repeat(64)) => ({ path, sha256, size: 1 });
 
+test('patch preview verifies histories serially and retains only deterministic active summaries', async t => {
+  const controlRoot = harnessProjectRoot();
+  const dataRoot = resolve(controlRoot, '.tmp', 'development-patch-tests', `catalog-${process.pid}-${Date.now()}`);
+  await mkdir(dataRoot, { recursive: true });
+  t.after(() => rm(dataRoot, { recursive: true, force: true }));
+  const created = await writeDevelopmentSourceManifest({ bindingId: 'catalog-test', sourceRoot: controlRoot,
+    controlRoot, dataRoot, configPath: resolve(controlRoot, 'examples', 'project-harness.json'), projectRoot: controlRoot });
+  const store = new AuthorityStore({ root: dataRoot, controlRoot });
+  for (const [projectId, runId, status] of [['z', 'live', 'ready'], ['a', 'live', 'running'],
+    ['a', 'closed', 'closed'], ['z', 'retired', 'superseded']]) {
+    await store.create({ projectId, runId, status, epoch: 1, generation: 1,
+      leases: [{ status: 'active', leaseId: 'lease' }], dispatches: [{ status: 'requested', dispatchId: 'dispatch' }] },
+    { commandId: `create-${projectId}-${runId}` });
+  }
+  await mkdir(resolve(dataRoot, 'authority/a/missing-state'), { recursive: true });
+  const plan = await createDevelopmentPatchPlan(created.file);
+  assert.deepEqual(plan.activeRuns.map(row => `${row.projectId}/${row.runId}`), ['a/live', 'z/live']);
+  assert(plan.activeRuns.every(row => row.activeLeaseIds[0] === 'lease' && row.activeDispatchIds[0] === 'dispatch'));
+  const closed = await store.read('a', 'closed');
+  await atomicWriteJson(store.runFile('a', 'closed'), { ...closed, status: 'tampered' }, { root: dataRoot });
+  await assert.rejects(createDevelopmentPatchPlan(created.file), { code: 'AUTHORITY_DIGEST_MISMATCH' });
+});
+
 test('H4 quality restart requires a reviewed, blocked, idle Run', () => {
   const state = { status: 'all-remaining-blocked', metadata: { commandIntent: { action: 'quality' } },
     features: [{ metadata: { stage: 'quality' }, state: 'completed' },

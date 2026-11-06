@@ -2,6 +2,7 @@ import { resolve } from 'node:path';
 import { digestJson } from '../common/canonical.mjs';
 import { assert } from '../common/errors.mjs';
 import { diffWorkspaceSnapshots } from '../common/workspace-snapshot.mjs';
+import { interruptedAmendmentTransportDraft } from './development-amendment-review-recovery.mjs';
 
 const within = (root, path) => path === root || path.startsWith(`${root.replace(/\/$/, '')}/`);
 export const isPlanningRecovery = state => ['plan', 'replan', 'amend'].includes(state.metadata?.commandIntent?.action);
@@ -46,9 +47,16 @@ export const assertPlanningReplacementScope = ({ retired, plan, project, before,
     && after.digest === digestJson(after.files) && after.digest === plan.run.sourceDigest);
   const active = retired.features.filter(row => row.state === 'running');
   const paths = diffWorkspaceSnapshots(before, after);
-  fail(active.length === 1 && active[0].metadata?.stage === 'version-planning'
+  const reviewRecovery = plan.intent.planRevision?.recoveryDraft;
+  fail(interruptedAmendmentTransportDraft(retired) && paths.length === 0
+    && reviewRecovery?.retiredRunId === retired.runId && reviewRecovery.sourceDigest === before.digest
+    || active.length === 1 && (active[0].metadata?.stage === 'version-planning'
     && paths.every(path => active[0].allowedPaths.some(root => within(root, path))
-      && !active[0].forbiddenPaths.some(root => within(root, path))));
+      && !active[0].forbiddenPaths.some(root => within(root, path)))
+    || active[0].metadata?.stage === 'plan-review' && active[0].allowedPaths.length === 0
+      && paths.length === 0 && retired.metadata.commandIntent.action === 'amend'
+      && reviewRecovery?.kind === 'interrupted-amendment-review/1'
+      && reviewRecovery.priorRunId === retired.runId && reviewRecovery.sourceDigest === before.digest));
   return { fromSourceDigest: before.digest, observedSourceDigest: after.digest, changedPaths: paths,
     disposition: 'unaccepted-draft-requires-new-planning-and-review' };
 };

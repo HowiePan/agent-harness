@@ -7,14 +7,15 @@ import { captureWorkspace } from '../common/workspace-snapshot.mjs';
 import { selectPlanRevisionParent, preparePlanRevisionIntent } from './plan-revision.mjs';
 import { assertAmendmentDocumentPins, readPlanAmendmentScope } from './plan-amendment-artifacts.mjs';
 import { captureAmendmentBaselines } from './plan-amendment-baseline.mjs';
+import { readPlanRevisionHistory } from './plan-revision-history.mjs';
 
 /** Shared read-only inspection for current bindings and future-source migration previews. */
 export const inspectPlanAmendment = async ({ project, selector, workflowId, workspaceRoot, authorityStore, evidenceStore }) => {
   const request = project.policy?.planChangeRequests?.[selector];
   assert(request, 'PLAN_AMENDMENT_SCOPE_REQUIRED', 'Select an exact registered change request.');
   const scope = await readPlanAmendmentScope(request, workspaceRoot);
-  const states = await authorityStore.list(project.id);
   const lookup = { action: 'amend', target: request.target, workflowId, selector };
+  const states = await readPlanRevisionHistory(authorityStore, project.id, lookup);
   const parent = selectPlanRevisionParent({ intent: lookup, states });
   const context = preparePlanRevisionIntent({ intent: lookup, states, project, sourceDigest: parent?.sourceDigest, amendmentScope: scope });
   assertAmendmentDocumentPins(context.planRevision);

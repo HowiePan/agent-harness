@@ -1,9 +1,10 @@
-import { mkdir } from 'node:fs/promises';
+import { mkdir, readdir } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { digestJson, withoutKeys } from '../common/canonical.mjs';
 import { assert } from '../common/errors.mjs';
 import { atomicWriteJson, readJson } from '../kernel/atomic-io.mjs';
 import { AuthorityStore } from '../kernel/authority-store.mjs';
+import { readVerifiedRunRecord } from './authority-history-reader.mjs';
 import { assertHarnessWritePath, harnessControlRoot } from '../common/write-boundary.mjs';
 import { safeSegment } from '../common/paths.mjs';
 import { assertLocalDevelopmentInvocation, decisionFromLocalDevelopmentInvocation } from './local-development-invocation.mjs';
@@ -42,20 +43,33 @@ export const diffDevelopmentFiles = (beforeFiles, afterFiles) => {
 
 const activeRunSummary = async ({ dataRoot, controlRoot }) => {
   const store = new AuthorityStore({ root: dataRoot, controlRoot });
-  const runs = (await store.listAll()).filter(run => !terminalRunStates.has(run.status));
-  return runs.map(run => ({
-    projectId: run.projectId,
-    runId: run.runId,
-    status: run.status,
-    revision: run.revision,
-    authorityDigest: run.authorityDigest,
-    sourceDigest: run.sourceDigest ?? null,
-    eventSequence: run.events?.at(-1)?.sequence ?? 0,
-    epoch: run.epoch,
-    generation: run.generation,
-    activeLeaseIds: (run.leases ?? []).filter(lease => lease.status === 'active').map(lease => lease.leaseId).sort(),
-    activeDispatchIds: (run.dispatches ?? []).filter(dispatch => ['requested', 'assigned'].includes(dispatch.status)).map(dispatch => dispatch.dispatchId).sort(),
-  })).sort((left, right) => `${left.projectId}/${left.runId}`.localeCompare(`${right.projectId}/${right.runId}`));
+  const summaries = [];
+  const directories = async path => {
+    try { return (await readdir(path, { withFileTypes: true })).filter(item => item.isDirectory()); }
+    catch (error) { if (error.code === 'ENOENT') return []; throw error; }
+  };
+  // Patch classification needs only live identities. Verify one Authority at a
+  // time and discard terminal histories instead of retaining every full Run.
+  for (const project of await directories(resolve(dataRoot, 'authority'))) {
+    for (const directory of await directories(resolve(dataRoot, 'authority', project.name))) {
+      const run = await readVerifiedRunRecord(store, project.name, directory.name, { required: false });
+      if (!run || terminalRunStates.has(run.status)) continue;
+      summaries.push({
+        projectId: run.projectId,
+        runId: run.runId,
+        status: run.status,
+        revision: run.revision,
+        authorityDigest: run.authorityDigest,
+        sourceDigest: run.sourceDigest ?? null,
+        eventSequence: run.events?.at(-1)?.sequence ?? 0,
+        epoch: run.epoch,
+        generation: run.generation,
+        activeLeaseIds: (run.leases ?? []).filter(lease => lease.status === 'active').map(lease => lease.leaseId).sort(),
+        activeDispatchIds: (run.dispatches ?? []).filter(dispatch => ['requested', 'assigned'].includes(dispatch.status)).map(dispatch => dispatch.dispatchId).sort(),
+      });
+    }
+  }
+  return summaries.sort((left, right) => `${left.projectId}/${left.runId}`.localeCompare(`${right.projectId}/${right.runId}`));
 };
 
 const readManifest = async input => {

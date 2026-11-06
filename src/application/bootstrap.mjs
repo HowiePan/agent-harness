@@ -3,6 +3,7 @@ import { mkdir } from 'node:fs/promises';
 import { isAbsolute, relative, resolve } from 'node:path';
 import { digestJson } from '../common/canonical.mjs';
 import { assert } from '../common/errors.mjs';
+import { applyConfiguredFileBoundary } from '../common/configured-file-boundary.mjs';
 import { inspectExtensionArtifact, loadExtensionPack } from '../platform/extensions/contract.mjs';
 import { ExtensionRegistry } from '../platform/extensions/registry.mjs';
 import { assertJsonSchema } from '../common/json-schema.mjs';
@@ -69,7 +70,7 @@ export const createBootstrapPlan = async (input, { controlRoot: controlRootInput
   const generatorArtifact = extensions.find(item => item.id === request.project.generatorExtensionId);
   const generator = await loadExtensionPack(resolve(controlRoot, generatorArtifact.entry), { controlRoot, expectedDigest: generatorArtifact.artifactDigest, requireArtifactManifest: !developmentMode });
   validateGeneratorProjectInput(generator, request.project.input);
-  const draft = generator.operations.createProjectDescriptor(request.project.input);
+  const draft = applyConfiguredFileBoundary(generator.operations.createProjectDescriptor(request.project.input), request.project.fileBoundary);
   assert(draft.id === request.binding.projectId, 'BOOTSTRAP_PROJECT_ID_MISMATCH', 'Generated Project Descriptor does not match the binding project ID.');
   assert(draft.profiles.includes(request.binding.profileId), 'BOOTSTRAP_PROFILE_MISMATCH', 'Generated Project Descriptor does not include the bound Profile.');
   assert(resolve(draft.workspace.root) === resolve(request.binding.workspaceRoot), 'BOOTSTRAP_WORKSPACE_MISMATCH', 'Generated Project Descriptor does not match the bound workspace.');
@@ -125,7 +126,7 @@ export const applyBootstrapPlan = async (planInput, { controlRoot: controlRootIn
     const generator = await extensionRegistry.loadOne(plan.request.project.generatorExtensionId);
     assert(typeof generator.operations.createProjectDescriptor === 'function', 'BOOTSTRAP_DESCRIPTOR_GENERATOR_MISSING', 'Bootstrap generator Extension does not provide createProjectDescriptor().');
     validateGeneratorProjectInput(generator, plan.request.project.input);
-    const draft = generator.operations.createProjectDescriptor(plan.request.project.input);
+    const draft = applyConfiguredFileBoundary(generator.operations.createProjectDescriptor(plan.request.project.input), plan.request.project.fileBoundary);
     assert(draft.id === plan.request.binding.projectId, 'BOOTSTRAP_PROJECT_ID_MISMATCH', 'Generated Project Descriptor does not match the binding project ID.');
     assert(draft.profiles.includes(plan.request.binding.profileId), 'BOOTSTRAP_PROFILE_MISMATCH', 'Generated Project Descriptor does not include the bound Profile.');
     assert(resolve(draft.workspace.root) === resolve(plan.request.binding.workspaceRoot), 'BOOTSTRAP_WORKSPACE_MISMATCH', 'Generated Project Descriptor does not match the bound workspace.');

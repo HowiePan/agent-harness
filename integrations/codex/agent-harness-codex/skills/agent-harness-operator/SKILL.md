@@ -19,6 +19,8 @@ On Windows, treat `C:\` as read-only by default. The sole write exception is a u
 
 Treat Agent Harness Authority as the only workflow state. Agent conversation state, model output, process exit text, and projected reports are evidence or transport data, never Authority.
 
+For a Run pinning `projectFilePolicy` (`project-files/1`), use its exact owned project roots and protected paths. Feature path lists are internal planning references; project-local adjustments retain acceptance and require `scopeAdjustments` reasons, not automatic Amend. Never infer ownership from the Git parent or tool writable roots. Read-only stages remain read-only. Legacy Runs without this policy retain their immutable strict contracts until formal migration. See [project execution](../../../../../docs/guides/project-execution.md). Default process duration is unlimited; keep resource protection and fresh observations, diagnose silence rather than treating elapsed time as failure.
+
 Before a state-changing operation:
 
 1. Locate the standalone Agent Harness control root and its data root.

@@ -5,9 +5,10 @@ import { assertJsonSchema, assertSchemaDefinition } from '../../common/json-sche
 import { assertKnownFindingDispositions, assertKnownFindingInventory } from './known-finding-inventory.mjs';
 import { classifyQualityFindings, qualityFindingInScope } from './quality-classification.mjs';
 import { isIntervention } from '../../kernel/intervention.mjs';
+import { assertVerificationReady } from './delivery-verification-ready.mjs';
 
 const businessResultSchema = JSON.parse(readFileSync(new URL('../../../schemas/result.schema.json', import.meta.url), 'utf8'));
-export const VISIBLE_AGENT_RESULT_CONTRACT_VERSION = '1.2';
+export const VISIBLE_AGENT_RESULT_CONTRACT_VERSION = '1.4';
 const visibleResultSchema = JSON.parse(readFileSync(new URL('../../../schemas/visible-agent-result.schema.json', import.meta.url), 'utf8'));
 
 export const createDispatchResultContract = (feature, { conversationVisible = false } = {}) => {
@@ -41,12 +42,17 @@ export const assertDispatchResultContract = (input, feature, options = {}) => {
   return expected;
 };
 
-export const validateBusinessResult = (input, { conversationVisible = false, repair = false, feature = null } = {}) => {
+export const validateBusinessResult = (input, { conversationVisible = false, repair = false, feature = null, allowVerificationReady = false } = {}) => {
   const result = structuredClone(input);
   assertJsonSchema(result, conversationVisible ? visibleResultSchema : businessResultSchema, {
     code: conversationVisible ? 'VISIBLE_RESULT_SCHEMA_INVALID' : 'RESULT_SCHEMA_INVALID',
     label: conversationVisible ? 'Conversation-visible Agent result' : 'Agent result',
   });
+  if (result.status === 'verification-ready' || result.verificationRequest) {
+    assert(allowVerificationReady && result.status === 'verification-ready', 'RESULT_VERIFICATION_REQUEST_UNRESOLVED',
+      'Implementation readiness must be resolved by the Host before a Kernel submission.');
+    assertVerificationReady(result, feature);
+  }
   if (feature?.metadata?.qualityReview === true && result.status === 'completed') {
     const findingScopePaths = feature.metadata.qualityContext?.findingScopePaths;
     for (const item of result.deliveryPrerequisites ?? []) {

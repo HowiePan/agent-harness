@@ -1,4 +1,5 @@
 import { assert } from '../../common/errors.mjs';
+import { cloneJson } from '../../common/clone-json.mjs';
 import { defineNodeTaskContract, taskFeatureProjection } from '../../common/task-contract.mjs';
 import { validateWorkGraph } from '../../kernel/work-graph.mjs';
 import { uniqueProposalIds } from './proposal-id.mjs';
@@ -22,7 +23,7 @@ export const expandApprovedImplementation = ({ features, typedPlan, projectId, a
       && digestJson(approvalBinding.typedPlan) === digestJson(typedPlan),
     'IMPLEMENTATION_APPROVAL_BINDING_MISMATCH', 'Approval context does not bind the exact project-owned typed plan.');
     const { typedPlan: _typedPlan, amendmentBaseline: _amendmentBaseline, ...identity } = approvalBinding;
-    approvedPlanBinding = { ...structuredClone(identity), typedPlanDigest: digestJson(typedPlan) };
+    approvedPlanBinding = { ...cloneJson(identity), typedPlanDigest: digestJson(typedPlan) };
   }
   const proposed = typedPlan?.proposedFeatures;
   assert(Array.isArray(proposed), 'IMPLEMENTATION_TYPED_PLAN_REQUIRED', 'The approved plan has no typed proposals.');
@@ -87,8 +88,8 @@ export const expandApprovedImplementation = ({ features, typedPlan, projectId, a
       ],
       acceptance: [
         `Complete proposal ${proposal.id} and report its ID in the delivery-implementation-v1 output.`,
-        ...contracts.map((value, i) => `Contract ${i + 1}: ${value}`),
-        ...verification.map((value, i) => `Verify ${i + 1}: ${value}`),
+        ...contracts.map((value, i) => `Contract ${i + 1}: ${typeof value === 'string' ? value : JSON.stringify(value)}`),
+        ...verification.map((value, i) => `Verify ${i + 1}: ${typeof value === 'string' ? value : JSON.stringify(value)}`),
         'Provide exact changedFiles and evidence for every completed contract and verification item.',
       ],
       evidenceRequirements: [...task.evidenceRequirements, 'The completed output must identify the proposal and enumerate completed contracts and verification items exactly as approved.'],
@@ -102,17 +103,17 @@ export const expandApprovedImplementation = ({ features, typedPlan, projectId, a
       // The Descriptor remains the write authority. Proposal paths guide the Agent;
       // a necessary sibling source file does not force a new user replan.
       allowedPaths: [...parent.allowedPaths],
-      contracts: [...new Set([...parent.contracts, ...contracts])],
+      contracts: [...new Set([...parent.contracts, ...contracts.map(value => typeof value === 'string' ? value : JSON.stringify(value))])],
       attemptLimit: Math.max(parent.attemptLimit ?? 3, 21,
         ...Object.values(baseline?.progress?.[budgetSource(proposal)]?.attempts ?? {}).map(item => item.limit ?? 0)),
       metadata: {
         ...parent.metadata,
         outputValueSchemas: { ...parent.metadata.outputValueSchemas,
           implement: approvedImplementationValueSchema(proposal) },
-        approvedDeliveryPlan: structuredClone(typedPlan),
-        approvedProposal: structuredClone(proposal),
+        approvedDeliveryPlan: cloneJson(typedPlan),
+        approvedProposal: cloneJson(proposal),
         ...(approvedPlanBinding ? { approvedPlanBinding } : {}),
-        ...(baseline?.progress?.[budgetSource(proposal)] ? { amendmentProgressBaseline: structuredClone(baseline.progress[budgetSource(proposal)]),
+        ...(baseline?.progress?.[budgetSource(proposal)] ? { amendmentProgressBaseline: cloneJson(baseline.progress[budgetSource(proposal)]),
           amendmentProgressBaselineOwner: budgetSource(proposal) } : {}),
         implementationProgressRetries: 20,
         allowDynamicDecomposition: false,

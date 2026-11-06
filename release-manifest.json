@@ -42,8 +42,8 @@
     },
     {
       "path": "docs/guides/bounded-delivery.md",
-      "sha256": "9b9d3807611c0e97e66a4958b54722246a8501e1751cbbf541997277ea5c0e58",
-      "size": 22389
+      "sha256": "be44ba95daab5ac7d5941bb596b38ba538987a0346d16ab1ec3916c36969e955",
+      "size": 25075
     },
     {
       "path": "docs/guides/consumer-quickstart.md",
@@ -72,8 +72,8 @@
     },
     {
       "path": "docs/guides/implementation-budget.md",
-      "sha256": "9e613abd16996a53dd027697d1e1ee4498cff1cf42e460335423fd060aa7c12b",
-      "size": 7508
+      "sha256": "68ba97ee7cf27c71cd1a30f26fdeda01bde5f95de558facf87d894aff3d6b79c",
+      "size": 7997
     },
     {
       "path": "docs/guides/local-debugging.md",
@@ -82,13 +82,23 @@
     },
     {
       "path": "docs/guides/plan-amendments.md",
-      "sha256": "cba649f55731ae62157bac492500c1017a67ea82092cd417ec0e40ed872f9bde",
-      "size": 11849
+      "sha256": "ee90634345f128a08565f99d829ffa32821ffed9cc8ae9e3bf7c5fab94d8c678",
+      "size": 14372
     },
     {
       "path": "docs/guides/project-configuration.md",
       "sha256": "43edab8d52b38095bf7d6d8722a6d1a09c57758459a9dc2ae7f88d8cfb122108",
       "size": 1684
+    },
+    {
+      "path": "docs/guides/project-execution.md",
+      "sha256": "e92bd75972bda7921a58153247f496eed3e1c4b2e4982b8c5dc332efedd289f7",
+      "size": 4877
+    },
+    {
+      "path": "docs/guides/script-resources.md",
+      "sha256": "aa6baa5ae4c3b44fce64422ccade49f39bcba0fa033b256ae27736169eb8ff4e",
+      "size": 8642
     },
     {
       "path": "docs/guides/workspace-configuration.md",
@@ -322,8 +332,8 @@
     },
     {
       "path": "docs/README.md",
-      "sha256": "e1be2559628887b0bff0251d91a8d5427961fdfaf7fb8cb46ba52c692839aa81",
-      "size": 1735
+      "sha256": "b6bca2ca2c6040eabad0c0a7ebe3636fa2b4caa2b5f84aee0eaad5c41be5260b",
+      "size": 1797
     },
     {
       "path": "docs/reference/commands.md",
@@ -332,8 +342,8 @@
     },
     {
       "path": "docs/reference/configuration-api.md",
-      "sha256": "a0bffcffd64957c3fdf7a0a3adfc925c2835324e52bc9bcd5fd6e29611ebcab7",
-      "size": 36115
+      "sha256": "ec1c6b3184de3facf245dc918e84e545f8e0dbe136c9ea81bf8a8f005d068ac0",
+      "size": 37430
     },
     {
       "path": "docs/reference/legacy-compatibility.md",
@@ -522,8 +532,8 @@
     },
     {
       "path": "package.json",
-      "sha256": "b4775f0bebcd1ed9f55784879f3054095013c328bb6427f4692b68dd0650649f",
-      "size": 4337
+      "sha256": "41e11097733acd4cdbc4f1ab9b0a44144e89d0e5b8d41986ca54fa10664e1efb",
+      "size": 4375
     },
     {
       "path": "plugins/codex-cli-runtime.plugin.json",
@@ -587,8 +597,8 @@
     },
     {
       "path": "schemas/bootstrap-request.schema.json",
-      "sha256": "56ac3804be7a42136e22f21cb567ca85f4abf01f660db19fd81f4141f31753b8",
-      "size": 1679
+      "sha256": "0154d47d7e523896826388797540731a3cafa36237f9f11dd760597a194ed4c1",
+      "size": 1724
     },
     {
       "path": "schemas/cardworld-project-input.schema.json",
@@ -707,18 +717,18 @@
     },
     {
       "path": "schemas/project-descriptor-input.schema.json",
-      "sha256": "6fe391fadd136b5a3617ae90dc5c568d31bbc0e20624d055d726a6448a679ebc",
-      "size": 5869
+      "sha256": "388b9bc3710798c6c365a42a697e09fa128e92d80cfedaade8a5421db984adfe",
+      "size": 6451
     },
     {
       "path": "schemas/project-descriptor.schema.json",
-      "sha256": "6c92cbb5ac442b0cf4959e1638084f95173d1b5c5cceda0a230e158cd8ccab0b",
-      "size": 6088
+      "sha256": "0fea975e05e9da809c3494bdcbe3499d6faf8bca891a72afba4e821ffabf2b02",
+      "size": 6647
     },
     {
       "path": "schemas/project-harness-config.schema.json",
-      "sha256": "de3f3d714c374441395813ca06485d937baf989be39b81862d1d55f007914110",
-      "size": 1837
+      "sha256": "0b33c5f461a5cf3b1b8e9f45627919d66c3d5ec3b1d153f8d1d132964a6224dc",
+      "size": 2374
     },
     {
       "path": "schemas/recovery-capsule.schema.json",
@@ -747,8 +757,8 @@
     },
     {
       "path": "schemas/result.schema.json",
-      "sha256": "60330e5a5be777e4da51c9537d572df90725100f5d797475b1f6e0aa0c61207b",
-      "size": 6191
+      "sha256": "4d64eab2913053e13fd29894ab70e8668ac52540e0c5be83cced0fdf90614903",
+      "size": 6442
     },
     {
       "path": "schemas/run-lineage-resolution.schema.json",
@@ -772,8 +782,8 @@
     },
     {
       "path": "schemas/visible-agent-result.schema.json",
-      "sha256": "d8c9ae9bd28aaf95bc090a1c3622fa06b484dc5af58846fc6df7b704a5c05aae",
-      "size": 6213
+      "sha256": "47104801819c1ebcf008600a751f78e6547c9ddddd611d8129e03b1a19c317f3",
+      "size": 6875
     },
     {
       "path": "schemas/workflow-definition.schema.json",
@@ -796,6 +806,11 @@
       "size": 2520
     },
     {
+      "path": "scripts/run-bounded-script.mjs",
+      "sha256": "9f9555c346c477635bd444854cb9d551d0f9df3a2fb02a24b9ce54b315dfae0e",
+      "size": 3913
+    },
+    {
       "path": "scripts/workflow-canary.mjs",
       "sha256": "c41dde3f36306bb6cbdf7e32baa3b5bf90a27728a363f9bb7e7c6ed9e95e3fb5",
       "size": 28325
@@ -811,19 +826,24 @@
       "size": 812
     },
     {
+      "path": "src/application/authority-history-reader.mjs",
+      "sha256": "1a2656389bcdbc39c595a63383251e5aa0b8d6af33047c477ec2442570dfbb7f",
+      "size": 2708
+    },
+    {
       "path": "src/application/batch-prerelease.mjs",
       "sha256": "23942da4ce8608385f145003e21a69af457f3d8c1383dc5b365c69b703ad0870",
       "size": 7978
     },
     {
       "path": "src/application/bootstrap.mjs",
-      "sha256": "e30d81e3fa7a49e08f3a451932ee8be1a664660bb23cacc1599d7b0c97bff299",
-      "size": 13664
+      "sha256": "30f2fc233c5eef99be1aa6e893a7d8554e4c2b2685fd817c2cf6430528205a59",
+      "size": 13873
     },
     {
       "path": "src/application/codex-host-effect-journal.mjs",
-      "sha256": "ac85dd134d6214203899e48b426bdbc305d8b1ae130afa3765d1f98ae64c4162",
-      "size": 9213
+      "sha256": "c8c044ce29dea8e6036b5130d6519122ac4f1881d78a57aff9b9ae2b20b16361",
+      "size": 9288
     },
     {
       "path": "src/application/collection-exhaustion.mjs",
@@ -852,8 +872,13 @@
     },
     {
       "path": "src/application/delivery-verification.mjs",
-      "sha256": "0cb9104df65069027e066b811466a5c214227e057920982286b5d4cd28aa8353",
-      "size": 12189
+      "sha256": "c834c16cc51543396f3aa3afb78bd263a95ca47472ea35e93c2d4e20ad242510",
+      "size": 12734
+    },
+    {
+      "path": "src/application/development-amendment-review-recovery.mjs",
+      "sha256": "4c6aad686b1004d3935700c64c96d78fbda8aac036a2d243adf9c3268207a841",
+      "size": 10612
     },
     {
       "path": "src/application/development-budget-migration.mjs",
@@ -866,19 +891,34 @@
       "size": 2997
     },
     {
+      "path": "src/application/development-configuration-rebase.mjs",
+      "sha256": "8bc8d2748e61cf62fcb858fceea67190cadad7ffd97cd6e5ecf09286038a8a36",
+      "size": 2967
+    },
+    {
+      "path": "src/application/development-coordination-review.mjs",
+      "sha256": "716bc1903aa1159e5812b42da357848b5c5437a5acad39dd1f8496e9821b0c7b",
+      "size": 11711
+    },
+    {
       "path": "src/application/development-environment-review.mjs",
       "sha256": "d73709e95b51d3086c6ecdd7014a6e1a822ad25e37204b02cb1b964c914b3d1b",
       "size": 7812
     },
     {
       "path": "src/application/development-h4-preflight.mjs",
-      "sha256": "f8020f665678551f099a529d3c07200b23da6409c2e4e3ae2b05f566d3614565",
-      "size": 10836
+      "sha256": "3ec020000847d61049fc6617dc112928ee107b1847f40ca005a319cdd1483f7f",
+      "size": 10988
+    },
+    {
+      "path": "src/application/development-host-check-review.mjs",
+      "sha256": "bf85cbb47aff0af8eca737ec84834a94b0c78e06e1c3053df5ef73950b154ae7",
+      "size": 8375
     },
     {
       "path": "src/application/development-patch.mjs",
-      "sha256": "a69522676acd3f840cc6cc994839d4615074cd3be227e8074a7564a3eea6275b",
-      "size": 15491
+      "sha256": "245ec8cc3016c252133979ded8515e7b217c99338860c5d0599950d21d5fa9b1",
+      "size": 16296
     },
     {
       "path": "src/application/development-plan-closeout.mjs",
@@ -892,8 +932,8 @@
     },
     {
       "path": "src/application/development-planning-recovery.mjs",
-      "sha256": "7991bd562460d744349e6cff90ca4dd97b833364ae760db9a6a86341e64a2866",
-      "size": 3787
+      "sha256": "94e099f5bc91aa444fd0f61f393828dd2a3afc2bf07a5cd2b4cfda644953446e",
+      "size": 4469
     },
     {
       "path": "src/application/development-planning-retirement.mjs",
@@ -902,8 +942,8 @@
     },
     {
       "path": "src/application/development-planning-transition.mjs",
-      "sha256": "5eb895babd048e86dbb8e5c53857619ebf41fcfe4c27d2ffbddcec5bb0cfc28b",
-      "size": 4395
+      "sha256": "1a142b1c16888509b60ec53a0969ab10bf07cd587b7e7e2b6eec3c99adc3ac59",
+      "size": 4547
     },
     {
       "path": "src/application/development-replacement-scope.mjs",
@@ -912,8 +952,8 @@
     },
     {
       "path": "src/application/development-run-recovery.mjs",
-      "sha256": "aaba63c2ec920ad54801ddaa02f0f5a517a975d6874fcc6ecbbab74694694c6e",
-      "size": 51078
+      "sha256": "44a49437e889a263596147d8595e20cb22375da297979b01e143f5f2d3c07ea0",
+      "size": 56842
     },
     {
       "path": "src/application/development-source.mjs",
@@ -926,9 +966,14 @@
       "size": 2758
     },
     {
+      "path": "src/application/execution-history-inputs.mjs",
+      "sha256": "befbe37677fb5cb730af04e804d36b7174f6f6cb7bdb236b6dd852a5f97ac41d",
+      "size": 4185
+    },
+    {
       "path": "src/application/execution-readiness-service.mjs",
-      "sha256": "fb05581b48c490a52f78a474ee0bee21f94b2e7b91642f2a8ba23d9762702ace",
-      "size": 20120
+      "sha256": "322bb14cc1e2c7ed9e0efd3e10203dd579ec2ce8ba369543111a9257947e78f5",
+      "size": 20259
     },
     {
       "path": "src/application/execution-readiness.mjs",
@@ -937,13 +982,13 @@
     },
     {
       "path": "src/application/harness.mjs",
-      "sha256": "4c82a057217951a412f8e27f1241b7eb54b38e7f2581154922596210a7df5da7",
-      "size": 117265
+      "sha256": "c9fd4b3571cb3dd5f60eaaf9fa552464ca4fef0847e86989e7e282c65eb23d56",
+      "size": 120422
     },
     {
       "path": "src/application/implementation-budget.mjs",
-      "sha256": "193b4d4492b667da836b87b7dd5ac943c9adb7ba10e8f255e8ae062dc925acb2",
-      "size": 2860
+      "sha256": "fbf53b9faf426289b006353265078cda88e4d5730183319892b7e3aea0ef9554",
+      "size": 3317
     },
     {
       "path": "src/application/implementation-carryover-approval.mjs",
@@ -952,8 +997,13 @@
     },
     {
       "path": "src/application/implementation-continuation.mjs",
-      "sha256": "fa815caa3bfc72f9890111c3a59aa7076e757a1a728c930708a6ce89639f7608",
-      "size": 25935
+      "sha256": "2b583f7358f8e529330a8fde16c55109f5d0a13e455f6207fed8894c2256366f",
+      "size": 26721
+    },
+    {
+      "path": "src/application/implementation-evidence-inputs.mjs",
+      "sha256": "85b18154487965128a2de6865e9f4f4e00a9fdeb9de922330ac0cb04f3526ad0",
+      "size": 5173
     },
     {
       "path": "src/application/implementation-handoff.mjs",
@@ -982,8 +1032,8 @@
     },
     {
       "path": "src/application/interruption-diagnosis.mjs",
-      "sha256": "40b3f24a222d8dde3d1099b66dfa5f4f89369873f57a450e3086c69e5be69e00",
-      "size": 5940
+      "sha256": "8290246a87e4194630567ce17ed77b346be83cc68bd56570367fe5c82b02c780",
+      "size": 6359
     },
     {
       "path": "src/application/interruption-outcome.mjs",
@@ -997,18 +1047,18 @@
     },
     {
       "path": "src/application/interruption-review.mjs",
-      "sha256": "8f2184cce45c79ab63c1c1fb9e9f6002a9a941b2958575aae274e4343f72db6c",
-      "size": 17283
+      "sha256": "30b157fefdcba384fec0a83de0ecc8fa9afd93d537fa3ea440ac0205f4bb737e",
+      "size": 18136
     },
     {
       "path": "src/application/lifecycle-command-plan.mjs",
-      "sha256": "a94cbdd4b6b5bc7fe7c94cd3864bd19802c780885e3f0a9e3c25145114993c6f",
-      "size": 18301
+      "sha256": "97cef94a1dbad9b5eb3252850081fd4b9c3d77e792b30ffc92692f1c02c85150",
+      "size": 18316
     },
     {
       "path": "src/application/lifecycle-execution-service.mjs",
-      "sha256": "e31bab4d75b1d6bd16845e2ee2592cd5610638cc4ecc8c61a07513efdcf724c5",
-      "size": 51634
+      "sha256": "f373fe1d45ce6791983e4b0ebc98500ac7b7c966133a40d70dcbb6d32bc2cac4",
+      "size": 52687
     },
     {
       "path": "src/application/lifecycle-interruption.mjs",
@@ -1017,8 +1067,8 @@
     },
     {
       "path": "src/application/lifecycle-resume.mjs",
-      "sha256": "ac8292786ed4e1015b1163c96fcd204fb2cd1d3d99ab14ad8ae6d800eb4dbb61",
-      "size": 7558
+      "sha256": "03407a57eeed99d592b71b25ad2240f945b5afe3204ebaf359588ea5295ccaaa",
+      "size": 7843
     },
     {
       "path": "src/application/lineage.mjs",
@@ -1032,38 +1082,38 @@
     },
     {
       "path": "src/application/local-incident.mjs",
-      "sha256": "a760cadb675cface44ba66ad98cea96bd528cc53ca435d43c52f26b041358d2e",
-      "size": 5353
+      "sha256": "d865554ea053e89f7e0946ab72e31efd7df2abac103d9d6f14fda92d07c5c164",
+      "size": 5699
     },
     {
       "path": "src/application/plan-amendment-artifacts.mjs",
-      "sha256": "ad5caae09ef40dcb8481df8ff95a6bba41ef84feeacf9477902a2158222e72f7",
-      "size": 13236
+      "sha256": "7cd2068e2888a16210377069d7632b7d01361c9bd4b5c2e5ba1adc4b2967ccf4",
+      "size": 13456
     },
     {
       "path": "src/application/plan-amendment-baseline.mjs",
-      "sha256": "85856f5a5a05f06c8c770b5508600540d0bc25002277f8823eeec0b65f9cc6c7",
-      "size": 16832
+      "sha256": "c26633192372f38a8aa32cf5981068a762700f4ac6af461e78fb1350b15788b9",
+      "size": 17038
     },
     {
       "path": "src/application/plan-amendment-draft-artifacts.mjs",
-      "sha256": "ace7dfec5ad6d20c369e49c3bf0b87f3b50661fb5f5e7f640560ced139d57dd7",
-      "size": 7958
+      "sha256": "4162b477760f3b10820af7a398c61cd182f32ea3544b229f86aac61928e046e0",
+      "size": 9215
     },
     {
       "path": "src/application/plan-amendment-finding-carryover.mjs",
-      "sha256": "ff640175fc615b503380497c9160a6da5dd4b01a7448ea4dbf084b71541ea8d3",
-      "size": 2149
+      "sha256": "c83d7438c1fb23cded6378354be2d36b63984671056e1d782bf8bbb827a5923a",
+      "size": 2596
     },
     {
       "path": "src/application/plan-amendment-inspection.mjs",
-      "sha256": "923f965385bf03324fb094ba113bc22d51dbb83f170ddcb978d6b97f7a242b0d",
-      "size": 2786
+      "sha256": "743d041d9caed504cb728fbc54eb79c8cba5b62d6cd6a230129cd5271c85649b",
+      "size": 2885
     },
     {
       "path": "src/application/plan-amendment-retry.mjs",
-      "sha256": "ed08a669159e755426c3c605f6a3ec4832bcbcc0a67e0cb0d9f55cdfbfe5e191",
-      "size": 10779
+      "sha256": "e2fab6e30abb3100a76b21dcb35bd1a1b7beef780b2465c0a8af53ca8986162c",
+      "size": 21153
     },
     {
       "path": "src/application/plan-amendment-unaccepted-baseline.mjs",
@@ -1077,8 +1127,13 @@
     },
     {
       "path": "src/application/plan-review-reconciliation.mjs",
-      "sha256": "ba7299102ace9a0a84e44d4ba2ec44a544221e2e0f2d700be5aee78e25547f47",
-      "size": 9183
+      "sha256": "c95ef22684fc782905f66a864136c6a7a38591ca2d38f2266a307e7af73cabf7",
+      "size": 9508
+    },
+    {
+      "path": "src/application/plan-revision-history.mjs",
+      "sha256": "271bbc0892b2fa743712a2827ffefb87eedcb7fdf967dcb1681c5c0e08f7a7fa",
+      "size": 5356
     },
     {
       "path": "src/application/plan-revision.mjs",
@@ -1091,9 +1146,14 @@
       "size": 15150
     },
     {
+      "path": "src/application/planning-history-inputs.mjs",
+      "sha256": "c60515f779a9195f787782516c10c469e28b2490e9068f3ee99aa1bbf33bcd74",
+      "size": 3806
+    },
+    {
       "path": "src/application/project-initialization.mjs",
-      "sha256": "20d900922cdd46b91a3e766e603c15dafe772703d7b2ebc7dc0c85e914f8bfb7",
-      "size": 8545
+      "sha256": "cdbbc9888b0d0ec3a3546827b538da2ed0d1c09ef2fbe59e1385a28dc1cdb133",
+      "size": 8833
     },
     {
       "path": "src/application/quality-run-retirement.mjs",
@@ -1152,8 +1212,13 @@
     },
     {
       "path": "src/common/canonical.mjs",
-      "sha256": "47af0127cbd235db075fb32027dbb22a0f25dc64c8005dd104e818553c8efb20",
-      "size": 1301
+      "sha256": "88a40b6d9e4245e9bfbd74653ba44b99be78ec665add4f2acb4f396cfc2bae1d",
+      "size": 3179
+    },
+    {
+      "path": "src/common/clone-json.mjs",
+      "sha256": "7e4f02aca41b663137cf7d8131b24eec11e623b8c054d6a90aed616ab75a3c19",
+      "size": 924
     },
     {
       "path": "src/common/concurrency.mjs",
@@ -1161,9 +1226,19 @@
       "size": 717
     },
     {
+      "path": "src/common/configured-file-boundary.mjs",
+      "sha256": "0eb89fca5cec5f5439883834deca119814d188d4d2b1d2822df57552e97cc4d4",
+      "size": 1714
+    },
+    {
       "path": "src/common/errors.mjs",
       "sha256": "b3c2be0100210479b2ecdb23fd7621e028c399eb06e39a18e1a647357ba8f5e2",
       "size": 478
+    },
+    {
+      "path": "src/common/execution-health.mjs",
+      "sha256": "9191320406ce6b59f5d8819e5b4320d52a53829eb9c4c3cae5b2ef96a4df0f27",
+      "size": 1353
     },
     {
       "path": "src/common/feature-submission.mjs",
@@ -1189,6 +1264,11 @@
       "path": "src/common/paths.mjs",
       "sha256": "451a80f362734d6ee3ca0f9f88c50556a4c4999d580c346db9594a663d0c489f",
       "size": 2448
+    },
+    {
+      "path": "src/common/project-file-policy.mjs",
+      "sha256": "ded02628096ff377a71937d3766e172ce42338938bc70bbcc7b117d699bfd9f3",
+      "size": 3956
     },
     {
       "path": "src/common/task-contract.mjs",
@@ -1362,8 +1442,8 @@
     },
     {
       "path": "src/flows/delivery-lifecycle/approved-implementation.mjs",
-      "sha256": "91ba9f59c72066f3dae9348f93fb9177badd19f02cec6b0a0db8598827cb2f9d",
-      "size": 9834
+      "sha256": "075d36ca6917007fff25140cb1a6ecffd6f9085e2ef8aeeea87b5fb5e576fe33",
+      "size": 10043
     },
     {
       "path": "src/flows/delivery-lifecycle/commands.mjs",
@@ -1372,8 +1452,8 @@
     },
     {
       "path": "src/flows/delivery-lifecycle/compile-delivery-batches.mjs",
-      "sha256": "e0dd84095f2dfedfd091af5295a7a4baf92c8466713115533b1505dc49a3b5dd",
-      "size": 5565
+      "sha256": "981f25d87cbc9a25253c89d8b718de18ffabda7e34f69b5dd4aa9c09a23596d9",
+      "size": 6068
     },
     {
       "path": "src/flows/delivery-lifecycle/contracts/index.mjs",
@@ -1392,8 +1472,8 @@
     },
     {
       "path": "src/flows/delivery-lifecycle/descriptor.mjs",
-      "sha256": "7d2e6abd6d85b7f5c4030e71ca95d788397f0b916ff4db64758fb38278176507",
-      "size": 6355
+      "sha256": "75010e53838b33db26d639ac91d7981730fc64a61d93614b9cd864996f140e44",
+      "size": 6478
     },
     {
       "path": "src/flows/delivery-lifecycle/extension.mjs",
@@ -1447,13 +1527,13 @@
     },
     {
       "path": "src/flows/delivery-lifecycle/nodes/plan/amend.mjs",
-      "sha256": "58427fbc0a564672b65c72d97fa00f903c62fd4bf5b37c942781b3b9393817d1",
-      "size": 8324
+      "sha256": "452c79381db98e1fc904ddddc846e740e988b084105278a803182dadf08faa98",
+      "size": 9495
     },
     {
       "path": "src/flows/delivery-lifecycle/nodes/plan/index.mjs",
-      "sha256": "2f1ed0dc95f3b6fab405b9a14cea9593e5328dc2e27618741342508643aac109",
-      "size": 6656
+      "sha256": "44ac18eb5ddd7a049d5156eb6fad9bd78ce51b612ed140d5363dd4be8c5eadd2",
+      "size": 6832
     },
     {
       "path": "src/flows/delivery-lifecycle/nodes/prerelease/index.mjs",
@@ -1482,8 +1562,8 @@
     },
     {
       "path": "src/flows/delivery-lifecycle/plan-amendment.mjs",
-      "sha256": "5984f37dd299934b31053e7033827ea1f97243aa783a523c12cf9b38e5327ba8",
-      "size": 14558
+      "sha256": "59832268e47ee3455eb691994999a88c962a45c7d72040cd0632fad10a8ecc07",
+      "size": 15363
     },
     {
       "path": "src/flows/delivery-lifecycle/plan-approval.mjs",
@@ -1497,8 +1577,13 @@
     },
     {
       "path": "src/flows/delivery-lifecycle/plan-review-loop.mjs",
-      "sha256": "5bf2a88bc9d3145bcf562c6cb2176405817ff5f2f087d8d388b2a2e8857388e3",
-      "size": 4598
+      "sha256": "5bf4e821de75c99390b11d2b5dc0d7d5987f3eaae650adf24c5d7a93d6cf97b1",
+      "size": 4758
+    },
+    {
+      "path": "src/flows/delivery-lifecycle/plan-source-exits.mjs",
+      "sha256": "876c0775f898a5f8da1fc9968a731d9e1baeae85507b9d259561885fa7452540",
+      "size": 6402
     },
     {
       "path": "src/flows/delivery-lifecycle/planner.mjs",
@@ -1507,8 +1592,8 @@
     },
     {
       "path": "src/flows/delivery-lifecycle/policy/delivery-lifecycle.mjs",
-      "sha256": "7541127e49a579232787ef271d93f43a3186d114aef0b5f4e1c624e629a98a55",
-      "size": 18690
+      "sha256": "14a7970ca001e7d30f98edec654c2d770f4b7cc7157cba5af362fee13252cc84",
+      "size": 19099
     },
     {
       "path": "src/flows/delivery-lifecycle/policy/implementation-progress.mjs",
@@ -1712,13 +1797,13 @@
     },
     {
       "path": "src/kernel/authority-store.mjs",
-      "sha256": "dd6321db9f3c135b719740927a67adb6069785f1b76819265dee920fcb024230",
-      "size": 7126
+      "sha256": "5f51c7ebcf73c57fda6dccc581b5d1b115dbe37ca64789a903b64dfa5105c26f",
+      "size": 7170
     },
     {
       "path": "src/kernel/completion-carryover.mjs",
-      "sha256": "633681c5b6a93fd46143c65609005c710153dcaa5bf58d57f99fd731ebc3eb05",
-      "size": 12308
+      "sha256": "a9775be3aafcf4a4abb524709c452daa38235b8aba480395795bf29f405e197f",
+      "size": 12508
     },
     {
       "path": "src/kernel/evidence-store.mjs",
@@ -1742,8 +1827,8 @@
     },
     {
       "path": "src/kernel/kernel.mjs",
-      "sha256": "d9b62b36e3189bec9197176be3d78282f505f4b14ec4ad7914e47b64deb1292c",
-      "size": 76439
+      "sha256": "0627c4ca0dca363cb8c5546e11116279f5d40ca994897837aa0d782bceca8246",
+      "size": 76802
     },
     {
       "path": "src/kernel/quality.mjs",
@@ -1757,8 +1842,8 @@
     },
     {
       "path": "src/kernel/work-graph.mjs",
-      "sha256": "fd53ac66d41d405102536510c51b362e6c4316462373c8f6694375118b9a3bac",
-      "size": 5885
+      "sha256": "f10543751da078aca4f96a0bb609a924a621332625efcff1956278aa300946d7",
+      "size": 6096
     },
     {
       "path": "src/platform/execution/authorization.mjs",
@@ -1769,6 +1854,11 @@
       "path": "src/platform/execution/boundary.mjs",
       "sha256": "87de721d37902dd6b11bd0909b713df3cb278304735fa679c27a672af4f580cb",
       "size": 608
+    },
+    {
+      "path": "src/platform/execution/delivery-verification-ready.mjs",
+      "sha256": "4bfb64afbedfa0c4ca87041546f5f9783f8c12f518b58a7f2e368af3fb3caf65",
+      "size": 4005
     },
     {
       "path": "src/platform/execution/known-finding-inventory.mjs",
@@ -1787,8 +1877,8 @@
     },
     {
       "path": "src/platform/execution/result-contract.mjs",
-      "sha256": "797730febdd41ba016e234dc8818dea88c03fb4aaff25b24480fe47b3bb2e11c",
-      "size": 8659
+      "sha256": "05e02918677bd129fe0d971d1ed0288371e75d33f3c4d01c4bd2e7a634793457",
+      "size": 9107
     },
     {
       "path": "src/platform/extensions/command-contract.mjs",
@@ -1862,8 +1952,8 @@
     },
     {
       "path": "src/platform/plugins/codec/agent-prompt-codec.mjs",
-      "sha256": "0bafb90c4fbd4c112fd0bce7d2381b830b86bcf8f55bd8b59c9f33dbd6d422da",
-      "size": 22999
+      "sha256": "efd0fa45102168f48fa9b6f3e64cfff99ee4c5022dc789ad41ba2598539ddbfc",
+      "size": 28330
     },
     {
       "path": "src/platform/plugins/codec/json-codec.mjs",
@@ -1877,13 +1967,23 @@
     },
     {
       "path": "src/platform/plugins/execution/managed-output.mjs",
-      "sha256": "350468ff75fd715f6db2716294fb49f1f82481e7a8825c6f20cde550722bd6ca",
-      "size": 9411
+      "sha256": "ff77a4e2a27a6b00f73f1bf5ab5188afdb089e46e50bdcc224bfc6d46ff616ce",
+      "size": 10066
+    },
+    {
+      "path": "src/platform/plugins/execution/resource-guard.mjs",
+      "sha256": "f4c507d48134c0e81fd0361f330bdc38ed2fc27a84808bc7f68a62f21c03993d",
+      "size": 8508
+    },
+    {
+      "path": "src/platform/plugins/execution/windows-resource-job.ps1",
+      "sha256": "d7aaf13c70030f52231283431c0d54384244d409d625798835e5f448d6241414",
+      "size": 6037
     },
     {
       "path": "src/platform/plugins/gate/process-gate.mjs",
-      "sha256": "8452be49fc71fe9a043b978b5bce24124a632a65383e40ddc1d339767aad11de",
-      "size": 5617
+      "sha256": "35e70feed4d04c04d85bd81b19fed2ada07cf558c1107a67c06d7f4b7ad448a2",
+      "size": 7470
     },
     {
       "path": "src/platform/plugins/host.mjs",
@@ -2007,8 +2107,8 @@
     },
     {
       "path": "src/platform/registry/project-contract.mjs",
-      "sha256": "164347cbfcc9224a065d53e21c8a3bf845f35f2fb32948c45e20a5e1f69b978d",
-      "size": 5423
+      "sha256": "c3c27d42a3a6f8e34c426db98cf726f8494c87888e4665d8a62a8fb8b5220a73",
+      "size": 5567
     },
     {
       "path": "src/platform/registry/project-registry.mjs",
@@ -2062,8 +2162,8 @@
     },
     {
       "path": "src/platform/workflow/gates/project-gate-runner.mjs",
-      "sha256": "e39d776b7c4270913cee8b75ce82593384f0f603b58959ff9a325f2a97b0fe58",
-      "size": 19767
+      "sha256": "a318a49f96e353be74714b6ef3e03dfe4117f053f54718b6787490da92b8a94d",
+      "size": 19762
     },
     {
       "path": "src/platform/workflow/index.mjs",
@@ -2121,7 +2221,7 @@
       "size": 19877
     }
   ],
-  "packageDigest": "e2552972547877a6d461829c504ed300f33fe13d222d1b5bf048106dee0e574d",
+  "packageDigest": "7d55659efddcbbf5362db2561f3cff127b61297051e8dd333f7ee56d421e170a",
   "metadataFiles": [
     "release-manifest.json",
     "sbom.spdx.json"

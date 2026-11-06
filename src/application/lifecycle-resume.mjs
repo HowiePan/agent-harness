@@ -61,7 +61,7 @@ export const selectQualityContinuationRun = (states, intent) => {
 
 // A continuation may retry an unfinished implementation, but cannot turn an
 // approval, exhausted budget, or unrelated blocked stage into executable work.
-const assertResumableFeature = (state, feature, inputBindingRepairs, interruptionReviews = []) => {
+const assertResumableFeature = (state, feature, inputBindingRepairs, interruptionReviews, hostCheckReviews) => {
   const review = interruptionReviews.some(item => item.feature.id === feature.id && item.decision.action === 'diagnose'
     && item.decision.problem.sourceDigest === state.sourceDigest);
   assert(review || ['implementation', 'quality', 'quality-repair', 'quality-recheck', 'quality-closeout'].includes(feature.metadata?.stage),
@@ -76,7 +76,9 @@ const assertResumableFeature = (state, feature, inputBindingRepairs, interruptio
     && item.approvedChecksDigest === digestJson(feature.metadata?.deliveryBatch?.checks));
   const providerFailure = submission?.result?.status === 'failed' && submission.result.failureClass === 'runtime-provider'
     && submission.result.blocker?.kind === 'runtime-provider';
-  assert(review || (feature.metadata?.stage === 'implementation' && (inScopeFix || inputBindingRepair)) || providerFailure
+  const hostCheckReview = hostCheckReviews.some(item => item.featureId === feature.id
+    && item.sourceDigest === state.sourceDigest && item.submissionDigest === submission?.submissionDigest);
+  assert(review || (feature.metadata?.stage === 'implementation' && (inScopeFix || inputBindingRepair || hostCheckReview)) || providerFailure
     || isInterruptedImplementationSubmission(state, feature, submission),
     'LIFECYCLE_RESUME_BLOCKER_REQUIRES_REVIEW', 'The blocked Feature is not an in-scope fix or a retryable provider failure.');
   const attempt = submissionAttempt(state, feature, submission);
@@ -84,15 +86,15 @@ const assertResumableFeature = (state, feature, inputBindingRepairs, interruptio
   return feature.id;
 };
 
-export const selectBlockedResumeFeature = (state, { inputBindingRepairs = [], interruptionReviews = [], pendingIntervention = false } = {}) => {
+export const selectBlockedResumeFeature = (state, { inputBindingRepairs = [], interruptionReviews = [], hostCheckReviews = [], pendingIntervention = false } = {}) => {
   assert(!state.metadata?.operatorStop?.requested, 'OPERATOR_EXECUTION_STOPPED', 'The user has stopped this execution.');
   if (pendingIntervention) return null;
   const blocked = state.features.filter(feature => feature.state === 'blocked');
   if (!blocked.length) return null;
-  if (blocked.length === 1) return assertResumableFeature(state, blocked[0], inputBindingRepairs, interruptionReviews);
+  if (blocked.length === 1) return assertResumableFeature(state, blocked[0], inputBindingRepairs, interruptionReviews, hostCheckReviews);
   const eligible = blocked.filter(feature => {
     if (!(feature.dependsOn ?? []).every(id => state.features.some(item => item.id === id && item.state === 'completed'))) return false;
-    try { assertResumableFeature(state, feature, inputBindingRepairs, interruptionReviews); return true; } catch { return false; }
+    try { assertResumableFeature(state, feature, inputBindingRepairs, interruptionReviews, hostCheckReviews); return true; } catch { return false; }
   });
   // The approved graph order is stable; reopen one executable frontier only.
   // Other scope, external, approval and exhausted blockers remain untouched.

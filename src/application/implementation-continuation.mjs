@@ -16,7 +16,7 @@ const obligation = (kind, key, detail) => ({ id: `obligation:${digestJson({ kind
 const completed = checkpoint => checkpoint.status === 'completed' && checkpoint.evidence?.length > 0;
 
 /** Resolve only hash-pinned local plan data, never a conversational replacement plan. */
-export const buildImplementationContinuation = async (state, feature, workspaceRoot, { readPinnedBytes = null, excluded = [] } = {}) => {
+export const buildImplementationContinuation = async (state, feature, workspaceRoot, { readPinnedBytes = null, excluded = [], requiredEvidenceInputs = [] } = {}) => {
   const proposal = feature.metadata?.deliveryOwnerProposal ?? feature.metadata?.approvedProposal;
   if (feature.metadata?.stage !== 'implementation' || !proposal) return null;
   const typed = feature.metadata.approvedDeliveryPlan;
@@ -172,6 +172,9 @@ export const buildImplementationContinuation = async (state, feature, workspaceR
       && item.featureId === feature.id && item.decision === 'verified') ?? null,
     ...(batch ? { deliveryFeedback: deliveryBatchFeedback(state, feature) } : {}),
     externalPrerequisites: structuredClone(expanded?.externalPrerequisites ?? []),
+    requiredEvidenceInputs: structuredClone(requiredEvidenceInputs),
+    ...(batch ? { verificationHandoff: { version: 'delivery-verification-ready/1',
+      batchDigest: feature.metadata.deliveryPlanBinding.batchDigest, checkIds: batch.checks.map(check => check.id) } } : {}),
     history: [...(inherited?.history ?? []), ...history].slice(-3).map(item => ({ submissionId: item.submissionId,
       inputSourceDigest: item.inputSourceDigest, outputSourceDigest: item.outputSourceDigest,
       changedFiles: item.changedFiles, summary: item.result.summary, blocker: item.result.blocker ?? null,
@@ -184,8 +187,9 @@ export const buildImplementationContinuation = async (state, feature, workspaceR
     instructions: batch ? [
       `This native Agent delivers approved batch ${batch.id}, phase ${batch.phase}, within the original proposal ${proposal.id}.`,
       'Complete the cohesive workBatch objective, assigned obligationIds, real consumers and declared checks. A completed planned batch is a valid handoff to another native Agent; it is not full original Feature acceptance. Do not volunteer one-file/one-certificate slices or absorb other batches.',
-      'Use exact approved obligation IDs as completed checkpoints with real evidence. Every planned check also needs a checkpoint delivery-check:<check.id> with its evidence file paths. Harness captures fingerprints of inputs and outputs; only an exact attested environment match can enable cache reuse. Mandatory convergence checks run fresh.',
+      'For delivery-verification-ready/1, report implementation evidence using exact obligation IDs and status implemented, then request Host verification with the exact batch digest and check IDs. Do not claim unexecuted checks completed. Host receipts determine completion; failures return to the original bounded repair flow. Harness captures fingerprints of inputs and outputs; only an exact attested environment match can enable cache reuse. Mandatory convergence checks run fresh.',
       'Preserve scope, source-retirement prerequisites, genuine external/permission blockers and shared retry budgets. Local feasible work may continue independently of a prerequisite that only guards a later protected action. Never fabricate proof or turn a receipt into write authority.',
+      'requiredEvidenceInputs are exact read-only Harness-published artifacts verified from the approved Authority ancestry before dispatch. Verify their SHA-256 before reading; never search adjacent control directories or modify them. Unaccepted draft inputs carry no completion credit and require fresh current-source verification.',
       'On a real interruption or reproduced defect retain verified partial progress and exact next actions. Repair related failures within this moderate batch and its authorized scope. Report capacity mismatch with sizing evidence; never pad work or silently grow the batch.',
       'At convergence verify all original acceptance obligations against current inputs; reject stale upstream proof, run every mandatory final check and report original completedContracts only when the whole proposal is accepted.',
     ] : [

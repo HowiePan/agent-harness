@@ -5,7 +5,7 @@ import { approvalSatisfied } from '../../../flow-kit/primitives.mjs';
 import { createQualityFollowUpFeatures, createQualityGateDiagnosticReview, hasCurrentCleanQualityReview, qualityReviewNoProgress, validateQualityReviewPolicies } from '../../../flow-kit/profiles/quality-loop.mjs';
 import { normalizeQualityReviewLimit, qualityReviewBudgetExhausted } from '../../../flow-kit/profiles/quality-budget.mjs';
 import { planApprovalSatisfied, reviewedPlanProposal } from '../plan-approval.mjs';
-import { resolvedPlanAmendment } from '../plan-amendment.mjs';
+import { resolvedPlanAmendment, validateAmendmentGraph } from '../plan-amendment.mjs';
 import { createPlanReviewFollowUps, DEFAULT_PLAN_REVIEW_LIMIT } from '../plan-review-loop.mjs';
 import { uniqueProposalIds } from '../proposal-id.mjs';
 import { implementationAttemptBudget } from './implementation-progress.mjs';
@@ -108,14 +108,15 @@ export const createDeliveryLifecycleProfile = (id = 'delivery-lifecycle') => Obj
       const completedContracts = output?.completedContracts;
       return { ok: output?.proposalId === proposal.id
         && Array.isArray(completedContracts) && completedContracts.length === contracts.length
-        && contracts.every(item => completedContracts.includes(item))
+        && contracts.every(item => completedContracts.some(value => sameVerificationItem(value, item)))
         && verified, reason: 'approved-proposal-completion-evidence-mismatch' };
     }
     if (feature.metadata?.stage === 'version-planning' && result.status === 'completed' && Array.isArray(result.followUpFeatures) && result.followUpFeatures.length > 0) {
       return { ok: false, reason: 'planning-proposals-must-use-typed-plan-output' };
     }
     if (feature.metadata?.stage === 'version-planning' && result.status === 'completed') {
-      const proposals = state.metadata?.commandIntent?.action === 'amend'
+      const isAmendment = state.metadata?.commandIntent?.action === 'amend';
+      const proposals = isAmendment
         ? resolvedPlanAmendment(state.metadata.planRevision, result.outputs?.amendment?.value, { workspaceRoot: state.metadata.workspace?.root }).proposedFeatures
         : result.outputs?.plan?.value?.proposedFeatures ?? [];
       if (proposals.some(item => (item.projectId === state.projectId) !== (item.disposition === 'project-owned'))) {
@@ -124,9 +125,15 @@ export const createDeliveryLifecycleProfile = (id = 'delivery-lifecycle') => Obj
       if (!uniqueProposalIds(proposals.filter(item => item.projectId === state.projectId))) {
         return { ok: false, reason: 'planning-proposal-id-invalid' };
       }
-      for (const proposal of proposals.filter(item => item.projectId === state.projectId
-        && (item.deliveryPolicy === DELIVERY_BATCH_POLICY || state.metadata?.commandIntent?.action !== 'amend'
-          && state.profile?.config?.requireDeliveryBatches))) validateDeliveryBatches(proposal);
+      const bounded = proposals.filter(item => item.projectId === state.projectId
+        && (item.deliveryPolicy === DELIVERY_BATCH_POLICY || !isAmendment && state.profile?.config?.requireDeliveryBatches));
+      try {
+        for (const proposal of bounded) validateDeliveryBatches(proposal);
+        if (!isAmendment && bounded.length) {
+          validateAmendmentGraph({ proposedFeatures: proposals.filter(item => item.projectId === state.projectId) },
+            { requireDeclarations: () => true });
+        }
+      } catch (error) { return { ok: false, reason: `${error.code}: ${error.message}` }; }
     }
     // A negative review is a valid decision. Preserve its findings instead of
     // rejecting the result and retrying the same unchanged plan.

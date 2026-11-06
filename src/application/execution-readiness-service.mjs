@@ -15,6 +15,7 @@ import { assertFreshVisibleObservation, isVisibleHostAdapter } from '../platform
 import { assertVisibleHostReceiptOwner } from '../platform/plugins/runtime/visible-host-bindings.mjs';
 import { inspectProjectGateCapabilities } from '../platform/workflow/gates/project-gate-runner.mjs';
 import { validateLifecycleCommandPlan } from './lifecycle-command-plan.mjs';
+import { readExecutionLineageHistory,readActiveLeaseHistory } from './execution-history-inputs.mjs';
 import { validateQualityReviewPolicies } from '../flow-kit/profiles/quality-loop.mjs';
 
 export const createExecutionReadinessReport = async (context, planInput, { onGateProgress = null, probeWrite = true, ttlMs = 60000 } = {}) => {
@@ -71,7 +72,7 @@ export const createExecutionReadinessReport = async (context, planInput, { onGat
       add('quality-verification-paths', true, { outputs });
     } catch (error) { add('quality-verification-paths', false, {}, issues(error)); }
     const trustedAgentAdapter = resolveVisibleHostAdapter(plan.run.runtimePluginId);
-    const states = await authorityStore.list(plan.project.id);
+    const states = await readExecutionLineageHistory(authorityStore,plan);
     const currentLineage = await lineageStore.read(plan.project.id, plan.logicalTaskKey);
     lineageResolution = resolveRunLineage({ plan, states, currentLineage, policy: project.policy?.recovery ?? {}, now: kernel.now, ttlMs });
     const lineageReady = lineageResolution.action !== 'block';
@@ -135,7 +136,7 @@ export const createExecutionReadinessReport = async (context, planInput, { onGat
       add('visible-host', ready, isVisibleHostAdapter(trustedAgentAdapter) ? { provider: trustedAgentAdapter.provider, adapterVersion: trustedAgentAdapter.adapterVersion, capabilities: trustedAgentAdapter.capabilities, requiredCapabilities } : { requiredCapabilities }, ready ? [] : [{ code: 'VISIBLE_AGENT_HOST_COORDINATOR_UNAVAILABLE', message: 'Conversation-visible execution requires an injected trusted Host Adapter with inspect, spawn, wait, structured-result, reconciliation, Lease confirmation, and containment capabilities.' }]);
       if (ready && lineageReady) {
         try {
-          const authorityStates = await authorityStore.listAll();
+          const authorityStates = await readActiveLeaseHistory(authorityStore);
           const activeEffectIds = authorityStates.flatMap(state => {
             const expired = new Set(leaseHealth(state, Date.parse(createdAt)).filter(item => item.hardExpired).map(item => item.leaseId));
             return state.leases.filter(lease => lease.status === 'active' && !expired.has(lease.leaseId))
@@ -217,7 +218,7 @@ export const createExecutionReadinessReport = async (context, planInput, { onGat
             'EXECUTION_WORKSPACE_SOURCE_STALE', 'Workspace changed during readiness checks.');
           check.details.actualSourceDigest = snapshot.digest;
         } else {
-          const current = resolveRunLineage({ plan, states: await authorityStore.list(plan.project.id),
+          const current = resolveRunLineage({ plan, states: await readExecutionLineageHistory(authorityStore,plan),
             currentLineage: await lineageStore.read(plan.project.id, plan.logicalTaskKey), policy: project.policy?.recovery ?? {}, now: kernel.now, ttlMs });
           const identity = value => digestJson(withoutKeys(value, ['createdAt', 'expiresAt', 'resolutionDigest']));
           assert(identity(current) === identity(lineageResolution), 'EXECUTION_READINESS_AUTHORITY_CHANGED', 'Run lineage changed during readiness checks.');

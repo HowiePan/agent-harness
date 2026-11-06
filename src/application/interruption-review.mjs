@@ -71,6 +71,8 @@ const makeReview = (feature, submission, decisionRef, sourceDigest, correction =
       'Use only read-only inspection. Do not build, test, write artifacts or modify source. Reference current source files by project-relative path and their actual SHA-256. Never create placeholder inputs.',
       'evidence contains only bound source inventory members. Put historical logs and excluded artifacts in optional observations; these are current observations, never source identity or acceptance credit. Do not include paths outside this project or linked files.',
       'unknowns may be empty or typed questions. Use classification in-scope-work or verification-pending only with a concrete action, retained verification and unitsIncluded:true. Missing authorization, contract differences, external prerequisites and unresolved sizing remain blocked. A read-only review need not perform the original future tests.',
+      'For a planning subject, distinguish the cost of doing the present planning/reconciliation from the future implementation costs it must estimate. Inspect concrete consumer ownership, compilation closures, shared writers and existing complete batch capacities before declaring that protected contracts must change. Missing analysis is ordinary planning work when that analysis fits the unchanged planning contract; do not require future implementation or tests as proof that planning may proceed.',
+      'A finished diagnosis returns status completed even when its conclusion is unresolved, contract-change or external-prerequisite: that conclusion blocks the original task. Use blocked or failed status only when this diagnostic itself cannot deliver the required source-bound analysis.',
       'Recommend in-scope only with a concrete strategy that preserves the entire approved batch, commands, obligations, dependency boundaries, write scope and budget. Do not silently split the batch, drop tests or combine unrelated batches.',
       'A changed estimate alone is not a contract change. If remaining work fits the original capacity, recommend continuation. If it cannot, identify the exact smallest contract difference and evidence. Do not approve any change.',
       `Bind the output to sourceSubmissionId ${submission.submissionId} and contractDigest ${featureContractDigest(feature)}.`,
@@ -126,7 +128,8 @@ export const applyInterruptionReview = async ({ state, feature, project, kernel,
   assert(snapshot.digest === state.sourceDigest, 'INTERVENTION_SOURCE_DRIFT', 'Source changed after diagnostic observation.');
   const evidenceContext = { projectId: state.projectId, runId: state.runId, featureId: feature.id,
     epoch: state.epoch, generation: state.generation, sourceDigest: state.sourceDigest };
-  const assessment = await assessDiagnosis({ value, parent, snapshot, workspaceRoot: state.metadata.workspace.root, evidenceStore, evidenceContext });
+  const assessment = await assessDiagnosis({ value, parent, snapshot, workspaceRoot: state.metadata.workspace.root, evidenceStore, evidenceContext,
+    projectFilePolicy: state.metadata.projectFilePolicy });
   const assessmentId = `intervention-assessed/${submission.submissionId}`;
   const previousAssessment = state.decisions.find(item => item.id === assessmentId);
   const proof = previousAssessment ? { ref: previousAssessment.evidenceRef } : await evidenceStore.put({ ...assessment, reviewSubmissionId: submission.submissionId,

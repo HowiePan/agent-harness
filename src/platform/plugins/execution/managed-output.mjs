@@ -1,4 +1,4 @@
-import { lstat, mkdir, readdir, rm, rmdir } from 'node:fs/promises';
+import { lstat, mkdir, opendir, rm, rmdir } from 'node:fs/promises';
 import { isAbsolute, resolve } from 'node:path';
 import { digestJson } from '../../../common/canonical.mjs';
 import { assert } from '../../../common/errors.mjs';
@@ -27,20 +27,25 @@ export const validateOutputDeclarations = declarations => {
   });
 };
 
-const usageOf = async root => {
+const usageOf = async (root, budget = { maxBytes: Infinity, maxFiles: Infinity }) => {
   const usage = { files: 0, bytes: 0 };
+  const exceeded = () => usage.files > budget.maxFiles || usage.bytes > budget.maxBytes;
   const visit = async path => {
     let entries;
-    try { entries = await readdir(path, { withFileTypes: true }); }
+    try { entries = await opendir(path); }
     catch (error) { if (error.code === 'ENOENT') return; throw error; }
-    for (const entry of entries) {
+    for await (const entry of entries) {
+      // Directory entries also consume quota; empty directory forests cannot
+      // turn a small output budget into an unbounded monitor traversal.
+      usage.files += 1;
+      if (exceeded()) return;
       const file = resolve(path, entry.name);
       if (entry.isDirectory()) await visit(file);
       else {
         const info = await lstat(file);
-        usage.files += 1;
         usage.bytes += info.isFile() ? info.size : 0;
       }
+      if (exceeded()) return;
     }
   };
   await visit(root);
@@ -52,11 +57,11 @@ const violationsFor = outputs => outputs.flatMap(output => [
   ...(output.usage.files > output.maxFiles ? [{ outputId: output.id, metric: 'files', limit: output.maxFiles, actual: output.usage.files }] : []),
 ]);
 
-export const createManagedOutputSession = ({ root, controlRoot, operationId, declarations = DEFAULT_PROCESS_OUTPUTS, now = () => new Date().toISOString() }) => {
+export const createManagedOutputSession = ({ root, controlRoot, operationId, directoryName = operationId, declarations = DEFAULT_PROCESS_OUTPUTS, now = () => new Date().toISOString() }) => {
   const controlledRoot = assertHarnessWritePath(root, 'managed output root', controlRoot);
   const operation = safeSegment(operationId, 'operationId');
   const policy = validateOutputDeclarations(declarations);
-  const operationRoot = assertHarnessWritePath(resolve(controlledRoot, operation), 'managed operation root', controlRoot);
+  const operationRoot = assertHarnessWritePath(resolve(controlledRoot, safeSegment(directoryName, 'operation directory')), 'managed operation root', controlRoot);
   const paths = Object.fromEntries(policy.map(output => [output.id, resolve(operationRoot, output.id)]));
   const peakUsage = new Map(policy.map(output => [output.id, { files: 0, bytes: 0 }]));
   let monitor = null;
@@ -64,11 +69,11 @@ export const createManagedOutputSession = ({ root, controlRoot, operationId, dec
 
   const inspect = async () => {
     const outputs = await Promise.all(policy.map(async output => {
-      const usage = await usageOf(paths[output.id]);
+      const usage = await usageOf(paths[output.id], output);
       const prior = peakUsage.get(output.id);
       const peak = { files: Math.max(prior.files, usage.files), bytes: Math.max(prior.bytes, usage.bytes) };
       peakUsage.set(output.id, peak);
-      return { ...output, path: paths[output.id], usage, peakUsage: peak };
+      return { ...output, path: paths[output.id], usage, usageComplete: usage.files <= output.maxFiles && usage.bytes <= output.maxBytes, peakUsage: peak };
     }));
     const violations = violationsFor(outputs);
     if (!observedViolations.length && violations.length) observedViolations = structuredClone(violations);
@@ -90,11 +95,14 @@ export const createManagedOutputSession = ({ root, controlRoot, operationId, dec
     monitor(child, { intervalMs = 100 } = {}) {
       assert(!monitor, 'OUTPUT_MONITOR_ALREADY_STARTED', `Output monitor already started: ${operation}`);
       let pending = Promise.resolve();
+      let inspecting = false;
       const timer = setInterval(() => {
-        pending = pending.then(async () => {
+        if (inspecting) return;
+        inspecting = true;
+        pending = (async () => {
           const snapshot = await inspect();
           if (snapshot.violations.length && child.exitCode === null) child.kill('SIGTERM');
-        }).catch(() => {});
+        })().catch(() => {}).finally(() => { inspecting = false; });
       }, intervalMs);
       monitor = async () => { clearInterval(timer); await pending; return inspect(); };
       return monitor;
@@ -110,13 +118,13 @@ export const createManagedOutputSession = ({ root, controlRoot, operationId, dec
       }
       await rmdir(operationRoot).catch(error => { if (!['ENOENT', 'ENOTEMPTY'].includes(error.code)) throw error; });
       await rmdir(controlledRoot).catch(error => { if (!['ENOENT', 'ENOTEMPTY'].includes(error.code)) throw error; });
-      const remaining = await Promise.all(policy.map(async output => ({ id: output.id, ...await usageOf(paths[output.id]) })));
+      const remaining = await Promise.all(policy.map(async output => ({ id: output.id, ...await usageOf(paths[output.id], output) })));
       const receipt = {
         protocolVersion: '1.0',
         operationId: operation,
         reason,
         status: observedViolations.length ? 'budget-exceeded' : 'cleaned',
-        outputs: before.outputs.map(output => ({ id: output.id, retention: output.retention, maxBytes: output.maxBytes, maxFiles: output.maxFiles, usage: output.usage, peakUsage: output.peakUsage })),
+        outputs: before.outputs.map(output => ({ id: output.id, retention: output.retention, maxBytes: output.maxBytes, maxFiles: output.maxFiles, usage: output.usage, usageComplete: output.usageComplete, peakUsage: output.peakUsage })),
         violations: observedViolations,
         cleanup,
         remaining,

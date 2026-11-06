@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { access, writeFile } from 'node:fs/promises';
+import { access, mkdir, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { createCommandWrapperSandbox, createManagedOutputSession, createProcessRuntime, PluginHost } from '../src/index.mjs';
 import { makeFixture } from './test-support.mjs';
@@ -45,6 +45,21 @@ test('Process Runtime terminates an over-budget output and still returns cleanup
   assert.deepEqual(waited.payload.outputReceipt.remaining[0], { id: 'probe', files: 0, bytes: 0 });
   const cleaned = await runtime.cleanup({ agentId: spawned.payload.agentId });
   assert.equal(cleaned.payload.outputReceipt.receiptDigest, waited.payload.outputReceipt.receiptDigest);
+});
+
+test('output monitor streams entries and stops at a directory budget breach', async t => {
+  const fixture = await makeFixture(); t.after(() => fixture.cleanup());
+  const session = createManagedOutputSession({ root: resolve(fixture.dataRoot, 'bounded-scan'), operationId: 'scan',
+    declarations: [{ ...declarations(1024)[0], maxFiles: 2 }] });
+  await session.prepare();
+  for (const name of ['a', 'b', 'c', 'd']) await mkdir(resolve(session.paths.probe, name));
+  const measured = await session.inspect();
+  assert.equal(measured.outputs[0].usage.files, 3);
+  assert.equal(measured.outputs[0].usageComplete, false);
+  assert.equal(measured.violations[0].metric, 'files');
+  const receipt = await session.finish();
+  assert.equal(receipt.status, 'budget-exceeded');
+  assert.equal(receipt.outputs[0].usageComplete, false);
 });
 
 test('required OS sandbox is fail-closed and an installed wrapper is recorded', async t => {

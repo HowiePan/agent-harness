@@ -112,6 +112,7 @@ test('visible 1.4 Prompt names the digest-bound packet file without duplicating 
 
 test('visible 1.5 Prompt keeps the complete task and result contract in digest-bound files', () => {
   const visible = packet();
+  visible.execution.prompt.contractVersion = '1.5';
   visible.outputRef = '/tmp/dispatch-output.json';
   visible.execution.runtime = { mode: 'conversation-visible', userVisible: true, hostOrchestrated: true };
   visible.execution.result = createDispatchResultContract(visible.feature, { conversationVisible: true });
@@ -124,6 +125,21 @@ test('visible 1.5 Prompt keeps the complete task and result contract in digest-b
   assert.match(compiled.text, new RegExp(visible.execution.result.contractDigest));
   assert.match(compiled.text, /A dirty Git status may contain work from an earlier Run/);
   assert.doesNotMatch(compiled.text, /"knownFindingDispositions"/);
+});
+
+test('new Prompt requires bounded scripts while historical 1.5 remains unchanged', () => {
+  const current = packet();
+  current.execution.runtime = { mode: 'conversation-visible', userVisible: true, hostOrchestrated: true };
+  current.execution.result = createDispatchResultContract(current.feature, { conversationVisible: true });
+  const compiled = compileAgentPrompt(current);
+  assert.equal(compiled.contractVersion, '1.8');
+  assert.match(compiled.text, /Resource policy bounded-script\/1/);
+  assert.match(compiled.text, /run-bounded-script\.mjs/);
+  assert.match(compiled.text, /no default total duration deadline/);
+  assert.match(compiled.text, /Do not raise resource caps/);
+  assert.doesNotMatch(compiled.text, /4 processes, 60 seconds/);
+  current.execution.prompt.contractVersion = '1.5';
+  assert.doesNotMatch(compileAgentPrompt(current).text, /bounded-script\/1/);
 });
 
 test('visible continuation Prompt points to immutable obligations without operator-added instructions', () => {
@@ -151,8 +167,19 @@ test('historical continuation without a work batch preserves its original prompt
   assert.doesNotMatch(compiled.text, /use workBatch/);
 });
 
+test('new visible handoff requires Host evidence and pins read-only unaccepted draft artifacts', () => {
+  const input=packet();input.execution.runtime={mode:'conversation-visible',userVisible:true,hostOrchestrated:true};
+  input.execution.result=createDispatchResultContract(input.feature,{conversationVisible:true});
+  input.execution.implementationContinuation={verificationHandoff:{version:'delivery-verification-ready/1'},
+    requiredEvidenceInputs:[{path:'exact.json',sha256:'a'.repeat(64),size:100,status:'unaccepted',completionCredit:false}]};
+  const prompt=compileAgentPrompt(input);
+  assert.match(prompt.text,/return status verification-ready/);
+  assert.match(prompt.text,/zero completion credit/);assert.match(prompt.text,/verify their size and SHA-256/);
+  assert.match(prompt.text,/never claim an unexecuted test completed/);
+});
+
 test('visible prompts preserve explicit Dispatch authority for protected source operations', () => {
-  for (const contractVersion of ['1.4', '1.5']) {
+  for (const contractVersion of ['1.4', '1.5', '1.6']) {
     const migration = packet();
     migration.feature = { ...migration.feature, id: 'source-layout', kind: 'implementation',
       task: taskContract('source-layout', ['Relocate the approved source files and retire their old paths']),

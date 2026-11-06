@@ -6,6 +6,7 @@ import { digestJson, sha256 } from '../src/common/canonical.mjs';
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const included = ['bin', 'src', 'schemas', 'profiles', 'plugins', 'integrations/codex/runtime', 'integrations/codex/plugins', 'integrations/codex/extensions', 'integrations/legacy-consumers', 'docs', 'examples', 'scripts/check-context-budget.mjs', 'scripts/workflow-canary.mjs', 'scripts/workspace-canary.mjs', 'package.json', 'README.md', 'CONTRIBUTING.md', 'SECURITY.md', 'LICENSE'];
 const excludedDirectoryNames = new Set(['.plugin-data']);
+included.push('scripts/run-bounded-script.mjs');
 const files = [];
 const visit = async file => {
   const info = await stat(file);

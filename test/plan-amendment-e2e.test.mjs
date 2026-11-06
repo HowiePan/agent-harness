@@ -25,7 +25,11 @@ for (const visible of [false, true]) test(`amend command reaches reviewed approv
   const packets = new Map();
   const adapter = visible ? createMockVisibleHostAdapter({
     onSpawn: input => packets.set(input.dispatchId, input.packet),
-    onResult: input => handler(packets.get(input.dispatchId)),
+    onResult: async input => {
+      const packet = packets.get(input.dispatchId);
+      try { return await handler(packet); }
+      finally { packets.delete(input.dispatchId); }
+    },
     onReconcile: async () => ({ ready: true, provider: 'test-host', adapterVersion: '1.0.0',
       contract: { id: 'amendment-test-native', version: '1.0.0', digest: 'd'.repeat(64) },
       assertionId: 'amendment-test-reconciliation', observedAt: new Date().toISOString(), reconciled: [], issues: [] }),
@@ -86,7 +90,7 @@ for (const visible of [false, true]) test(`amend command reaches reviewed approv
         value: [`runtime and consumer boundary for ${state.metadata.planRevision.parentPlanDigest}`] }];
       if (packet.feature.metadata.planReviewRound > 1) patch.changes = [{ ...patch.changes[0],
         value: ['runtime and prerequisite consumer conversion with explicit source lifetime'] }];
-      if (visible) patch.changes[0].value = patch.changes[0].value.map(value => `${value} ${'large-plan-contract '.repeat(16000)}`);
+      if (visible) patch.changes[0].value = patch.changes[0].value.map(value => `${value} ${'large-plan-contract '.repeat(14000)}`);
       const before = await captureWorkspace(workspaceRoot);
       const materialized = await materializePlanAmendment({ revision: state.metadata.planRevision, patch, workspaceRoot });
       const changedFiles = diffWorkspaceSnapshots(before, await captureWorkspace(workspaceRoot));

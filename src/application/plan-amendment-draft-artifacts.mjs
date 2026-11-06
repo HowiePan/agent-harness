@@ -1,11 +1,26 @@
 import { assert } from '../common/errors.mjs';
 import { digestJson, withoutKeys } from '../common/canonical.mjs';
-import { rejectedAmendmentDraftEvidence } from './plan-amendment-retry.mjs';
+import { rejectedAmendmentDraftEvidence, diagnosedAmendmentScopeEvidence } from './plan-amendment-retry.mjs';
+import { interruptedAmendmentReviewDraft } from './development-amendment-review-recovery.mjs';
 
 /** Recover only exact planning bytes already committed by a blocked draft, never an artifact-root wildcard. */
 export const verifyBlockedDraftArtifacts = async ({ drafts, snapshot, evidenceStore, artifactRoot }) => {
   const current = new Map(snapshot.files.map(file => [file.path, file]));
   const verified = new Set();
+  for (const draft of drafts) {
+    const correction = diagnosedAmendmentScopeEvidence(draft);
+    if (!correction) continue;
+    const diagnostic = correction.diagnostic;
+    const records = await Promise.all(diagnostic.evidenceRefs.map(ref => evidenceStore.read(ref)));
+    assert(records.some(record => {
+      const value = JSON.parse(record.bytes.toString('utf8'));
+      return record.metadata.projectId === draft.projectId && record.metadata.runId === draft.runId
+        && record.metadata.featureId === diagnostic.featureId && record.metadata.dispatchId === diagnostic.dispatchId
+        && record.metadata.sourceDigest === diagnostic.inputSourceDigest
+        && value.inputSourceDigest === diagnostic.inputSourceDigest && value.outputSourceDigest === diagnostic.outputSourceDigest
+        && digestJson(value.result) === digestJson(diagnostic.result);
+    }), 'PLAN_AMENDMENT_DRAFT_ARTIFACT_INVALID', 'A registered batch correction requires its exact read-only diagnostic Evidence.');
+  }
   for (const draft of drafts) {
     const rejected = rejectedAmendmentDraftEvidence(draft);
     if (!rejected) continue;
@@ -63,7 +78,8 @@ export const verifyBlockedDraftArtifacts = async ({ drafts, snapshot, evidenceSt
     const invalid = 'PLAN_AMENDMENT_DRAFT_ARTIFACT_INVALID';
     const rejected = rejectedAmendmentDraftEvidence(draft);
     const rejectedResult = rejected && [rejected.planner.submissionId, rejected.blocked.submissionId].includes(submission.submissionId);
-    assert((submission.result?.status === 'blocked' && submission.result.failureClass === 'scope-blocker' || rejectedResult)
+    const interrupted = interruptedAmendmentReviewDraft(draft)?.planner.submissionId === submission.submissionId;
+    assert((submission.result?.status === 'blocked' && submission.result.failureClass === 'scope-blocker' || rejectedResult || interrupted)
       && submission.submissionDigest === digestJson(withoutKeys(submission, ['submissionDigest']))
       && dispatch?.status === 'committed' && dispatch.submissionId === submission.submissionId
       && dispatch.featureSnapshot.metadata?.stage === 'version-planning'

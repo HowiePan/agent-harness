@@ -187,7 +187,7 @@ export class ProjectGateRunner {
       const spec = { id: recipe.id, commandId: recipe.id, args: [], recipe: structuredClone(recipe), projectId, runId, epoch: state.epoch, generation: state.generation, sourceDigest: state.sourceDigest, featureId };
       if (recipe.cwd !== undefined) spec.cwd = recipe.cwd;
       if (recipe.timeoutMs !== undefined) spec.timeoutMs = recipe.timeoutMs;
-      const specDigest = digestJson({ recipe, featureId, command: recipe.command, cwd: recipe.cwd ?? '.', timeoutMs: recipe.timeoutMs ?? 300000 });
+      const specDigest = digestJson({ recipe, featureId, command: recipe.command, cwd: recipe.cwd ?? '.', timeoutMs: recipe.timeoutMs ?? 0 });
       const executorPlugin = recipe.executorPluginId ? this.harness.pluginHost.get(recipe.executorPluginId, 'gate-executor').manifest : manifest;
       const executable = recipe.executorPluginId ? null : await executableAvailable(recipe.command[0], resolve(workspaceRoot, recipe.cwd ?? '.'));
       assert(recipe.executorPluginId || executable, 'GATE_EXECUTABLE_UNAVAILABLE', `Gate ${recipe.id} executable is unavailable.`);

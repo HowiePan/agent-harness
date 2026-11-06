@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { once } from 'node:events';
-import { mkdir, mkdtemp, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { PassThrough } from 'node:stream';
 import { createCodexCollaborationHostAdapter } from '../integrations/codex/agent-harness-codex/lib/codex-collaboration-host-adapter.mjs';
@@ -212,6 +212,17 @@ test('spawn task identity mismatch fails closed and contains the returned Agent'
   assert.equal(fixture.requests.filter(request => request.operation === 'interrupt').length, 1);
   assert.equal(fixture.tasks.get('/root/unrelated-task'), 'interrupted');
   assert.equal((await host.journal.list())[0].state, 'contained');
+});
+
+test('filtered Host journal retains exact relevant effects and still validates discarded histories',async t=>{
+  const fixture=await setup(t),host=fixture.create();
+  await host.adapter.spawn(spawnInput);
+  const all=await host.journal.list();assert.equal(all.length,1);
+  assert.deepEqual(await host.journal.list({include:e=>e.binding.runId===all[0].binding.runId}),all);
+  assert.deepEqual(await host.journal.list({include:()=>false}),[]);
+  assert.deepEqual(await host.journal.unresolved(),all.filter(e=>!['settled','contained'].includes(e.state)));
+  await writeFile(host.journal.file(all[0].effectId),JSON.stringify({...all[0],effectDigest:'a'.repeat(64)}));
+  await assert.rejects(host.journal.list({include:()=>false}),{code:'CODEX_HOST_EFFECT_DIGEST_MISMATCH'});
 });
 
 test('preflight reconciliation contains a crash-window Agent before any later spawn', async t => {

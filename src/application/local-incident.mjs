@@ -11,6 +11,7 @@ const planSourceDrift = new Set(['IMPLEMENTATION_PLAN_SOURCE_MISMATCH']);
 const environmentFailure = new Set(['LOCAL_PROCESS_GATE_HOST_UNAVAILABLE']);
 const planningAttention = new Set(['DELIVERY_BATCH_SIZING_REVIEW_REQUIRED', 'RUN_EXECUTION_FROZEN', 'implementation-sizing-review']);
 const localBindingFailure = /^(?:LOCAL_SOURCE_|VISIBLE_LIFECYCLE_(?:COORDINATOR|WORKFLOW|WORKSPACE)_IDENTITY_MISMATCH)/;
+const coordinationFailure = /^(?:IMPLEMENTATION_EVIDENCE_|IMPLEMENTATION_DRAFT_EVIDENCE_|DEVELOPMENT_COORDINATION_REVIEW_)/;
 
 /** Classify a source-linked failure without depending on a particular Workflow. */
 export const classifyLocalIncident = ({ error, phase, projectId = null, workflowId = null, action = null, target = null, runId = null } = {}) => {
@@ -24,13 +25,15 @@ export const classifyLocalIncident = ({ error, phase, projectId = null, workflow
   const isEnvironmentFailure = environmentFailure.has(code);
   const isBindingFailure = localBindingFailure.test(code);
   const isPlanningAttention = planningAttention.has(code);
-  const patchLevelHint = isHostFailure ? 'H3' : isAuthorityFailure || code === 'DEVELOPMENT_PATCH_INCOMPATIBLE' ? 'H4' : null;
+  const isCoordinationFailure = coordinationFailure.test(code);
+  const patchLevelHint = isHostFailure || isCoordinationFailure ? 'H3' : isAuthorityFailure || code === 'DEVELOPMENT_PATCH_INCOMPATIBLE' ? 'H4' : null;
   const severity = isAuthorityFailure ? 'P0'
     : isInvocationError ? 'P3'
       : projectAttention.has(code) || isPlanningAttention || isPlanSourceDrift || isEnvironmentFailure || isBindingFailure || isSourceStale || code === 'DEVELOPMENT_PATCH_INCOMPATIBLE' ? 'P2'
         : 'P1';
-  const origin = isInvocationError ? 'invocation' : projectAttention.has(code) || isPlanningAttention || isPlanSourceDrift ? 'project' : isEnvironmentFailure ? 'environment' : isBindingFailure || isSourceStale ? 'binding' : isHostFailure || isAuthorityFailure || code === 'DEVELOPMENT_PATCH_INCOMPATIBLE' ? 'harness' : 'undetermined';
+  const origin = isInvocationError ? 'invocation' : projectAttention.has(code) || isPlanningAttention || isPlanSourceDrift ? 'project' : isEnvironmentFailure ? 'environment' : isBindingFailure || isSourceStale ? 'binding' : isHostFailure || isCoordinationFailure || isAuthorityFailure || code === 'DEVELOPMENT_PATCH_INCOMPATIBLE' ? 'harness' : 'undetermined';
   const disposition = isInvocationError ? 'correct-invocation'
+    : isCoordinationFailure ? 'verify-coordination-inputs-in-harness-maintenance'
     : isPlanningAttention ? 'review-bounded-plan-or-approved-replacement'
     : featureBlocked.has(code) ? 'resolve-feature-blockers'
     : isPlanSourceDrift ? 'review-exact-plan-source-delta'
@@ -47,7 +50,7 @@ export const classifyLocalIncident = ({ error, phase, projectId = null, workflow
   return Object.freeze({
     protocolVersion: '1.0', kind: 'local-harness-incident',
     incidentId: digestJson(context), ...context,
-    origin, severity, severityStatus: isHostFailure || isAuthorityFailure || isInvocationError || isSourceStale || isPlanSourceDrift || isEnvironmentFailure || isPlanningAttention || projectAttention.has(code) || code === 'DEVELOPMENT_PATCH_INCOMPATIBLE' ? 'classified' : 'provisional',
+    origin, severity, severityStatus: isCoordinationFailure || isHostFailure || isAuthorityFailure || isInvocationError || isSourceStale || isPlanSourceDrift || isEnvironmentFailure || isPlanningAttention || projectAttention.has(code) || code === 'DEVELOPMENT_PATCH_INCOMPATIBLE' ? 'classified' : 'provisional',
     patchLevelHint, disposition,
     containment, maintenanceContext: origin === 'harness' ? 'independent-harness-checkout' : origin === 'binding' ? 'verify-bound-project-checkout-then-independent-harness-checkout-if-needed' : null,
     currentExecution: containment ? 'contained' : isHostEffectFailure ? 'contain-and-verify-before-repair' : 'hold-untrusted-command',

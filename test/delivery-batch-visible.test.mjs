@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import { mkdir, mkdtemp, rm, writeFile, readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
@@ -38,7 +39,12 @@ for (const mode of ['ordinary', 'input', 'capacity', 'unknown', 'clarification',
   const extension = await loadExtensionPack('./src/flows/delivery-lifecycle/index.mjs', { controlRoot });
   const runtime = await loadExtensionPack('./integrations/codex/extensions/codex-runtime.mjs', { controlRoot });
   const packets = new Map(); const spawned = [];
-  const adapter = createMockVisibleHostAdapter({ onSpawn: input => { packets.set(input.dispatchId, input.packet); spawned.push(input.packet); },
+  const adapter = createMockVisibleHostAdapter({ onSpawn: input => {
+    const bytes = readFileSync(`${input.packet.outputRef}.dispatch-packet.json`);
+    assert.equal(sha256(bytes), input.packetDigest);
+    assert.deepEqual(JSON.parse(bytes), input.packet);
+    packets.set(input.dispatchId, input.packet); spawned.push(input.packet);
+  },
     onResult: async input => {
       const packet = packets.get(input.dispatchId); const feature = packet.feature;
       const output = (port, schemaId, value) => ({ status: 'completed', summary: 'Observed fixture result.', changedFiles: [],

@@ -48,19 +48,20 @@ export class CodexHostEffectJournal {
     return value ? validateCodexHostEffect(value) : null;
   }
 
-  async list() {
+  async list({ include = () => true } = {}) {
     let entries;
     try { entries = await readdir(this.root, { withFileTypes: true }); }
     catch (error) { if (error.code === 'ENOENT') return []; throw error; }
     const effects = [];
     for (const entry of entries.filter(item => item.isFile() && /^codex_host_effect_[a-f0-9]{24}\.json$/.test(item.name)).sort((a, b) => a.name.localeCompare(b.name))) {
-      effects.push(validateCodexHostEffect(await readJson(resolve(this.root, entry.name))));
+      const effect = validateCodexHostEffect(await readJson(resolve(this.root, entry.name)));
+      if (include(effect)) effects.push(effect);
     }
     return effects;
   }
 
   async unresolved() {
-    return (await this.list()).filter(effect => !terminalStates.has(effect.state));
+    return this.list({ include: effect => !terminalStates.has(effect.state) });
   }
 
   async prepare({ request, taskName, binding }) {

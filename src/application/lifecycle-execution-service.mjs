@@ -1,6 +1,7 @@
 import { assert } from '../common/errors.mjs';
 import { submissionAttempt } from '../kernel/attempt-budget.mjs';
 import { selectBlockedResumeFeature } from './lifecycle-resume.mjs';
+import { inspectDevelopmentHostCheckReview } from './development-host-check-review.mjs';
 import { ACCEPTANCE_CONTINUATION_POLICY, hasNewAcceptanceCheckpoint } from './implementation-continuation.mjs';
 import { hasTargetImplementationProgress, shouldCorrectImplementationHandoff, implementationHandoffCorrectionReason } from './implementation-handoff.mjs';
 import { AUTO_CONCURRENCY, AUTO_CONCURRENCY_LIMIT, resolveConcurrencyLimit } from '../common/concurrency.mjs';
@@ -9,6 +10,7 @@ import { ProjectGateRunner, runPendingFeatureGates } from '../platform/workflow/
 import { isVisibleHostAdapter } from '../platform/plugins/runtime/visible-host-adapter.mjs';
 import { canonicalize, digestJson, sha256 } from '../common/canonical.mjs';
 import { assertInside, assertNoLinkPath } from '../common/paths.mjs';
+import { assertFeatureFileAccess } from '../common/project-file-policy.mjs';
 import { resolve } from 'node:path';
 import { atomicWrite } from '../kernel/atomic-io.mjs';
 import { validateBusinessResult, validateProfileResult } from '../platform/execution/result-contract.mjs';
@@ -26,7 +28,7 @@ import { decideInterruption, interventionHistory } from './interruption-policy.m
 import { isIntervention, isExecutionComplete, profileState } from '../kernel/intervention.mjs';
 import { sealInterruptionOutcome, describeInterruptionError } from './interruption-outcome.mjs';
 
-const recoverableResultCodes = new Set(['REPAIR_CHECKPOINT_REQUIRED', 'REPAIR_CHECKPOINT_EVIDENCE_REQUIRED', 'REPAIR_FINDING_CHECKPOINT_REQUIRED', 'QUALITY_DIAGNOSTIC_DISPOSITION_REQUIRED', 'QUALITY_PREREQUISITE_INVALID', 'PROFILE_RESULT_REJECTED', 'RESULT_OUTPUT_PORTS_MISMATCH', 'RESULT_OUTPUT_SCHEMA_ID_MISMATCH', 'RESULT_OUTPUT_VALUE_SCHEMA_INVALID']);
+const recoverableResultCodes = new Set(['REPAIR_CHECKPOINT_REQUIRED', 'REPAIR_CHECKPOINT_EVIDENCE_REQUIRED', 'REPAIR_FINDING_CHECKPOINT_REQUIRED', 'QUALITY_DIAGNOSTIC_DISPOSITION_REQUIRED', 'QUALITY_PREREQUISITE_INVALID', 'PROFILE_RESULT_REJECTED', 'RESULT_OUTPUT_PORTS_MISMATCH', 'RESULT_OUTPUT_SCHEMA_ID_MISMATCH', 'RESULT_OUTPUT_VALUE_SCHEMA_INVALID', 'DELIVERY_VERIFICATION_REQUEST_INVALID', 'DELIVERY_VERIFICATION_READINESS_INCOMPLETE', 'RESULT_VERIFICATION_REQUEST_UNRESOLVED']);
 export const visibleLifecycleStopReason = state => {
   if (state.profile?.id === 'collection-batch' && state.features.some(feature => ['blocked', 'failed-budget'].includes(feature.state)
     && feature.blocker?.kind !== 'engine-artifact')) return 'collection-attention-required';
@@ -46,9 +48,14 @@ const safeQualityScopePaths = (feature, blocker, workspaceRoot) => {
 export const shouldRetryImplementationVerificationPath = ({ feature, result, state }) => {
   if (feature?.metadata?.stage !== 'implementation' || result?.status !== 'blocked' || result.failureClass !== 'verification-path-prohibited') return false;
   const candidates = result.blocker?.repairCandidatePaths;
-  if (!Array.isArray(candidates) || !candidates.length || !candidates.every(path => safeProjectPath(path)
-    && feature.allowedPaths?.some(scope => safeProjectPath(scope) && insideScope(scope, path))
-    && !feature.forbiddenPaths?.some(scope => safeProjectPath(scope) && insideScope(scope, path)))) return false;
+  if (!Array.isArray(candidates) || !candidates.length || !candidates.every(path => {
+    if (state.metadata?.projectFilePolicy) {
+      try { assertFeatureFileAccess({ feature, policy: state.metadata.projectFilePolicy, path }); return true; }
+      catch { return false; }
+    }
+    return safeProjectPath(path) && feature.allowedPaths?.some(scope => safeProjectPath(scope) && insideScope(scope, path))
+      && !feature.forbiddenPaths?.some(scope => safeProjectPath(scope) && insideScope(scope, path));
+  })) return false;
   const retries = feature.metadata.verificationRepairRetries;
   if (!Number.isInteger(retries) || retries < 1) return false;
   const current = state.features.find(item => item.id === feature.id);
@@ -259,6 +266,11 @@ const continueVisibleLifecyclePlan = async (context, api, planInput, { commandId
   const pendingReviewAtEntry = hasPendingIntervention(started.state);
   let state = await applyPendingInterruptionReviews(api, started.state, commandId);
   const activeRunId = state.runId;
+  const hostCheckReviews = await inspectDevelopmentHostCheckReview(state, authorityStore, api.evidenceStore);
+  const reviewedHostReason = featureId => {
+    const review = hostCheckReviews.find(item => item.featureId === featureId);
+    return review ? `development-host-check-reviewed:${review.evidenceRef}` : null;
+  };
   if (resume) {
     assert(activeRunId === resume.runId, 'LIFECYCLE_RESUME_RUN_MISMATCH', 'Lifecycle execution selected a different Run.');
     const inputBindingRepairs = await inspectVerificationInputRepairs(state, plan.run.executionWorkspaceRoot, project.workspace.excluded ?? []);
@@ -267,7 +279,7 @@ const continueVisibleLifecyclePlan = async (context, api, planInput, { commandId
     // clarification, or exhaust its allowance. Let the shared loop resolve
     // that new frontier; it is not drift of the original resume selection.
     assert(pendingReviewAtEntry ? resume.blockedFeatureId === null
-      : selectBlockedResumeFeature(state, { inputBindingRepairs, interruptionReviews, pendingIntervention: hasPendingIntervention(state) }) === resume.blockedFeatureId,
+      : selectBlockedResumeFeature(state, { inputBindingRepairs, interruptionReviews, hostCheckReviews, pendingIntervention: hasPendingIntervention(state) }) === resume.blockedFeatureId,
       'LIFECYCLE_RESUME_FEATURE_MISMATCH', 'The blocked Feature set changed after resume planning.');
     if (resume.blockedFeatureId) {
       const blocked = state.features.find(feature => feature.id === resume.blockedFeatureId);
@@ -281,7 +293,7 @@ const continueVisibleLifecyclePlan = async (context, api, planInput, { commandId
       const reviewed = !repaired && interruptionReviews.some(item => item.feature.id === blocked.id)
         ? await api.scheduleInterruptionReview(plan.project.id, activeRunId, blocked.id, `${commandId}.resume.diagnose`) : null;
       state = repaired?.state ?? reviewed?.state ?? (await api.kernel.reopenFeature(plan.project.id, activeRunId,
-        { featureId: blocked.id, reason: 'implement-automatic-continuation' },
+        { featureId: blocked.id, reason: reviewedHostReason(blocked.id) ?? 'implement-automatic-continuation' },
         { expectedRevision: state.revision, commandId: `${commandId}.resume.reopen.${blocked.id}` })).state;
     }
   } else if (state.metadata?.completionCarryover?.progressOnly && !pendingReviewAtEntry) {
@@ -289,7 +301,7 @@ const continueVisibleLifecyclePlan = async (context, api, planInput, { commandId
     // Migration itself preserved every blocker and never started work.
     const inputBindingRepairs = await inspectVerificationInputRepairs(state, plan.run.executionWorkspaceRoot, project.workspace.excluded ?? []);
     const interruptionReviews = reviewableInterruptions(state);
-    const featureId = selectBlockedResumeFeature(state, { inputBindingRepairs, interruptionReviews, pendingIntervention: hasPendingIntervention(state) });
+    const featureId = selectBlockedResumeFeature(state, { inputBindingRepairs, interruptionReviews, hostCheckReviews, pendingIntervention: hasPendingIntervention(state) });
     const repaired = featureId && inputBindingRepairs.some(item => item.featureId === featureId)
       ? await api.repairVerificationInputBlocker(plan.project.id, activeRunId, featureId, `${commandId}.partial-carryover`) : null;
     assert(!inputBindingRepairs.some(item => item.featureId === featureId) || repaired,
@@ -297,7 +309,7 @@ const continueVisibleLifecyclePlan = async (context, api, planInput, { commandId
     const reviewed = featureId && !repaired && interruptionReviews.some(item => item.feature.id === featureId)
       ? await api.scheduleInterruptionReview(plan.project.id, activeRunId, featureId, `${commandId}.partial-carryover.diagnose`) : null;
     if (featureId) state = repaired?.state ?? reviewed?.state ?? (await api.kernel.reopenFeature(plan.project.id, activeRunId,
-      { featureId, reason: 'implement-migrated-partial-continuation' },
+      { featureId, reason: reviewedHostReason(featureId) ?? 'implement-migrated-partial-continuation' },
       { expectedRevision: state.revision, commandId: `${commandId}.partial-carryover.reopen.${featureId}` })).state;
   }
   const rounds = [];
@@ -359,12 +371,12 @@ const continueVisibleLifecyclePlan = async (context, api, planInput, { commandId
       }
       for (const dispatch of requested.slice(0, physicalLimit)) {
         const compiled = await api.readDispatchPacket(plan.project.id, activeRunId, dispatch.dispatchId);
-        if (['1.4', '1.5'].includes(compiled.prompt.contractVersion)) {
-          const packetFile = assertInside(authorityStore.root, `${compiled.packet.outputRef}.dispatch-packet.json`, 'Dispatch packet transport');
-          const packetBytes = canonicalize(compiled.packet);
-          assert(sha256(packetBytes) === compiled.prompt.packetDigest, 'DISPATCH_PACKET_TRANSPORT_DIGEST_MISMATCH', 'Dispatch packet transport differs from the generated Prompt.');
-          await atomicWrite(packetFile, packetBytes, { root: authorityStore.root });
-        }
+        // Persist every immutable packet before exposing its Prompt to a Host.
+        // Transport availability must not depend on a list of Prompt versions.
+        const packetFile = assertInside(authorityStore.root, `${compiled.packet.outputRef}.dispatch-packet.json`, 'Dispatch packet transport');
+        const packetBytes = canonicalize(compiled.packet);
+        assert(sha256(packetBytes) === compiled.prompt.packetDigest, 'DISPATCH_PACKET_TRANSPORT_DIGEST_MISMATCH', 'Dispatch packet transport differs from the generated Prompt.');
+        await atomicWrite(packetFile, packetBytes, { root: authorityStore.root });
         let spawned = null;
         let runtimeReceipt = null;
         try {
@@ -469,13 +481,13 @@ const continueVisibleLifecyclePlan = async (context, api, planInput, { commandId
       let runtimeEvidence = transported.runtimeEvidence ?? {};
       let rejected = null;
       try {
-        const validatedPreview = validateBusinessResult(businessResult, { conversationVisible: true, repair: Boolean(feature?.metadata?.repairFindingId), feature });
+        const validatedPreview = validateBusinessResult(businessResult, { conversationVisible: true, repair: Boolean(feature?.metadata?.repairFindingId), feature, allowVerificationReady: true });
         const preview = await resolvePlanAmendmentResult({ state, feature, result: validatedPreview,
           workspaceRoot: state.metadata?.workspace?.root ?? plan.run.executionWorkspaceRoot });
         validateProfileResult({ profile: api.profileRegistry.get(state.profile.id), state, feature, result: preview.result });
       }
       catch (error) {
-        if (!recoverableResultCodes.has(error.code) || !['completed', 'blocked'].includes(businessResult.status) || !hostResultReceipt?.observationRequestDigest) throw error;
+        if (!recoverableResultCodes.has(error.code) || !['completed', 'blocked', 'verification-ready'].includes(businessResult.status) || !hostResultReceipt?.observationRequestDigest) throw error;
         if (error.code.startsWith('REPAIR_') && !feature?.metadata?.repairFindingId) throw error;
         if (error.code.startsWith('QUALITY_') && !feature?.metadata?.qualityReview) throw error;
         rejected = rejectVisibleResult({ error, result: businessResult, receipt: hostResultReceipt, runtimeReceipt: lease.runtimeReceipt, agentId: lease.agentId, dispatchId: dispatch.dispatchId, packetDigest: dispatch.packetDigest });

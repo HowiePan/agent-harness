@@ -9,6 +9,7 @@ import { createProcessGateExecutor } from '../platform/plugins/gate/process-gate
 import { DEFAULT_PROCESS_OUTPUTS } from '../platform/plugins/execution/managed-output.mjs';
 import { executableAvailable, toolchainInputs } from '../platform/workflow/gates/project-gate-runner.mjs';
 import { classifyFragmentedDeliveryHandoff } from '../flows/delivery-lifecycle/delivery-feedback.mjs';
+import { assertVerificationReady, completeVerifiedDelivery } from '../platform/execution/delivery-verification-ready.mjs';
 import { envelope } from '../platform/plugins/contracts.mjs';
 import { fingerprintDeliveryPaths, inspectDeliveryPaths } from './delivery-paths.mjs';
 import { resolveVerificationInputs, assertVerificationBindingStable } from './verification-input-bindings.mjs';
@@ -19,7 +20,7 @@ const manifest = { id: 'delivery-process-verification', kind: 'gate-executor', v
   execution: { outputs: DEFAULT_PROCESS_OUTPUTS, sandbox: { mode: 'optional' } } };
 
 const checkRecipe = check => ({ id: `delivery-check-${digestJson(check)}`, command: check.command,
-  cwd: check.cwd ?? '.', timeoutMs: check.timeoutMs ?? 300000 });
+  cwd: check.cwd ?? '.', timeoutMs: check.timeoutMs ?? 0 });
 
 /** Deterministic checks only. This runner cannot dispatch an Agent or implement code. */
 export const executeDeliveryCheck = async ({ check: approvedCheck, workspaceRoot, excluded = [], dataRoot, controlRoot,
@@ -101,18 +102,20 @@ export const executeDeliveryCheck = async ({ check: approvedCheck, workspaceRoot
 };
 
 export const verifyDeliveryBatchResult = async ({ state, feature, dispatch, result, workspaceRoot,
-  project, evidenceStore, dataRoot, controlRoot, onProgress = () => {} }) => {
+  project, evidenceStore, dataRoot, controlRoot, onProgress = () => {}, executeCheck = executeDeliveryCheck }) => {
   const batch = feature.metadata?.deliveryBatch;
   if (!batch) return { result, receipts: [] };
-  if (result.status !== 'completed') {
+  const ready = result.status === 'verification-ready';
+  if (ready) assertVerificationReady(result, feature);
+  if (result.status !== 'completed' && !ready) {
     const classified = classifyFragmentedDeliveryHandoff(state, feature, result);
     return { result: classified, receipts: [], ...(classified !== result ? { nativeResult: result } : {}) };
   }
-  assert(digestJson([...(result.outputs?.implement?.value?.changedFiles ?? [])].sort()) === digestJson([...result.changedFiles].sort()),
+  assert(ready || digestJson([...(result.outputs?.implement?.value?.changedFiles ?? [])].sort()) === digestJson([...result.changedFiles].sort()),
     'DELIVERY_BATCH_OUTPUT_SOURCE_MISMATCH', 'Typed delivery output must report the same actual source delta as the managed result.');
   const context = dispatch.execution.implementationContinuation;
   const claims = new Map((result.checkpoints ?? []).map(item => [item.id, item]));
-  assert(batch.obligationIds.every(id => claims.get(id)?.status === 'completed' && claims.get(id).evidence?.length),
+  assert(batch.obligationIds.every(id => claims.get(id)?.status === (ready ? 'implemented' : 'completed') && claims.get(id).evidence?.length),
     'DELIVERY_BATCH_ACCEPTANCE_INCOMPLETE', 'A completed batch requires evidence checkpoints for every assigned obligation.');
   const checks = [...batch.checks];
   if (batch.phase === 'convergence') {
@@ -129,11 +132,12 @@ export const verifyDeliveryBatchResult = async ({ state, feature, dispatch, resu
     assert([...scopeIds].every(id => covered.has(id)), 'DELIVERY_BATCH_CONVERGENCE_COVERAGE', 'Original acceptance cannot be replaced by child completion.');
   }
   const receipts = [];
-  for (const check of [...new Map(checks.map(item => [digestJson(item), item])).values()]) {
+  const approvedChecks = [...new Map(checks.map(item => [digestJson(item), item])).values()];
+  for (const check of approvedChecks) {
     const outputs = [...feature.allowedPaths, ...(feature.metadata.verificationOutputPaths ?? []), ...(project.policy?.qualityVerificationOutputs ?? [])];
     assert(check.outputs.every(path => outputs.some(root => path === root || path.startsWith(`${root}/`))),
       'DELIVERY_CHECK_OUTPUT_SCOPE', 'Verification outputs require the current Feature or declared transient-output authority.');
-    const receipt = await executeDeliveryCheck({ check, workspaceRoot, excluded: project.workspace.excluded,
+    const receipt = await executeCheck({ check, workspaceRoot, excluded: project.workspace.excluded,
       inputScope: { allowedPaths: feature.allowedPaths, forbiddenPaths: feature.forbiddenPaths },
       pinnedInputBinding: context.workBatch?.verificationInputBindings?.find(item => item.approvedCheckDigest === digestJson(check)),
       evidenceStore, dataRoot, controlRoot, forceFresh: batch.checks.includes(check) && batch.phase === 'convergence',
@@ -144,7 +148,8 @@ export const verifyDeliveryBatchResult = async ({ state, feature, dispatch, resu
     if (receipt.status !== 'passed') {
       const external = receipt.status === 'environment-failed' || receipt.status === 'budget-exceeded';
       const failedIds = new Set(receipt.check.covers);
-      return { receipts, nativeResult: result, result: { ...result, status: 'blocked', outputs: {},
+      const { verificationRequest: _request, ...failedResult } = result;
+      return { receipts, nativeResult: result, result: { ...failedResult, status: 'blocked', outputs: {},
         summary: `Delivery ${batch.id} verification failed: ${check.id}. ${result.summary}`,
         failureClass: external ? 'environment' : 'implementation-incomplete',
         blocker: { kind: external ? 'environment' : 'implementation', summary: `Host check ${check.id}: ${receipt.status}. ${(receipt.executorReceipt.payload.stderr ?? '').slice(-1500)}`,
@@ -153,5 +158,5 @@ export const verifyDeliveryBatchResult = async ({ state, feature, dispatch, resu
         observations: [...(result.observations ?? []), `Host verification evidence: ${receipt.evidenceRef}`] } };
     }
   }
-  return { result, receipts };
+  return ready ? { result: completeVerifiedDelivery(result, feature, receipts, approvedChecks), receipts, nativeResult: result } : { result, receipts };
 };

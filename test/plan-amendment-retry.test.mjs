@@ -33,6 +33,30 @@ test('a registered scope correction pins the exact unaccepted idle draft', () =>
     summary: 'Original scope', amendmentScope: state.metadata.planRevision.amendmentScope } }), null);
 });
 
+test('an output-free scope blocker can append only unfinished Features in the same approved project', () => {
+  const extended = () => {
+    const { state, input } = fixture();
+    state.projectId = 'project';
+    state.metadata.planRevision.parentPlan.proposedFeatures.push({ id: 'producer', projectId: 'project', disposition: 'project-owned' });
+    input.scope.featureIds.push('producer');
+    return { state, input };
+  };
+  const { state, input } = extended();
+  const ref = selectAmendmentRetry(input);
+  const plan = { intent: { ...input.intent, planRevision: { ...state.metadata.planRevision,
+    amendmentScope: input.scope, changeRequestDigest: digestJson(input.request), replacesAmendment: ref } } };
+  assert(matchesAmendmentRetry(state, plan));
+  for (const change of [
+    row => { row.state.metadata.planRevision.parentPlan.proposedFeatures.at(-1).projectId = 'other'; },
+    row => { row.state.submissions[0].changedFiles = ['docs/amendment/draft.json']; },
+    row => { row.state.metadata.planRevision.implementationBaselines = [{ completed: [{ proposalId: 'producer' }] }]; },
+    row => { row.input.scope.featureIds.reverse(); },
+  ]) {
+    const row = extended(); change(row);
+    assert.throws(() => selectAmendmentRetry(row.input), { code: 'PLAN_AMENDMENT_RETRY_UNSAFE' });
+  }
+});
+
 test('scope retry rejects live work, accepted output, different bases and broader identities', () => {
   for (const mutate of [
     row => row.state.leases.push({ status: 'active' }),

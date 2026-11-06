@@ -1,6 +1,7 @@
 import { mkdir, mkdtemp, rm } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { assert } from '../common/errors.mjs';
+import { applyConfiguredFileBoundary } from '../common/configured-file-boundary.mjs';
 import { assertHarnessWritePath } from '../common/write-boundary.mjs';
 import { AuthorityStore } from '../kernel/authority-store.mjs';
 import { EvidenceStore } from '../kernel/evidence-store.mjs';
@@ -44,7 +45,7 @@ export const previewDevelopmentH4Migration = async ({ plan, manifest, runId, for
   const extensions = await Promise.all(loaded.request.extensions.map(item => loadExtensionPack(item.module,
     { cwd: controlRoot, controlRoot })));
   const generator = extensions.find(item => item.id === loaded.request.project.generatorExtensionId);
-  const draft = generator.operations.createProjectDescriptor(loaded.request.project.input);
+  const draft = applyConfiguredFileBoundary(generator.operations.createProjectDescriptor(loaded.request.project.input), loaded.request.project.fileBoundary);
   const descriptor = { ...draft, harness: { version: manifest.release.version, artifactDigest: plan.after.runtimeDigest },
     extensions: (draft.extensions ?? []).map(item => {
       const installed = extensions.find(extension => extension.id === item.id);

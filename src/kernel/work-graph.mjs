@@ -2,6 +2,8 @@ import { assert } from '../common/errors.mjs';
 import { EXECUTION_CLASSES, assertExecutionClass } from '../platform/execution/boundary.mjs';
 import { slash } from '../common/paths.mjs';
 import { defineNodeTaskContract } from '../common/task-contract.mjs';
+import { projectWritersConflict } from '../common/project-file-policy.mjs';
+import { cloneJson } from '../common/clone-json.mjs';
 
 const unique = values => [...new Set(values ?? [])];
 const list = value => unique(Array.isArray(value) ? value.map(String) : []);
@@ -28,7 +30,7 @@ export const normalizeFeature = feature => ({
   conflictsWith: list(feature.conflictsWith),
   gatePlan: list(feature.gatePlan),
   attemptLimit: Number.isInteger(feature.attemptLimit) && feature.attemptLimit > 0 ? feature.attemptLimit : 3,
-  metadata: structuredClone(feature.metadata ?? {}),
+  metadata: cloneJson(feature.metadata ?? {}),
   state: feature.state ?? 'pending',
 });
 
@@ -93,14 +95,14 @@ const roundRobin = features => {
   return output;
 };
 
-export const scheduleFeatures = ({ features, activeFeatureIds = [], limit, canDispatch = () => true, candidateFeatureIds = null }) => {
+export const scheduleFeatures = ({ features, activeFeatureIds = [], limit, canDispatch = () => true, candidateFeatureIds = null, projectFilePolicy = null }) => {
   const active = activeFeatureIds.map(id => features.find(feature => feature.id === id)).filter(Boolean);
   const eligible = features.filter(feature => ['pending', 'ready'].includes(feature.state) && dependencySatisfied(feature, features) && canDispatch(feature));
   const candidates = candidateFeatureIds ? candidateFeatureIds.map(id => eligible.find(feature => feature.id === id)).filter(Boolean) : roundRobin(eligible);
   const selected = [];
   for (const feature of candidates) {
     if (selected.length >= limit) break;
-    if ([...active, ...selected].some(other => featuresConflict(feature, other))) continue;
+    if ([...active, ...selected].some(other => projectWritersConflict(feature, other, projectFilePolicy) || featuresConflict(feature, other))) continue;
     selected.push(feature);
   }
   return selected;

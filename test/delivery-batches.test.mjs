@@ -18,6 +18,39 @@ test('planned moderate deliveries compile to distinct native Features with share
   assert.match(features[0].task.instructions.join(' '), /completed planned batch|completed batch is a valid planned handoff/i);
 });
 
+test('structured approved contract and verification references compile without changing their evidence identity', () => {
+  const p = proposal();
+  p.contracts = [{ specificationRef: 'plan.json#/contracts/0' }, { specificationRef: 'plan.json#/contracts/1' }];
+  p.verification = [{ capabilityProducer: 'F01', specificationRef: 'plan.json#/verification/0' }];
+  const before = structuredClone(p);
+  const features = compile(p);
+  const final = features.at(-1);
+  assert.deepEqual(p, before);
+  assert.deepEqual(features[0].metadata.approvedProposal.contracts, p.deliveryBatches[0].acceptance);
+  assert.deepEqual(final.metadata.approvedProposal.contracts, p.contracts);
+  assert.deepEqual(final.metadata.approvedProposal.verification, p.verification);
+  assert.deepEqual(final.contracts, p.contracts.map(item => JSON.stringify(item)));
+  assert.deepEqual(final.task.acceptance, [...p.contracts.map(item => JSON.stringify(item)),
+    ...p.verification.map(item => `Verify: ${JSON.stringify(item)}`)]);
+  assert(!features.some(feature => feature.task.acceptance.some(item => item.includes('[object Object]'))));
+  const schema = final.metadata.outputValueSchemas.implement;
+  assert.deepEqual(schema.properties.completedContracts.items.enum, p.contracts);
+  assert.deepEqual(schema.properties.verificationResults.items.oneOf[0].properties.item.const, p.verification[0]);
+});
+
+test('split child convergence uses approved batch criteria when original result arrays are empty', () => {
+  const p = proposal(); p.contracts = []; p.verification = [];
+  const before = structuredClone(p);
+  const final = compile(p).at(-1);
+  const batch = p.deliveryBatches.at(-1);
+  assert.deepEqual(p, before);
+  assert.deepEqual(final.task.acceptance, [...batch.acceptance, ...batch.verification.map(value => `Verify: ${value}`)]);
+  assert.deepEqual(final.metadata.approvedProposal.contracts, []);
+  assert.deepEqual(final.metadata.approvedProposal.verification, []);
+  assert.equal(final.metadata.outputValueSchemas.implement.properties.completedContracts.maxItems, 0);
+  assert.equal(final.metadata.outputValueSchemas.implement.properties.verificationResults.maxItems, 0);
+});
+
 for (const [name, mutate, code] of [
   ['Feature oversized including repair reserve', p => p.deliveryBatchReserve = 19, 'DELIVERY_BATCH_CAPACITY'],
   ['batch oversized despite count below twenty', p => p.deliveryBatches[0].sizing.estimatedUnits = 100, 'DELIVERY_BATCH_SIZING'],

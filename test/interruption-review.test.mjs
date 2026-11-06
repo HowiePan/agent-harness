@@ -118,6 +118,35 @@ test('typed external questions cannot be relabeled as permission to continue', a
   assert.equal(hasPendingIntervention(applied.state), false);
 });
 
+test('honest unresolved and external costs block without spending a format clarification', async t => {
+  for (const classification of ['unresolved', 'external-prerequisite', 'contract-change']) {
+    const f = await fixture(t); await schedule(f); const first = await dispatchAndBind(f, 'run');
+    const result = await reviewResult(f, first, { conclusion: classification });
+    result.outputs.diagnosis.value.remainingWork[0].unknowns = [{ question: 'The prerequisite cost or authority is not established.',
+      classification, action: 'Obtain concrete source-bound reconciliation.', verification: 'Retain the original complete contract.', unitsIncluded: false }];
+    await recordResult(f, 'run', first.dispatch, result);
+    const applied = await f.harness.applyInterruptionReview(f.projectId, 'run', first.dispatch.featureId, `boundary-${classification}`);
+    const assessment = applied.state.decisions.findLast(row => row.kind === 'execution-intervention-assessment').assessment;
+    assert.equal(assessment.disposition, 'blocked');
+    assert.deepEqual(assessment.issues, []);
+    assert.equal(assessment.boundaries[0].classification, classification);
+    assert.equal(applied.state.metadata.interruptionLedger.length, 1);
+    assert.equal(applied.state.features[0].state, 'blocked');
+    assert.equal(hasPendingIntervention(applied.state), false);
+  }
+});
+
+test('ordinary uncosted work still requires clarification', async t => {
+  const f = await fixture(t); await schedule(f); const first = await dispatchAndBind(f, 'run');
+  const result = await reviewResult(f, first);
+  result.outputs.diagnosis.value.remainingWork[0].unknowns = [{ question: 'A normal check remains.',
+    classification: 'verification-pending', action: 'Run the original check.', verification: 'Keep all assertions.', unitsIncluded: false }];
+  await recordResult(f, 'run', first.dispatch, result);
+  const applied = await f.harness.applyInterruptionReview(f.projectId, 'run', first.dispatch.featureId, 'uncosted');
+  assert.equal(applied.state.metadata.interruptionLedger.length, 2);
+  assert.equal(applied.state.features.at(-1).metadata.intervention.validationFeedback.issues[0].code, 'QUESTION_DISPOSITION_REQUIRED');
+});
+
 test('a reserved clarification and original diagnosis survive formal replacement without a third reservation', async t => {
   const f = await fixture(t); await schedule(f); const first = await dispatchAndBind(f, 'run');
   await recordResult(f, 'run', first.dispatch, await reviewResult(f, first, { repairPaths: ['outside'] }));

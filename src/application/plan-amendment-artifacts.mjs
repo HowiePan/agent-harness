@@ -102,6 +102,8 @@ export const resolvePlanAmendmentResult = async ({ state, feature, result, works
 /** Compute all artifacts before writing; output bytes are deterministic and never replace a base file. */
 export const buildPlanAmendmentArtifacts = async ({ revision, patch, workspaceRoot }) => {
   const scope = validateAmendmentScope(revision.amendmentScope);
+  const sourceExitOptions = { requireDeclarations: proposal => scope.featureIds.includes(proposal.id)
+    || scope.featureIds.includes(proposal.splitFrom) };
   assertAmendmentDocumentPins(revision);
   assert(Array.isArray(patch?.documents) && patch.documents.length === scope.documents.length,
     'PLAN_AMENDMENT_DOCUMENT_INVALID', 'The delta must account for every registered document.');
@@ -122,7 +124,7 @@ export const buildPlanAmendmentArtifacts = async ({ revision, patch, workspaceRo
     }
     if (base.proposedFeatures) {
       assertAmendmentMembership(base, value, scope);
-      validateAmendmentGraph(value);
+      validateAmendmentGraph(value, sourceExitOptions);
     }
     value = rebindAmendmentReferences(value, rebindings);
     const bytes = jsonBytes(value);
@@ -132,7 +134,7 @@ export const buildPlanAmendmentArtifacts = async ({ revision, patch, workspaceRo
   }
   assert(completedPatch.changes.length + completedPatch.documents.reduce((n, item) => n + item.changes.length, 0) > 0,
     'PLAN_AMENDMENT_EMPTY', 'An empty delta is not a plan amendment.');
-  const plan = applyPlanAmendment(revision, completedPatch);
+  const plan = validateAmendmentGraph(applyPlanAmendment(revision, completedPatch), sourceExitOptions);
   const referenced = new Map(outputs.map(output => [output.path, output.value]));
   const checkReferences = value => {
     if (typeof value === 'string') {

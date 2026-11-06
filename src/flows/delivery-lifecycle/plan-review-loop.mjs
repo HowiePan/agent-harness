@@ -19,7 +19,8 @@ export const createPlanReviewFollowUps = ({ state, feature, result }) => {
   if (feature.metadata?.stage !== 'plan-review' || result.status !== 'completed') return [];
   const review = result.outputs?.['plan-review']?.value;
   if (review?.approved !== false) return [];
-  const round = feature.metadata.planReviewRound ?? 1;
+  const priorRounds = state.metadata?.planRevision?.replacesAmendment?.preservedDraft?.reviewRoundsUsed ?? 0;
+  const round = (feature.metadata.planReviewRound ?? 1) + priorRounds;
   if (round >= state.profile.config.planReviewLimit) return [];
   const plan = reviewedPlanProposal(state);
   const amendment = state.metadata?.commandIntent?.action === 'amend';
@@ -28,7 +29,7 @@ export const createPlanReviewFollowUps = ({ state, feature, result }) => {
   const planner = state.features.find(item => item.metadata?.stage === 'version-planning' && !item.metadata.planReviewRound);
   const reviewer = state.features.find(item => item.metadata?.stage === 'plan-review' && !item.metadata.planReviewRound);
   assert(planner?.task && reviewer?.task, 'PLAN_REVIEW_ROOT_FEATURE_MISSING', 'Plan review continuation requires the original planner and reviewer Features.');
-  const next = round + 1;
+  const next = (feature.metadata.planReviewRound ?? 1) + 1;
   const plannerId = `${planner.id}--review-revision-${next}`;
   const reviewerId = `${reviewer.id}--review-revision-${next}`;
   assert(!state.features.some(item => item.id === plannerId || item.id === reviewerId),

@@ -76,6 +76,23 @@ test('Gate Executor separates product failure from an executable receipt', async
   assert(progress.some(event => event.phase === 'finished' && event.status === 'passed'));
 });
 
+test('Gate Executor records a silent child timeout as a distinct environment failure', async t => {
+  const fixture = await makeFixture(); t.after(() => fixture.cleanup());
+  const manifest = { id: 'gate-timeout', kind: 'gate-executor', version: '1.0.0', capabilities: ['process'], permissions: ['gate.execute'] };
+  const events = [];
+  const executor = createProcessGateExecutor({ manifest, workspaceRoot: fixture.workspace,
+    temporaryRoot: resolve(fixture.dataRoot, 'tmp', 'gate-timeout'),
+    allowlist: [{ id: 'silent', executable: process.execPath, args: ['-e', 'setInterval(() => {}, 1000)'], timeoutMs: 300 }],
+    onProgress: event => events.push(event) });
+  const { payload } = await executor.execute({ id: 'silent-timeout', commandId: 'silent' });
+  assert.equal(payload.status, 'environment-failed');
+  assert.equal(payload.environmentError.code, 'GATE_PROCESS_TIMEOUT');
+  assert.equal(payload.environmentError.timeoutMs, 300);
+  assert.equal(payload.stdout, '');
+  assert.equal(payload.outputReceipt.status, 'cleaned');
+  assert(events.some(event => event.phase === 'process-timeout' && event.code === 'GATE_PROCESS_TIMEOUT'));
+});
+
 test('Gate Executor launches a Windows command shim and rejects shell control arguments', { skip: process.platform !== 'win32' }, async t => {
   const fixture = await makeFixture(); t.after(() => fixture.cleanup());
   const shim = resolve(fixture.root, 'gate-shim.cmd');
@@ -94,6 +111,22 @@ test('Gate Executor launches a Windows command shim and rejects shell control ar
   const packageResult = await packageGate.execute({ id: 'package-pass', commandId: 'package' });
   assert.equal(packageResult.payload.status, 'passed');
   assert.match(packageResult.payload.stdout, /pnpm:check:ci/);
+});
+
+test('Windows Gate keeps long operation IDs out of the child TEMP path', { skip: process.platform !== 'win32' }, async t => {
+  const fixture = await makeFixture(); t.after(() => fixture.cleanup());
+  const temporaryRoot = resolve(fixture.dataRoot, 'tmp', 'compact-gate');
+  const manifest = { id: 'compact-gate', kind: 'gate-executor', version: '1.0.0' };
+  const id = `delivery-check-${'a'.repeat(64)}`;
+  const executor = createProcessGateExecutor({ manifest, workspaceRoot: fixture.workspace, temporaryRoot,
+    allowlist: [{ id, executable: process.execPath, args: ['-e', 'console.log(process.env.TEMP)'] }], onProgress: () => {} });
+  const { payload } = await executor.execute({ id, commandId: id });
+  assert.equal(payload.status, 'passed');
+  assert(payload.outputReceipt.operationId.startsWith(`${id}-`));
+  const childTemp = payload.stdout.trim();
+  assert.equal(resolve(childTemp, '..', '..'), temporaryRoot);
+  assert(childTemp.length < resolve(temporaryRoot, payload.outputReceipt.operationId, 'temporary').length - 50);
+  await assert.rejects(() => access(childTemp), error => error.code === 'ENOENT');
 });
 
 test('Gate Executor enforces declared output budgets and cleans before returning', async t => {

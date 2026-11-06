@@ -3,6 +3,7 @@ import { digestAmendmentJson as digestJson, stringifyAmendmentJson } from './ame
 import { assert } from '../../common/errors.mjs';
 import { assertAmendmentMembership, validateFeatureSplitScope } from './amendment-feature-splits.mjs';
 import { readAmendmentReference } from './amendment-reference.mjs';
+import { validatePlanSourceExits } from './plan-source-exits.mjs';
 
 export const AMENDMENT_VERSION = 'plan-amendment/1';
 const hash = value => /^[a-f0-9]{64}$/.test(value ?? '');
@@ -96,20 +97,35 @@ export const validateAmendmentScope = scope => {
   return scope;
 };
 
-export const validateAmendmentGraph = plan => {
+export const validateAmendmentGraph = (plan, sourceExitOptions) => {
   const proposals = plan?.proposedFeatures;
   assert(Array.isArray(proposals) && proposals.length > 0, 'PLAN_AMENDMENT_GRAPH_INVALID', 'A complete proposal graph is required.');
   const keys = new Set(proposals.map(item => `${item.projectId}/${item.id}`));
   assert(keys.size === proposals.length, 'PLAN_AMENDMENT_GRAPH_INVALID', 'Proposal identities must be unique.');
   for (const projectId of new Set(proposals.map(item => item.projectId))) {
     const pending = new Map(proposals.filter(item => item.projectId === projectId).map(item => [item.id, item]));
+    for (const item of pending.values()) {
+      assert(Array.isArray(item.dependsOn), 'PLAN_AMENDMENT_GRAPH_INVALID', `${item.id} needs an explicit dependency list.`);
+      for (const dependency of item.dependsOn) assert(pending.has(dependency), 'PLAN_AMENDMENT_GRAPH_INVALID',
+        `${item.id} depends on a missing or cross-project proposal: ${dependency}.`);
+    }
     const complete = new Set();
     while (pending.size) {
-      const ready = [...pending.values()].find(item => Array.isArray(item.dependsOn) && item.dependsOn.every(id => complete.has(id)));
-      assert(ready, 'PLAN_AMENDMENT_GRAPH_INVALID', 'Amendment introduces a cycle, missing producer or cross-project dependency.');
+      const ready = [...pending.values()].find(item => item.dependsOn.every(id => complete.has(id)));
+      if (!ready) {
+        const path = new Map();
+        let id = pending.keys().next().value;
+        while (!path.has(id)) {
+          path.set(id, path.size);
+          id = pending.get(id).dependsOn.find(dependency => pending.has(dependency));
+        }
+        const cycle = [...path.keys()].slice(path.get(id)).concat(id);
+        assert(false, 'PLAN_AMENDMENT_GRAPH_INVALID', `Proposal cycle in ${projectId}: ${cycle.join(' -> ')}.`);
+      }
       pending.delete(ready.id); complete.add(ready.id);
     }
   }
+  validatePlanSourceExits(proposals, sourceExitOptions);
   return plan;
 };
 

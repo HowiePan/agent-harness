@@ -1,4 +1,5 @@
 import { assert } from '../common/errors.mjs';
+import { applyConfiguredFileBoundary } from '../common/configured-file-boundary.mjs';
 import { digestJson } from '../common/canonical.mjs';
 import { captureWorkspace } from '../common/workspace-snapshot.mjs';
 import { AuthorityStore } from '../kernel/authority-store.mjs';
@@ -18,7 +19,7 @@ export const freezeDevelopmentPlanningTransition = async ({ plan, manifest, prev
   const extensions = await Promise.all(config.request.extensions.map(item => loadExtensionPack(item.module,
     { cwd: manifest.controlRoot, controlRoot: manifest.controlRoot })));
   const generator = extensions.find(item => item.id === config.request.project.generatorExtensionId);
-  const descriptor = generator.operations.createProjectDescriptor(config.request.project.input);
+  const descriptor = applyConfiguredFileBoundary(generator.operations.createProjectDescriptor(config.request.project.input), config.request.project.fileBoundary);
   const snapshot = await captureWorkspace(manifest.projectRoot, { excluded: descriptor.workspace.excluded ?? [] });
   assert(snapshot.digest === preview.inspection.workspaceSourceDigest
     && digestJson(descriptor.policy.planChangeRequests[preview.inspection.selector]) === preview.inspection.changeRequestDigest,

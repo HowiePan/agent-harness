@@ -1,5 +1,5 @@
 import { readFileSync } from 'node:fs';
-import { digestJson, withoutKeys } from '../common/canonical.mjs';
+import { digestJson, digestJsonOmitting, withoutKeys } from '../common/canonical.mjs';
 import { assert } from '../common/errors.mjs';
 import { assertJsonSchema } from '../common/json-schema.mjs';
 import { safeSegment } from '../common/paths.mjs';
@@ -17,7 +17,7 @@ const schemas = new Map([['feature.schema.json', featureSchema], ['node-task-con
 
 const slug = value => String(value).toLowerCase().replace(/[^a-z0-9._-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 48) || 'target';
 
-export const lifecyclePlanDigest = plan => digestJson(withoutKeys(plan, ['planDigest']));
+export const lifecyclePlanDigest = plan => digestJsonOmitting(plan, ['planDigest']);
 
 export const deriveLogicalTaskKey = ({ projectId, intent, executionWorkspaceRoot, workspaceIdentity = null, workspaceRef = null }) => digestJson({
   projectId,

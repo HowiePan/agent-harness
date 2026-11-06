@@ -1,4 +1,5 @@
 import { readdir } from 'node:fs/promises';
+import { readVerifiedRunHistory, readVerifiedRunRecord } from './authority-history-reader.mjs';
 import { resolve } from 'node:path';
 import { assert } from '../common/errors.mjs';
 import { captureWorkspace, diffWorkspaceSnapshots } from '../common/workspace-snapshot.mjs';
@@ -12,13 +13,18 @@ import { createHarness } from './harness.mjs';
 import { ExtensionRegistry } from '../platform/extensions/registry.mjs';
 import { CodexHostEffectJournal } from './codex-host-effect-journal.mjs';
 import { validateBusinessResult } from '../platform/execution/result-contract.mjs';
+import { prepareDevelopmentCoordinationReview,reviewDevelopmentCoordination,rebindDevelopmentCoordinationReview } from './development-coordination-review.mjs';
 import { expandApprovedImplementation } from '../flows/delivery-lifecycle/approved-implementation.mjs';
 import { createCompletionCarryoverPlan, verifyCompletionCarryover } from '../kernel/completion-carryover.mjs';
 import { assertPlanningReplacementScope, developmentRecoveryArguments, isPlanningRecovery } from './development-planning-recovery.mjs';
 import { recoverInterruptedWorkspace, readInterruptedWorkspaceDraft } from './interrupted-workspace-recovery.mjs';
 import { approvedBudgetExtensionProgress, approvedPostPatchBudgetProgress } from './development-budget-migration.mjs';
 import { environmentBlockedFeatures, reviewDevelopmentEnvironment } from './development-environment-review.mjs';
+import { reviewDevelopmentHostCheck } from './development-host-check-review.mjs';
 import { assertDeliveryOutputRejection, inspectDeliveryOutputRejection } from './delivery-output-rejection.mjs';
+import { createAmendmentReviewRecoveryPlan, interruptedAmendmentReviewDraft, interruptedAmendmentTransportDraft } from './development-amendment-review-recovery.mjs';
+import { validateLifecycleCommandPlan } from './lifecycle-command-plan.mjs';
+import {inspectPendingConfigurationRebase} from './development-configuration-rebase.mjs';
 
 const activeLeaseIds = state => state.leases.filter(lease => lease.status === 'active').map(lease => lease.leaseId).sort();
 const activeDispatchIds = state => state.dispatches.filter(dispatch => ['requested', 'assigned'].includes(dispatch.status)).map(dispatch => dispatch.dispatchId).sort();
@@ -234,15 +240,23 @@ export const assertDispatchSourceSnapshotEvidence = ({ evidence, state, dispatch
 
 export const planningRecoverySnapshots = async ({ state, plan, project, evidenceStore }) => {
   const running = state.features.filter(feature => feature.state === 'running');
-  assert(running.length === 1 && running[0].metadata?.stage === 'version-planning',
+  const reviewDraft = interruptedAmendmentReviewDraft(state);
+  const transportDraft = interruptedAmendmentTransportDraft(state);
+  assert(transportDraft || running.length === 1 && (running[0].metadata?.stage === 'version-planning' || reviewDraft),
     'DEVELOPMENT_PLANNING_RECOVERY_DISPATCH_REQUIRED', 'Planning recovery requires exactly one interrupted planning Feature.');
-  const dispatches = state.dispatches.filter(dispatch => dispatch.featureId === running[0].id
+  const feature = transportDraft ? state.features.find(row => row.metadata?.stage === 'version-planning') : running[0];
+  const dispatches = state.dispatches.filter(dispatch => dispatch.featureId === feature.id
     && dispatch.sourceDigest === state.sourceDigest && dispatch.sourceSnapshotRef);
   assert(dispatches.length === 1, 'DEVELOPMENT_PLANNING_RECOVERY_DISPATCH_REQUIRED',
     'Planning recovery requires the exact interrupted source snapshot.');
   const dispatch = dispatches[0];
   const before = assertDispatchSourceSnapshotEvidence({ evidence: await evidenceStore.read(dispatch.sourceSnapshotRef), state, dispatch });
   const after = await captureWorkspace(state.metadata.workspace.root, { excluded: project.workspace.excluded ?? [] });
+  if (reviewDraft) {
+    const { verifyBlockedDraftArtifacts } = await import('./plan-amendment-draft-artifacts.mjs');
+    await verifyBlockedDraftArtifacts({ drafts: [state], snapshot: after, evidenceStore,
+      artifactRoot: state.metadata.planRevision.amendmentScope.artifactRoot });
+  }
   assertPlanningReplacementScope({ retired: state, plan, project, before, after });
   return { before, after };
 };
@@ -427,9 +441,20 @@ export const recoverDevelopmentRun = async ({ manifestFile, runId, commandId, cw
     evidenceStore: harness.evidenceStore, controlRoot: manifest.controlRoot, dataRoot: manifest.dataRoot,
     commandId: `${commandId}.interrupted-source`, patchReceiptDigest: receipt.receiptDigest });
   const extension = selectDevelopmentRecoveryExtension({ state, intent, project, installedExtensions });
-  const plan = await harness.createLifecyclePlan({ projectId, extensionId: extension.id, workflowId: intent.workflowId,
-    profileId: intent.profileId, action: intent.action, target: intent.target,
-    arguments: developmentRecoveryArguments(intent), executionWorkspaceRoot: state.metadata.workspace.root });
+  if(environmentReview?.kind==='delivery-coordination-review') {
+    onEnvironmentProgress?.({phase:'coordination-input-preflight',status:'checking',runId});
+    await prepareDevelopmentCoordinationReview({state,project,review:environmentReview,authorityStore:harness.authorityStore,evidenceStore:harness.evidenceStore});
+    onEnvironmentProgress?.({phase:'coordination-input-preflight',status:'verified',runId});
+  }
+  const plan = (interruptedAmendmentReviewDraft(state) || interruptedAmendmentTransportDraft(state)) && ['H2', 'H3'].includes(receipt.level)
+    ? await createAmendmentReviewRecoveryPlan({ state, project, extension, releaseIdentity,
+      snapshot: await captureWorkspace(state.metadata.workspace.root, { excluded: project.workspace.excluded ?? [] }),
+      patchReceiptDigest: receipt.receiptDigest, authorityStore: harness.authorityStore, evidenceStore: harness.evidenceStore,
+      executionConstraintDigest: state.metadata.lifecycleExecution.executionConstraintDigest,
+      sourceToolBinding: state.metadata.sourceToolBinding ?? null })
+    : await harness.createLifecyclePlan({ projectId, extensionId: extension.id, workflowId: intent.workflowId,
+      profileId: intent.profileId, action: intent.action, target: intent.target,
+      arguments: developmentRecoveryArguments(intent), executionWorkspaceRoot: state.metadata.workspace.root });
   assert(plan.logicalTaskKey === state.metadata.logicalTaskKey && plan.run.runId !== runId && plan.planDigest !== state.metadata.lifecyclePlanDigest,
     'DEVELOPMENT_RUN_REPLACEMENT_INVALID', 'The current source did not produce a distinct Plan for the same logical task.');
   const planningSource = isPlanningRecovery(state)
@@ -491,7 +516,20 @@ export const recoverDevelopmentRun = async ({ manifestFile, runId, commandId, cw
       evidenceStore: harness.evidenceStore, authorityStore: harness.authorityStore });
     completionCarryover = { plan: carryoverPlan, replacementPlan: plan };
   }
-  if (environmentBlockedFeatures(state).length > 0) {
+  if (environmentReview?.kind === 'delivery-coordination-review') {
+    onEnvironmentProgress?.({phase:'coordination-capability',status:'checking',runId});
+    assert(completionCarryover?.plan?.progressOnly, 'DEVELOPMENT_COORDINATION_REVIEW_INVALID',
+      'Coordination restoration requires verified partial implementation carry-over.');
+    completionCarryover.environmentReview = await reviewDevelopmentCoordination({state,project,review:environmentReview,
+      carryover:completionCarryover.plan,authorityStore:harness.authorityStore,evidenceStore:harness.evidenceStore});
+    onEnvironmentProgress?.({phase:'coordination-capability',status:'verified',runId});
+  } else if (environmentReview?.kind === 'delivery-host-check-review') {
+    assert(completionCarryover?.plan?.progressOnly, 'DEVELOPMENT_HOST_CHECK_REVIEW_INVALID',
+      'Host check review requires sealed partial implementation carry-over.');
+    completionCarryover.environmentReview = await reviewDevelopmentHostCheck({ state, project,
+      review: environmentReview, carryover: completionCarryover.plan, evidenceStore: harness.evidenceStore,
+      dataRoot: manifest.dataRoot, controlRoot: manifest.controlRoot, onProgress: onEnvironmentProgress });
+  } else if (environmentBlockedFeatures(state).length > 0) {
     assert(completionCarryover, 'DEVELOPMENT_ENVIRONMENT_REVIEW_INVALID',
       'Environment recovery requires the sealed implementation completion carry-over.');
     completionCarryover.environmentReview = await reviewDevelopmentEnvironment({ state, project,
@@ -501,10 +539,12 @@ export const recoverDevelopmentRun = async ({ manifestFile, runId, commandId, cw
   // Check the replacement Plan before fencing any Host effect. A source or
   // scope mismatch must leave the old Agent and Run untouched.
   if (state.dispatches.length > 0 || state.leases.length > 0) {
+    onEnvironmentProgress?.({phase:'host-effect-fence',status:'checking',runId});
     const hostContract = state.leases.find(lease => lease.runtimeReceipt?.hostSpawnReceipt)?.runtimeReceipt.hostSpawnReceipt.contract;
     assert(hostContract, 'DEVELOPMENT_RUN_HOST_CONTRACT_REQUIRED', 'Recovery requires the bound Host contract.');
     const effects = new CodexHostEffectJournal({ controlRoot: manifest.controlRoot, dataRoot: manifest.dataRoot, contract: hostContract });
-    assertDevelopmentRunRecoveryEffects(state, await effects.list());
+    assertDevelopmentRunRecoveryEffects(state, await effects.list({include:effect=>effect.binding?.projectId===state.projectId&&effect.binding?.runId===state.runId}));
+    onEnvironmentProgress?.({phase:'host-effect-fence',status:'verified',runId});
   }
   let draftEvidence = null;
   if (planningSource) {
@@ -519,6 +559,7 @@ export const recoverDevelopmentRun = async ({ manifestFile, runId, commandId, cw
       sourceDigest: state.sourceDigest, artifactDigest: state.artifactDigest, policyDigest: state.policyDigest,
       pluginSetDigest: state.pluginSetDigest, labels: ['unaccepted-planning-draft'] });
   }
+  onEnvironmentProgress?.({phase:'supersede-run',status:'checking',runId});
   const retired = await harness.kernel.supersedeRun(projectId, runId, {
     replacementRunId: plan.run.runId, planDigest: plan.planDigest,
     reason: `development-${receipt.level.toLowerCase()}-recovery:${receipt.receiptDigest}`,
@@ -545,7 +586,7 @@ export const pendingCarryoverRefreshOriginValid = (prior, receipt = null) => {
 };
 
 /** Re-seal an unstarted replacement after a later source-link rebind. */
-export const refreshPendingDevelopmentCarryover = async ({ manifestFile, commandId, cwd = process.cwd() }) => {
+export const refreshPendingDevelopmentCarryover = async ({ manifestFile, commandId, cwd = process.cwd(), configurationBaselineRef = null }) => {
   assert(commandId, 'COMMAND_ID_REQUIRED', 'Pending carry-over refresh requires a command ID.');
   const { manifest, releaseIdentity } = await verifyDevelopmentSourceManifest(manifestFile);
   await createLocalDevelopmentInvocation({ projectRoot: manifest.projectRoot, configPath: manifest.configPath,
@@ -557,13 +598,20 @@ export const refreshPendingDevelopmentCarryover = async ({ manifestFile, command
     extensions: installedExtensions, strictProjectIdentity: false, initializeStorage: false });
   const projectId = config.request.binding.projectId;
   const project = await harness.projectRegistry.get(projectId);
-  const states = await harness.authorityStore.list(projectId);
-  const pending = states.filter(state => state.status === 'superseded'
-    && state.metadata?.completionCarryover?.replacementPlan
-    && !states.some(candidate => candidate.runId === state.metadata.supersededByRunId));
+  const knownRunIds = new Set();
+  const candidates = [];
+  await readVerifiedRunHistory(harness.authorityStore, projectId, { include: state => {
+    knownRunIds.add(state.runId);
+    if (state.status === 'superseded' && state.metadata?.completionCarryover?.replacementPlan) candidates.push({
+      runId: state.runId, replacementRunId: state.metadata.supersededByRunId, authorityDigest: state.authorityDigest });
+    return false;
+  } });
+  const pending = candidates.filter(state => !knownRunIds.has(state.replacementRunId));
   assert(pending.length <= 1, 'CARRYOVER_PENDING_AMBIGUOUS', 'More than one retired Run has an unstarted replacement Plan.');
-  const prior = pending[0];
-  if (!prior) return null;
+  if (!pending.length) return null;
+  const prior = await readVerifiedRunRecord(harness.authorityStore, projectId, pending[0].runId);
+  assert(prior.authorityDigest === pending[0].authorityDigest,
+    'AUTHORITY_HISTORY_CHANGED', 'Pending carry-over changed while loading its selected history.');
   let originReceipt = null;
   if (prior.metadata.supersededReason?.startsWith('development-h4-recovery:')) {
     const patchRoot = resolve(manifest.dataRoot, 'development', 'patches');
@@ -585,35 +633,50 @@ export const refreshPendingDevelopmentCarryover = async ({ manifestFile, command
   'CARRYOVER_REFRESH_CLAIM_INVALID', 'Retired Run and its sealed replacement claim differ.');
   const typedPlan = prior.metadata.approvedPlan?.typedPlan;
   assert(typedPlan, 'CARRYOVER_APPROVED_PLAN_REQUIRED', 'Pending implementation carry-over requires its approved plan.');
-  const previousFeatures = expandApprovedImplementation({ features: previous.replacementPlan.run.features, typedPlan, projectId, approvalBinding: prior.metadata.approvedPlan });
-  await verifyCompletionCarryover({ plan: previous.plan, prior, replacementFeatures: previousFeatures,
-    evidenceStore: harness.evidenceStore, authorityStore: harness.authorityStore });
+  await (async()=>{
+    const sealed=validateLifecycleCommandPlan(previous.replacementPlan);
+    assert(sealed.workflow.artifactDigest===previous.plan.replacementWorkflowDigest,
+      'CARRYOVER_REFRESH_CLAIM_INVALID','The sealed replacement Workflow differs from its carry-over proof.');
+    // Verify the old sealed graph from its original Authority, rather than
+    // compiling it again with a newer Runtime. Only the already sealed Workflow
+    // artifact rebinding is applied; Kernel checks the entire immutable graph.
+    const previousFeatures=prior.features.map(feature=>feature.metadata?.stage==='implementation'?{
+      ...feature,metadata:{...feature.metadata,workflow:{...feature.metadata.workflow,artifactDigest:sealed.workflow.artifactDigest}},
+    }:feature);
+    await verifyCompletionCarryover({ plan: previous.plan, prior, replacementFeatures: previousFeatures,
+      evidenceStore: harness.evidenceStore, authorityStore: harness.authorityStore });
+  })();
+  const configurationRebase = await inspectPendingConfigurationRebase({prior,project,evidenceStore:harness.evidenceStore,baselineRef:configurationBaselineRef});
+  const carryoverSource = configurationRebase ? {...prior,sourceDigest:configurationRebase.toSourceDigest} : prior;
   const plan = await harness.createLifecyclePlan({ projectId, extensionId: extension.id, workflowId: intent.workflowId,
     profileId: intent.profileId, action: intent.action, target: intent.target,
     arguments: intent.preset === 'default' ? [] : [intent.preset], executionWorkspaceRoot: prior.metadata.workspace.root },
   { ignorePendingCompletionCarryover: true });
   if (plan.planDigest === previous.replacementPlan.planDigest) return null;
-  assert(plan.logicalTaskKey === prior.metadata.logicalTaskKey && plan.run.sourceDigest === prior.sourceDigest
-    && plan.run.runId !== prior.runId && !states.some(state => state.runId === plan.run.runId),
+  assert(plan.logicalTaskKey === prior.metadata.logicalTaskKey && plan.run.sourceDigest === carryoverSource.sourceDigest
+    && plan.run.runId !== prior.runId && !knownRunIds.has(plan.run.runId),
   'CARRYOVER_REFRESH_REPLACEMENT_INVALID', 'Current Plan cannot safely replace the unstarted claim.');
   const replacementFeatures = expandApprovedImplementation({ features: plan.run.features, typedPlan, projectId, approvalBinding: prior.metadata.approvedPlan });
-  const carryoverPlan = createCompletionCarryoverPlan({ prior: { ...prior, status: 'ready' }, replacementFeatures,
+  const carryoverPlan = createCompletionCarryoverPlan({ prior: { ...carryoverSource, status: 'ready' }, replacementFeatures,
     replacementRunId: plan.run.runId, replacementPlanDigest: plan.planDigest,
     patchReceiptDigest: previous.plan.patchReceiptDigest, sourceDigest: plan.run.sourceDigest,
     includeIncomplete: previous.plan.progressOnly === true });
-  await verifyCompletionCarryover({ plan: carryoverPlan, prior, replacementFeatures,
+  await verifyCompletionCarryover({ plan: carryoverPlan, prior:carryoverSource, replacementFeatures,
     evidenceStore: harness.evidenceStore, authorityStore: harness.authorityStore });
   const output = { projectId, priorRunId: prior.runId, priorReplacementRunId: previous.plan.replacementRunId,
     replacementRunId: plan.run.runId, firstPendingFeatureId: carryoverPlan.firstPendingFeatureId,
-    carryoverDigest: carryoverPlan.carryoverDigest };
+    carryoverDigest: carryoverPlan.carryoverDigest,...(configurationRebase?{configurationRebase}:{}) };
+  const environmentReview=previous.environmentReview?await rebindDevelopmentCoordinationReview({prior,carryover:carryoverPlan,evidenceStore:harness.evidenceStore}):null;
   await harness.authorityStore.transact(projectId, prior.runId,
     { expectedRevision: prior.revision, commandId, payload: output }, state => {
       assert(state.status === 'superseded' && state.metadata.supersededByRunId === previous.plan.replacementRunId
         && state.metadata.completionCarryover.plan.carryoverDigest === previous.plan.carryoverDigest,
       'CARRYOVER_REFRESH_AUTHORITY_CHANGED', 'Pending replacement changed before refresh.');
       state.metadata.supersededByRunId = plan.run.runId;
+      if(configurationRebase){state.sourceDigest=configurationRebase.toSourceDigest;
+        state.metadata.configurationRebase=configurationRebase;state.evidenceRefs.push(configurationRebase.evidenceRef);}
       state.metadata.supersedePlanDigest = plan.planDigest;
-      state.metadata.completionCarryover = { plan: carryoverPlan, replacementPlan: plan };
+      state.metadata.completionCarryover = { plan: carryoverPlan, replacementPlan: plan,...(environmentReview?{environmentReview}:{}) };
       state.events.push({ sequence: state.events.length + 1, type: 'feature.completion-carryover-refreshed',
         at: new Date().toISOString(), epoch: state.epoch, generation: state.generation,
         previousReplacementRunId: previous.plan.replacementRunId, replacementRunId: plan.run.runId,

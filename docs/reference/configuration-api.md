@@ -1,5 +1,9 @@
 # Agent Harness 配置 API 参考
 
+`harness.json` 的 `schemaVersion: "1.1"` 必须声明 `project.fileBoundary`：`version: "project-boundary/1"`，以及 `sourceRoots`（所属源码目录，非空）、`sharedPaths`（明确共享文件/目录）、`artifactRoots`（构建及验证产物）、`protectedPaths`（硬保护范围）。路径相对 binding.workspaceRoot；禁止绝对路径、父目录穿越、通配符及产物与源码/保护范围交叠。通用 Bootstrap 将其生成到 Descriptor，固化后供 Run/Dispatch 使用；模板不能扩大显式配置。旧 1.0 配置维持兼容。
+
+项目文件策略通过 `policy.projectFilePolicy` 登记：`version: "project-files/1"`、`mode: "project-owned"`、`roots`（相对项目执行 checkout 的明确所属目录或文件，不能为空）、`protectedPaths`（硬保护路径，可为空）。`allowedPaths` 与 `forbiddenPaths` 在新策略下是内部规划参考；跨参考路径修改自动记录原因，可提供 `scopeAdjustments` 细化，不能跨越所属项目。旧 Run 未配置策略时保留原严格合同。配置示例、冲突调度、只读与迁移规则见[项目内持续执行](../guides/project-execution.md)。
+
 本文是 V1.0.0 配置面的完整契约。它面向只有安装包、没有源码的接入方，说明“是什么、有什么、能做什么、怎么做、不能做什么”。Schema 是机器契约，本文是字段语义、默认值、运行原理和操作边界的规范说明。
 
 ## 1. 配置对象与生效顺序
@@ -372,7 +376,7 @@ Delivery Profile 还使用 `requireCanonicalDecision`、`requireUserCodeReview`�
 | `required` | 否 | 默认由 Planner 解释为 required | 是否进入必过集合。 |
 | `forceFresh` | 否 | boolean | 要求当前来源上重新执行；final Gate 通常为 `true`。 |
 | `cwd` | 否 | 相对工作区路径 | 执行目录。 |
-| `timeoutMs` | 否 | 正整数 | 超时毫秒数。 |
+| `timeoutMs` | 否 | 0 或正整数 | 默认 0，无总时长截止；正整数是显式截止毫秒数，上限 2147468647。观察窗口与任务寿命分离，资源保护继续生效。 |
 | `environment` | 否 | 字符串映射 | 明确环境变量；不是继承全部宿主环境的开关。 |
 | `outputs` | 否 | Managed Output 数组 | 声明临时、Evidence、Cache 或 Artifact 输出预算。 |
 | `sandboxMode` | 否 | `optional` 或 `required` | OS sandbox 要求；`required` 且无 Provider 时失败。 |

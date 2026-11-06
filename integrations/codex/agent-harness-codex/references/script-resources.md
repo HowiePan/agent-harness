@@ -1,0 +1,9 @@
+# Helper script resource boundary
+
+Before authoring or running helper scripts, resolve the verified Harness control/runtime root from the existing binding. Read its `docs/guides/script-resources.md`; use its `scripts/run-bounded-script.mjs --request <request.json>` entrypoint. Do not invent a new binding, use a different runtime, or start a lifecycle command to resolve this path.
+
+`bounded-script/1` requires serial, checkpointed execution: at most 128 exact input files / 32 MiB, 128 KiB script, 512 MiB process-tree memory, 25% host CPU, 4 processes and 1 MiB combined stdout/stderr. There is no default total duration deadline; `timeoutMs: 0` means none, a positive integer is an explicitly requested deadline. Observe long-running work and diagnose missing progress; elapsed time or silence alone is not failure. Split larger inputs and stream records; preserve completed shards. Do not launch helper scripts directly, detached or through an Agent CLI. A resource failure requires a smaller shard or streaming repair before one bounded retry; do not repeat unchanged, increase resource limits or bypass enforcement. Keep approved development batches and acceptance intact.
+
+The Windows Job supervisor must be available; unavailable enforcement blocks that script. Scripts cannot recursively invoke a Gate holding the same resource slot. Gates run separately under their existing coordinator contract and resource policy. Safe bounded inspection and authorized maintenance can continue; no new execution or write authority is granted by this entrypoint. A stale resource slot requires owner/descendant containment evidence before precise cleanup.
+
+This contract constrains cooperative Host tool use; it is not a global native-tool interception mechanism. Old immutable prompts do not gain new prose. Apply Runtime changes through H0–H4 binding and recovery before new Dispatches; never inject them into a live Lease.

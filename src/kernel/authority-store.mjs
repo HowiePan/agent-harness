@@ -1,12 +1,13 @@
 import { mkdir, readdir } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
-import { digestJson, newId, withoutKeys } from '../common/canonical.mjs';
+import { digestJson, digestJsonOmitting, newId } from '../common/canonical.mjs';
 import { assert, fail } from '../common/errors.mjs';
 import { safeSegment } from '../common/paths.mjs';
 import { atomicWriteJson, readJson, withDirectoryLock } from './atomic-io.mjs';
 import { assertHarnessWritePath } from '../common/write-boundary.mjs';
+import { cloneJson } from '../common/clone-json.mjs';
 
-const authorityDigest = state => digestJson(withoutKeys(state, ['authorityDigest']));
+const authorityDigest = state => digestJsonOmitting(state, ['authorityDigest']);
 
 export class AuthorityStore {
   constructor({ root, controlRoot, now = () => new Date().toISOString() }) {
@@ -73,7 +74,7 @@ export class AuthorityStore {
       }
       const at = this.now();
       const state = {
-        ...structuredClone(initialState),
+        ...cloneJson(initialState),
         revision: 1,
         createdAt: initialState.createdAt ?? at,
         updatedAt: at,
@@ -99,7 +100,7 @@ export class AuthorityStore {
       }
       assert(Number.isInteger(expectedRevision), 'EXPECTED_REVISION_REQUIRED', 'A numeric expected revision is required.');
       assert(current.revision === expectedRevision, 'REVISION_CONFLICT', 'Authority revision changed before the command could commit.', { expected: expectedRevision, actual: current.revision });
-      const next = structuredClone(current);
+      const next = cloneJson(current);
       const result = await mutate(next);
       const at = this.now();
       next.revision = current.revision + 1;

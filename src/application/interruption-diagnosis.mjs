@@ -2,6 +2,7 @@ import { readFile, stat } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { sha256 } from '../common/canonical.mjs';
 import { assertNoLinkPath } from '../common/paths.mjs';
+import { assertFeatureFileAccess } from '../common/project-file-policy.mjs';
 
 const fileSchema = { type: 'object', required: ['path', 'sha256'], additionalProperties: false,
   properties: { path: { type: 'string', minLength: 1 }, sha256: { type: 'string', pattern: '^[a-f0-9]{64}$' } } };
@@ -33,7 +34,7 @@ const inScope = (feature, path) => projectPath(path)
   && !feature.forbiddenPaths.some(root => path === root || path.startsWith(`${root}/`));
 
 /** Model recommendation defects are feedback, never evidence of lost Authority. */
-export const assessDiagnosis = async ({ value, parent, snapshot, workspaceRoot, evidenceStore, evidenceContext }) => {
+export const assessDiagnosis = async ({ value, parent, snapshot, workspaceRoot, evidenceStore, evidenceContext, projectFilePolicy = null }) => {
   const issues = [], observations = [], boundaries = [];
   for (const item of value.evidence) {
     if (!snapshot.files.some(file => file.path === item.path && file.sha256 === item.sha256)) {
@@ -60,10 +61,17 @@ export const assessDiagnosis = async ({ value, parent, snapshot, workspaceRoot, 
       labels: ['diagnostic-observation'], observedPath: item.path, acceptanceCredit: false });
     observations.push({ ...item, evidenceRef: stored.ref, acceptanceCredit: false });
   }
-  for (const path of value.repairPaths) if (!inScope(parent, path)) issues.push({ code: 'REPAIR_SCOPE_EXPANSION', path,
-    instruction: 'Retain original write authority; classify a necessary scope change as contract-change instead of granting it.' });
+  for (const path of value.repairPaths) {
+    let permitted = inScope(parent, path);
+    if (projectFilePolicy) {
+      try { assertFeatureFileAccess({ feature: parent, policy: projectFilePolicy, path, workspaceRoot }); permitted = true; }
+      catch { permitted = false; }
+    }
+    if (!permitted) issues.push({ code: 'REPAIR_SCOPE_EXPANSION', path,
+      instruction: 'Repair only within project-owned roots and retained acceptance; external writes require explicit authority.' });
+  }
   for (const [index, work] of value.remainingWork.entries()) for (const question of work.unknowns) {
-    if (typeof question === 'string' || !question.unitsIncluded) issues.push({ code: 'QUESTION_DISPOSITION_REQUIRED', workIndex: index,
+    if (typeof question === 'string' || ['in-scope-work', 'verification-pending'].includes(question.classification) && !question.unitsIncluded) issues.push({ code: 'QUESTION_DISPOSITION_REQUIRED', workIndex: index,
       instruction: 'Classify each question. Ordinary work or pending verification requires a concrete in-scope action, retained verification and cost already included in this work estimate. Do not relabel unresolved authorization or prerequisites as ordinary work.' });
     else if (!['in-scope-work', 'verification-pending'].includes(question.classification)) boundaries.push({ workIndex: index, ...question });
   }

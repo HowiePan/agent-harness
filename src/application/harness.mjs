@@ -25,10 +25,12 @@ import { installExtensionPacks } from '../platform/extensions/contract.mjs';
 import { resolveCommandIntent } from '../platform/extensions/command-contract.mjs';
 import { createLifecycleCommandPlan, validateLifecycleCommandPlan } from './lifecycle-command-plan.mjs';
 import { selectBlockedResumeFeature } from './lifecycle-resume.mjs';
+import { inspectDevelopmentHostCheckReview } from './development-host-check-review.mjs';
 import { inspectVerificationInputRepairs, applyVerificationInputRepair } from './verification-input-recovery.mjs';
 import { reviewableInterruptions, hasPendingIntervention, scheduleInterruptionReview, applyInterruptionReview, isBoundIntervention } from './interruption-review.mjs';
 import { verifyInterruptedImplementationResume, isInterruptedImplementationSubmission } from './lifecycle-interruption.mjs';
 import { buildImplementationContinuation } from './implementation-continuation.mjs';
+import { prepareImplementationEvidenceInputs } from './implementation-evidence-inputs.mjs';
 import { verifyDeliveryBatchResult } from './delivery-verification.mjs';
 import { withVerificationLease } from './delivery-verification-lease.mjs';
 import { resolveCarryoverApproval, readCarryoverApprovalSnapshot } from './implementation-carryover-approval.mjs';
@@ -42,6 +44,7 @@ import { verifyPlanningPredecessor } from './version-predecessor-gate.mjs';
 import { assessPlanArchiveSourceCompatibility, ensureProjectPlanArchive } from './plan-archive.mjs';
 import { reconcilePlanReviewFindings } from './plan-review-reconciliation.mjs';
 import { captureWorkspace, diffWorkspaceSnapshots } from '../common/workspace-snapshot.mjs';
+import { assertFeatureFileAccess, validateProjectFilePolicy } from '../common/project-file-policy.mjs';
 import { resolveProjectWorkspace } from '../common/workspace-identity.mjs';
 import { MemoryStore } from '../platform/resources/memory/memory-store.mjs';
 import { verifySourceManifest, assertSourceManifestCurrent, readPinnedSource } from '../platform/workflow/source-manifest.mjs';
@@ -63,8 +66,12 @@ import { ensurePlanApprovalArtifact, planApprovalSatisfied, planApprovalSnapshot
 import { expandApprovedImplementation } from '../flows/delivery-lifecycle/approved-implementation.mjs';
 import { assessAutomaticPlanSourceCompatibility, assessPlanSourceCompatibility, assessRecoveredImplementationContinuation, assessVerifiedImplementationContinuation, matchingPlanSourceCompatibilityDecision } from './plan-source-compatibility.mjs';
 import { preparePlanRevisionIntent, selectPlanRevisionParent } from './plan-revision.mjs';
+import { readVerifiedRunHistory } from './authority-history-reader.mjs';
+import { readPlanRevisionHistory } from './plan-revision-history.mjs';
+import { readImplementationPlanningHistory, readQualityPlanningHistory } from './planning-history-inputs.mjs';
 import { readPlanAmendmentScope, resolvePlanAmendmentResult, verifyPlanAmendmentArtifacts } from './plan-amendment-artifacts.mjs';
 import { carryAmendmentReviewFindings } from './plan-amendment-finding-carryover.mjs';
+import { createAmendmentReviewRecoveryPlan, interruptedAmendmentReviewDraft, interruptedAmendmentTransportDraft } from './development-amendment-review-recovery.mjs';
 import { captureAmendmentBaselines, verifyAmendmentBaselines } from './plan-amendment-baseline.mjs';
 import {
   buildExecutionGrantContext,
@@ -161,7 +168,7 @@ export const createHarness = async ({ controlRoot: controlRootInput, dataRoot: d
     assert(digestJson(packet) === dispatch.packetDigest, 'PACKET_DIGEST_MISMATCH', 'Persisted Dispatch no longer matches its packet.');
     const binding = dispatch.execution?.prompt;
     assert(binding?.pluginId && binding?.pluginVersion && binding?.contractVersion, 'AGENT_PROMPT_BINDING_REQUIRED', 'Dispatch requires an exact Prompt Codec and contract binding.');
-    if (binding.contractVersion === AGENT_PROMPT_CONTRACT_VERSION) assertDispatchResultContract(dispatch.execution?.result, feature, { conversationVisible: dispatch.execution?.runtime?.mode === 'conversation-visible' });
+    if (['1.5', AGENT_PROMPT_CONTRACT_VERSION].includes(binding.contractVersion)) assertDispatchResultContract(dispatch.execution?.result, feature, { conversationVisible: dispatch.execution?.runtime?.mode === 'conversation-visible' });
     const codec = pluginHost.get(binding.pluginId, 'codec');
     assert(codec.manifest.capabilities.includes('agent-prompt'), 'AGENT_PROMPT_CODEC_REQUIRED', `Codec ${binding.pluginId} does not provide agent-prompt capability.`);
     assert(codec.manifest.version === binding.pluginVersion, 'AGENT_PROMPT_CODEC_VERSION_MISMATCH', 'Installed Prompt Codec version does not match the immutable Dispatch binding.');
@@ -363,7 +370,7 @@ export const createHarness = async ({ controlRoot: controlRootInput, dataRoot: d
       await verifyPlanningPredecessor({ project, intent, readVersionRelease: (projectId, target) => api.readVersionRelease(projectId, target) });
       const snapshot = await captureWorkspace(workspace.root, { excluded: project.workspace.excluded ?? [] });
       if (intent.action === 'implement' && !workflowInput) {
-        const states = await authorityStore.list(project.id);
+        const states = await readImplementationPlanningHistory(authorityStore, project.id, intent);
         assert(!states.some(run => ['closed', 'incomplete', 'failed'].includes(run.status)
           && run.metadata?.commandIntent?.action === 'implement'
           && run.metadata.commandIntent.target === intent.target
@@ -411,7 +418,20 @@ export const createHarness = async ({ controlRoot: controlRootInput, dataRoot: d
       if (['replan', 'amend'].includes(intent.action)) {
         const released = await api.readVersionRelease(project.id, intent.target);
         assert(released?.state?.status !== 'released', 'REPLAN_VERSION_RELEASED', 'A released version requires a new target or a separately authorized patch release.');
-        const states = await authorityStore.list(project.id);
+        const states = await readPlanRevisionHistory(authorityStore, project.id, intent);
+        if (intent.action === 'amend') {
+          const pending = states.filter(state => (interruptedAmendmentReviewDraft(state) || interruptedAmendmentTransportDraft(state))
+            && state.status === 'superseded' && state.metadata.commandIntent.target === intent.target
+            && state.metadata.commandIntent.workflowId === intent.workflowId
+            && state.metadata.commandIntent.selector === intent.selector
+            && !states.some(row => row.runId === state.metadata.supersededByRunId));
+          assert(pending.length <= 1, 'DEVELOPMENT_AMENDMENT_REVIEW_RECOVERY_AMBIGUOUS', 'Multiple unstarted review recoveries claim this command.');
+          if (pending.length) return createAmendmentReviewRecoveryPlan({ state: pending[0], project, snapshot,
+            patchReceiptDigest: pending[0].metadata.supersededReason.split(':').at(-1), authorityStore, evidenceStore,
+            extension, releaseIdentity: { ...currentReleaseIdentity, verified: true },
+            executionConstraintDigest: executionConstraints.constraintDigest,
+            sourceToolBinding: pending[0].metadata.sourceToolBinding ?? null });
+        }
         const parent = selectPlanRevisionParent({ intent, states });
         let sourceChanges = null;
         if (parent && parent.sourceDigest !== snapshot.digest) {
@@ -445,7 +465,7 @@ export const createHarness = async ({ controlRoot: controlRootInput, dataRoot: d
           assert(Array.isArray(scopes) && scopes.length > 0 && new Set(scopes.map(scope => scope.id)).size === scopes.length
             && scopes.every(scope => typeof scope.id === 'string' && scope.id.length > 0 && typeof scope.root === 'string' && scope.root.length > 0),
           'QUALITY_SCOPES_INVALID', 'The bound Extension must declare unique quality scopes for the target.');
-          const runs = await authorityStore.list(project.id);
+          const runs = await readQualityPlanningHistory(authorityStore, project.id);
           const qualityTargets = {};
           const qualityRepairInventories = {};
           const qualityCloseouts = {};
@@ -478,7 +498,7 @@ export const createHarness = async ({ controlRoot: controlRootInput, dataRoot: d
           workflowId: intent.workflowId,
           target: intent.target,
           sourceDigest: snapshot.digest,
-          runs: await authorityStore.list(project.id),
+          runs: await readQualityPlanningHistory(authorityStore, project.id),
           legacyInventory,
           findingScopePaths: project.policy?.qualityFindingPaths ?? [],
           includeNonterminal: intent.action === 'quality' && ['repair-known', 'closeout'].includes(intent.preset),
@@ -557,7 +577,9 @@ export const createHarness = async ({ controlRoot: controlRootInput, dataRoot: d
             && digestJson(feature.allowedPaths) === digestJson(feature.metadata.scopeExtensions.at(-1).after))))
         || feature.metadata?.stage === 'gate-diagnostic' || isBoundIntervention(state, feature)), 'LIFECYCLE_RESUME_FEATURE_MISMATCH', 'Run has Features outside the original lifecycle plan.');
       const inputBindingRepairs = await inspectVerificationInputRepairs(state, workspace.root, project.workspace.excluded ?? []);
-      const blockedFeatureId = selectBlockedResumeFeature(state, { inputBindingRepairs, interruptionReviews: reviewableInterruptions(state), pendingIntervention: hasPendingIntervention(state) });
+      const hostCheckReviews = await inspectDevelopmentHostCheckReview(state, authorityStore, evidenceStore);
+      const blockedFeatureId = selectBlockedResumeFeature(state, { inputBindingRepairs, hostCheckReviews,
+        interruptionReviews: reviewableInterruptions(state), pendingIntervention: hasPendingIntervention(state) });
       if (blockedFeatureId) {
         const feature = state.features.find(item => item.id === blockedFeatureId);
         const submission = [...state.submissions].reverse().find(item => item.featureId === blockedFeatureId);
@@ -611,7 +633,7 @@ export const createHarness = async ({ controlRoot: controlRootInput, dataRoot: d
         assert(state.metadata?.lifecyclePlanDigest === plan.planDigest, 'LIFECYCLE_COMMAND_RECEIPT_INVALID', 'The lifecycle command receipt points to a Run bound to another Command Plan.');
         state = await commitCommandDecisions(state);
         if (state.status !== 'closed') {
-          const current = resolveRunLineage({ plan, states: await authorityStore.list(plan.project.id), currentLineage: observedLineage, policy: project.policy?.recovery ?? {}, now: kernel.now });
+          const current = resolveRunLineage({ plan, states: await readVerifiedRunHistory(authorityStore, plan.project.id), currentLineage: observedLineage, policy: project.policy?.recovery ?? {}, now: kernel.now });
           if (current.action === 'ordinary-resume' && current.selectedRunId === state.runId) {
             const resumed = await kernel.recover(plan.project.id, state.runId, { mode: 'ordinary-resume' }, { expectedRevision: state.revision, commandId: `${commandId}.lineage.resume.${current.resolutionDigest}` });
             state = resumed.state;
@@ -622,7 +644,7 @@ export const createHarness = async ({ controlRoot: controlRootInput, dataRoot: d
         return { status: state.status === 'closed' ? 'closed' : 'started', planDigest: plan.planDigest, plan, runtimePolicy, state, reused: true };
       }
       verifyExecutionReadinessReport(preflightReport, { plan, now: kernel.now });
-      const states = await authorityStore.list(plan.project.id);
+      const states = await readVerifiedRunHistory(authorityStore, plan.project.id);
       const replacedQualityRuns = plan.intent.action === 'quality'
         ? states.filter(candidate => !['closed', 'incomplete', 'failed', 'superseded'].includes(candidate.status)
           && candidate.metadata?.commandIntent?.action === 'quality'
@@ -815,7 +837,7 @@ export const createHarness = async ({ controlRoot: controlRootInput, dataRoot: d
       if (input.metadata?.commandIntent?.action === 'implement' && input.features.some(feature => feature.metadata?.stage === 'implementation') && !input.features.some(feature => feature.metadata?.stage === 'plan-review')) {
         const target = input.metadata?.commandIntent?.target;
         const workflowId = input.metadata?.workflow?.id;
-        const projectRuns = await authorityStore.list(project.id);
+        const projectRuns = await readVerifiedRunHistory(authorityStore, project.id);
         const candidates = projectRuns.filter(run => run.status !== 'superseded'
           && run.metadata?.commandIntent?.target === target && run.metadata?.workflow?.id === workflowId
           && run.features.some(feature => feature.metadata?.stage === 'plan-review'));
@@ -910,7 +932,8 @@ export const createHarness = async ({ controlRoot: controlRootInput, dataRoot: d
             return { runId, authorityDigest: prior.authorityDigest };
           })) };
       }
-      return kernel.startRun({ ...input, ...(attemptCarryover ? { attemptCarryover } : {}), features, profileConfig, policyDigest, sourceDigest: runSourceDigest, pluginSetDigest: input.pluginSetDigest ?? installedCompositionDigest, metadata: { ...input.metadata, approvedPlan, ...(approvedPlan ? { attemptAccounting: 'separate-progress-v1' } : {}), ...(lifecycleExecution ? { lifecycleExecution } : {}), workspace: structuredClone(workspace), gateRecipes: structuredClone(project.gateRecipes ?? []), projectDescriptorDigest: project.descriptorDigest, extensionSetDigest: extensionSet.digest } }, command);
+      const projectFilePolicy = validateProjectFilePolicy(project.policy?.projectFilePolicy);
+      return kernel.startRun({ ...input, ...(attemptCarryover ? { attemptCarryover } : {}), features, profileConfig, policyDigest, sourceDigest: runSourceDigest, pluginSetDigest: input.pluginSetDigest ?? installedCompositionDigest, metadata: { ...input.metadata, projectFilePolicy, approvedPlan, ...(approvedPlan ? { attemptAccounting: 'separate-progress-v1' } : {}), ...(lifecycleExecution ? { lifecycleExecution } : {}), workspace: structuredClone(workspace), gateRecipes: structuredClone(project.gateRecipes ?? []), projectDescriptorDigest: project.descriptorDigest, extensionSetDigest: extensionSet.digest } }, command);
     },
 
     async scheduleInterruptionReview(projectId, runId, featureId, commandId) {
@@ -996,7 +1019,8 @@ export const createHarness = async ({ controlRoot: controlRootInput, dataRoot: d
         const executionByFeatureId = Object.fromEntries(await Promise.all(input.candidateFeatureIds.map(async featureId => {
           const feature = state.features.find(item => item.id === featureId);
           assert(feature, 'FEATURE_NOT_FOUND', `Unknown candidate Feature: ${featureId}`);
-          const continuation = await buildImplementationContinuation(state, feature, workspaceRoot, { excluded: project.workspace.excluded ?? [] });
+          const requiredEvidenceInputs = await prepareImplementationEvidenceInputs({ state, feature, authorityStore, evidenceStore });
+          const continuation = await buildImplementationContinuation(state, feature, workspaceRoot, { excluded: project.workspace.excluded ?? [], requiredEvidenceInputs });
           return [featureId, { ...(continuation ? { implementationContinuation: continuation } : {}), prompt: structuredClone(promptBinding), result: createDispatchResultContract(feature, { conversationVisible: runtimePolicy.mode === 'conversation-visible' }), runtime: { mode: runtimePolicy.mode, userVisible: runtimePolicy.userVisible, hostOrchestrated: runtimePolicy.hostOrchestrated, ...(runtimeManifest.capabilities.includes('typed-output-envelope-v1') ? { resultDialect: 'typed-output-envelope-v1' } : {}) } }];
         })));
         return kernel.schedule(projectId, runId, { ...scheduledInput, executionByFeatureId }, command);
@@ -1015,7 +1039,8 @@ export const createHarness = async ({ controlRoot: controlRootInput, dataRoot: d
       for (const featureId of strategy.payload.featureIds) {
         const feature = state.features.find(item => item.id === featureId);
         const execution = { prompt: structuredClone(promptBinding), result: createDispatchResultContract(feature, { conversationVisible: runtimePolicy.mode === 'conversation-visible' }), ...(runtimePolicy ? { runtime: { mode: runtimePolicy.mode, userVisible: runtimePolicy.userVisible, hostOrchestrated: runtimePolicy.hostOrchestrated, ...(runtimeManifest.capabilities.includes('typed-output-envelope-v1') ? { resultDialect: 'typed-output-envelope-v1' } : {}) } } : {}) };
-        const continuation = await buildImplementationContinuation(state, feature, workspaceRoot, { excluded: project.workspace.excluded ?? [] });
+        const requiredEvidenceInputs = await prepareImplementationEvidenceInputs({ state, feature, authorityStore, evidenceStore });
+        const continuation = await buildImplementationContinuation(state, feature, workspaceRoot, { excluded: project.workspace.excluded ?? [], requiredEvidenceInputs });
         if (continuation) execution.implementationContinuation = continuation;
         if (modelRouterPluginId) {
           const request = { featureId, role: feature.ownerRole, capabilities: feature.metadata.requiredCapabilities ?? [], risk: Number(feature.metadata.risk ?? 0) };
@@ -1072,7 +1097,7 @@ export const createHarness = async ({ controlRoot: controlRootInput, dataRoot: d
         assert(runtimeReceipt.agentId === input.agentId, 'RUNTIME_RECEIPT_AGENT_MISMATCH', 'Runtime Receipt Agent identity does not match the requested Lease binding.');
         assert(runtimeReceipt.dispatchId === dispatch.dispatchId, 'RUNTIME_RECEIPT_DISPATCH_MISMATCH', 'Runtime Receipt Dispatch identity does not match the managed Dispatch.');
         assert(runtimeReceipt.packetDigest === dispatch.packetDigest, 'PACKET_DIGEST_MISMATCH', 'Runtime Receipt does not match the immutable Dispatch packet.');
-        if (dispatch.execution?.prompt?.contractVersion === AGENT_PROMPT_CONTRACT_VERSION) assert(runtimeReceipt.resultContractDigest === dispatch.execution?.result?.contractDigest, 'RESULT_CONTRACT_RECEIPT_MISMATCH', 'Visible Runtime Receipt does not match the immutable Dispatch result contract.');
+        if (['1.5', AGENT_PROMPT_CONTRACT_VERSION].includes(dispatch.execution?.prompt?.contractVersion)) assert(runtimeReceipt.resultContractDigest === dispatch.execution?.result?.contractDigest, 'RESULT_CONTRACT_RECEIPT_MISMATCH', 'Visible Runtime Receipt does not match the immutable Dispatch result contract.');
         assert(runtimeReceipt.prompt?.codecPluginId === prompt.codecPluginId && runtimeReceipt.prompt?.codecPluginVersion === prompt.codecPluginVersion && runtimeReceipt.prompt?.contractVersion === prompt.contractVersion, 'AGENT_PROMPT_RECEIPT_IDENTITY_MISMATCH', 'Visible Runtime Receipt does not match the generated Prompt Contract identity.');
         assert(runtimeReceipt.prompt?.packetDigest === prompt.packetDigest && runtimeReceipt.prompt?.promptDigest === prompt.promptDigest, 'AGENT_PROMPT_RECEIPT_DIGEST_MISMATCH', 'Visible Runtime Receipt is not bound to the exact generated Prompt and Dispatch packet.');
         assert(typeof trustedAgentAdapter?.verifyVisibleLease === 'function', 'VISIBLE_AGENT_HOST_ATTESTOR_REQUIRED', 'Conversation-visible Lease binding requires a trusted host adapter that can verify the visible child Agent.');
@@ -1134,7 +1159,7 @@ export const createHarness = async ({ controlRoot: controlRootInput, dataRoot: d
       const conversationVisible = dispatch.execution?.runtime?.mode === 'conversation-visible';
       const feature = state.features.find(item => item.id === dispatch.featureId);
       if (dispatch.execution?.result) assertDispatchResultContract(dispatch.execution.result, feature, { conversationVisible });
-      let validatedResult = validateBusinessResult(result, { conversationVisible, repair: Boolean(feature?.metadata?.repairFindingId), feature });
+      let validatedResult = validateBusinessResult(result, { conversationVisible, repair: Boolean(feature?.metadata?.repairFindingId), feature, allowVerificationReady: true });
       if (runtimeEvidence?.hostResultReceipt?.resultDigest && !runtimeEvidence?.resultRejection && !runtimeEvidence?.hostTerminalFailure) {
         assert(runtimeEvidence.hostResultReceipt.resultDigest === digestJson(result), 'HOST_RESULT_DIGEST_MISMATCH', 'Host result Receipt does not match the native Agent result.');
       }
@@ -1157,6 +1182,9 @@ export const createHarness = async ({ controlRoot: controlRootInput, dataRoot: d
       const cumulativeChangedFiles = diffWorkspaceSnapshots(sourceSnapshot, resultingSnapshot);
       const interveningFiles = new Set(state.submissions.filter(submission => submission.inputSourceDigest === dispatch.sourceDigest && !submission.supersededAt).flatMap(submission => submission.changedFiles ?? []));
       const actualChangedFiles = cumulativeChangedFiles.filter(path => !interveningFiles.has(path));
+      if (state.metadata?.projectFilePolicy) for (const path of actualChangedFiles) {
+        assertFeatureFileAccess({ feature, policy: state.metadata.projectFilePolicy, path, workspaceRoot });
+      }
       const claimedChangedFiles = [...new Set(validatedResult.changedFiles)].map(path => String(path).replaceAll('\\', '/')).sort();
       const rejection = runtimeEvidence?.resultRejection;
       const hostTerminalFailure = runtimeEvidence?.hostTerminalFailure;
@@ -1197,13 +1225,15 @@ export const createHarness = async ({ controlRoot: controlRootInput, dataRoot: d
       const verifyDelivery = () => verifyDeliveryBatchResult({ state, feature, dispatch,
         result: { ...validatedResult, changedFiles: actualChangedFiles }, workspaceRoot, project, evidenceStore,
         dataRoot: authorityStore.root, controlRoot, onProgress: onVerificationProgress });
-      const deliveryVerification = feature.metadata?.deliveryBatch && validatedResult.status === 'completed'
+      const deliveryVerification = feature.metadata?.deliveryBatch && ['completed', 'verification-ready'].includes(validatedResult.status)
         ? await withVerificationLease({ kernel, authorityStore, state, lease, commandId }, verifyDelivery)
         : await verifyDelivery();
       state = await authorityStore.read(projectId, runId);
       assert(!deliveryVerification.receipts.some(item => item.sourceDrift), 'DELIVERY_VERIFICATION_SOURCE_DRIFT',
         'A verification command changed source inputs; its result cannot be accepted as proof.');
       validatedResult = deliveryVerification.result;
+      validateBusinessResult(validatedResult, { conversationVisible, repair: Boolean(feature?.metadata?.repairFindingId), feature });
+      validateProfileResult({ profile: profileRegistry.get(state.profile.id), state, feature, result: validatedResult });
       const verifiedResult = { ...validatedResult, changedFiles: actualChangedFiles };
       await verifyPlanAmendmentArtifacts({ state, feature, result: verifiedResult, workspaceRoot });
       await atomicWriteJson(dispatch.outputRef, verifiedResult, { root: authorityStore.root });
@@ -1227,7 +1257,7 @@ export const createHarness = async ({ controlRoot: controlRootInput, dataRoot: d
         submitted = { ...submitted, state: reconciled.state };
         await ensurePlanApprovalArtifact(authorityStore.root, submitted.state);
         await ensureProjectPlanArchive({ project, state: submitted.state, workspaceRoot,
-          previousPlanRuns: (await authorityStore.list(projectId)).filter(run => run.runId !== runId) });
+          previousPlanRuns: (await readVerifiedRunHistory(authorityStore, projectId)).filter(run => run.runId !== runId) });
       }
       return submitted;
     },

@@ -23,6 +23,7 @@ export const createDeliveryProjectDescriptor = ({
   knownFindingInventories,
   planChangeRequests,
   actionPaths,
+  projectFilePolicy = null,
   qualityVerificationOutputs = [],
   qualityReviewLimit = { mode: 'bounded', maxRechecks: 2 },
   majorReleaseTargets = [],
@@ -58,6 +59,7 @@ export const createDeliveryProjectDescriptor = ({
       ...structuredClone(extensions),
     ],
     policy: {
+      ...(projectFilePolicy ? { projectFilePolicy: structuredClone(projectFilePolicy) } : {}),
       agentExecutionMode: resolvedAgentExecutionMode,
       defaultRuntimePlugin: runtimePluginId,
       runtimePlugins,
