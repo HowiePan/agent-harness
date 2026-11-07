@@ -81,6 +81,15 @@ test('source continuity follows the sealed patch lineage before validating new l
   assert.deepEqual(f.input, before);
 });
 
+test('completion and incomplete rows copied without attempt-carryover markers count only at their original native Dispatch',()=>{
+  const f=carriedFixture();delete f.child.metadata.attemptCarryover;
+  const before=structuredClone(f.input);
+  assert.deepEqual(assessVerifiedImplementationContinuation(f.input).submissionDigests,['current-submission','next-submission']);
+  assert.deepEqual(f.input,before);
+  f.child.dispatches[0].status='requested';
+  assert.equal(assessVerifiedImplementationContinuation(f.input),null);
+});
+
 test('patch lineage cannot substitute approval, graph, parent, source, evidence or uncommitted drift', () => {
   for (const mutate of [f => { f.input.priorRuns.pop(); },
     f => { f.parent.status = 'ready'; },

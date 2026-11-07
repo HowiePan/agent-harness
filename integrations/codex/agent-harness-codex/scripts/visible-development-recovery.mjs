@@ -10,7 +10,6 @@ import { ExtensionRegistry } from '../../../../src/platform/extensions/registry.
 import { createCodexRolloutHostExchange, readCodexRolloutObservation } from '../lib/codex-rollout-host-exchange.mjs';
 import { createCodexCollaborationHostAdapter } from '../lib/codex-collaboration-host-adapter.mjs';
 import { createHostExchangeDiagnosticWriter } from '../lib/host-exchange-diagnostics.mjs';
-import { assertLocalProcessGateHost } from '../lib/local-process-gate-readiness.mjs';
 import { createLifecycleCommandPlan, validateLifecycleCommandPlan } from '../../../../src/application/lifecycle-command-plan.mjs';
 import { assertDevelopmentReplacementScope } from '../../../../src/application/development-replacement-scope.mjs';
 import { assertRecoverableNativeImplementationResult } from '../../../../src/application/development-terminal-result.mjs';
@@ -26,6 +25,9 @@ const main = async () => {
   if (process.argv[2] !== '--manifest' || !process.argv[3] || process.argv[4] !== '--run' || !process.argv[5]
     || !(tail.length === 0 || tail.length === 1 && (retireOnly || prepareOnly) || reviewFile))
     fail('VISIBLE_DEVELOPMENT_RECOVERY_ARGUMENTS_INVALID', 'Usage: visible-development-recovery.mjs --manifest <source-link-manifest> --run <run-id> [--retire-only|--prepare-only [--environment-review <json>]]');
+  // Reject before manifest IO, Host effects, Run retirement, Gates or dispatch.
+  if (!retireOnly && !prepareOnly) fail('CURRENT_USER_COMMAND_REQUIRED',
+    'Independent recovery cannot initiate a lifecycle. Use --prepare-only, then await a user-issued command.');
   const environmentReview = reviewFile ? JSON.parse(await readFile(resolve(reviewFile), 'utf8')) : null;
   const onEnvironmentProgress = event => emit({ kind: 'codex-visible-development-recovery', phase: 'environment-review', event });
   const manifestFile = resolve(process.argv[3]);
@@ -231,30 +233,9 @@ const main = async () => {
         priorRunId: runId, retiredReplacementRunId: recovery.replacementRunId, runId: plan.run.runId,
         reason: 'retired-run-entered-quality-target-ledger' });
     }
-    assertLocalProcessGateHost({ recipes: project.gateRecipes });
-    const onGateProgress = event => emit({ kind: 'codex-visible-lifecycle-event', phase: 'gate-progress', event });
-    const preflight = await harness.createExecutionReadinessReport(plan, { onGateProgress });
-    emit({ kind: 'codex-visible-development-recovery', phase: 'preflight', projectId, runId: plan.run.runId,
-      executionReady: preflight.executionReady, blockers: preflight.checks.filter(check => !check.ready).map(check => check.id),
-      issues: preflight.checks.filter(check => !check.ready).map(check => ({ id: check.id, issues: check.issues })) });
-    if (!preflight.executionReady) { process.exitCode = 2; return; }
-    if (prepareOnly) {
-      emit({ kind: 'codex-visible-development-recovery', phase: 'prepared', projectId,
-        priorRunId: runId, runId: plan.run.runId, planDigest: plan.planDigest,
-        executionReady: true, executionStarted: false });
-      return;
-    }
-    const result = await harness.executeVisibleLifecyclePlan(plan, {
-      commandId: `${old.metadata.lifecycleInvocationId}.development-continue.${runId}`,
-      preflightReport: preflight, onGateProgress,
-    });
-    if (result.planApprovalArtifact) emit({ kind: 'codex-visible-lifecycle-event', phase: 'plan-review-ready',
-      commandId: `${old.metadata.lifecycleInvocationId}.development-continue.${runId}`,
-      status: result.planApprovalArtifact.reviewApproved ? 'awaiting-user-approval' : 'independent-review-rejected',
-      artifact: result.planApprovalArtifact });
-    emit({ kind: 'codex-visible-development-recovery', phase: 'complete', projectId, runId: plan.run.runId,
-      status: result.status, reason: result.reason ?? null, revision: result.state?.revision ?? null });
-    if (!['closed', 'completed'].includes(result.status)) process.exitCode = 3;
+    emit({ kind: 'codex-visible-development-recovery', phase: 'prepared', projectId,
+      priorRunId: runId, runId: plan.run.runId, planDigest: plan.planDigest,
+      executionReady: false, readinessRequired: true, executionStarted: false });
   } finally {
     hostExchange.close();
   }

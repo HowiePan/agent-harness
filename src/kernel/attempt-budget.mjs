@@ -1,5 +1,6 @@
 import { digestJson, withoutKeys } from '../common/canonical.mjs';
 import { assert } from '../common/errors.mjs';
+import { continuousPolicy, executionProblemId } from '../common/continuous-execution.mjs';
 
 export const MAX_BUDGET_INCREMENT = 20;
 export const MAX_BUDGET_LIMIT = 1000;
@@ -21,13 +22,20 @@ export const selectAttemptBudget = ({ state, feature, submission, profile }) => 
   const policy = profile.attemptBudget?.({ state, feature, result });
   const progress = policy?.kind === 'progress' && result.status === 'blocked' && hasSourceProgress(state, feature, submission);
   const budgetKind = progress ? 'progress' : 'failure';
+  if (continuousPolicy(state) && feature.kind !== 'execution-diagnostic') {
+    const problemId=executionProblemId(feature);
+    return {key:`${feature.logicalRoot}:problem:${problemId}:${budgetKind}`,problemId,budgetKind,
+      limit:progress ? null : continuousPolicy(state).recovery.cyclesPerProblem};
+  }
   const key = progress ? `${feature.logicalRoot}:progress` : `${feature.logicalRoot}:${result.failureClass ?? result.status}`;
   const limit = progress ? policy.limit : policy?.failureLimit ?? feature.attemptLimit;
   assert(Number.isSafeInteger(limit) && limit > 0, 'ATTEMPT_BUDGET_INVALID', 'Attempt limits must be finite positive integers.');
   return { key, budgetKind, limit };
 };
 
-export const submissionAttempt = (state, feature, submission) => state.attempts?.[
+export const submissionAttempt = (state, feature, submission) => continuousPolicy(state) && feature.kind!=='execution-diagnostic'
+  ? state.attempts?.[`${feature.logicalRoot}:problem:${executionProblemId(feature)}:${state.attempts?.[submission?.attemptBudgetKey]?.budgetKind==='progress'?'progress':'failure'}`]
+  : state.attempts?.[
   submission?.attemptBudgetKey ?? `${feature.logicalRoot}:${submission?.result?.failureClass ?? submission?.result?.status}`
 ];
 

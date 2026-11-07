@@ -6,11 +6,13 @@ import { delimiter, isAbsolute, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { assert } from '../../../common/errors.mjs';
 import { executionHealth } from '../../../common/execution-health.mjs';
+import { createProcessLog } from './process-log.mjs';
 
 const MiB = 1024 * 1024;
 export const SCRIPT_RESOURCE_LIMITS = Object.freeze({ memoryBytes: 512 * MiB, cpuPercent: 25,
   maxProcesses: 4, timeoutMs: 0, maxOutputBytes: MiB, maxInputBytes: 32 * MiB, maxInputFiles: 128, maxScriptBytes: 128 * 1024 });
-const maximum = { ...SCRIPT_RESOURCE_LIMITS, memoryBytes: 2 * 1024 * MiB, timeoutMs: 2147468647, maxProcesses: 16 };
+const maximum = { ...SCRIPT_RESOURCE_LIMITS, memoryBytes: 8 * 1024 * MiB, cpuPercent:50, timeoutMs: 2147468647, maxProcesses: 32,
+  maxOutputBytes:4*MiB,maxLogBytes:256*MiB,maxInputFiles:1000000,maxInputBytes:16*1024*MiB };
 export const resolveResourceLimits = (input = {}) => {
   const policy = { ...SCRIPT_RESOURCE_LIMITS, ...input };
   for (const [key, value] of Object.entries(policy)) assert(Object.hasOwn(maximum, key)
@@ -61,8 +63,10 @@ export const runResourceBounded = async ({ launch, limits, resourceRoot, onSpawn
   const prepared = prepareResourceLaunch(launch, limits);
   const release = await acquireResourceSlot(resourceRoot);
   const supervisorTemporary = resolve(resourceRoot, 'resource-slot', 'supervisor-temp');
+  let log;
   try {
     await mkdir(supervisorTemporary);
+    if(prepared.limits.maxLogBytes) log=await createProcessLog(resourceRoot,prepared.limits.maxLogBytes);
     return await new Promise(resolveRun => {
       const child = spawn(prepared.executable, prepared.args, { cwd: prepared.cwd, env: { ...prepared.environment,
         TEMP: supervisorTemporary, TMP: supervisorTemporary, TMPDIR: supervisorTemporary }, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
@@ -74,7 +78,10 @@ export const runResourceBounded = async ({ launch, limits, resourceRoot, onSpawn
         const text = chunk.subarray(0, remaining).toString();
         if (stream === 'stdout') stdout += text; else stderr += text;
         if (text) onProgress({ phase: 'output', stream, text });
-        if (bytes > prepared.limits.maxOutputBytes) stop('PROCESS_OUTPUT_LIMIT', 'Output exceeded its budget; split work and emit compact summaries.');
+        if(log) {
+          try { if(!log.write(stream,chunk)) stop('PROCESS_LOG_LIMIT','Durable process log reached its disk quota.'); }
+          catch(error) { stop('PROCESS_LOG_WRITE_FAILED',error.message); }
+        } else if (bytes > prepared.limits.maxOutputBytes) stop('PROCESS_OUTPUT_LIMIT', 'Output exceeded its budget; split work and emit compact summaries.');
       };
       child.stdout.on('data', chunk => consume(chunk, 'stdout'));
       child.stderr.on('data', chunk => consume(chunk, 'stderr'));
@@ -92,7 +99,8 @@ export const runResourceBounded = async ({ launch, limits, resourceRoot, onSpawn
         if (exitCode === 124) environmentError ??= { code: 'PROCESS_RESOURCE_TIMEOUT', message: 'Supervisor stopped the process tree at its time limit.' };
         if (exitCode === 125) environmentError ??= { code: 'RESOURCE_SUPERVISOR_FAILED', message: 'OS resource isolation failed; no unguarded retry is allowed.' };
         resolveRun({ exitCode, signal, stdout, stderr, environmentError,
-          resourceReceipt: { policy: 'bounded-script/1', limits: prepared.limits, outputBytes: bytes, supervised: true, status: exitCode === 0 && !environmentError ? 'passed' : 'failed' } });
+          resourceReceipt: { policy: 'bounded-script/1', limits: prepared.limits, outputBytes: bytes,
+            displayTruncated:bytes>prepared.limits.maxOutputBytes,...(log?{logs:log.finish()}:{}), supervised: true, status: exitCode === 0 && !environmentError ? 'passed' : 'failed' } });
       });
       onSpawn(child);
       onProgress({ phase: 'process-started', processId: child.pid ?? null, resourcePolicy: 'bounded-script/1' });

@@ -1,4 +1,5 @@
 import { describeReadinessInterruption } from '../../../../src/application/interruption-outcome.mjs';
+import { isLocalProcessGateHostFailure } from './local-process-gate-readiness.mjs';
 
 const boundedText = (value, fallback, limit) => {
   const text = typeof value === 'string' && value.length ? value : fallback;
@@ -75,7 +76,7 @@ export const createPreflightLifecycleEvent = ({ commandId, intentDigest, planDig
 });
 
 export const preRunProcessGateRetry = ({ error, phase, runCreationAttempted = false } = {}) =>
-  error?.code === 'LOCAL_PROCESS_GATE_HOST_UNAVAILABLE' && error?.details?.processCode === 'EPERM'
+  isLocalProcessGateHostFailure(error) && error?.details?.processCode === 'EPERM'
     && phase === 'planned' && !runCreationAttempted
     ? { mode: 'same-intent-once', reason: 'captured-child-process-permission', runCreated: false, hostEffectStarted: false }
     : null;

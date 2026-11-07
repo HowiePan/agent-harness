@@ -73,6 +73,16 @@ test('idle migration before the first child completion preserves partial evidenc
     sourceDigest, includeIncomplete: true });
   assert.equal(nextPlan.partialSubmissions.length, 2);
   await verifyCompletionCarryover({ plan: nextPlan, prior: replacement, replacementFeatures: features, evidenceStore, authorityStore });
+  const context=structuredClone(replacement),audit={...structuredClone(submissions[1]),submissionId:'audit-only',dispatchId:'audit-history'};
+  audit.submissionDigest=digestJson(Object.fromEntries(Object.entries(audit).filter(([key])=>key!=='submissionDigest')));
+  context.submissions.push(audit);context.features.find(f=>f.id===audit.featureId).submissionId=audit.submissionId;
+  context.events.find(e=>e.type==='attempts.carried-over').submissionIds.push(audit.submissionId);
+  const contextPlan=createCompletionCarryoverPlan({...input,prior:context,replacementRunId:'context-replacement',includeIncomplete:true});
+  assert(!contextPlan.partialSubmissions.some(s=>s.submissionId===audit.submissionId),'Copied context is history, not selected partial progress.');
+  const legacy=structuredClone(context);delete legacy.events.find(e=>e.type==='feature.completion-carried-over').partialSubmissionIds;
+  const legacyPlan=createCompletionCarryoverPlan({...input,prior:legacy,replacementRunId:'legacy-replacement',includeIncomplete:true});
+  assert.deepEqual(legacyPlan.partialSubmissions.map(s=>s.submissionId),['s-spatial']);
+  await verifyCompletionCarryover({plan:legacyPlan,prior:legacy,replacementFeatures:features,evidenceStore,authorityStore});
   const forged = structuredClone(replacement);
   forged.events.find(event => event.type === 'attempts.carried-over').sources[0].authorityDigest = '0'.repeat(64);
   const forgedPlan = createCompletionCarryoverPlan({ prior: forged, replacementFeatures: features,

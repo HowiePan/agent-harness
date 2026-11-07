@@ -26,3 +26,12 @@ test('user stop and necessary approval or exhausted allowances preserve their hu
   assert.equal(coordinationRecoveryDirective({ status: 'closed' }).userGoalComplete, true);
   assert.equal(coordinationRecoveryDirective({ status: 'attention-required' }).userGoalComplete, false);
 });
+
+test('missing current command and exhausted command recovery never recommend independent automatic restart',()=>{
+  for(const code of ['CURRENT_USER_COMMAND_REQUIRED','USER_COMMAND_ALREADY_CONSUMED','COMMAND_RECOVERY_EXHAUSTED']){
+    const outcome=describeInterruptionError({code,message:'Preserve current command boundary.'});
+    assert.equal(outcome.action,'stop');assert.equal(outcome.coordination.userInputRequired,true);
+    assert.equal(outcome.coordination.processReplayAllowed,false);
+    assert(outcome.coordination.constraints.every(line=>!line.includes('no new user command is needed')));
+  }
+});

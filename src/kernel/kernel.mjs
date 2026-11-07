@@ -1,9 +1,11 @@
 import { resolve } from 'node:path';
-import { digestJson, newId, withoutKeys } from '../common/canonical.mjs';
+import { digestJson, newId, withoutKeys, sha256 } from '../common/canonical.mjs';
 import { assert, fail } from '../common/errors.mjs';
 import { safeSegment } from '../common/paths.mjs';
 import { assertFeatureFileAccess, projectPathAdjustments, validateProjectFilePolicy } from '../common/project-file-policy.mjs';
 import { cloneJson } from '../common/clone-json.mjs';
+import { continuousPolicy, executionBudgetBlocked, continuousConfigurationDelta, problemCycle } from '../common/continuous-execution.mjs';
+import { installContinuousAccounting } from './continuous-accounting.mjs';
 import { assertHardRecoveryDecision, hardRecoveryCapability } from '../platform/recovery/authorization.mjs';
 import { readRecoveryVerification } from '../platform/recovery/verification.mjs';
 import { readRecoveryResolution } from '../platform/recovery/resolution.mjs';
@@ -17,6 +19,7 @@ import { completionCarryoverDigest, verifyCompletionCarryover } from './completi
 import { assertBudgetExtensionApproval, prepareBudgetExtension, selectAttemptBudget, submissionAttempt } from './attempt-budget.mjs';
 import { resolveAttemptCarryover } from './attempt-carryover.mjs';
 import { reserveIntervention, assertInterventionReadOnly, isIntervention, isExecutionComplete, profileState, carryInterventions } from './intervention.mjs';
+import {reserveDependencyRepair,completeDependencyRepairs} from './dependency-repair.mjs';
 
 const activeLease = lease => ['requested', 'active'].includes(lease.status);
 const activeDispatch = dispatch => ['requested', 'assigned'].includes(dispatch.status);
@@ -76,6 +79,8 @@ export const buildDispatchPacket = (state, dispatch, feature) => {
   gates: structuredClone(dispatch.gateSnapshot ?? state.gates),
   execution: structuredClone(dispatch.execution ?? {}),
   ...(state.metadata?.projectFilePolicy ? { projectFilePolicy: structuredClone(state.metadata.projectFilePolicy) } : {}),
+  ...(continuousPolicy(state) ? { continuousExecution: structuredClone(continuousPolicy(state)),
+    scriptPolicyBinding:{dataRoot:state.metadata.resourceDataRoot,projectId:state.projectId,runId:state.runId,dispatchId:dispatch.dispatchId} } : {}),
   ...(state.metadata?.workspace ? { workspace: structuredClone(state.metadata.workspace) } : {}),
   ...(state.metadata?.workspaceRef ? { workspaceRef: structuredClone(state.metadata.workspaceRef) } : {}),
   ...(state.metadata?.sourceToolBinding ? { sourceToolBinding: structuredClone(state.metadata.sourceToolBinding) } : {}),
@@ -172,6 +177,7 @@ export class HarnessKernel {
     };
     assert(state.sourceDigest && state.pluginSetDigest, 'RUN_DIGESTS_REQUIRED', 'Run requires source and plugin-set digests.');
     delete state.metadata.interruptionLedger;
+    delete state.metadata.dependencyRepairs;
     delete state.metadata.operatorStop;
     if (priorCarryover) {
       const { prior, plan } = priorCarryover;
@@ -216,7 +222,8 @@ export class HarnessKernel {
           summary: lastPendingSubmission.result?.summary ?? null, blocker: structuredClone(lastPendingSubmission.result?.blocker ?? null),
           evidenceRefs: [...(lastPendingSubmission.evidenceRefs ?? [])] } } : {}) };
       event(state, 'feature.completion-carried-over', { priorRunId: prior.runId,
-        carryoverDigest: plan.carryoverDigest, completedFeatureIds: [...completedIds] }, this.now);
+        carryoverDigest: plan.carryoverDigest, completedFeatureIds: [...completedIds],
+        partialSubmissionIds:(plan.partialSubmissions??[]).map(item=>item.submissionId) }, this.now);
       if (plan.progressOnly) {
         const transferred = await resolveAttemptCarryover({ projectId: input.projectId, runId: input.runId,
           attemptCarryover: { sources: [{ runId: prior.runId, authorityDigest: prior.authorityDigest }],
@@ -259,6 +266,10 @@ export class HarnessKernel {
       await carryInterventions({ state, prior: await this.authorityStore.read(input.projectId, pin.runId),
         roots: new Set(attemptCarryover.receipt.logicalRoots), evidenceStore: this.evidenceStore });
     }
+    const continuousMigration=installContinuousAccounting(state);
+    if(continuousPolicy(state)) state.metadata.resourceDataRoot=this.authorityStore.root;
+    if(continuousMigration?.length) event(state,'execution.policy-migrated',{version:continuousPolicy(state).version,problems:continuousMigration},this.now);
+    state.status=deriveStatus(state,profile);
     profile.validateRun(profileState(state));
     return this.authorityStore.create(state, { commandId: command.commandId, payload: input });
   }
@@ -280,7 +291,7 @@ export class HarnessKernel {
       const featureGateIds = new Set((state.metadata?.gateRecipes ?? []).filter(recipe => recipe.scope === 'feature').map(recipe => recipe.id));
       const gateComplete = feature => feature.gatePlan.filter(id => featureGateIds.has(id)).every(id => state.gates.some(gate => gate.id === id && gate.scope === 'feature' && gate.featureId === feature.id && gate.status === 'passed' && gate.sourceDigest === state.sourceDigest));
       const selected = scheduleFeatures({ features: state.features, activeFeatureIds: activeFeatures, limit: capacity,
-        canDispatch: feature => !Object.values(state.attempts).some(item => item.logicalRoot === feature.logicalRoot && item.exhausted)
+        canDispatch: feature => !executionBudgetBlocked(state,feature)
           && profile.canDispatch(isIntervention(feature) ? state.features.find(item => item.id === feature.metadata.intervention.sourceFeatureId) : feature,
             profileState(state)).ok
           && feature.dependsOn.every(id => gateComplete(state.features.find(item => item.id === id))),
@@ -353,8 +364,9 @@ export class HarnessKernel {
   async submit(projectId, runId, input, command) {
     const evidenceRecords = [];
     for (const ref of input.evidenceRefs ?? []) evidenceRecords.push(await this.evidenceStore.read(ref));
-    return this.authorityStore.transact(projectId, runId, { expectedRevision: command.expectedRevision, commandId: command.commandId, payload: input }, state => {
+    return this.authorityStore.transact(projectId, runId, { expectedRevision: command.expectedRevision, commandId: command.commandId, payload: input }, async state => {
       assertMutableRun(state);
+      assert(!state.metadata?.operatorStop?.requested,'OPERATOR_EXECUTION_STOPPED','The user stopped execution before result registration.');
       const profile = this.profile(state.profile.id);
       const dispatch = state.dispatches.find(item => item.dispatchId === input.dispatchId);
       const lease = state.leases.find(item => item.dispatchId === input.dispatchId && item.status === 'active');
@@ -422,6 +434,8 @@ export class HarnessKernel {
       assertInterventionReadOnly(feature, input, dispatch);
       if (result.status === 'completed') assert((input.evidenceRefs ?? []).length > 0, 'COMPLETION_EVIDENCE_REQUIRED', 'Completed Features require content-addressed evidence.');
       const submission = { submissionId: this.id('submission'), dispatchId: dispatch.dispatchId, leaseId: lease.leaseId, featureId: feature.id, agentId: lease.agentId, epoch: state.epoch, generation: state.generation, inputSourceDigest: dispatch.sourceDigest, outputSourceDigest: input.resultingSourceDigest, changedFiles, result: structuredClone(result), evidenceRefs: [...new Set(input.evidenceRefs ?? [])], submittedAt: this.now() };
+      const recoveryStrategy=continuousPolicy(state) && state.decisions.findLast(d=>d.kind==='execution-intervention' && d.featureId===feature.id && d.strategyDigest);
+      if(recoveryStrategy) {submission.recoveryStrategyDigest=recoveryStrategy.strategyDigest;submission.recoveryCycleGeneration=problemCycle(state,feature);}
       const budget = result.status === 'completed' ? null : selectAttemptBudget({ state, feature, submission, profile });
       if (budget) submission.attemptBudgetKey = budget.key;
       submission.submissionDigest = digestJson(submission);
@@ -443,12 +457,20 @@ export class HarnessKernel {
       else {
         const { key } = budget;
         const attempt = state.attempts[key] ?? { key, logicalRoot: feature.logicalRoot, failureClass: result.failureClass ?? result.status,
-          budgetKind: budget.budgetKind, failures: 0, ...(budget.budgetKind === 'progress' ? { used: 0 } : {}), limit: budget.limit, records: [] };
+          budgetKind: budget.budgetKind, ...(budget.problemId ? {problemId:budget.problemId} : {}), failures: 0, ...(budget.budgetKind === 'progress' ? { used: 0 } : {}), limit: budget.limit, records: [] };
         assert(!attempt.budgetKind || attempt.budgetKind === budget.budgetKind, 'ATTEMPT_BUDGET_KIND_COLLISION', 'A failure class cannot alias the progress ledger.');
-        if (attempt.budgetKind === 'progress') attempt.used += 1;
-        else attempt.failures += 1;
+        if (attempt.budgetKind === 'progress') {
+          attempt.used += 1;
+          if(continuousPolicy(state)) {
+            const failed=state.attempts[`${feature.logicalRoot}:problem:${budget.problemId}:failure`];
+            if(failed) {failed.cycleFailures=0;failed.cycleGeneration=(failed.cycleGeneration??0)+1;failed.exhausted=false;}
+          }
+        } else {
+          attempt.failures += 1;
+          if(budget.problemId)attempt.cycleFailures=(attempt.cycleFailures??attempt.failures-1)+1;
+        }
         attempt.records.push({ dispatchId: dispatch.dispatchId, submissionId: submission.submissionId, at: this.now(), summary: result.summary ?? null });
-        attempt.exhausted = (attempt.budgetKind === 'progress' ? attempt.used : attempt.failures) >= attempt.limit;
+        attempt.exhausted = attempt.limit !== null && (attempt.budgetKind === 'progress' ? attempt.used : attempt.cycleFailures??attempt.failures) >= attempt.limit;
         state.attempts[key] = attempt;
         feature.state = attempt.exhausted ? 'failed-budget' : 'blocked';
         feature.blocker = structuredClone(result.blocker ?? { kind: result.failureClass ?? 'execution', summary: result.summary ?? 'Feature blocked.' });
@@ -471,6 +493,8 @@ export class HarnessKernel {
           event(state, 'finding.resolved', { id: finding.id, repairFeatureId: feature.id, evidenceRefs: submission.evidenceRefs }, this.now);
         }
       }
+      for(const repairId of await completeDependencyRepairs(state,submission,this.now,this.evidenceStore))
+        event(state,'execution.dependency-repair-completed',{repairId,submissionId:submission.submissionId,featureId:feature.id},this.now);
       const followUps = typeof profile.createFollowUpFeatures === 'function'
         ? profile.createFollowUpFeatures({ state: structuredClone(state), feature: structuredClone(feature), findings: structuredClone(findings), result: structuredClone(result) })
         : [];
@@ -725,6 +749,47 @@ export class HarnessKernel {
         state.status = deriveStatus(state, this.profile(state.profile.id));
         return result;
       });
+  }
+
+  async requestDependencyRepair(projectId,runId,input,command) {
+    return this.authorityStore.transact(projectId,runId,{...command,payload:input},async state=>{
+      assertMutableRun(state);
+      const result=await reserveDependencyRepair(state,input,this.evidenceStore,this.now);
+      event(state,'execution.dependency-repair-requested',{repairId:result.id,sourceFeatureId:result.sourceFeatureId,
+        ownerFeatureId:result.ownerFeatureId,reviewSubmissionId:result.reviewSubmissionId},this.now);
+      state.status=deriveStatus(state,this.profile(state.profile.id));
+      return result;
+    });
+  }
+
+  async rebaseControlConfiguration(projectId,runId,input,command) {
+    const record=await this.evidenceStore.read(input.evidenceRef),proof=JSON.parse(record.bytes.toString('utf8'));
+    const baselineRecord=await this.evidenceStore.read(proof.baselineRef),baseline=JSON.parse(baselineRecord.bytes.toString('utf8'));
+    const policy=continuousConfigurationDelta(baseline.configText,proof.configurationText);
+    const oldFiles=new Map(baseline.snapshot.files.map(f=>[f.path,f.sha256])),newFiles=new Map(proof.snapshot.files.map(f=>[f.path,f.sha256]));
+    const changed=[...new Set([...oldFiles.keys(),...newFiles.keys()])].filter(p=>oldFiles.get(p)!==newFiles.get(p));
+    return this.authorityStore.transact(projectId,runId,{...command,payload:input},state=>{
+      assertMutableRun(state);
+      assert(['ready','all-remaining-blocked'].includes(state.status) && !state.leases.some(activeLease) && !state.dispatches.some(activeDispatch)
+        && !state.metadata.operatorStop?.requested && proof.kind==='continuous-policy-configuration-migration'
+        && proof.priorAuthorityDigest===state.authorityDigest && record.metadata.projectId===projectId && record.metadata.runId===runId
+        && record.metadata.sourceDigest===state.sourceDigest && proof.fromSourceDigest===state.sourceDigest
+        && baselineRecord.metadata.projectId===projectId && baselineRecord.metadata.runId===runId
+        && digestJson(baseline.snapshot.files)===state.sourceDigest && baseline.priorAuthorityDigest===state.authorityDigest
+        && digestJson(policy)===digestJson(proof.policy) && changed.length===1 && changed[0]===proof.configurationPath
+        && oldFiles.get(proof.configurationPath)===sha256(baseline.configText) && newFiles.get(proof.configurationPath)===sha256(proof.configurationText)
+        && digestJson(proof.snapshot.files)===proof.toSourceDigest && proof.snapshot.digest===proof.toSourceDigest
+        && input.approval?.actor==='human-user' && input.approval.decision==='approved'
+        && input.approval.action==='enable-continuous-execution' && input.approval.policyDigest===digestJson(proof.policy),
+      'CONTROL_CONFIGURATION_REBASE_INVALID','Control configuration migration requires exact idle source-bound evidence and approval.');
+      state.sourceDigest=proof.toSourceDigest;
+      state.metadata.continuousConfigurationRebase={evidenceRef:input.evidenceRef,fromSourceDigest:proof.fromSourceDigest,
+        toSourceDigest:proof.toSourceDigest,acceptanceCredit:false};
+      state.evidenceRefs.push(input.evidenceRef);
+      state.decisions.push({...input.approval,id:command.commandId,kind:'continuous-policy-migration',evidenceRef:input.evidenceRef});
+      event(state,'control.configuration-rebased',{evidenceRef:input.evidenceRef,fromSourceDigest:proof.fromSourceDigest,toSourceDigest:proof.toSourceDigest,acceptanceCredit:false},this.now);
+      return {sourceDigest:state.sourceDigest,policyDigest:input.approval.policyDigest};
+    });
   }
 
   async reopenFeature(projectId, runId, input, command) {

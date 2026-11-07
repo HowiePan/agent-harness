@@ -21,6 +21,7 @@ import { retireUnresumableQualityRun } from '../../../../src/application/quality
 import { describeInterruptionError } from '../../../../src/application/interruption-outcome.mjs';
 import { coordinationRecoveryDirective } from '../../../../src/application/coordination-recovery.mjs';
 import { preserveVisibleResult } from '../lib/visible-lifecycle-result.mjs';
+import { createCodexUserCommandHost } from '../lib/codex-user-command.mjs';
 
 const samePath = (left, right) => process.platform === 'win32'
   ? resolve(left).toLowerCase() === resolve(right).toLowerCase()
@@ -51,6 +52,7 @@ const main = async () => {
   const preflightOnly = process.argv.length === 5 && process.argv[4] === '--preflight-only';
   if (![4, 5].includes(process.argv.length) || process.argv[2] !== '--intent' || (process.argv.length === 5 && !preflightOnly)) throw Object.assign(new Error('Usage: visible-lifecycle-coordinator.mjs --intent <base64url-intent> [--preflight-only]'), { code: 'VISIBLE_LIFECYCLE_COORDINATOR_ARGUMENTS_INVALID' });
   const intent = await resolveVisibleLifecycleIntentArgument(process.argv[3]);
+  const lifecycleCommandHost = createCodexUserCommandHost({ intent });
   if (intent.harness.release.mode === 'source-link') localIncidentContext = { phase: 'binding', projectId: intent.project.projectId, workflowId: intent.project.workflowId, action: intent.command.action, target: intent.command.target, commandId: intent.commandId, intentDigest: intent.intentDigest };
   const active = await validateActiveReleaseBinding({
     controlRoot: intent.harness.controlRoot,
@@ -68,7 +70,8 @@ const main = async () => {
   if (intent.command.action === 'release') {
     if (intent.project.workspaceId) throw Object.assign(new Error('Formal release requires a single bound Project.'), { code: 'VISIBLE_RELEASE_PROJECT_REQUIRED' });
     const harness = await createHarness({ controlRoot: intent.harness.controlRoot, dataRoot: intent.harness.dataRoot,
-      releaseIdentity, extensions, strictProjectIdentity: !developmentMode });
+      releaseIdentity, extensions, strictProjectIdentity: !developmentMode, lifecycleCommandHost });
+    return harness.withUserLifecycleCommand({ commandId: intent.commandId }, async () => {
     const descriptor = await harness.projectRegistry.get(intent.project.projectId);
     const workflow = descriptor.workflows?.find(item => item.id === intent.project.workflowId);
     if (intent.project.workflowId && descriptor.workflows?.length && (!workflow || workflow.version !== intent.project.workflowVersion || workflow.artifactDigest !== intent.project.workflowDigest
@@ -99,7 +102,7 @@ const main = async () => {
       target: intent.command.target, candidateDigest: intent.releaseCandidate.candidateDigest });
     emit({ kind: 'codex-visible-lifecycle-event', phase: 'complete', commandId: intent.commandId, intentDigest: intent.intentDigest,
       status: result.state.status, result });
-    return;
+    });
   }
   const hostOptions = { controlRoot: intent.harness.controlRoot, dataRoot: intent.harness.dataRoot, codexSessionId: intent.codexSessionId, onRejected: createHostExchangeDiagnosticWriter({ controlRoot: intent.harness.controlRoot, dataRoot: intent.harness.dataRoot }), ...(developmentMode ? { responseTimeoutMs: 1800000 } : {}) };
   const hostExchange = developmentMode ? createCodexRolloutHostExchange(hostOptions) : createHookHostExchange(hostOptions);
@@ -120,7 +123,9 @@ const main = async () => {
       extensions,
       strictProjectIdentity: !developmentMode,
       agentAdapters: { 'codex-conversation-runtime': host.adapter },
+      lifecycleCommandHost,
     });
+    return await harness.withUserLifecycleCommand({ commandId: intent.commandId }, async () => {
     const descriptor = await harness.projectRegistry.get(intent.project.projectId);
     const workflowBinding = intent.project.workflowId ? descriptor.workflows?.find(workflow => workflow.id === intent.project.workflowId) : null;
     if (intent.project.workflowId && descriptor.workflows?.length && (!workflowBinding || workflowBinding.version !== intent.project.workflowVersion || workflowBinding.artifactDigest !== intent.project.workflowDigest || workflowBinding.extensionId !== intent.project.extensionId)) throw Object.assign(new Error('Visible lifecycle Workflow binding differs from the approved Project Descriptor.'), { code: 'VISIBLE_LIFECYCLE_WORKFLOW_IDENTITY_MISMATCH' });
@@ -155,6 +160,12 @@ const main = async () => {
         continuation = selectQualityContinuationRun(states, resolved);
       }
       if (continuation) {
+        if(continuation.metadata?.operatorStop?.requested && (continuation.leases.some(l=>l.status==='active')
+          || continuation.dispatches.some(d=>['requested','assigned'].includes(d.status)))){
+          if(preflightOnly){emitRetirementPreflight(intent,continuation,'USER_RESTART_TRANSPORT_PREPARATION_REQUIRED',
+            'The stopped transport must be contained before the new user command can execute.');return;}
+          continuation=await harness.prepareUserRequestedRestart({projectId:descriptor.id,runId:continuation.runId});
+        }
         try {
           resume = await harness.createLifecycleResumePlan({ projectId: descriptor.id, runId: continuation.runId, executionWorkspaceRoot: intent.executionWorkspaceRoot });
           plan = resume.plan;
@@ -196,6 +207,7 @@ const main = async () => {
         executionWorkspaceRoot: intent.executionWorkspaceRoot,
       });
     }
+    await harness.assertCurrentCommandPlan(plan);
     if (localIncidentContext) localIncidentContext = { ...localIncidentContext, phase: 'planned', runId: plan.run.runId, planDigest: plan.planDigest };
     if (intent.project.workflowId && (plan.workflow?.id !== intent.project.workflowId || plan.workflow.version !== intent.project.workflowVersion || plan.workflow.artifactDigest !== intent.project.workflowDigest)) throw Object.assign(new Error('Visible lifecycle Plan differs from the verified Workflow binding.'), { code: 'VISIBLE_LIFECYCLE_WORKFLOW_IDENTITY_MISMATCH' });
     emit(createPlannedLifecycleEvent({ commandId: intent.commandId, intentDigest: intent.intentDigest, plan }));
@@ -237,6 +249,7 @@ const main = async () => {
       emit({ kind: 'codex-visible-lifecycle-incident', code: incident.code, incident, details: { reason: result.reason } });
     }
     if (!['closed', 'completed'].includes(result.status)) process.exitCode = 3;
+    });
   } finally {
     hostExchange.close();
   }

@@ -6,6 +6,7 @@ import { assertKnownFindingDispositions, assertKnownFindingInventory } from './k
 import { classifyQualityFindings, qualityFindingInScope } from './quality-classification.mjs';
 import { isIntervention } from '../../kernel/intervention.mjs';
 import { assertVerificationReady } from './delivery-verification-ready.mjs';
+import {markResultCorrection} from './result-correction.mjs';
 
 const businessResultSchema = JSON.parse(readFileSync(new URL('../../../schemas/result.schema.json', import.meta.url), 'utf8'));
 export const VISIBLE_AGENT_RESULT_CONTRACT_VERSION = '1.4';
@@ -42,7 +43,7 @@ export const assertDispatchResultContract = (input, feature, options = {}) => {
   return expected;
 };
 
-export const validateBusinessResult = (input, { conversationVisible = false, repair = false, feature = null, allowVerificationReady = false } = {}) => {
+const validateBusinessResultValue = (input, { conversationVisible = false, repair = false, feature = null, allowVerificationReady = false } = {}) => {
   const result = structuredClone(input);
   assertJsonSchema(result, conversationVisible ? visibleResultSchema : businessResultSchema, {
     code: conversationVisible ? 'VISIBLE_RESULT_SCHEMA_INVALID' : 'RESULT_SCHEMA_INVALID',
@@ -91,6 +92,13 @@ export const validateBusinessResult = (input, { conversationVisible = false, rep
   return result;
 };
 
+export const validateBusinessResult=(input,options={})=>{
+  // Validate trusted contract inputs outside the result-local correction boundary.
+  if(options.feature?.metadata?.outputPorts)createDispatchResultContract(options.feature,options);
+  if(options.feature?.metadata?.knownFindingInventory)assertKnownFindingInventory(options.feature.metadata.knownFindingInventory);
+  try{return validateBusinessResultValue(input,options);}catch(error){throw markResultCorrection(error);}
+};
+
 export const validateProfileResult = ({ profile, state, feature, result }) => {
   if (isIntervention(feature)) {
     assert(feature.allowedPaths.length === 0 && state.metadata?.interruptionLedger?.some(item => item.id === feature.id
@@ -100,7 +108,8 @@ export const validateProfileResult = ({ profile, state, feature, result }) => {
   }
   if (typeof profile.validateResult !== 'function') return result;
   const verdict = profile.validateResult({ state: structuredClone(state), feature: structuredClone(feature), result: structuredClone(result) });
-  assert(verdict?.ok === true, 'PROFILE_RESULT_REJECTED', `Profile ${profile.id} rejected the Agent result.`, { reason: verdict?.reason ?? null });
+  try{assert(verdict?.ok === true, 'PROFILE_RESULT_REJECTED', `Profile ${profile.id} rejected the Agent result.`, { reason: verdict?.reason ?? null });}
+  catch(error){throw markResultCorrection(error);}
   return result;
 };
 

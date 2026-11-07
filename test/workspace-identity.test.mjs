@@ -2,7 +2,8 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { mkdir, mkdtemp, rm, rmdir, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
-import { createHarness, createInMemoryRuntime, harnessTemporaryRoot, projectExecutionPolicyDecisionContext, ProjectGateRunner, resolveProjectWorkspace } from '../src/index.mjs';
+import { createInMemoryRuntime, harnessTemporaryRoot, projectExecutionPolicyDecisionContext, ProjectGateRunner, resolveProjectWorkspace } from '../src/index.mjs';
+import { createTestHarness as createHarness } from './lifecycle-command-support.mjs';
 import { createTestExecutionAuthorizationAdapter } from './test-support.mjs';
 
 let sequence = 0;

@@ -1,4 +1,5 @@
-import { digestJson } from '../common/canonical.mjs';
+import { digestJson,sha256 } from '../common/canonical.mjs';
+import {readFile} from 'node:fs/promises';
 import { assert } from '../common/errors.mjs';
 import { diffWorkspaceSnapshots } from '../common/workspace-snapshot.mjs';
 import { resolve } from 'node:path';
@@ -6,6 +7,7 @@ import { planApprovalSnapshot, reviewedPlanProposal } from '../flows/delivery-li
 import { CodexHostEffectJournal } from './codex-host-effect-journal.mjs';
 import { readInterruptedWorkspaceDraft } from './interrupted-workspace-recovery.mjs';
 import { completionCarryoverDigest, implementationGraphDigest } from '../kernel/completion-carryover.mjs';
+import {readConfigurationSourceBridge} from './development-configuration-rebase.mjs';
 
 const excludedPath = (path, excluded) => excluded.some(entry => {
   const normalized = String(entry).replaceAll('\\', '/').replace(/^\.\//, '').replace(/\/$/, '');
@@ -70,9 +72,10 @@ export const assessAutomaticPlanSourceCompatibility = ({ planRun, assessment, im
 
 const localSourceSubmissions = run => {
   const inherited = new Set(run.metadata?.attemptCarryover?.submissionIds ?? []);
+  const carried=(run.events??[]).some(event=>event.type==='feature.completion-carried-over');
   return (run.submissions ?? []).filter(item => !item.supersededAt
-    && (!inherited.has(item.submissionId)
-      || run.dispatches?.some(dispatch => dispatch.dispatchId === item.dispatchId)));
+    && (!carried&&!inherited.has(item.submissionId)
+      || run.dispatches?.some(dispatch => dispatch.dispatchId === item.dispatchId&&dispatch.status==='committed')));
 };
 
 // A replacement keeps the original approval start. Reconstruct its source
@@ -111,8 +114,8 @@ const sourceSubmissionLineage = (run, priorRuns, sameRoot) => {
 };
 
 /** Preserve source progress already committed by an implementation Run for this exact approved plan. */
-export const assessVerifiedImplementationContinuation = ({ planRun, planArtifact, priorRuns, currentSourceDigest, workspaceRoot, implementationFeatures, verifiedSourceRecoveries = [] }) => {
-  const currentPaths = (implementationFeatures ?? [])
+export const assessVerifiedImplementationContinuation = ({ planRun, planArtifact, priorRuns, currentSourceDigest, workspaceRoot, implementationFeatures, verifiedSourceRecoveries = [], projectFilePolicy = null }) => {
+  const currentPaths = projectFilePolicy?.roots ?? (implementationFeatures ?? [])
     .filter(feature => feature.metadata?.stage === 'implementation' && feature.metadata?.sourcePolicy !== 'read-only')
     .flatMap(feature => feature.allowedPaths ?? []).filter(safePath);
   if (!currentPaths.length) return null;
@@ -145,7 +148,8 @@ export const assessVerifiedImplementationContinuation = ({ planRun, planArtifact
       if (item.inputSourceDigest !== digest || !item.outputSourceDigest || !item.submissionDigest
         || !item.evidenceRefs?.length || !feature
         || !paths.every(path => safePath(path)
-          && feature.allowedPaths?.some(scope => safePath(scope) && containsPath(scope, path))
+          && (origin.metadata?.projectFilePolicy?.roots ?? feature.allowedPaths)?.some(scope => safePath(scope) && containsPath(scope, path))
+          && !(origin.metadata?.projectFilePolicy?.protectedPaths ?? feature.forbiddenPaths ?? []).some(scope=>safePath(scope)&&containsPath(scope,path))
           && currentPaths.some(scope => containsPath(scope, path)))) { valid = false; break; }
       digest = item.outputSourceDigest;
     }
@@ -161,11 +165,43 @@ export const assessVerifiedImplementationContinuation = ({ planRun, planArtifact
 
 /** Carry an abandoned Dispatch's in-scope source delta as unverified work for a new Run. */
 export const assessRecoveredImplementationContinuation = async ({ planRun, planArtifact, priorRuns, currentSnapshot,
-  workspaceRoot, implementationFeatures, evidenceStore, controlRoot, dataRoot, readHostEffect = null }) => {
+  workspaceRoot, implementationFeatures, evidenceStore, controlRoot, dataRoot, readHostEffect = null, projectFilePolicy = null }) => {
   const implementationPaths = (implementationFeatures ?? [])
     .filter(feature => feature.metadata?.stage === 'implementation' && feature.metadata?.sourcePolicy !== 'read-only')
     .flatMap(feature => feature.allowedPaths ?? []).filter(safePath);
   const verifiedSourceRecoveries = [];
+  // Configuration may change more than once across a sealed implementation
+  // lineage. Later baselines preserve the exact earlier configuration bytes.
+  const configurationOrigins=(priorRuns??[]).filter(origin=>
+    (origin.metadata?.configurationRebase||origin.metadata?.continuousConfigurationRebase)
+    &&origin.projectId===planRun.projectId&&origin.metadata.approvedPlan?.runId===planRun.runId
+    &&origin.metadata.approvedPlan.planDigest===planArtifact.planDigest
+    &&origin.metadata.approvedPlan.artifactDigest===planArtifact.artifactDigest
+    &&resolve(origin.metadata?.workspace?.root??'')===resolve(workspaceRoot));
+  const texts=new Map(),proofs=new Map();
+  if(configurationOrigins.length){
+    const currentText=await readFile(resolve(workspaceRoot,'harness.json'),'utf8');texts.set(sha256(currentText),currentText);
+    for(const origin of configurationOrigins){
+      const claim=origin.metadata.continuousConfigurationRebase??origin.metadata.configurationRebase;
+      const record=await evidenceStore.read(claim.evidenceRef),proof=JSON.parse(record.bytes.toString('utf8'));
+      const baselineRecord=await evidenceStore.read(proof.baselineRef),baseline=JSON.parse(baselineRecord.bytes.toString('utf8'));
+      assert(record.metadata.projectId===origin.projectId&&record.metadata.runId===origin.runId
+        &&baselineRecord.metadata.projectId===origin.projectId&&baselineRecord.metadata.runId===origin.runId,
+      'CONFIGURATION_REBASE_INVALID','Configuration inventory belongs to another Authority.');
+      for(const [text,snapshot] of [[proof.configurationText,proof.snapshot],[baseline.configText,baseline.snapshot]])
+        if(typeof text==='string'&&sha256(text)===snapshot?.files.find(f=>f.path==='harness.json')?.sha256)texts.set(sha256(text),text);
+      proofs.set(origin.runId,proof);
+    }
+    const seen=new Set();
+    for(const origin of configurationOrigins){
+      const proof=proofs.get(origin.runId),claim=origin.metadata.continuousConfigurationRebase??origin.metadata.configurationRebase;
+      if(seen.has(claim.evidenceRef))continue;seen.add(claim.evidenceRef);
+      const configurationText=texts.get(proof.snapshot?.files.find(f=>f.path==='harness.json')?.sha256);
+      if(configurationText===undefined)continue; // no historical bytes, no bridge
+      verifiedSourceRecoveries.push(await readConfigurationSourceBridge({origin,evidenceStore,
+        currentSnapshot:proof.snapshot,workspaceRoot,projectFilePolicy,configurationText}));
+    }
+  }
   for (const origin of priorRuns ?? []) {
     const binding = origin.metadata?.approvedPlan;
     if (!origin.metadata?.interruptedWorkspaceDraft || origin.projectId !== planRun.projectId
@@ -177,8 +213,9 @@ export const assessRecoveredImplementationContinuation = async ({ planRun, planA
   }
   if (verifiedSourceRecoveries.length) {
     const verified = assessVerifiedImplementationContinuation({ planRun, planArtifact, priorRuns,
-      currentSourceDigest: currentSnapshot.digest, workspaceRoot, implementationFeatures, verifiedSourceRecoveries });
-    if (verified) return { ...verified, mode: 'verified-implementation-with-interrupted-draft',
+      currentSourceDigest: currentSnapshot.digest, workspaceRoot, implementationFeatures, verifiedSourceRecoveries, projectFilePolicy });
+    if (verified) return { ...verified, mode: verifiedSourceRecoveries.some(item=>item.kind==='configuration-only')
+      ? 'verified-implementation-with-configuration-rebase' : 'verified-implementation-with-interrupted-draft',
       draftEvidenceRefs: verifiedSourceRecoveries.map(item => item.evidenceRef) };
   }
   for (const run of priorRuns ?? []) {

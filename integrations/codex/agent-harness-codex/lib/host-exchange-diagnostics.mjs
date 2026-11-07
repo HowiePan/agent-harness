@@ -8,13 +8,14 @@ const maxRawBytes = 256 * 1024;
 
 export const createHostExchangeDiagnosticWriter = ({ controlRoot, dataRoot, now = () => new Date().toISOString() }) => {
   const root = assertHarnessWritePath(resolve(dataRoot, 'diagnostics', 'codex-host-exchange'), 'Codex Host diagnostic root', controlRoot);
-  return async ({ code, request, rawLine, requestId, requestDigest, operation, tool, rawFrameDigest, rawFrameBytes, observedFields, mismatchedFields }) => {
+  return async ({ code, request, rawLine, requestId, requestDigest, operation, tool, rawFrameDigest, rawFrameBytes, observedFields, mismatchedFields, observedRolloutBytes,matchingNativeCalls,reminders }) => {
     const rawCaptured = rawFrameBytes <= maxRawBytes;
     const body = {
       protocolVersion: '1.0', kind: 'codex-host-exchange-rejection', code,
       sessionId: request.sessionId, requestId, requestDigest, operation, tool,
       bindingDigest: digestJson(request.binding ?? null), rawFrameDigest, rawFrameBytes,
       observedFields, mismatchedFields, rawCaptured,
+      ...([observedRolloutBytes,matchingNativeCalls,reminders].some(Number.isSafeInteger)?{transportProgress:Object.fromEntries(Object.entries({observedRolloutBytes,matchingNativeCalls,reminders}).filter(([,v])=>Number.isSafeInteger(v)&&v>=0))}:{}),
       ...(rawCaptured ? { rawFrame: rawLine } : {}),
       observedAt: now(),
     };

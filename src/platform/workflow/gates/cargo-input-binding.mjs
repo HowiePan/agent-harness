@@ -4,12 +4,13 @@ export const CARGO_INPUT_BINDING = Object.freeze({ id: 'cargo-test-target-input'
 
 // This deliberately accepts a small, unambiguous subset of manifest syntax.
 // Unsupported syntax is a missing proof, never permission to guess a filename.
-export const cargoTestInputCandidate = ({ manifestPath, content, command, declaredPath }) => {
+export const cargoTestInputCandidate = ({ manifestPath, content, command, declaredPath, allowManifestTargetInput = false }) => {
   const selectors = [];
   for (let i = 0; i < command.length; i += 1) {
     if (command[i] === '--test') selectors.push(command[++i]);
     else if (command[i].startsWith('--test=')) selectors.push(command[i].slice(7));
   }
+  if(!selectors.length && allowManifestTargetInput) selectors.push(posix.basename(declaredPath,'.rs'));
   if (selectors.length !== 1 || !/^[\w-]+$/.test(selectors[0] ?? '')) return null;
   const name = selectors[0];
   const directory = posix.dirname(manifestPath);

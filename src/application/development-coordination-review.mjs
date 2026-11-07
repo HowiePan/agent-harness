@@ -2,6 +2,7 @@ import { digestJson, sha256,withoutKeys } from '../common/canonical.mjs';
 import { assert } from '../common/errors.mjs';
 import { featureContractDigest } from '../common/interruption-contract.mjs';
 import { submissionAttempt } from '../kernel/attempt-budget.mjs';
+import { executionBudgetBlocked } from '../common/continuous-execution.mjs';
 import { createDispatchResultContract } from '../platform/execution/result-contract.mjs';
 import { DELIVERY_VERIFICATION_HANDOFF } from '../platform/execution/delivery-verification-ready.mjs';
 import { collectImplementationDraftInputs } from './implementation-evidence-inputs.mjs';
@@ -29,7 +30,7 @@ export const inspectRestoredCoordination = async ({ state, feature, authoritySto
     && checks.length && DELIVERY_VERIFICATION_HANDOFF === 'delivery-verification-ready/1',
   code, 'Only the exact committed legacy coordination blocker may use capability restoration; external approvals and dependencies remain blocked.');
   const contract = createDispatchResultContract(feature, {conversationVisible:true});
-  assert(contract.version === '1.3', code, 'The replacement Runtime must expose the verification-readiness contract.');
+  assert(['1.3','1.4'].includes(contract.version), code, 'The replacement Runtime must expose the verification-readiness contract.');
   const drafts = await collectImplementationDraftInputs({state,feature,authorityStore,evidenceStore});
   assert(drafts.length, code, 'The required unaccepted draft Evidence is still unavailable.');
   const bindings=[];
@@ -72,7 +73,7 @@ export const reviewDevelopmentCoordination = async ({state,project,review,carryo
     && ['projectId','runId','featureId','expectedRevision','sourceDigest','submissionDigest','contractDigest','blockerDigest'].every(key=>review[key]===actual[key])
     && carryover.firstPendingFeatureId===feature.id,code,'Coordination review must bind the exact idle frontier and replacement plan.');
   const attempt=submissionAttempt(state,feature,state.submissions.findLast(item=>item.featureId===feature.id));
-  assert(attempt&&!attempt.exhausted&&!Object.values(state.attempts).some(item=>item.logicalRoot===feature.logicalRoot&&item.exhausted),code,
+  assert(attempt&&!attempt.exhausted&&!executionBudgetBlocked(state,feature),code,
     'Capability restoration does not waive exhausted budgets; approve the exact bounded addition first.');
   const proof=await evidenceStore.put(actual,{projectId:state.projectId,runId:state.runId,epoch:state.epoch,generation:state.generation,
     featureId:feature.id,sourceDigest:state.sourceDigest,artifactDigest:state.artifactDigest,policyDigest:state.policyDigest,

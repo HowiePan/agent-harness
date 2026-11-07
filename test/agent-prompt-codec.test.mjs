@@ -132,11 +132,11 @@ test('new Prompt requires bounded scripts while historical 1.5 remains unchanged
   current.execution.runtime = { mode: 'conversation-visible', userVisible: true, hostOrchestrated: true };
   current.execution.result = createDispatchResultContract(current.feature, { conversationVisible: true });
   const compiled = compileAgentPrompt(current);
-  assert.equal(compiled.contractVersion, '1.8');
+  assert.equal(compiled.contractVersion, '1.9');
   assert.match(compiled.text, /Resource policy bounded-script\/1/);
   assert.match(compiled.text, /run-bounded-script\.mjs/);
   assert.match(compiled.text, /no default total duration deadline/);
-  assert.match(compiled.text, /Do not raise resource caps/);
+  assert.match(compiled.text, /never self-declared numbers/);
   assert.doesNotMatch(compiled.text, /4 processes, 60 seconds/);
   current.execution.prompt.contractVersion = '1.5';
   assert.doesNotMatch(compileAgentPrompt(current).text, /bounded-script\/1/);

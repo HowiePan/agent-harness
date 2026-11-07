@@ -3,6 +3,8 @@ import { assert } from '../common/errors.mjs';
 import { submissionAttempt } from './attempt-budget.mjs';
 import { validateWorkGraph } from './work-graph.mjs';
 import { INTERRUPTION_POLICY, MAX_INTERVENTIONS_PER_ROOT, featureContractDigest, interventionAllowance } from '../common/interruption-contract.mjs';
+import { continuousPolicy, executionProblemId, executionBudgetBlocked, problemHistory, problemCycle } from '../common/continuous-execution.mjs';
+import {inspectDependencyRepair} from './dependency-repair.mjs';
 
 export const INTERVENTION_LIMIT = MAX_INTERVENTIONS_PER_ROOT;
 export const isIntervention = feature => feature?.kind === 'execution-diagnostic';
@@ -30,14 +32,48 @@ export const carryInterventions = async ({ state, prior, roots, evidenceStore })
           && evidence.metadata.sourceDigest === result.inputSourceDigest,
         'INTERVENTION_CARRYOVER_EVIDENCE', 'Diagnostic transfer must verify the original evidence binding.');
       }
-      state.submissions.push(structuredClone(result));
+      if(!state.submissions.some(s=>s.submissionId===result.submissionId))state.submissions.push(structuredClone(result));
       state.evidenceRefs = [...new Set([...state.evidenceRefs, ...result.evidenceRefs])];
     }
     assert(['pending', 'completed', 'blocked', 'failed-budget'].includes(feature.state),
       'INTERVENTION_CARRYOVER_ACTIVE', 'Active diagnostic transport cannot transfer.');
     state.features.push(structuredClone(feature));
+    const originalParent=prior.features.find(f=>f.id===parent.id);
+    if(originalParent.state==='blocked'&&inspectDependencyRepair(prior,feature.id)){
+      parent.state='blocked';parent.blocker=structuredClone(originalParent.blocker);
+      parent.submissionId=originalParent.submissionId;
+    }
     for (const [key, attempt] of Object.entries(prior.attempts).filter(([, item]) => item.logicalRoot === feature.logicalRoot)) {
       state.attempts[key] = structuredClone(attempt);
+    }
+  }
+  for(const repair of prior.metadata?.dependencyRepairs??[]){
+    const source=state.features.find(f=>f.id===repair.sourceFeatureId),owner=state.features.find(f=>f.id===repair.ownerFeatureId);
+    if(!source||!owner||!roots.has(source.logicalRoot))continue;
+    assert(featureContractDigest(source)===repair.sourceContractDigest&&featureContractDigest(owner)===repair.ownerContractDigest,
+      'DEPENDENCY_REPAIR_CARRYOVER_INVALID','Dependency repair cannot transfer to changed contracts.');
+    const existing=state.metadata.dependencyRepairs?.find(r=>r.id===repair.id);
+    assert(!existing||digestJson(existing)===digestJson(repair),'DEPENDENCY_REPAIR_CARRYOVER_INVALID','Repair history cannot be reset.');
+    if(existing)continue;
+    for(const id of [repair.sourceSubmissionId,repair.reviewSubmissionId,repair.ownerSubmissionId,...(repair.revalidation??[]).flatMap(x=>[x.submissionId,...(x.verifiedSubmissionId?[x.verifiedSubmissionId]:[])])]){
+      const s=prior.submissions.find(s=>s.submissionId===id);
+      assert(s?.submissionDigest===digestJson(Object.fromEntries(Object.entries(s).filter(([k])=>k!=='submissionDigest'))),
+        'DEPENDENCY_REPAIR_CARRYOVER_INVALID','Repair requires its unchanged Submission lineage.');
+      for(const ref of s.evidenceRefs)await evidenceStore.read(ref);
+      if(!state.submissions.some(x=>x.submissionId===id))state.submissions.push(structuredClone(s));
+      state.evidenceRefs=[...new Set([...state.evidenceRefs,...s.evidenceRefs])];
+    }
+    await evidenceStore.read(repair.assessmentRef);
+    state.metadata.dependencyRepairs=[...(state.metadata.dependencyRepairs??[]),structuredClone(repair)];
+    if(repair.status==='pending')for(const current of [source,owner]){
+      const old=prior.features.find(f=>f.id===current.id);
+      assert(!['running','dispatched'].includes(old.state),'DEPENDENCY_REPAIR_CARRYOVER_INVALID','Active repair cannot transfer.');
+      for(const key of ['state','submissionId','blocker','reopenedAt','reopenReason'])if(old[key]!==undefined)current[key]=structuredClone(old[key]);
+    }
+    for(const item of repair.revalidation??[]){
+      const current=state.features.find(f=>f.id===item.featureId),old=prior.features.find(f=>f.id===item.featureId);
+      assert(current&&featureContractDigest(current)===item.contractDigest,'DEPENDENCY_REPAIR_CARRYOVER_INVALID','Revalidation requires its unchanged dependent contract.');
+      if(!item.verifiedSubmissionId)for(const key of ['state','submissionId','blocker','reopenedAt','reopenReason'])if(old[key]!==undefined)current[key]=structuredClone(old[key]);
     }
   }
 };
@@ -55,7 +91,7 @@ export const reserveIntervention = (state, input, evidence, now) => {
     && !state.decisions.some(item => item.action === 'freeze-execution' && item.decision === 'approved'),
   'INTERVENTION_NOT_IDLE', 'Diagnostic reservation requires idle unfrozen execution.');
   const attempt = submissionAttempt(state, source, submission);
-  assert(attempt && !attempt.exhausted && !Object.values(state.attempts).some(item => item.logicalRoot === source.logicalRoot && item.exhausted),
+  assert(attempt && !attempt.exhausted && !executionBudgetBlocked(state,source),
     'INTERVENTION_BUDGET_EXHAUSTED', 'Diagnostics cannot evade exhausted execution budgets.');
   const body = JSON.parse(evidence.bytes.toString('utf8'));
   assert(evidence.metadata.projectId === state.projectId && evidence.metadata.runId === state.runId
@@ -84,9 +120,11 @@ export const reserveIntervention = (state, input, evidence, now) => {
     && input.feature.metadata.intervention.assessmentId === assessment.id
     && !ledger.some(item => item.correctionOf === correctionOf));
   assert(!correctionOf || validCorrection, 'INTERVENTION_CORRECTION_INVALID', 'Clarification requires the exact unaccepted diagnosis and verified source-bound assessment.');
-  assert(body.budget.limit === interventionAllowance(source)
-    && ledger.filter(item => item.logicalRoot === source.logicalRoot).length < interventionAllowance(source)
-    && (validCorrection || !ledger.some(item => item.logicalRoot === source.logicalRoot && item.fingerprint === body.fingerprint)),
+  const history=problemHistory(state,source);
+  assert(!continuousPolicy(state) || body.problem.problemId===executionProblemId(source),'INTERVENTION_PROBLEM_MISMATCH','Problem identity must bind the current contract.');
+  assert(body.budget.limit === interventionAllowance(source,state)
+    && history.length < interventionAllowance(source,state)
+    && (validCorrection || !history.some(item => item.fingerprint === body.fingerprint)),
   'INTERVENTION_LIMIT_REACHED', 'Repeated unchanged evidence or exhausted recovery allowance cannot create more diagnostics.');
   const candidate = validateWorkGraph([...state.features, input.feature]).at(-1);
   assert(isIntervention(candidate) && candidate.id === `diagnostic/${digestJson({ root: source.logicalRoot, submissionId: submission.submissionId,
@@ -101,7 +139,7 @@ export const reserveIntervention = (state, input, evidence, now) => {
   'INTERVENTION_FEATURE_INVALID', 'A diagnostic must be a single-attempt read-only task for the bound blocker.');
   state.features.push(candidate);
   state.metadata.interruptionLedger = [...ledger, { id: candidate.id, logicalRoot: source.logicalRoot,
-    sourceDigest: state.sourceDigest, fingerprint: body.fingerprint, action: 'diagnose',
+    sourceDigest: state.sourceDigest, ...(continuousPolicy(state)?{problemId:executionProblemId(source),cycleGeneration:problemCycle(state,source)}:{}), fingerprint: body.fingerprint, action: 'diagnose',
     sourceSubmissionId: submission.submissionId, ...(correctionOf ? { correctionOf, assessmentId: assessment.id } : {}),
     evidenceRefs: [input.evidenceRef], reservedAt: now() }];
   return { featureId: candidate.id, scheduled: true };

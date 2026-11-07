@@ -144,7 +144,7 @@ test('source-linked project hooks route native tool evidence without a packaged 
     const delayedProbe = runLocalSourceHostProbe({ bindingsDir, sessionId: 'local-source-session', output: delayedOutput, transport: 'hook' });
     const [delayedChunk] = await once(delayedOutput, 'data');
     const delayedRequest = JSON.parse(delayedChunk.toString());
-    elapsed = 62000;
+    elapsed = 120001;
     await handleLocalSourceHook({ hook_event_name: 'PostToolUse', tool_name: 'list_agents', tool_use_id: 'native-tool-delayed-probe', tool_input: {}, tool_response: { agents: [] }, session_id: 'local-source-session', turn_id: 'local-source-turn' }, { bindingsDir });
     const delayedResult = await delayedProbe;
     assert.equal(delayedResult.ok, true);
@@ -155,7 +155,7 @@ test('source-linked project hooks route native tool evidence without a packaged 
     const missingProbe = runLocalSourceHostProbe({ bindingsDir, sessionId: 'local-source-session', output: missingOutput, transport: 'hook' });
     const timedOut = assert.rejects(missingProbe, { code: 'CODEX_HOST_HOOK_RESPONSE_TIMEOUT' });
     await once(missingOutput, 'data');
-    elapsed = 120001;
+    elapsed = 1800001;
     await timedOut;
   } finally { clock.mock.restore(); }
 

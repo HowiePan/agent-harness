@@ -2,7 +2,8 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
-import { createHarness, createStaticModelRouter, defineExtensionPack, digestJson, ExtensionRegistry, loadExtensionPack, projectDescriptorInput, projectDescriptorSchemas, projectExecutionPolicyDecisionContext, ProjectRegistry, sha256, validateJsonSchema } from '../src/index.mjs';
+import { createStaticModelRouter, defineExtensionPack, digestJson, ExtensionRegistry, loadExtensionPack, projectDescriptorInput, projectDescriptorSchemas, projectExecutionPolicyDecisionContext, ProjectRegistry, sha256, validateJsonSchema } from '../src/index.mjs';
+import { createTestHarness as createHarness } from './lifecycle-command-support.mjs';
 import { extensionPack as engineDeliveryExtension } from '../integrations/legacy-consumers/cardworld/index.mjs';
 import { makeFixture, startRun } from './test-support.mjs';
 

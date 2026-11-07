@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict';
+import { createTestHarness as createHarness } from './lifecycle-command-support.mjs';
 import test from 'node:test';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
-import { createHarness, createInMemoryRuntime, harnessTemporaryRoot,
+import { createInMemoryRuntime, harnessTemporaryRoot,
   loadExtensionPack, projectExecutionPolicyDecisionContext, projectDescriptorInput } from '../src/index.mjs';
 import { createCardWorldProjectDescriptor } from '../integrations/legacy-consumers/cardworld/index.mjs';
 import { planApprovalSnapshot } from '../src/flows/delivery-lifecycle/plan-approval.mjs';

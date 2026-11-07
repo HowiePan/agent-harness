@@ -4,6 +4,7 @@ import { EXECUTION_CLASSES, assertExecutionClass } from '../execution/boundary.m
 import { validateJsonSchema } from '../../common/json-schema.mjs';
 import { resolveLifecycleExecutionPolicy } from '../plugins/runtime/execution-policy.mjs';
 import { validateProjectFilePolicy } from '../../common/project-file-policy.mjs';
+import { validateContinuousExecution } from '../../common/continuous-execution.mjs';
 
 const inputSchema = JSON.parse(readFileSync(new URL('../../../schemas/project-descriptor-input.schema.json', import.meta.url), 'utf8'));
 const recordSchema = JSON.parse(readFileSync(new URL('../../../schemas/project-descriptor.schema.json', import.meta.url), 'utf8'));
@@ -21,6 +22,7 @@ export const assertProjectDescriptorInput = (input, { strictIdentity = true } = 
   assertPlainObject(input.workspace, 'PROJECT_DESCRIPTOR_INVALID', 'Project Descriptor requires a workspace object.');
   if (input.policy !== undefined) assertPlainObject(input.policy, 'PROJECT_POLICY_INVALID', 'Project Descriptor policy must be an object.');
   validateProjectFilePolicy(input.policy?.projectFilePolicy);
+  validateContinuousExecution(input.policy?.continuousExecution);
   assert(!Object.hasOwn(input.policy ?? {}, 'executionGrant') && !Object.hasOwn(input.policy ?? {}, 'lifecycleExecutionGrant') && !Object.hasOwn(input.policy ?? {}, 'authorization'), 'DESCRIPTOR_EXECUTION_AUTHORIZATION_FORBIDDEN', 'Project Descriptor policy cannot contain execution authorization or grants.');
   for (const [action, execution] of Object.entries(input.policy?.actionExecution ?? {})) {
     assertPlainObject(execution, 'PROJECT_ACTION_EXECUTION_INVALID', `Project action execution policy must be an object: ${action}`);

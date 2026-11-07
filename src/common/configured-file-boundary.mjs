@@ -1,6 +1,7 @@
 import { assert } from './errors.mjs';
 import { safeProjectFile } from './project-file-policy.mjs';
 import { cloneJson } from './clone-json.mjs';
+import { validateContinuousExecution } from './continuous-execution.mjs';
 export const validateFileBoundary = boundary => {
   assert(boundary?.version === 'project-boundary/1', 'PROJECT_BOUNDARY_REQUIRED', 'Declare project.fileBoundary explicitly.');
   for (const key of ['sourceRoots', 'sharedPaths', 'artifactRoots', 'protectedPaths']) {
@@ -13,7 +14,9 @@ export const validateFileBoundary = boundary => {
     'PROJECT_BOUNDARY_OVERLAP', 'Artifact roots cannot overlap source, shared or protected paths.');
   return cloneJson(boundary);
 };
-export const applyConfiguredFileBoundary = (descriptor, boundary) => {
+export const applyConfiguredFileBoundary = (descriptor, boundary, executionPolicy) => {
+  const continuousExecution=validateContinuousExecution(executionPolicy);
+  if (continuousExecution) descriptor={...descriptor,policy:{...descriptor.policy,continuousExecution}};
   if (!boundary) return descriptor; // Legacy configuration retains its original strict contract.
   const value=validateFileBoundary(boundary);
   return {...descriptor, policy:{...descriptor.policy,

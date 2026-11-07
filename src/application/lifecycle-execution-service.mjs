@@ -1,7 +1,9 @@
 import { assert } from '../common/errors.mjs';
 import { submissionAttempt } from '../kernel/attempt-budget.mjs';
+import { continuousPolicy } from '../common/continuous-execution.mjs';
 import { selectBlockedResumeFeature } from './lifecycle-resume.mjs';
 import { inspectDevelopmentHostCheckReview } from './development-host-check-review.mjs';
+import {inspectDeliveryFailureRetries} from './delivery-failure-retry.mjs';
 import { ACCEPTANCE_CONTINUATION_POLICY, hasNewAcceptanceCheckpoint } from './implementation-continuation.mjs';
 import { hasTargetImplementationProgress, shouldCorrectImplementationHandoff, implementationHandoffCorrectionReason } from './implementation-handoff.mjs';
 import { AUTO_CONCURRENCY, AUTO_CONCURRENCY_LIMIT, resolveConcurrencyLimit } from '../common/concurrency.mjs';
@@ -27,8 +29,9 @@ import { reviewableInterruptions, hasPendingIntervention, interruptionContext, a
 import { decideInterruption, interventionHistory } from './interruption-policy.mjs';
 import { isIntervention, isExecutionComplete, profileState } from '../kernel/intervention.mjs';
 import { sealInterruptionOutcome, describeInterruptionError } from './interruption-outcome.mjs';
+import {isResultCorrection} from '../platform/execution/result-correction.mjs';
+import {recordResultContinuously} from './record-result-continuously.mjs';
 
-const recoverableResultCodes = new Set(['REPAIR_CHECKPOINT_REQUIRED', 'REPAIR_CHECKPOINT_EVIDENCE_REQUIRED', 'REPAIR_FINDING_CHECKPOINT_REQUIRED', 'QUALITY_DIAGNOSTIC_DISPOSITION_REQUIRED', 'QUALITY_PREREQUISITE_INVALID', 'PROFILE_RESULT_REJECTED', 'RESULT_OUTPUT_PORTS_MISMATCH', 'RESULT_OUTPUT_SCHEMA_ID_MISMATCH', 'RESULT_OUTPUT_VALUE_SCHEMA_INVALID', 'DELIVERY_VERIFICATION_REQUEST_INVALID', 'DELIVERY_VERIFICATION_READINESS_INCOMPLETE', 'RESULT_VERIFICATION_REQUEST_UNRESOLVED']);
 export const visibleLifecycleStopReason = state => {
   if (state.profile?.id === 'collection-batch' && state.features.some(feature => ['blocked', 'failed-budget'].includes(feature.state)
     && feature.blocker?.kind !== 'engine-artifact')) return 'collection-attention-required';
@@ -59,7 +62,7 @@ export const shouldRetryImplementationVerificationPath = ({ feature, result, sta
   const retries = feature.metadata.verificationRepairRetries;
   if (!Number.isInteger(retries) || retries < 1) return false;
   const current = state.features.find(item => item.id === feature.id);
-  const attempt = state.attempts[`${feature.logicalRoot}:${result.failureClass}`];
+  const attempt = submissionAttempt(state,feature,state.submissions?.findLast(s=>s.featureId===feature.id)??{result});
   return current?.state === 'blocked' && attempt && !attempt.exhausted && attempt.failures <= retries;
 };
 export const shouldContinueImplementationProgress = ({ feature, result, state, submission }) => {
@@ -87,7 +90,7 @@ export const shouldContinueImplementationProgress = ({ feature, result, state, s
     && item.attemptKey === (submission.attemptBudgetKey ?? `${feature.logicalRoot}:${result.failureClass}`))
     .reduce((total, item) => total + item.additional, 0);
   const budget = feature.metadata.implementationProgressRetries + additions;
-  if (!Number.isInteger(budget) || budget < 1) return false;
+  if (!continuousPolicy(state) && (!Number.isInteger(budget) || budget < 1)) return false;
   const continuations = state.submissions.filter(item => item.featureId === feature.id
     && item.result?.status === 'blocked' && item.outputSourceDigest !== item.inputSourceDigest).length;
   const attempt = submissionAttempt(state, feature, { ...submission, result });
@@ -266,10 +269,13 @@ const continueVisibleLifecyclePlan = async (context, api, planInput, { commandId
   const pendingReviewAtEntry = hasPendingIntervention(started.state);
   let state = await applyPendingInterruptionReviews(api, started.state, commandId);
   const activeRunId = state.runId;
-  const hostCheckReviews = await inspectDevelopmentHostCheckReview(state, authorityStore, api.evidenceStore);
+  const hostCheckReviews = [...await inspectDevelopmentHostCheckReview(state, authorityStore, api.evidenceStore),
+    ...await inspectDeliveryFailureRetries(state,api.evidenceStore)];
   const reviewedHostReason = featureId => {
     const review = hostCheckReviews.find(item => item.featureId === featureId);
-    return review ? `development-host-check-reviewed:${review.evidenceRef}` : null;
+    return review ? review.kind==='delivery-failure-retry'
+      ? `Repair the failed original Host check ${review.checkId} within the existing project boundary and remaining attempt budget. Failure evidence: ${review.evidenceRef}. Preserve all acceptance and resource limits; rerun fresh original checks. This is not a passing review or completion.`
+      : `development-host-check-reviewed:${review.evidenceRef}` : null;
   };
   if (resume) {
     assert(activeRunId === resume.runId, 'LIFECYCLE_RESUME_RUN_MISMATCH', 'Lifecycle execution selected a different Run.');
@@ -487,7 +493,7 @@ const continueVisibleLifecyclePlan = async (context, api, planInput, { commandId
         validateProfileResult({ profile: api.profileRegistry.get(state.profile.id), state, feature, result: preview.result });
       }
       catch (error) {
-        if (!recoverableResultCodes.has(error.code) || !['completed', 'blocked', 'verification-ready'].includes(businessResult.status) || !hostResultReceipt?.observationRequestDigest) throw error;
+        if (!isResultCorrection(error) || !['completed', 'blocked', 'verification-ready'].includes(businessResult.status) || !hostResultReceipt?.observationRequestDigest) throw error;
         if (error.code.startsWith('REPAIR_') && !feature?.metadata?.repairFindingId) throw error;
         if (error.code.startsWith('QUALITY_') && !feature?.metadata?.qualityReview) throw error;
         rejected = rejectVisibleResult({ error, result: businessResult, receipt: hostResultReceipt, runtimeReceipt: lease.runtimeReceipt, agentId: lease.agentId, dispatchId: dispatch.dispatchId, packetDigest: dispatch.packetDigest });
@@ -495,7 +501,7 @@ const continueVisibleLifecyclePlan = async (context, api, planInput, { commandId
         hostResultReceipt = rejected.receipt;
         runtimeEvidence = { ...runtimeEvidence, resultRejection: rejected.rejection };
       }
-      const submitted = await api.recordResult(plan.project.id, activeRunId, dispatch.dispatchId, businessResult, { commandId: `${commandId}.submit.${dispatch.dispatchId}`,
+      const submitted = await recordResultContinuously(api,plan.project.id, activeRunId, dispatch.dispatchId, businessResult, { commandId: `${commandId}.submit.${dispatch.dispatchId}`,
         onVerificationProgress: onGateProgress, runtimeEvidence: { ...runtimeEvidence, hostWaitReceipt: waited?.receipt ?? null, hostResultReceipt } });
       state = submitted.state;
       // Application may reject a claimed delivery completion after actual

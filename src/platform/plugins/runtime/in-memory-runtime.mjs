@@ -11,7 +11,7 @@ export const createInMemoryRuntime = ({ manifest, handler }) => {
       const task = { status: 'running', promise: Promise.resolve().then(() => handler(structuredClone(packet), { agentId, messages: messages.get(agentId) ?? [] })) };
       tasks.set(agentId, task);
       messages.set(agentId, []);
-      task.promise.then(result => { task.status = 'completed'; task.result = result; }, error => { task.status = 'failed'; task.error = { message: error.message, code: error.code }; });
+      task.promise.then(result => { task.status = 'completed'; task.result = result; }, error => { task.status = 'failed'; task.error = { message: error.message, ...(error.code ? {code:error.code} : {}) }; });
       return envelope(manifest, 'receipt', { operation: 'spawn', agentId, transportReceipt: { runtimePluginId: manifest.id, mode: 'in-memory', startedAt: new Date().toISOString() } });
     },
     async wait({ agentId }) {
@@ -21,7 +21,7 @@ export const createInMemoryRuntime = ({ manifest, handler }) => {
       const transported = task.result?.result && typeof task.result.result === 'object'
         ? { result: task.result.result, verificationReceipts: structuredClone(task.result.verificationReceipts ?? []) }
         : { result: task.result };
-      return envelope(manifest, 'event', { operation: 'wait', agentId, status: task.status, ...transported, error: task.error });
+      return envelope(manifest, 'event', { operation: 'wait', agentId, status: task.status, ...transported, ...(task.error ? {error:task.error} : {}) });
     },
     async send({ agentId, message }) {
       assert(tasks.has(agentId), 'MEMORY_AGENT_NOT_FOUND', `In-memory agent not found: ${agentId}`);

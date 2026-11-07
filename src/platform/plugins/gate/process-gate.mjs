@@ -8,8 +8,9 @@ import { harnessControlRoot } from '../../../common/write-boundary.mjs';
 import { envelope } from '../contracts.mjs';
 import { createManagedOutputSession, DEFAULT_PROCESS_OUTPUTS, prepareSandboxLaunch, replaceOutputTokens } from '../execution/managed-output.mjs';
 import { runResourceBounded } from '../execution/resource-guard.mjs';
+import { resourceClassLimits } from '../execution/resource-policy.mjs';
 
-const run = ({ executable, args, cwd, env, timeoutMs, onSpawn, onProgress = null, resourceRoot }) => new Promise(resolveRun => {
+const run = ({ executable, args, cwd, env, timeoutMs, onSpawn, onProgress = null, resourceRoot, executionPolicy }) => new Promise(resolveRun => {
   // Windows cannot launch npm-style .cmd shims through spawn without a shell.
   const windowsCommand = process.platform === 'win32' && (/\.(?:cmd|bat)$/i.test(executable) || /^(?:npm|npx|pnpm|yarn)$/i.test(executable));
   if (windowsCommand && [executable, ...args].some(value => /["&|<>^%!()\r\n]/.test(value))) {
@@ -21,7 +22,7 @@ const run = ({ executable, args, cwd, env, timeoutMs, onSpawn, onProgress = null
       ? { executable: process.env.ComSpec, args: ['/d', '/s', '/c', `"${[executable, ...args].map(value => /\s/.test(value) || !value ? `"${value}"` : value).join(' ')}"`], cwd, environment: env }
       : { executable, args, cwd, environment: env };
     resolveRun(runResourceBounded({ launch, resourceRoot,
-      limits: { memoryBytes: 2 * 1024 ** 3, timeoutMs, maxProcesses: 16 }, onSpawn, onProgress }).then(result => {
+      limits: executionPolicy ? {...resourceClassLimits(executionPolicy,'test'),timeoutMs} : { memoryBytes: 2 * 1024 ** 3, timeoutMs, maxProcesses: 16 }, onSpawn, onProgress }).then(result => {
       if (result.environmentError?.code === 'PROCESS_RESOURCE_TIMEOUT') {
         result.environmentError = { code: 'GATE_PROCESS_TIMEOUT', message: `Gate process exceeded its ${timeoutMs} ms timeout.`, timeoutMs };
         onProgress?.({ phase: 'process-timeout', ...result.environmentError });
@@ -48,7 +49,7 @@ const run = ({ executable, args, cwd, env, timeoutMs, onSpawn, onProgress = null
   child.on('close', (exitCode, signal) => { clearTimeout(timer); onProgress?.({ phase: 'process-finished', exitCode, signal }); resolveRun({ exitCode, signal, stdout, stderr, environmentError: timeoutError }); });
 });
 
-export const createProcessGateExecutor = ({ manifest, workspaceRoot, allowlist, baseEnvironment = {}, temporaryRoot, controlRoot, outputDeclarations = manifest.execution?.outputs ?? DEFAULT_PROCESS_OUTPUTS, sandbox = null, resolveSandbox = null, sandboxMode = manifest.execution?.sandbox?.mode ?? 'optional', monitorIntervalMs = 100, onProgress = null }) => ({
+export const createProcessGateExecutor = ({ manifest, workspaceRoot, allowlist, baseEnvironment = {}, temporaryRoot, controlRoot, executionPolicy = null, outputDeclarations = manifest.execution?.outputs ?? DEFAULT_PROCESS_OUTPUTS, sandbox = null, resolveSandbox = null, sandboxMode = manifest.execution?.sandbox?.mode ?? 'optional', monitorIntervalMs = 100, onProgress = null }) => ({
   async execute(spec) {
     assert(typeof onProgress === 'function', 'PROCESS_PROGRESS_OBSERVER_REQUIRED', 'Process Gate execution requires a live progress observer.');
     const allowed = allowlist.find(item => item.id === spec.commandId);
@@ -70,7 +71,7 @@ export const createProcessGateExecutor = ({ manifest, workspaceRoot, allowlist, 
       const selectedSandbox = resolveSandbox ? resolveSandbox({ spec, allowed }) : sandbox;
       const sandboxed = await prepareSandboxLaunch({ sandbox: selectedSandbox, mode: spec.sandboxMode ?? allowed.sandboxMode ?? sandboxMode, launch: requestedLaunch });
       sandboxReceipt = sandboxed.receipt;
-      result = await run({ executable: sandboxed.launch.executable, args: sandboxed.launch.args, cwd: sandboxed.launch.cwd, env: sandboxed.launch.environment, timeoutMs: Number(spec.timeoutMs ?? allowed.timeoutMs ?? 0), resourceRoot: resolve(harnessControlRoot(controlRoot), '.tmp', 'bounded-processes'), onSpawn: child => session.monitor(child, { intervalMs: monitorIntervalMs }), onProgress: event => onProgress({ gateId: spec.id, ...event }) });
+      result = await run({ executable: sandboxed.launch.executable, args: sandboxed.launch.args, cwd: sandboxed.launch.cwd, env: sandboxed.launch.environment, executionPolicy, timeoutMs: Number(spec.timeoutMs ?? allowed.timeoutMs ?? 0), resourceRoot: resolve(harnessControlRoot(controlRoot), '.tmp', 'bounded-processes'), onSpawn: child => session.monitor(child, { intervalMs: monitorIntervalMs }), onProgress: event => onProgress({ gateId: spec.id, ...event }) });
     } catch (error) {
       result = { exitCode: null, signal: null, stdout: '', stderr: '', environmentError: { code: error.code ?? 'GATE_EXECUTION_FAILED', message: error.message } };
     } finally {

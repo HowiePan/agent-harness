@@ -17,7 +17,8 @@ export const coordinationRecoveryDirective = ({ status = 'error', interruption =
       'Contain unresolved Host effects before another dispatch; never wait for an Agent that was not started.',
       'Diagnose using existing authority. Confirmed Harness defects require independent maintenance, verification and H0-H4 classification.',
       'Use only verified recovery receipts; do not mint an intent, replay an exited Coordinator, rewrite results or edit Authority.',
-      'If a new Hook command is truly required, finish repair and recovery preparation before requesting that single minimum action.'],
+      'Continue only inside the current host-verified user command and its persisted finite allowance. Historical commands and migration receipts cannot initiate another lifecycle.',
+      'Maintenance may prepare recovery only. After command context loss, stop or exhaustion, preserve evidence and await an explicit user command; never replay an exited Coordinator.'],
     requiredDecision: !complete && needsDecision ? interruption.requiredDecision : null,
   };
   return { ...body, directiveDigest: digestJson(body) };

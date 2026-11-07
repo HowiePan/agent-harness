@@ -8,11 +8,12 @@ import { featureContractDigest } from '../src/application/interruption-policy.mj
 import { reviewableInterruptions, hasPendingIntervention, applyPendingInterruptionReviews, interruptionContext } from '../src/application/interruption-review.mjs';
 import { decideInterruption } from '../src/application/interruption-policy.mjs';
 import { resolveAttemptCarryover } from '../src/kernel/attempt-carryover.mjs';
+import { validateContinuousExecution } from '../src/common/continuous-execution.mjs';
 
 const blocked = { status: 'blocked', summary: 'Worker estimates too much remaining work.', changedFiles: [],
   failureClass: 'capacity-mismatch', blocker: { kind: 'capacity', summary: '44 estimated versus 36 capacity.' } };
-const fixture = async (t, { reserve = null } = {}) => {
-  const f = await makeFixture(); t.after(f.cleanup);
+const fixture = async (t, { reserve = null, continuous = false } = {}) => {
+  const f = await makeFixture(continuous ? {policy:{continuousExecution:validateContinuousExecution({version:'continuous-execution/1',recovery:{cyclesPerProblem:4,stagnantCycles:4}})}} : {}); t.after(f.cleanup);
   await mkdir(resolve(f.workspace, 'src'));
   await writeFile(resolve(f.workspace, 'src/owner.mjs'), 'export const existing = true;');
   await startRun(f, { features: [feature('owner', { stage: 'implementation', ...(reserve === null ? {} : { deliveryOwnerProposal: { id: 'owner', contracts: [], deliveryBatchReserve: reserve } }) }, { logicalRoot: 'owner', allowedPaths: ['src'] })] });
@@ -31,6 +32,24 @@ const reviewResult = async (f, dispatched, overrides = {}) => {
       repairPaths: ['src/owner.mjs'], remainingWork: [{ work: 'Finish behavior', existingImplementation: 'Owner already exists.',
         remainingDevelopment: 'Wire one consumer.', verification: 'Run all approved checks.', unknowns: [], units: 4 }], ...overrides } } } };
 };
+
+test('a repeatedly failed strategy is sealed as rejected and cannot create a pending-review spin',async t=>{
+ const f=await fixture(t,{continuous:true});await schedule(f);
+ let d=await dispatchAndBind(f,'run');await recordResult(f,'run',d.dispatch,await reviewResult(f,d));
+ await f.harness.applyInterruptionReview(f.projectId,'run',d.dispatch.featureId,'first-review');
+ let s;
+ for(let i=0;i<2;i++){
+   d=await dispatchAndBind(f,'run');s=(await recordResult(f,'run',d.dispatch,blocked)).state;
+   if(i===0)s=(await f.harness.kernel.reopenFeature(f.projectId,'run',{featureId:'owner',reason:'One bounded retry of approved strategy'},command(s))).state;
+ }
+ await f.harness.scheduleInterruptionReview(f.projectId,'run','owner','next-review');
+ d=await dispatchAndBind(f,'run');await recordResult(f,'run',d.dispatch,await reviewResult(f,d));
+ s=(await f.harness.applyInterruptionReview(f.projectId,'run',d.dispatch.featureId,'reject-repeated-strategy')).state;
+ assert.equal(s.features.find(x=>x.id==='owner').state,'blocked');
+ assert(s.decisions.some(x=>x.kind==='execution-strategy-rejected'));
+ assert.equal(hasPendingIntervention(s),false);
+ assert.equal((await applyPendingInterruptionReviews(f.harness,s,'no-spin')).revision,s.revision);
+});
 
 test('unknown committed blocker reserves a read-only native task, accounts review, and reopens only the original unchanged contract', async t => {
   const f = await fixture(t); const before = featureContractDigest(f.state.features[0]);

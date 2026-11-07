@@ -160,6 +160,7 @@ export class ProjectGateRunner {
     assert(typeof this.onProgress === 'function', 'PROCESS_PROGRESS_OBSERVER_REQUIRED', 'Project Gate execution requires a live progress observer.');
     const project = await this.harness.projectRegistry.get(projectId);
     let state = await this.harness.authorityStore.read(projectId, runId);
+    await this.harness.assertCurrentCommandState(projectId, runId);
     const currentPluginSetDigest = digestJson({ plugins: this.harness.pluginHost.snapshot().manifests, extensions: this.harness.extensionSet.installed });
     assert(currentPluginSetDigest === state.pluginSetDigest, 'GATE_PLUGIN_SET_DRIFT', 'Installed Gate plugins differ from the Run plugin composition.');
     if (state.metadata?.projectDescriptorDigest) assert(project.descriptorDigest === state.metadata.projectDescriptorDigest, 'GATE_PROJECT_DESCRIPTOR_DRIFT', 'Project Descriptor differs from the Run-bound Gate policy.');
@@ -175,6 +176,7 @@ export class ProjectGateRunner {
       workspaceRoot,
       temporaryRoot: `${this.harness.dataRoot}/tmp/gates`,
       controlRoot: this.harness.controlRoot,
+      executionPolicy: state.metadata?.continuousExecution,
       resolveSandbox: ({ allowed }) => allowed.sandboxPluginId ? this.harness.pluginHost.get(allowed.sandboxPluginId, 'os-sandbox') : null,
       allowlist: recipes.map(recipe => ({ id: recipe.id, executable: recipe.command[0], args: recipe.command.slice(1), cwd: recipe.cwd, timeoutMs: recipe.timeoutMs, environment: recipe.environment, outputs: recipe.outputs, sandboxMode: recipe.sandboxMode, sandboxPluginId: recipe.sandboxPluginId })),
       onProgress: this.onProgress,

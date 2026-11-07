@@ -4,8 +4,17 @@ import { assert } from '../common/errors.mjs';
 const mutableFeatureKeys = ['state', 'submissionId', 'blocker', 'reopenedAt', 'reopenReason',
   'recoveryDisposition', 'recoveryEvidenceRefs'];
 const implementation = state => state.features.filter(feature => feature.metadata?.stage === 'implementation');
-const partialOrigin = (state, submissionId) => [...state.events].reverse().find(event => event.type === 'attempts.carried-over'
-  && event.submissionIds?.includes(submissionId) && event.sources?.length);
+const partialOrigin = (state, submissionId) => {
+  const link=state.events.findLast(event=>event.type==='feature.completion-carried-over');
+  const explicit=link?.partialSubmissionIds;
+  const first=state.metadata?.completionCarryover?.firstPendingFeatureId??state.metadata?.completionCarryover?.plan?.firstPendingFeatureId;
+  // Old transfers retained all attempt history, including diagnostic context
+  // that the parent never selected as implementation progress. Legacy fallback
+  // is deliberately narrow and still requires the parent's exact sealed claim.
+  if(explicit?!explicit.includes(submissionId):!state.features.some(f=>f.id===first&&f.submissionId===submissionId))return null;
+  return [...state.events].reverse().find(event => event.type === 'attempts.carried-over'
+    && event.submissionIds?.includes(submissionId) && event.sources?.length);
+};
 const staticFeature = feature => {
   // Read-only hash projection, never a replacement Feature or mutable Authority.
   const stable = Object.fromEntries(Object.entries(feature).filter(([key]) => !mutableFeatureKeys.includes(key)));
@@ -58,8 +67,8 @@ export const createCompletionCarryoverPlan = ({ prior, replacementFeatures, repl
   assert(completed.length > 0 || partial.length > 0, 'CARRYOVER_NO_COMPLETIONS',
     'Carry-over requires completed Features or an explicitly verified committed partial implementation.');
   const firstPending = oldFeatures.findIndex(feature => feature.state !== 'completed');
-  assert(firstPending >= 0 && oldFeatures.slice(firstPending).every(feature => feature.state !== 'completed'),
-    'CARRYOVER_COMPLETION_ORDER_INVALID', 'Completed Features must form the verified prefix of the implementation graph.');
+  assert(firstPending >= 0 && completed.every(feature=>feature.dependsOn.every(id=>prior.features.some(parent=>parent.id===id&&parent.state==='completed'))),
+    'CARRYOVER_COMPLETION_ORDER_INVALID', 'A carried completion must retain every completed dependency in the original graph.');
   const completedSubmissions = completed.map(feature => {
     const submission = prior.submissions.find(item => item.submissionId === feature.submissionId && item.featureId === feature.id
       && item.result?.status === 'completed' && !item.supersededAt);

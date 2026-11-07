@@ -45,7 +45,7 @@ export const previewDevelopmentH4Migration = async ({ plan, manifest, runId, for
   const extensions = await Promise.all(loaded.request.extensions.map(item => loadExtensionPack(item.module,
     { cwd: controlRoot, controlRoot })));
   const generator = extensions.find(item => item.id === loaded.request.project.generatorExtensionId);
-  const draft = applyConfiguredFileBoundary(generator.operations.createProjectDescriptor(loaded.request.project.input), loaded.request.project.fileBoundary);
+  const draft = applyConfiguredFileBoundary(generator.operations.createProjectDescriptor(loaded.request.project.input), loaded.request.project.fileBoundary, loaded.request.project.executionPolicy);
   const descriptor = { ...draft, harness: { version: manifest.release.version, artifactDigest: plan.after.runtimeDigest },
     extensions: (draft.extensions ?? []).map(item => {
       const installed = extensions.find(extension => extension.id === item.id);

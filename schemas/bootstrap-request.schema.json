@@ -27,6 +27,7 @@
       "properties": {
         "generatorExtensionId": { "type": "string", "pattern": "^[a-z0-9][a-z0-9.-]+$" },
         "fileBoundary": { "type":"object" },
+        "executionPolicy": { "type":"object" },
         "input": { "type": "object" }
       },
       "additionalProperties": false

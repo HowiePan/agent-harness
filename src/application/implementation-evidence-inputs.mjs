@@ -60,6 +60,14 @@ export const collectImplementationDraftInputs = async ({ state, feature, authori
 export const prepareImplementationEvidenceInputs = async options => {
   const { state, evidenceStore } = options;
   const values = await collectImplementationDraftInputs(options);
+  for(const repair of state.metadata?.dependencyRepairs??[])if(repair.status==='pending'&&repair.ownerFeatureId===options.feature.id){
+    const review=state.submissions.find(s=>s.submissionId===repair.reviewSubmissionId);
+    const source=state.submissions.find(s=>s.submissionId===repair.sourceSubmissionId);
+    assert(review&&source,'DEPENDENCY_REPAIR_INPUT_MISSING','Dependency return must retain its original diagnosis and blocker.');
+    values.push({kind:'dependency-repair-input',version:'1.0',projectId:state.projectId,originRunId:repair.originRunId,
+      evidenceRef:repair.assessmentRef,completionCredit:false,status:'unaccepted',repair,
+      blocker:source.result,diagnosis:review.result.outputs.diagnosis.value});
+  }
   const refs = [];
   for (const value of values) {
     const bytes = Buffer.from(canonicalize(value));

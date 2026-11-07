@@ -1,12 +1,23 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { shouldContinueImplementationProgress, shouldRetryImplementationVerificationPath } from '../src/application/lifecycle-execution-service.mjs';
+import {selectBlockedResumeFeature} from '../src/application/lifecycle-resume.mjs';
 
 const feature = {
   id: 'implement/V-next', logicalRoot: 'implement:V-next',
   allowedPaths: ['scripts'], forbiddenPaths: ['tabletop-collection'],
   metadata: { stage: 'implementation', verificationRepairRetries: 2 },
 };
+
+test('a blocked consumer never prevents its runnable prerequisite or independent authorized work',()=>{
+ const owner={id:'owner',state:'pending',dependsOn:[],logicalRoot:'owner'};
+ const consumer={id:'consumer',state:'blocked',dependsOn:['owner'],metadata:{stage:'implementation'},logicalRoot:'consumer'};
+ const state={metadata:{},features:[owner,consumer],attempts:{},submissions:[]};
+ assert.equal(selectBlockedResumeFeature(state),null);assert.equal(consumer.state,'blocked');
+ owner.state='failed-budget';assert.throws(()=>selectBlockedResumeFeature(state),{code:'LIFECYCLE_RESUME_BLOCKER_REQUIRES_REVIEW'});
+ state.features.push({id:'independent',state:'pending',dependsOn:[],logicalRoot:'independent'});
+ assert.equal(selectBlockedResumeFeature(state),null);
+});
 const result = {
   status: 'blocked', failureClass: 'verification-path-prohibited',
   blocker: { kind: 'verification-path-prohibited', summary: 'Check writes outside the declared output path.', repairCandidatePaths: ['scripts/cardworld.ps1'] },

@@ -1,6 +1,7 @@
 import { mkdtemp, mkdir, rm, rmdir, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
-import { createExecutionAuthorizationAdapter, createHarness, createInMemoryRuntime, createVisibleHostAdapter, defineNodeTaskContract, harnessTemporaryRoot, projectExecutionPolicyDecisionContext, sealLifecycleExecutionGrant } from '../src/index.mjs';
+import { createExecutionAuthorizationAdapter, createInMemoryRuntime, createVisibleHostAdapter, defineNodeTaskContract, harnessTemporaryRoot, projectExecutionPolicyDecisionContext, sealLifecycleExecutionGrant } from '../src/index.mjs';
+import { createTestHarness as createHarness } from './lifecycle-command-support.mjs';
 import { extensionPack as engineDeliveryExtension } from '../integrations/legacy-consumers/cardworld/index.mjs';
 import { extensionPack as collectionBatchExtension } from '../integrations/legacy-consumers/collection/index.mjs';
 
@@ -108,6 +109,8 @@ export const createMockVisibleHostAdapter = ({
   onSpawn = null,
   onResult = null,
   onReconcile = null,
+  onConfirm = null,
+  onContain = null,
 } = {}) => createVisibleHostAdapter({
   provider,
   adapterVersion,
@@ -141,8 +144,8 @@ export const createMockVisibleHostAdapter = ({
     runtimeEvidence: { hostWaitReceipt: { host: provider }, hostResultReceipt: { host: provider } },
   }),
   reconcileVisibleHostEffects: async input => onReconcile ? onReconcile(input) : ({ reconciled: true }),
-  confirmVisibleLease: async () => ({ confirmed: true }),
-  containVisibleAgent: async () => ({ contained: true }),
+  confirmVisibleLease: async input => onConfirm ? onConfirm(input) : ({ confirmed: true }),
+  containVisibleAgent: async input => onContain ? onContain(input) : ({ contained: true }),
   sendVisibleAgent: async () => ({ sent: true }),
   interruptVisibleAgent: async () => ({ interrupted: true }),
 });

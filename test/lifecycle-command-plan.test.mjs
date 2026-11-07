@@ -3,7 +3,7 @@ import test from 'node:test';
 import { access, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { tmpdir } from 'node:os';
-import { createHarness } from '../src/application/harness.mjs';
+import { createTestHarness as createHarness } from './lifecycle-command-support.mjs';
 import { loadExtensionPack } from '../src/platform/extensions/contract.mjs';
 import { createCardWorldProjectDescriptor, createCardWorldLifecyclePlan } from '../integrations/legacy-consumers/cardworld/index.mjs';
 import { createReleaseActivationPlan, applyReleaseActivationPlan, releaseActivationPlanDigest } from '../src/platform/maintenance/release-activation.mjs';

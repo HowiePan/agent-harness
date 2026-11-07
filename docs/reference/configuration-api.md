@@ -1,5 +1,7 @@
 # Agent Harness 配置 API 参考
 
+`schemaVersion: "1.2"` 可显式声明 `project.executionPolicy`：`version: "continuous-execution/1"`，可选 `recovery`（按问题的周期审核参数）和 `resources`（已批准的资源分类及日志/流式输入配额）。省略时保留旧策略；完整字段、默认值、运行边界及 H4 迁移见[持续执行与有界恢复](../guides/continuous-execution.md)。配置不能携带运行时执行授权。
+
 `harness.json` 的 `schemaVersion: "1.1"` 必须声明 `project.fileBoundary`：`version: "project-boundary/1"`，以及 `sourceRoots`（所属源码目录，非空）、`sharedPaths`（明确共享文件/目录）、`artifactRoots`（构建及验证产物）、`protectedPaths`（硬保护范围）。路径相对 binding.workspaceRoot；禁止绝对路径、父目录穿越、通配符及产物与源码/保护范围交叠。通用 Bootstrap 将其生成到 Descriptor，固化后供 Run/Dispatch 使用；模板不能扩大显式配置。旧 1.0 配置维持兼容。
 
 项目文件策略通过 `policy.projectFilePolicy` 登记：`version: "project-files/1"`、`mode: "project-owned"`、`roots`（相对项目执行 checkout 的明确所属目录或文件，不能为空）、`protectedPaths`（硬保护路径，可为空）。`allowedPaths` 与 `forbiddenPaths` 在新策略下是内部规划参考；跨参考路径修改自动记录原因，可提供 `scopeAdjustments` 细化，不能跨越所属项目。旧 Run 未配置策略时保留原严格合同。配置示例、冲突调度、只读与迁移规则见[项目内持续执行](../guides/project-execution.md)。

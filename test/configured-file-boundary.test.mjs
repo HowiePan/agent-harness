@@ -18,7 +18,8 @@ test('missing, escaping, ambiguous or conflicting boundaries are rejected',()=>{
 });
 test('current project configuration names .cardworld-local explicitly',async()=>{
  const loaded=await loadProjectHarnessConfig('F:/CardWorld/harness.json');
- assert.equal(loaded.config.schemaVersion,'1.1');
+ assert.equal(loaded.config.schemaVersion,'1.2');
+ assert.equal(loaded.request.project.executionPolicy.version,'continuous-execution/1');
  assert.deepEqual(loaded.request.project.fileBoundary.artifactRoots,['.cardworld-local']);
  const missing=structuredClone(loaded.config);delete missing.project.fileBoundary;
  assert.throws(()=>validateProjectHarnessConfig(missing),{code:'PROJECT_BOUNDARY_REQUIRED'});

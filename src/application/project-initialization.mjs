@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs';
 import { assertJsonSchema } from '../common/json-schema.mjs';
 import { assert } from '../common/errors.mjs';
 import { validateFileBoundary } from '../common/configured-file-boundary.mjs';
+import { validateContinuousExecution } from '../common/continuous-execution.mjs';
 import { digestJson, sha256, withoutKeys } from '../common/canonical.mjs';
 import { applyBootstrapPlan, createBootstrapPlan } from './bootstrap.mjs';
 import { ExtensionRegistry } from '../platform/extensions/registry.mjs';
@@ -18,7 +19,9 @@ const resolveConsumerPath = (base, value, label) => {
 
 export const validateProjectHarnessConfig = input => {
   assertJsonSchema(input, schema, { code: 'PROJECT_HARNESS_CONFIG_INVALID', label: 'Project Harness configuration' });
-  if (input.schemaVersion === '1.1' || input.project.fileBoundary) validateFileBoundary(input.project.fileBoundary);
+  if (['1.1','1.2'].includes(input.schemaVersion) || input.project.fileBoundary) validateFileBoundary(input.project.fileBoundary);
+  assert(!input.project.executionPolicy || input.schemaVersion==='1.2','CONTINUOUS_POLICY_SCHEMA_REQUIRED','Execution policy requires configuration schema 1.2.');
+  validateContinuousExecution(input.project.executionPolicy);
   assert(new Set(input.extensions.map(item => item.id)).size === input.extensions.length, 'PROJECT_CONFIG_EXTENSION_DUPLICATE', 'Project Harness configuration repeats an Extension ID.');
   assert(input.extensions.some(item => item.id === input.project.generatorExtensionId), 'PROJECT_CONFIG_GENERATOR_EXTENSION_REQUIRED', 'Descriptor generator Extension must be declared.');
   assert(input.extensions.some(item => item.id === input.binding.extensionId), 'PROJECT_CONFIG_BOUND_EXTENSION_REQUIRED', 'Bound Extension must be declared.');
@@ -50,7 +53,8 @@ export const loadProjectHarnessConfig = async (configPathInput, { projectRoot: p
       protocolVersion: '1.0',
       extensions: config.extensions.map(item => ({ ...item })),
       project: { generatorExtensionId: config.project.generatorExtensionId, input: projectInput,
-        ...(config.project.fileBoundary ? {fileBoundary:config.project.fileBoundary} : {}) },
+        ...(config.project.fileBoundary ? {fileBoundary:config.project.fileBoundary} : {}),
+        ...(config.project.executionPolicy ? {executionPolicy:config.project.executionPolicy} : {}) },
       binding: {
         projectId: config.binding.projectId,
         profileId: config.binding.profileId,

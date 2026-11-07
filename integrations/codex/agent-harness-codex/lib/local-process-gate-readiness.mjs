@@ -1,10 +1,15 @@
 import { spawnSync } from 'node:child_process';
+const failures = new WeakSet();
+export const isLocalProcessGateHostFailure = error => failures.has(error);
 
 export const assertLocalProcessGateHost = ({ recipes, executable = process.execPath, spawn = spawnSync } = {}) => {
   if (!Array.isArray(recipes) || !recipes.some(recipe => recipe.executionClass === 'deterministic-process' && !recipe.executorPluginId)) return;
   const result = spawn(executable, ['-e', ''], { windowsHide: true, timeout: 5000, stdio: ['ignore', 'pipe', 'pipe'] });
-  if (result.error || result.status !== 0) throw Object.assign(new Error('Current Codex process permissions cannot launch a captured child process required by Project Gates.'), {
+  if (result.error || result.status !== 0) {
+    const error = Object.assign(new Error('Current Codex process permissions cannot launch a captured child process required by Project Gates.'), {
     code: 'LOCAL_PROCESS_GATE_HOST_UNAVAILABLE',
     details: { processCode: result.error?.code ?? null, exitCode: result.status ?? null },
   });
+    failures.add(error); throw error;
+  }
 };

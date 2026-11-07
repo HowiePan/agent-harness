@@ -5,6 +5,7 @@ import { assert } from '../common/errors.mjs';
 import { captureWorkspace } from '../common/workspace-snapshot.mjs';
 import { featureContractDigest } from '../common/interruption-contract.mjs';
 import { submissionAttempt } from '../kernel/attempt-budget.mjs';
+import { executionBudgetBlocked } from '../common/continuous-execution.mjs';
 import { executeDeliveryCheck } from './delivery-verification.mjs';
 import { inspectDevelopmentCoordinationReview } from './development-coordination-review.mjs';
 
@@ -33,7 +34,7 @@ export const selectDevelopmentHostCheck = ({ state, review, carryover, currentSo
   code, 'Host review requires one idle, unchanged implementation frontier and its original blocked Submission.');
   const attempt = submissionAttempt(state, feature, submission);
   assert(attempt && !attempt.exhausted
-    && !Object.values(state.attempts).some(item => item.logicalRoot === feature.logicalRoot && item.exhausted),
+    && !executionBudgetBlocked(state,feature),
   code, 'Host review cannot reset an exhausted budget.');
   assert(review.kind === 'delivery-host-check-review' && review.actor === 'operator'
     && review.runId === state.runId && review.expectedRevision === state.revision

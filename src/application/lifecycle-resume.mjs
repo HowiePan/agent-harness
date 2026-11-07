@@ -4,6 +4,7 @@ import { isInterruptedImplementationSubmission } from './lifecycle-interruption.
 import { ACCEPTANCE_CONTINUATION_POLICY, hasNewAcceptanceCheckpoint } from './implementation-continuation.mjs';
 import { hasTargetImplementationProgress, isIncompleteImplementationResult } from './implementation-handoff.mjs';
 import { digestJson } from '../common/canonical.mjs';
+import {executionBudgetBlocked} from '../common/continuous-execution.mjs';
 
 // A capacity handoff may preserve local progress while a later protected action
 // still awaits an external receipt. Reuse the committed Dispatch's proof scope;
@@ -91,6 +92,11 @@ export const selectBlockedResumeFeature = (state, { inputBindingRepairs = [], in
   if (pendingIntervention) return null;
   const blocked = state.features.filter(feature => feature.state === 'blocked');
   if (!blocked.length) return null;
+  const dependenciesComplete=feature=>(feature.dependsOn??[]).every(id=>state.features.some(parent=>parent.id===id&&parent.state==='completed'));
+  const pendingWork=state.features.some(feature=>feature.state==='pending'&&dependenciesComplete(feature)&&!executionBudgetBlocked(state,feature));
+  // A waiting consumer is not the executable frontier while an authorized
+  // prerequisite or independent task is already runnable. Keep its blocker.
+  if(!blocked.some(dependenciesComplete)&&pendingWork)return null;
   if (blocked.length === 1) return assertResumableFeature(state, blocked[0], inputBindingRepairs, interruptionReviews, hostCheckReviews);
   const eligible = blocked.filter(feature => {
     if (!(feature.dependsOn ?? []).every(id => state.features.some(item => item.id === id && item.state === 'completed'))) return false;
@@ -98,6 +104,7 @@ export const selectBlockedResumeFeature = (state, { inputBindingRepairs = [], in
   });
   // The approved graph order is stable; reopen one executable frontier only.
   // Other scope, external, approval and exhausted blockers remain untouched.
+  if(!eligible.length&&pendingWork)return null;
   assert(eligible.length > 0, 'LIFECYCLE_RESUME_BLOCKER_REQUIRES_REVIEW',
     'No blocked Feature has both completed dependencies and an authorized retry with remaining budget.');
   return eligible[0].id;

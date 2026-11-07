@@ -52,7 +52,9 @@ test('visible lifecycle preflight exposes blocker identities without dumping rep
 });
 
 test('captured-process denial permits one same-intent retry only before Run creation', () => {
-  const error = { code: 'LOCAL_PROCESS_GATE_HOST_UNAVAILABLE', details: { processCode: 'EPERM' } };
+  let error;
+  try { assertLocalProcessGateHost({recipes:[{executionClass:'deterministic-process'}],spawn:()=>({error:{code:'EPERM'},status:null})}); }
+  catch(observed){ error=observed; }
   assert.deepEqual(preRunProcessGateRetry({ error, phase: 'planned' }), {
     mode: 'same-intent-once', reason: 'captured-child-process-permission', runCreated: false, hostEffectStarted: false,
   });
@@ -60,4 +62,6 @@ test('captured-process denial permits one same-intent retry only before Run crea
   assert.equal(preRunProcessGateRetry({ error, phase: 'planned', runCreationAttempted: true }), null);
   assert.equal(preRunProcessGateRetry({ error: { ...error, details: { processCode: 'ENOENT' } }, phase: 'planned' }), null);
   assert.equal(preRunProcessGateRetry({ error: { code: 'CODEX_HOST_EFFECT_UNCERTAIN' }, phase: 'planned' }), null);
+  assert.equal(preRunProcessGateRetry({error:{code:'LOCAL_PROCESS_GATE_HOST_UNAVAILABLE',details:{processCode:'EPERM'}},phase:'planned'}),null);
 });
+import { assertLocalProcessGateHost } from '../integrations/codex/agent-harness-codex/lib/local-process-gate-readiness.mjs';

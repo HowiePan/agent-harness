@@ -21,7 +21,8 @@ const fileStat = async (root, path) => {
 };
 
 /** Resolve logical build-target inputs, not commands, contracts or write scope. */
-export const resolveVerificationInputs = async ({ check, workspaceRoot, allowedPaths = [], forbiddenPaths = [], excluded = [] }) => {
+export const resolveVerificationInputs = async ({ check, workspaceRoot, allowedPaths = [], forbiddenPaths = [], excluded = [], projectFilePolicy = null, continuousExecution = null }) => {
+  if(projectFilePolicy) {allowedPaths=projectFilePolicy.roots;forbiddenPaths=['.git','.agent-harness-data',...projectFilePolicy.protectedPaths];}
   const denied = [...forbiddenPaths, ...excluded];
   const missingInputs = [];
   const bindings = [];
@@ -35,7 +36,7 @@ export const resolveVerificationInputs = async ({ check, workspaceRoot, allowedP
       const stat = await fileStat(workspaceRoot, manifestPath);
       if (!stat?.isFile() || stat.size > 2 * 1024 * 1024) continue;
       const bytes = await readFile(assertNoLinkPath(workspaceRoot, resolve(workspaceRoot, manifestPath)));
-      const candidate = cargoTestInputCandidate({ manifestPath, content: bytes.toString('utf8'), command: check.command, declaredPath });
+      const candidate = cargoTestInputCandidate({ manifestPath, content: bytes.toString('utf8'), command: check.command, declaredPath, allowManifestTargetInput:Boolean(continuousExecution) });
       if (!candidate || !safePath(candidate.resolvedPath) || !allowed(candidate.resolvedPath, allowedPaths, denied)) continue;
       if (!(await fileStat(workspaceRoot, candidate.resolvedPath))?.isFile()) continue;
       candidates.push({ declaredPath, ...candidate, manifestPath, manifestSha256: sha256(bytes) });
@@ -50,11 +51,11 @@ export const resolveVerificationInputs = async ({ check, workspaceRoot, allowedP
     bindings, missingInputs, effectiveCheck };
 };
 
-export const bindContinuationVerificationInputs = async ({ continuation, feature, workspaceRoot, excluded = [], additionalChecks = [] }) => {
+export const bindContinuationVerificationInputs = async ({ continuation, feature, workspaceRoot, excluded = [], additionalChecks = [], projectFilePolicy = null, continuousExecution = null }) => {
   if (!continuation?.workBatch?.checks) return continuation;
   const checks = [...new Map([...continuation.workBatch.checks, ...additionalChecks].map(check => [digestJson(check), check])).values()];
   const resolutions = await Promise.all(checks.map(check => resolveVerificationInputs({ check,
-    workspaceRoot, allowedPaths: feature.allowedPaths, forbiddenPaths: feature.forbiddenPaths, excluded })));
+    workspaceRoot, allowedPaths: feature.allowedPaths, forbiddenPaths: feature.forbiddenPaths, excluded,projectFilePolicy,continuousExecution })));
   const missing = resolutions.filter(item => item.missingInputs.length);
   return { ...continuation, workBatch: { ...continuation.workBatch,
     approvedChecks: structuredClone(continuation.workBatch.checks),

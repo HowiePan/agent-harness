@@ -2,6 +2,7 @@ import { decideInterruption, interventionHistory } from './interruption-policy.m
 import { interruptionContext } from './interruption-review.mjs';
 import { isExecutionComplete } from '../kernel/intervention.mjs';
 import { coordinationRecoveryDirective } from './coordination-recovery.mjs';
+import {executionFault} from './execution-fault.mjs';
 
 // These are trusted control-plane exit families, not worker failure labels.
 export const INTERRUPTION_EXIT_COVERAGE = Object.freeze({
@@ -49,12 +50,14 @@ export const sealInterruptionOutcome = async (context, api, plan, result) => {
 };
 
 export const describeInterruptionError = (error, { phase = 'transport', plan = null } = {}) => {
+  const fault=executionFault(error,{phase});
   const decision = decideInterruption({ problem: { logicalRoot: plan?.logicalTaskKey ?? null,
     sourceDigest: plan?.run?.sourceDigest ?? null, contractDigest: plan?.planDigest ?? null,
-    summary: error?.message ?? String(error) }, facts: { identityTrusted: false,
-    userStopped: error?.code === 'OPERATOR_EXECUTION_STOPPED' }, capabilities: [] });
+    summary: error?.message ?? String(error) }, facts: { identityTrusted: ['identity','integrity'].includes(fault.category)?false:undefined,
+    userStopped: error?.code === 'OPERATOR_EXECUTION_STOPPED', authorizationRequired:fault.category==='authorization',
+    budgetExhausted:fault.category==='recovery-budget' }, capabilities: [] });
   return { ...decision, coordination: coordinationRecoveryDirective({ interruption: decision, planDigest: plan?.planDigest, runId: plan?.run?.runId }),
-    diagnosis: { phase, observedCode: error?.code ?? 'UNKNOWN_ERROR',
+    diagnosis: { phase, fault, observedCode: error?.code ?? 'UNKNOWN_ERROR',
     isolatedAction: 'Dependent writes and unverified submissions remain stopped.',
     attempted: ['Inspect the trusted exception and available execution identity; do not reinterpret worker labels as authority.'],
     missingCapability: 'No verified in-process repair may replace missing Host, source or Authority evidence.' } };

@@ -184,7 +184,7 @@ export const createLifecycleCommandPlan = ({ intent, project, extension, release
       agentExecutionMode: executionPolicy.mode,
       executionConstraintDigest,
       executionGrant: executionGrant ? validateLifecycleExecutionGrant(executionGrant) : null,
-      ...(compiled.run.metadata || sourceToolBinding || workspaceRef ? { metadata: { ...structuredClone(compiled.run.metadata ?? {}), ...(sourceToolBinding ? { sourceToolBinding: structuredClone(sourceToolBinding) } : {}), ...(workspaceRef ? { workspaceRef: structuredClone(workspaceRef) } : {}) } } : {}),
+      metadata: { ...structuredClone(compiled.run.metadata ?? {}), continuousExecution: structuredClone(project.policy?.continuousExecution ?? null), ...(sourceToolBinding ? { sourceToolBinding: structuredClone(sourceToolBinding) } : {}), ...(workspaceRef ? { workspaceRef: structuredClone(workspaceRef) } : {}) },
     },
     stopCondition: structuredClone(compiled.stopCondition ?? { type: 'run-ready-to-close' }),
     protectedOperations: [...new Set(compiled.protectedOperations ?? [])].sort(),

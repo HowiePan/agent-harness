@@ -39,7 +39,8 @@ export const resolveAttemptCarryover = async (input, features, store) => {
       assert(item.key === key && Number.isSafeInteger(used(item)) && used(item) >= 0,
         'ATTEMPT_CARRYOVER_INVALID', 'Historical counters must retain their original identity and kind.');
       const selected = attempts[key];
-      if (!selected || used(item) > used(selected) || used(item) === used(selected) && item.limit > selected.limit) attempts[key] = structuredClone(item);
+      if (!selected || used(item) > used(selected) || used(item) === used(selected)
+        && ((item.cycleGeneration??0)>(selected.cycleGeneration??0) || item.limit > selected.limit)) attempts[key] = structuredClone(item);
     }
     for (const item of prior.submissions.filter(row => owned.has(row.featureId) && row.result.status !== 'completed'
       && features.some(feature => feature.id === row.featureId))) {
@@ -63,7 +64,8 @@ export const resolveAttemptCarryover = async (input, features, store) => {
   } while (changed);
   for (const prior of all.filter(item => family.has(item.runId) && item.runId !== input.runId)) for (const [key, item] of Object.entries(prior.attempts)
     .filter(([, value]) => roots.has(value.logicalRoot))) {
-    assert(attempts[key] && used(attempts[key]) >= used(item) && attempts[key].limit >= item.limit,
+    assert(attempts[key] && used(attempts[key]) >= used(item) && attempts[key].limit >= item.limit
+      && (attempts[key].cycleGeneration??0)>=(item.cycleGeneration??0),
       'ATTEMPT_CARRYOVER_STALE', 'A newer counter or approved allowance exists for this stable root.');
   }
   for (const prior of all.filter(item => family.has(item.runId) && item.runId !== input.runId)) {
@@ -73,7 +75,7 @@ export const resolveAttemptCarryover = async (input, features, store) => {
     }
   }
   for (const [key, item] of Object.entries(attempts)) {
-    item.exhausted = used(item) >= item.limit;
+    item.exhausted = item.limit !== null && (item.cycleFailures??used(item)) >= item.limit;
     if (!item.exhausted) continue;
     const anchor = features.find(feature => feature.logicalRoot === item.logicalRoot
       && sources.some(source => source.submissions.some(submission => submission.featureId === feature.id && submission.attemptBudgetKey === key)));

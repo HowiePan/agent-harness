@@ -3,7 +3,8 @@ import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import { mkdir, mkdtemp, rm, writeFile, readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
-import { createHarness, loadExtensionPack, harnessTemporaryRoot } from '../src/index.mjs';
+import { loadExtensionPack, harnessTemporaryRoot } from '../src/index.mjs';
+import { createTestHarness as createHarness } from './lifecycle-command-support.mjs';
 import { createDeliveryProjectDescriptor } from '../src/flows/delivery-lifecycle/descriptor.mjs';
 import { projectExecutionPolicyDecisionContext } from '../src/platform/registry/project-registry.mjs';
 import { planApprovalSnapshot } from '../src/flows/delivery-lifecycle/plan-approval.mjs';
@@ -11,7 +12,7 @@ import { createMockVisibleHostAdapter } from './test-support.mjs';
 import { proposal, completion } from './delivery-batch-support.mjs';
 import { sha256 } from '../src/common/canonical.mjs';
 
-for (const mode of ['ordinary', 'input', 'capacity', 'unknown', 'clarification', 'clarification-exhausted-resume', 'contract', 'over-capacity']) test(`native-visible bounded deliveries: ${mode}, with genuine checks and no Agent CLI`, async t => {
+for (const mode of ['ordinary', 'input', 'capacity', 'unknown', 'clarification', 'clarification-exhausted-resume', 'contract', 'over-capacity','registration-interruption','ack-interruption','user-stopped-resume','user-stopped-active-resume']) test(`native-visible bounded deliveries: ${mode}, with genuine checks and no Agent CLI`, async t => {
   const repairInput = mode === 'input';
   const resumeBoundary = mode === 'clarification-exhausted-resume';
   const clarificationMode = mode.startsWith('clarification');
@@ -39,12 +40,21 @@ for (const mode of ['ordinary', 'input', 'capacity', 'unknown', 'clarification',
   const extension = await loadExtensionPack('./src/flows/delivery-lifecycle/index.mjs', { controlRoot });
   const runtime = await loadExtensionPack('./integrations/codex/extensions/codex-runtime.mjs', { controlRoot });
   const packets = new Map(); const spawned = [];
+  let confirmationInterrupted=false,stoppedContained=0;
   const adapter = createMockVisibleHostAdapter({ onSpawn: input => {
     const bytes = readFileSync(`${input.packet.outputRef}.dispatch-packet.json`);
     assert.equal(sha256(bytes), input.packetDigest);
     assert.deepEqual(JSON.parse(bytes), input.packet);
     packets.set(input.dispatchId, input.packet); spawned.push(input.packet);
   },
+    onConfirm:input=>{
+      if(mode==='user-stopped-active-resume'&&packets.get(input.dispatchId)?.feature.metadata.deliveryBatch&&!confirmationInterrupted){
+        confirmationInterrupted=true;throw Object.assign(Error('fixture stopped after bound Lease'),{code:'SIMULATED_CONFIRMATION_FAILURE'});
+      }
+      return {confirmed:true};
+    },
+    onContain:input=>{assert(packets.has(input.dispatchId));stoppedContained++;
+      return {contained:true,outcome:{disposition:'already-terminal',reason:input.reason,observationRequestDigest:'a'.repeat(64)}};},
     onResult: async input => {
       const packet = packets.get(input.dispatchId); const feature = packet.feature;
       const output = (port, schemaId, value) => ({ status: 'completed', summary: 'Observed fixture result.', changedFiles: [],
@@ -99,11 +109,20 @@ for (const mode of ['ordinary', 'input', 'capacity', 'unknown', 'clarification',
   await harness.projectRegistry.register(descriptor, { commandId: 'register-visible-fixture', authorityDecision: {
     actor: 'test', decision: 'approved', action: 'project-execution-policy-change', expiresAt: '2099-01-01T00:00:00.000Z',
     context: projectExecutionPolicyDecisionContext({ input: descriptor }) } });
+  let injectedRegistrationInterruption=false;
   const execute = async action => {
     const plan = await harness.createLifecyclePlan({ projectId: descriptor.id, action, target: 'V1.0.0', extensionId: extension.id, executionWorkspaceRoot: workspaceRoot });
+    return harness.withUserLifecycleCommand({commandId:`fixture-${action}`,scope:{projectId:descriptor.id,action,target:'V1.0.0',workspaceRoot}},async()=>{
     const preflightReport = await harness.createExecutionReadinessReport(plan);
     assert.equal(preflightReport.executionReady, true, JSON.stringify(preflightReport));
-    return harness.executeVisibleLifecyclePlan(plan, { commandId: `fixture-${action}`, preflightReport, maxConcurrency: 1 });
+    return harness.executeVisibleLifecyclePlan(plan, { commandId: `fixture-${action}`, preflightReport, maxConcurrency: 1,
+      onGateProgress:event=>{
+        const stage=mode==='registration-interruption'?'verified':mode==='ack-interruption'?'authority-committed':null;
+        if(action==='implement'&&stage&&event.phase==='result-registration'&&event.stage===stage&&!injectedRegistrationInterruption){
+          injectedRegistrationInterruption=true;throw Error('controlled native-visible registration interruption');
+        }
+      } });
+    });
   };
   const planned = await execute('plan');
   assert.equal(planned.reason, 'implementation-plan-user-approval-required');
@@ -114,7 +133,41 @@ for (const mode of ['ordinary', 'input', 'capacity', 'unknown', 'clarification',
   { expectedRevision: planned.state.revision, commandId: 'fixture-approval' });
   await harness.kernel.closeRun(descriptor.id, approved.state.runId, {}, { expectedRevision: approved.state.revision, commandId: 'fixture-close-plan' });
   let implemented;
-  if (resumeBoundary) {
+  if(mode.startsWith('user-stopped-')){
+    const plan=await harness.createLifecyclePlan({projectId:descriptor.id,action:'implement',target:'V1.0.0',extensionId:extension.id,executionWorkspaceRoot:workspaceRoot});
+    const scope={projectId:descriptor.id,action:'implement',target:'V1.0.0',workspaceRoot};
+    let started;
+    if(mode==='user-stopped-active-resume'){
+      await assert.rejects(execute('implement'),{code:'SIMULATED_CONFIRMATION_FAILURE'});
+      started={state:await harness.authorityStore.read(descriptor.id,plan.run.runId)};
+      assert.equal(started.state.leases.filter(l=>l.status==='active').length,1);
+    }else started=await harness.withUserLifecycleCommand({commandId:'fixture-before-stop',scope},async()=>{
+      const preflightReport=await harness.createExecutionReadinessReport(plan);
+      return harness.startLifecyclePlan(plan,{commandId:'fixture-before-stop',preflightReport});
+    });
+    const stopped=(await harness.kernel.recordDecision(descriptor.id,started.state.runId,{id:'fixture-user-stop',actor:'human-user',decision:'approved',action:'stop-execution',
+      context:{projectId:descriptor.id,runId:started.state.runId,sourceDigest:started.state.sourceDigest,priorAuthorityDigest:started.state.authorityDigest}},
+    {commandId:'fixture-user-stop',expectedRevision:started.state.revision})).state;
+    const attemptsBefore=JSON.stringify(stopped.attempts);
+    implemented=await harness.withUserLifecycleCommand({commandId:'fixture-user-restart',scope,userIssuedAt:new Date().toISOString()},async()=>{
+      let prepared=stopped;
+      if(mode==='user-stopped-active-resume'){
+        prepared=await harness.prepareUserRequestedRestart({projectId:descriptor.id,runId:stopped.runId});
+        assert.equal(prepared.metadata.operatorStop.requested,true);assert.equal(prepared.leases.filter(l=>l.status==='active').length,0);
+        assert.equal(prepared.sourceDigest,stopped.sourceDigest);assert.equal(stoppedContained,1);
+      }
+      const resume=await harness.createLifecycleResumePlan({projectId:descriptor.id,runId:stopped.runId,executionWorkspaceRoot:workspaceRoot});
+      const unchanged=await harness.authorityStore.read(descriptor.id,stopped.runId);
+      assert.equal(unchanged.authorityDigest,prepared.authorityDigest,'Planning cannot remove the stop');
+      assert.equal(JSON.stringify(unchanged.attempts),attemptsBefore);
+      const preflightReport=await harness.createExecutionReadinessReport(resume.plan);
+      assert.equal(preflightReport.executionReady,true);
+      return harness.executeVisibleLifecyclePlan(resume.plan,{commandId:'fixture-user-restart',preflightReport,resume,onGateProgress:()=>{}});
+    });
+    const decision=implemented.state.decisions.find(d=>d.action==='resume-execution');assert(decision);
+    assert.equal(decision.context.commandId,'fixture-user-restart');assert.equal(decision.context.priorStopDecisionId,'fixture-user-stop');
+    assert.equal(implemented.state.metadata.operatorStop.requested,false);
+  }else if (resumeBoundary) {
     const apply = harness.applyInterruptionReview;
     let processLoss = true;
     harness.applyInterruptionReview = async (...args) => {
@@ -131,8 +184,9 @@ for (const mode of ['ordinary', 'input', 'capacity', 'unknown', 'clarification',
     assert.equal(implemented.interruption.category, 'recovery-budget');
     assert.equal(implemented.coordination.userInputRequired, true);
   } else implemented = await execute('implement');
+  if(['registration-interruption','ack-interruption'].includes(mode))assert(injectedRegistrationInterruption);
   const deliveries = spawned.filter(packet => packet.feature.metadata.deliveryBatch);
-  assert.equal(deliveries.length, expectedStop ? 1 : repairInput || reviewMode ? 3 : 2,
+  assert.equal(deliveries.length, expectedStop ? 1 : repairInput || reviewMode || mode==='user-stopped-active-resume' ? 3 : 2,
     JSON.stringify({ reason: implemented.reason, interruption: implemented.interruption,
       features: implemented.state.features.map(item => ({ id: item.id, state: item.state, dependsOn: item.dependsOn })),
       attempts: implemented.state.attempts }));

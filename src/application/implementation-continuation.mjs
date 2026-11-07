@@ -10,6 +10,8 @@ import { deliveryBatchFeedback } from '../flows/delivery-lifecycle/delivery-feed
 import { bindContinuationVerificationInputs } from './verification-input-bindings.mjs';
 import { fingerprintDeliveryPaths } from './delivery-verification.mjs';
 import { mergeImplementationObligations } from './implementation-obligations.mjs';
+import {submissionAttempt} from '../kernel/attempt-budget.mjs';
+import {continuousPolicy} from '../common/continuous-execution.mjs';
 
 export const ACCEPTANCE_CONTINUATION_POLICY = 'approved-obligation-progress/1';
 const obligation = (kind, key, detail) => ({ id: `obligation:${digestJson({ kind, key })}`, kind, key, ...detail });
@@ -98,7 +100,7 @@ export const buildImplementationContinuation = async (state, feature, workspaceR
     ...(inherited?.checkpoints ?? []).map(checkpoint => [checkpoint.id, checkpoint]),
     ...history.flatMap(item => (item.result?.checkpoints ?? []).map(checkpoint => [checkpoint.id, checkpoint])),
   ]);
-  const attempt = state.attempts?.[latest?.attemptBudgetKey ?? `${feature.logicalRoot}:progress`]
+  const attempt = continuousPolicy(state) ? submissionAttempt(state,feature,latest) : state.attempts?.[latest?.attemptBudgetKey ?? `${feature.logicalRoot}:progress`]
     ?? state.attempts?.[`${feature.logicalRoot}:${latest?.result?.failureClass}`];
   const targetObligations = batch ? obligations.filter(item => batch.obligationIds.includes(item.id)) : obligations;
   const targets = [...new Set([
@@ -213,7 +215,8 @@ export const buildImplementationContinuation = async (state, feature, workspaceR
   };
   const additionalChecks = batch?.phase === 'convergence' ? state.features.filter(item => item.logicalRoot === feature.logicalRoot
     && item.id !== feature.id && item.state === 'completed').flatMap(item => item.metadata?.deliveryBatch?.checks ?? []) : [];
-  return bindContinuationVerificationInputs({ continuation, feature, workspaceRoot, excluded, additionalChecks });
+  return bindContinuationVerificationInputs({ continuation, feature, workspaceRoot, excluded, additionalChecks,
+    projectFilePolicy:state.metadata?.projectFilePolicy,continuousExecution:state.metadata?.continuousExecution });
 };
 
 /** A partial milestone report is continuation evidence, never final acceptance. */

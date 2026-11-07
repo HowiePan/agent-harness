@@ -6,9 +6,10 @@ export { INTERRUPTION_POLICY, MAX_INTERVENTIONS_PER_ROOT, featureContractDigest 
 /** Facts and capabilities come from the Host, never from the worker's labels. */
 export const decideInterruption = ({ problem, facts = {}, capabilities = [], history = [] }) => {
   const fingerprint = digestJson({ root: problem.logicalRoot ?? null, source: problem.sourceDigest ?? null,
+    ...(facts.continuous ? {problemId:problem.problemId,submissionId:problem.submissionId} : {}),
     contract: problem.contractDigest ?? null });
   const used = history.filter(item => item.logicalRoot === problem.logicalRoot);
-  const limit = Number.isSafeInteger(facts.recoveryLimit) ? Math.max(0, Math.min(MAX_INTERVENTIONS_PER_ROOT, facts.recoveryLimit)) : MAX_INTERVENTIONS_PER_ROOT;
+  const limit = Number.isSafeInteger(facts.recoveryLimit) ? Math.max(0, Math.min(facts.continuous ? 30 : MAX_INTERVENTIONS_PER_ROOT, facts.recoveryLimit)) : MAX_INTERVENTIONS_PER_ROOT;
   const body = { policy: INTERRUPTION_POLICY, boundary: 'action', fingerprint,
     problem: structuredClone(problem), attempts: used.map(item => ({ id: item.id, action: item.action ?? null,
       sourceDigest: item.sourceDigest ?? null, evidenceRefs: item.evidenceRefs ?? [] })),
@@ -20,6 +21,7 @@ export const decideInterruption = ({ problem, facts = {}, capabilities = [], his
     return { ...value, decisionDigest: digestJson(value) };
   };
   if (facts.userStopped) return decision('stop', 'user-stop', 'The user explicitly stopped this work.', 'resume-or-change-goal');
+  if (facts.stagnant) return decision('stop','no-progress','Several processing cycles made no verified overall progress. Review the combined root causes.','review-stagnant-strategy');
   if (facts.budgetExhausted) return decision('stop', 'budget', 'The next required execution has no approved allowance.', 'exact-budget-or-strategy-decision');
   // A known hard boundary stops dependent writes. Diagnostics may still run if
   // they have independent, verified read-only authority and a finite allowance.

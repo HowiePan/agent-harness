@@ -5,7 +5,7 @@ import {resolve} from 'node:path';
 import {makeFixture} from './test-support.mjs';
 import {captureWorkspace} from '../src/common/workspace-snapshot.mjs';
 import {applyConfiguredFileBoundary} from '../src/common/configured-file-boundary.mjs';
-import {inspectPendingConfigurationRebase} from '../src/application/development-configuration-rebase.mjs';
+import {inspectPendingConfigurationRebase,readConfigurationSourceBridge} from '../src/application/development-configuration-rebase.mjs';
 test('configuration-only rebase preserves scope and rejects source or authority expansion',async t=>{
  const f=await makeFixture();t.after(f.cleanup);
  const boundary={version:'project-boundary/1',sourceRoots:['engine'],sharedPaths:[],artifactRoots:['.local'],protectedPaths:[]};
@@ -19,7 +19,12 @@ test('configuration-only rebase preserves scope and rejects source or authority 
  const current={...old,schemaVersion:'1.1',project:{...old.project,fileBoundary:boundary}};
  await writeFile(file,JSON.stringify(current));
  const input={prior,project,evidenceStore:f.harness.evidenceStore,baselineRef:record.ref};
- assert.equal((await inspectPendingConfigurationRebase(input)).acceptanceCredit,false);
+ const claim=await inspectPendingConfigurationRebase(input);
+ assert.equal(claim.acceptanceCredit,false);
+ const origin={...prior,sourceDigest:claim.toSourceDigest,metadata:{configurationRebase:claim}};
+ const bridgeInput={origin,evidenceStore:f.harness.evidenceStore,currentSnapshot:await captureWorkspace(f.workspace),workspaceRoot:f.workspace,projectFilePolicy:project.policy.projectFilePolicy};
+ assert.equal((await readConfigurationSourceBridge(bridgeInput)).fromSourceDigest,snapshot.digest);
+ await assert.rejects(readConfigurationSourceBridge({...bridgeInput,currentSnapshot:{digest:'forged'}}),{code:'CONFIGURATION_REBASE_INVALID'});
  await writeFile(resolve(f.workspace,'unrelated.rs'),'changed');
  await assert.rejects(inspectPendingConfigurationRebase(input),{code:'CONFIGURATION_REBASE_INVALID'});
  await unlink(resolve(f.workspace,'unrelated.rs'));

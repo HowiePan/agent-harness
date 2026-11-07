@@ -7,6 +7,8 @@ import { loadLocalSourceBindings } from '../hooks/local-source-hook.mjs';
 import { createHookHostExchange } from '../lib/hook-host-exchange.mjs';
 import { createCodexRolloutHostExchange } from '../lib/codex-rollout-host-exchange.mjs';
 import { createHostExchangeDiagnosticWriter } from '../lib/host-exchange-diagnostics.mjs';
+import {locateCodexRollout} from '../lib/codex-rollout-host-exchange.mjs';
+import {inspectNativeTraceTail} from '../lib/codex-host-trace-diagnostic.mjs';
 
 export const resolveProbeSessionId = ({ explicitSessionId, environmentSessionId = process.env.CODEX_SESSION_ID } = {}) => {
   if (explicitSessionId && environmentSessionId && explicitSessionId !== environmentSessionId) throw Object.assign(new Error('Explicit session ID does not match CODEX_SESSION_ID.'), { code: 'LOCAL_SOURCE_HOST_PROBE_SESSION_MISMATCH' });
@@ -15,8 +17,9 @@ export const resolveProbeSessionId = ({ explicitSessionId, environmentSessionId 
   return sessionId;
 };
 
-// Inherit the transport's bounded response window, as the Coordinator does.
-export const runLocalSourceHostProbe = async ({ bindingsDir, sessionId, output = process.stdout, responseTimeoutMs, transport = 'rollout' } = {}) => {
+// Match the Coordinator's acknowledgement window, not a business-task deadline.
+export const HOST_PROBE_RESPONSE_TIMEOUT_MS=1800000;
+export const runLocalSourceHostProbe = async ({ bindingsDir, sessionId, output = process.stdout, responseTimeoutMs=HOST_PROBE_RESPONSE_TIMEOUT_MS, transport = 'rollout' } = {}) => {
   if (typeof sessionId !== 'string' || !sessionId.length) throw Object.assign(new Error('Local Host probe requires the current Codex session ID.'), { code: 'LOCAL_SOURCE_HOST_PROBE_SESSION_REQUIRED' });
   const { bindings } = await loadLocalSourceBindings(bindingsDir);
   const { controlRoot, dataRoot } = bindings.harness;
@@ -32,6 +35,14 @@ export const runLocalSourceHostProbe = async ({ bindingsDir, sessionId, output =
 };
 
 const main = async () => {
+  if(process.argv.length===8 && process.argv[2]==='--bindings-dir' && process.argv[4]==='--session-id' && process.argv[6]==='--diagnose-since'){
+    const sessionId=resolveProbeSessionId({explicitSessionId:process.argv[5]});
+    if(!Number.isFinite(Date.parse(process.argv[7])))throw Error('Use an exact ISO diagnostic timestamp.');
+    await loadLocalSourceBindings(process.argv[3]);
+    const host=await locateCodexRollout({codexSessionId:sessionId});
+    process.stdout.write(JSON.stringify({protocolVersion:'1.0',kind:'local-source-host-diagnostic',sessionId,
+      ...await inspectNativeTraceTail({path:host.path,after:process.argv[7]})})+'\n');return;
+  }
   if (![4, 6].includes(process.argv.length) || process.argv[2] !== '--bindings-dir' || (process.argv.length === 6 && process.argv[4] !== '--session-id')) throw Object.assign(new Error('Usage: local-source-host-probe.mjs --bindings-dir <absolute-dir> [--session-id <current-session-id>]'), { code: 'LOCAL_SOURCE_HOST_PROBE_ARGUMENTS_INVALID' });
   process.stdout.write(`${JSON.stringify(await runLocalSourceHostProbe({ bindingsDir: process.argv[3], sessionId: resolveProbeSessionId({ explicitSessionId: process.argv[5] }) }))}\n`);
 };

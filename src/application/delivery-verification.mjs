@@ -13,6 +13,7 @@ import { assertVerificationReady, completeVerifiedDelivery } from '../platform/e
 import { envelope } from '../platform/plugins/contracts.mjs';
 import { fingerprintDeliveryPaths, inspectDeliveryPaths } from './delivery-paths.mjs';
 import { resolveVerificationInputs, assertVerificationBindingStable } from './verification-input-bindings.mjs';
+import {processFailureRecovery} from './execution-fault.mjs';
 export { fingerprintDeliveryPaths } from './delivery-paths.mjs';
 
 const manifest = { id: 'delivery-process-verification', kind: 'gate-executor', version: '1.0.0',
@@ -25,9 +26,10 @@ const checkRecipe = check => ({ id: `delivery-check-${digestJson(check)}`, comma
 /** Deterministic checks only. This runner cannot dispatch an Agent or implement code. */
 export const executeDeliveryCheck = async ({ check: approvedCheck, workspaceRoot, excluded = [], dataRoot, controlRoot,
   evidenceStore, sourceContext = {}, forceFresh = false, onProgress = () => {},
-  inputScope = null, pinnedInputBinding = null }) => {
+  inputScope = null, pinnedInputBinding = null, executionPolicy = null }) => {
   const inputBinding = await resolveVerificationInputs({ check: approvedCheck, workspaceRoot,
-    allowedPaths: inputScope?.allowedPaths ?? [], forbiddenPaths: inputScope?.forbiddenPaths ?? [], excluded });
+    allowedPaths: inputScope?.allowedPaths ?? [], forbiddenPaths: inputScope?.forbiddenPaths ?? [], excluded,
+    projectFilePolicy:inputScope?.projectFilePolicy,continuousExecution:executionPolicy });
   let bindingError = null;
   try { assertVerificationBindingStable(pinnedInputBinding, inputBinding); }
   catch (error) {
@@ -83,7 +85,7 @@ export const executeDeliveryCheck = async ({ check: approvedCheck, workspaceRoot
   if (toolError) receipt = envelope(manifest, 'receipt', { operation: 'gate', gateId: recipe.id,
     status: 'environment-failed', exitCode: null, stdout: '', stderr: toolError.message, environmentError: toolError });
   if (!receipt) {
-    const executor = createProcessGateExecutor({ manifest, workspaceRoot, temporaryRoot: `${dataRoot}/tmp/delivery-checks`, controlRoot,
+    const executor = createProcessGateExecutor({ manifest, workspaceRoot, temporaryRoot: `${dataRoot}/tmp/delivery-checks`, controlRoot, executionPolicy,
       allowlist: [{ ...recipe, executable: recipe.command[0], args: recipe.command.slice(1) }], onProgress });
     receipt = await executor.execute({ id: recipe.id, commandId: recipe.id, args: [], recipe, ...sourceContext });
   }
@@ -95,6 +97,7 @@ export const executeDeliveryCheck = async ({ check: approvedCheck, workspaceRoot
     inputDigest, outputDigest: await fingerprintDeliveryPaths(workspaceRoot, check.outputs, onProgress),
     executorReceipt: receipt, cacheHit: Boolean(cacheOriginRef), cacheOriginRef,
     sourceBefore: before.digest, sourceAfter: after.digest };
+  if(body.status!=='passed')body.recovery={version:'verification-recovery/1',operation:processFailureRecovery(body)};
   const evidence = await evidenceStore.put(body, { ...sourceContext, sourceDigest: before.digest,
     mediaType: 'application/json', labels: ['delivery-verification'] });
   if (body.status === 'passed' && !body.cacheHit && check.cacheable) await cache.put(key, { status: 'passed', evidenceRefs: [evidence.ref] });
@@ -138,9 +141,10 @@ export const verifyDeliveryBatchResult = async ({ state, feature, dispatch, resu
     assert(check.outputs.every(path => outputs.some(root => path === root || path.startsWith(`${root}/`))),
       'DELIVERY_CHECK_OUTPUT_SCOPE', 'Verification outputs require the current Feature or declared transient-output authority.');
     const receipt = await executeCheck({ check, workspaceRoot, excluded: project.workspace.excluded,
-      inputScope: { allowedPaths: feature.allowedPaths, forbiddenPaths: feature.forbiddenPaths },
+      inputScope: { allowedPaths: feature.allowedPaths, forbiddenPaths: feature.forbiddenPaths,projectFilePolicy:state.metadata?.projectFilePolicy },
       pinnedInputBinding: context.workBatch?.verificationInputBindings?.find(item => item.approvedCheckDigest === digestJson(check)),
-      evidenceStore, dataRoot, controlRoot, forceFresh: batch.checks.includes(check) && batch.phase === 'convergence',
+      evidenceStore, dataRoot, controlRoot, executionPolicy:state.metadata?.continuousExecution, forceFresh: batch.checks.includes(check) && batch.phase === 'convergence'
+        ||Boolean(state.metadata?.dependencyRepairs?.some(r=>r.revalidation?.some(x=>x.featureId===feature.id&&!x.verifiedSubmissionId))),
       onProgress: event => onProgress?.({ ...event, deliveryBatchId: batch.id, checkId: check.id }),
       sourceContext: { projectId: state.projectId, runId: state.runId, featureId: feature.id, dispatchId: dispatch.dispatchId,
         epoch: state.epoch, generation: state.generation, artifactDigest: state.artifactDigest, policyDigest: state.policyDigest } });

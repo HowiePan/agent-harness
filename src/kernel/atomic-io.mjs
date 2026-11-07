@@ -62,6 +62,11 @@ export const withDirectoryLock = async (lockPath, operation, { root, timeoutMs =
       try {
         const info = await stat(lockPath);
         if (Date.now() - info.mtimeMs > staleMs) {
+          const owner=await readJson(resolve(lockPath,'owner.json'),null);
+          // A long operation is not a dead owner. Uncertain ownership also stays locked.
+          let dead=false;
+          if(Number.isSafeInteger(owner?.pid)&&owner.pid>0)try{process.kill(owner.pid,0);}catch(error){dead=error.code==='ESRCH';}
+          if(!dead){if(Date.now()-started>=timeoutMs)throw new HarnessError('AUTHORITY_LOCK_TIMEOUT','A live or unverified owner still holds this lock.',{lockPath});await wait(pollMs);continue;}
           if (root) assertNoLinkPath(root, lockPath, 'lock path');
           await rm(lockPath, { recursive: true, force: true });
           continue;

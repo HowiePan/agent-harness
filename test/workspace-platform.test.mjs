@@ -2,7 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
-import { WorkspaceRegistry, workspaceDecisionContext, workspaceProjectionId, REFERENCE_MEMORY_PROVIDER, createHarness, loadExtensionPack, createInMemoryRuntime, harnessTemporaryRoot } from '../src/index.mjs';
+import { WorkspaceRegistry, workspaceDecisionContext, workspaceProjectionId, REFERENCE_MEMORY_PROVIDER, loadExtensionPack, createInMemoryRuntime, harnessTemporaryRoot } from '../src/index.mjs';
+import { createTestHarness as createHarness } from './lifecycle-command-support.mjs';
 
 const fixture = async () => {
   const root = await mkdtemp(resolve(harnessTemporaryRoot(), 'workspace-test-'));

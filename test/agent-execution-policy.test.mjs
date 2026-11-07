@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { AGENT_PROMPT_CONTRACT_VERSION } from '../src/platform/plugins/codec/agent-prompt-codec.mjs';
 import { writeFile } from 'node:fs/promises';
 import { extensionPack as codexRuntimeExtension } from '../integrations/codex/extensions/codex-runtime.mjs';
 import { RunCoordinator } from '../src/platform/workflow/coordinator/run-coordinator.mjs';
@@ -207,7 +208,7 @@ test('explicit visible Feature dispatch binds the visible result schema', async 
   const read = await fixture.harness.readDispatchPacket(fixture.projectId, 'run', scheduled.result.dispatches[0].dispatchId);
   assert.equal(read.packet.execution.runtime.mode, 'conversation-visible');
   assert.match(read.packet.execution.result.schemaId, /visible-agent-result/);
-  assert.equal(read.prompt.contractVersion, '1.5');
+  assert.equal(read.prompt.contractVersion, AGENT_PROMPT_CONTRACT_VERSION);
 });
 
 test('Harness rejects unwrapped visible host callbacks instead of trusting a custom attestor', async () => {

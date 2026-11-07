@@ -25,7 +25,8 @@ export const inspectVerificationInputRepairs = async (state, workspaceRoot, excl
     const checks = feature.metadata.deliveryBatch?.checks;
     if (!checks?.length) continue;
     const resolutions = await Promise.all(checks.map(check => resolveVerificationInputs({ check, workspaceRoot,
-      allowedPaths: feature.allowedPaths, forbiddenPaths: feature.forbiddenPaths, excluded })));
+      allowedPaths: feature.allowedPaths, forbiddenPaths: feature.forbiddenPaths, excluded,
+      projectFilePolicy:state.metadata.projectFilePolicy,continuousExecution:state.metadata.continuousExecution })));
     if (resolutions.some(item => item.missingInputs.length) || !resolutions.some(item => item.bindings.length)) continue;
     const repair = { kind: 'verification-input-repair', version: '1.0.0', featureId: feature.id,
       submissionId: submission.submissionId, sourceDigest: state.sourceDigest,

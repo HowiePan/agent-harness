@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
-import { createHarness } from '../src/application/harness.mjs';
+import { createTestHarness as createHarness } from './lifecycle-command-support.mjs';
 import { createCardWorldProjectDescriptor } from '../integrations/legacy-consumers/cardworld/index.mjs';
 import { loadExtensionPack } from '../src/platform/extensions/contract.mjs';
 import { createInMemoryRuntime } from '../src/platform/plugins/runtime/in-memory-runtime.mjs';
