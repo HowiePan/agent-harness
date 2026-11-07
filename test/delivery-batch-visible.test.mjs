@@ -12,7 +12,7 @@ import { createMockVisibleHostAdapter } from './test-support.mjs';
 import { proposal, completion } from './delivery-batch-support.mjs';
 import { sha256 } from '../src/common/canonical.mjs';
 
-for (const mode of ['ordinary', 'input', 'capacity', 'unknown', 'clarification', 'clarification-exhausted-resume', 'contract', 'over-capacity','registration-interruption','ack-interruption','user-stopped-resume','user-stopped-active-resume']) test(`native-visible bounded deliveries: ${mode}, with genuine checks and no Agent CLI`, async t => {
+for (const mode of ['ordinary', 'input', 'capacity', 'unknown', 'clarification', 'clarification-exhausted-resume', 'contract', 'over-capacity','registration-interruption','ack-interruption','user-stopped-resume','user-stopped-active-resume','compound-recovery']) test(`native-visible bounded deliveries: ${mode}, with genuine checks and no Agent CLI`, async t => {
   const repairInput = mode === 'input';
   const resumeBoundary = mode === 'clarification-exhausted-resume';
   const clarificationMode = mode.startsWith('clarification');
@@ -40,7 +40,7 @@ for (const mode of ['ordinary', 'input', 'capacity', 'unknown', 'clarification',
   const extension = await loadExtensionPack('./src/flows/delivery-lifecycle/index.mjs', { controlRoot });
   const runtime = await loadExtensionPack('./integrations/codex/extensions/codex-runtime.mjs', { controlRoot });
   const packets = new Map(); const spawned = [];
-  let confirmationInterrupted=false,stoppedContained=0;
+  let confirmationInterrupted=false,stoppedContained=0,resultInterrupted=false,dispatchInterrupted=false;
   const adapter = createMockVisibleHostAdapter({ onSpawn: input => {
     const bytes = readFileSync(`${input.packet.outputRef}.dispatch-packet.json`);
     assert.equal(sha256(bytes), input.packetDigest);
@@ -56,6 +56,7 @@ for (const mode of ['ordinary', 'input', 'capacity', 'unknown', 'clarification',
     onContain:input=>{assert(packets.has(input.dispatchId));stoppedContained++;
       return {contained:true,outcome:{disposition:'already-terminal',reason:input.reason,observationRequestDigest:'a'.repeat(64)}};},
     onResult: async input => {
+      if(mode==='compound-recovery'&&packets.get(input.dispatchId)?.feature.metadata.deliveryBatch&&!resultInterrupted){resultInterrupted=true;throw Object.assign(Error('temporary result read failure'),{code:'NEW_UNREGISTERED_RESULT_ERROR'});}
       const packet = packets.get(input.dispatchId); const feature = packet.feature;
       const output = (port, schemaId, value) => ({ status: 'completed', summary: 'Observed fixture result.', changedFiles: [],
         outputs: { [port]: { schemaId, value, evidenceRefs: ['fixture:inspection'] } } });
@@ -132,6 +133,14 @@ for (const mode of ['ordinary', 'input', 'capacity', 'unknown', 'clarification',
     runId: planned.state.runId, planDigest: snapshot.planDigest, artifactDigest: snapshot.artifactDigest },
   { expectedRevision: planned.state.revision, commandId: 'fixture-approval' });
   await harness.kernel.closeRun(descriptor.id, approved.state.runId, {}, { expectedRevision: approved.state.revision, commandId: 'fixture-close-plan' });
+  if(mode==='compound-recovery'){
+    const dispatch=harness.dispatch;
+    harness.dispatch=async(...args)=>{
+      const result=await dispatch(...args);
+      if(!dispatchInterrupted){dispatchInterrupted=true;throw Object.assign(Error('lost scheduling acknowledgement'),{code:'NEW_UNREGISTERED_ACK_ERROR'});}
+      return result;
+    };
+  }
   let implemented;
   if(mode.startsWith('user-stopped-')){
     const plan=await harness.createLifecyclePlan({projectId:descriptor.id,action:'implement',target:'V1.0.0',extensionId:extension.id,executionWorkspaceRoot:workspaceRoot});
@@ -174,16 +183,19 @@ for (const mode of ['ordinary', 'input', 'capacity', 'unknown', 'clarification',
       if (processLoss) { processLoss = false; throw new Error('simulated process loss before diagnostic assessment'); }
       return apply(...args);
     };
-    await assert.rejects(execute('implement'), /simulated process loss/);
-    const prior = (await harness.authorityStore.list(descriptor.id)).find(item => item.metadata.commandIntent?.action === 'implement');
-    const resume = await harness.createLifecycleResumePlan({ projectId: descriptor.id, runId: prior.runId, executionWorkspaceRoot: workspaceRoot });
-    assert.equal(resume.blockedFeatureId, null);
-    const preflightReport = await harness.createExecutionReadinessReport(resume.plan);
-    assert.equal(preflightReport.executionReady, true);
-    implemented = await harness.executeVisibleLifecyclePlan(resume.plan, { commandId: 'fixture-resume', preflightReport, maxConcurrency: 1, resume });
+    // An ordinary thrown exception is not process loss: recover it inside the same command.
+    implemented = await execute('implement');
+    assert(implemented.state.decisions.some(d=>d.recovery?.operation==='application.applyInterruptionReview'&&d.recovery.status==='recovered'));
     assert.equal(implemented.interruption.category, 'recovery-budget');
     assert.equal(implemented.coordination.userInputRequired, true);
   } else implemented = await execute('implement');
+  if(mode==='compound-recovery'){
+    assert(dispatchInterrupted&&resultInterrupted);
+    const recovery=implemented.state.decisions.filter(d=>d.kind==='execution-action-recovery');
+    assert(recovery.some(d=>d.recovery.operation==='application.dispatch'&&d.recovery.action==='reconcile'));
+    assert(recovery.some(d=>d.recovery.operation==='host.result'&&d.recovery.status==='recovered'));
+    assert((await harness.authorityStore.list(descriptor.id)).filter(s=>s.metadata.commandIntent?.action==='implement').length===1);
+  }
   if(['registration-interruption','ack-interruption'].includes(mode))assert(injectedRegistrationInterruption);
   const deliveries = spawned.filter(packet => packet.feature.metadata.deliveryBatch);
   assert.equal(deliveries.length, expectedStop ? 1 : repairInput || reviewMode || mode==='user-stopped-active-resume' ? 3 : 2,

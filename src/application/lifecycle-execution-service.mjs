@@ -1,6 +1,7 @@
 import { assert } from '../common/errors.mjs';
 import { submissionAttempt } from '../kernel/attempt-budget.mjs';
 import { continuousPolicy } from '../common/continuous-execution.mjs';
+import {taskFailureStreak} from '../common/task-repetition.mjs';
 import { selectBlockedResumeFeature } from './lifecycle-resume.mjs';
 import { inspectDevelopmentHostCheckReview } from './development-host-check-review.mjs';
 import {inspectDeliveryFailureRetries} from './delivery-failure-retry.mjs';
@@ -31,6 +32,7 @@ import { isIntervention, isExecutionComplete, profileState } from '../kernel/int
 import { sealInterruptionOutcome, describeInterruptionError } from './interruption-outcome.mjs';
 import {isResultCorrection} from '../platform/execution/result-correction.mjs';
 import {recordResultContinuously} from './record-result-continuously.mjs';
+import {createActionRecovery,recoveryAwareApi} from './action-recovery.mjs';
 
 export const visibleLifecycleStopReason = state => {
   if (state.profile?.id === 'collection-batch' && state.features.some(feature => ['blocked', 'failed-budget'].includes(feature.state)
@@ -63,7 +65,8 @@ export const shouldRetryImplementationVerificationPath = ({ feature, result, sta
   if (!Number.isInteger(retries) || retries < 1) return false;
   const current = state.features.find(item => item.id === feature.id);
   const attempt = submissionAttempt(state,feature,state.submissions?.findLast(s=>s.featureId===feature.id)??{result});
-  return current?.state === 'blocked' && attempt && !attempt.exhausted && attempt.failures <= retries;
+  return current?.state === 'blocked' && attempt && !attempt.exhausted && (continuousPolicy(state)
+    ?taskFailureStreak(state,feature)<continuousPolicy(state).recovery.sameStrategyFailures:attempt.failures <= retries);
 };
 export const shouldContinueImplementationProgress = ({ feature, result, state, submission }) => {
   if (result.failureClass === 'implementation-sizing-review') return false;
@@ -94,7 +97,7 @@ export const shouldContinueImplementationProgress = ({ feature, result, state, s
   const continuations = state.submissions.filter(item => item.featureId === feature.id
     && item.result?.status === 'blocked' && item.outputSourceDigest !== item.inputSourceDigest).length;
   const attempt = submissionAttempt(state, feature, { ...submission, result });
-  return Boolean(attempt && !attempt.exhausted) && (attempt.budgetKind === 'progress' || continuations <= budget);
+  return Boolean(attempt && !attempt.exhausted) && (continuousPolicy(state) || attempt.budgetKind === 'progress' || continuations <= budget);
 };
 export const shouldContinueCollectionProgress = ({ feature, result, state, submission }) => {
   const expectedClass = feature?.metadata?.stage === 'shared-capability' ? 'collection-shared-incomplete'
@@ -104,8 +107,8 @@ export const shouldContinueCollectionProgress = ({ feature, result, state, submi
   if (current?.state !== 'blocked' || !submission || submission.featureId !== feature.id
     || submission.outputSourceDigest === submission.inputSourceDigest || !submission.changedFiles?.length) return false;
   const budget = feature.metadata.collectionProgressRetries;
-  const attempt = state.attempts[`${feature.logicalRoot}:${expectedClass}`];
-  if (!Number.isInteger(budget) || budget < 1 || !attempt || attempt.exhausted || attempt.failures > budget) return false;
+  const attempt = submissionAttempt(state,feature,submission);
+  if (!attempt || attempt.exhausted || !continuousPolicy(state)&&(!Number.isInteger(budget)||budget<1||attempt.failures>budget)) return false;
   return !state.submissions.some(item => item.submissionId !== submission.submissionId && item.featureId === feature.id
     && [item.inputSourceDigest, item.outputSourceDigest].includes(submission.outputSourceDigest));
 };
@@ -172,7 +175,7 @@ const runHeadlessLifecyclePlan = async (context, api, planInput, { commandId, pr
   const activeRunId = state.runId;
   state = await applyPendingInterruptionReviews(api, state, commandId);
   const retryFailedGates = async results => {
-    if (gateDiagnosticAttempts >= 5 || plan.intent.action === 'prerelease'
+    if (!continuousPolicy(state)&&gateDiagnosticAttempts >= 5 || plan.intent.action === 'prerelease'
       || !results.some(gate => ['failed', 'environment-failed', 'budget-exceeded'].includes(gate.status))) return null;
     state = await authorityStore.read(plan.project.id, activeRunId);
     if (!state.features.every(isExecutionComplete) || !api.profileRegistry.get(state.profile.id).createGateDiagnosticReview) return null;
@@ -186,7 +189,7 @@ const runHeadlessLifecyclePlan = async (context, api, planInput, { commandId, pr
   let execution;
   for (;;) {
     execution = await coordinator.run({ projectId: plan.project.id, runId: activeRunId, runtimePluginId: plan.run.runtimePluginId, maxConcurrency,
-    maxRounds: plan.intent.preset === 'release-exhaustive' || (plan.intent.action === 'produce' && state.profile.id === 'collection-batch') ? Infinity : maxRounds });
+    maxRounds: continuousPolicy(state) || plan.intent.preset === 'release-exhaustive' || (plan.intent.action === 'produce' && state.profile.id === 'collection-batch') ? Infinity : maxRounds });
     state = await authorityStore.read(plan.project.id, activeRunId);
     const beforeReview = state.revision;
     state = await applyPendingInterruptionReviews(api, state, commandId);
@@ -337,7 +340,7 @@ const continueVisibleLifecyclePlan = async (context, api, planInput, { commandId
     }));
   const retryFailedGates = async results => {
     if (plan.intent.action === 'prerelease') return null;
-    if (gateDiagnosticAttempts >= 5 || !results.some(gate => ['failed', 'environment-failed', 'budget-exceeded'].includes(gate.status))) return null;
+    if (!continuousPolicy(state)&&gateDiagnosticAttempts >= 5 || !results.some(gate => ['failed', 'environment-failed', 'budget-exceeded'].includes(gate.status))) return null;
     state = await authorityStore.read(plan.project.id, activeRunId);
     const profile = api.profileRegistry.get(state.profile.id);
     if (!profile.createGateDiagnosticReview) return null;
@@ -350,7 +353,7 @@ const continueVisibleLifecyclePlan = async (context, api, planInput, { commandId
       gateDiagnosticAttempts: gateDiagnosticAttempts + 1, continuedStart: { ...started, state: scheduled.state } });
     return { ...resumed, rounds: [...rounds, ...(resumed.rounds ?? [])] };
   };
-  const coordinatorRoundLimit = plan.intent.preset === 'release-exhaustive' || plan.intent.action === 'implement'
+  const coordinatorRoundLimit = continuousPolicy(state) || plan.intent.preset === 'release-exhaustive' || plan.intent.action === 'implement'
     || (plan.intent.action === 'produce' && state.profile.id === 'collection-batch') ? Infinity : maxRounds;
   let completedRounds = 0;
   while (completedRounds < coordinatorRoundLimit) {
@@ -463,7 +466,8 @@ const continueVisibleLifecyclePlan = async (context, api, planInput, { commandId
     for (const lease of leases) {
       const dispatch = state.dispatches.find(item => item.dispatchId === lease.dispatchId);
       const waitStarted = performance.now();
-      const waited = await trustedAgentAdapter.wait({ agentId: lease.agentId, dispatchId: lease.dispatchId, visibility: structuredClone(lease.runtimeReceipt.visibility), runtimeReceipt: structuredClone(lease.runtimeReceipt) });
+      const waited = await api.recoverExecutionAction({name:'host.wait',mode:'read',target:lease.featureId},
+        ()=>trustedAgentAdapter.wait({ agentId: lease.agentId, dispatchId: lease.dispatchId, visibility: structuredClone(lease.runtimeReceipt.visibility), runtimeReceipt: structuredClone(lease.runtimeReceipt) }));
       timing.waitMs += performance.now() - waitStarted;
       state = await authorityStore.read(plan.project.id, activeRunId);
       const heartbeat = await api.recordHeartbeat(plan.project.id, activeRunId, { leaseId: lease.leaseId, dispatchId: lease.dispatchId, agentId: lease.agentId, progress: waited?.progress ?? waited?.status ?? 'completed' }, { expectedRevision: state.revision, commandId: `${commandId}.heartbeat.${lease.dispatchId}.${state.revision}` });
@@ -471,7 +475,8 @@ const continueVisibleLifecyclePlan = async (context, api, planInput, { commandId
       if (!['completed', 'failed', 'blocked'].includes(waited?.status)) continue;
       terminalLeaseObserved = true;
       const resultStarted = performance.now();
-      const transported = await trustedAgentAdapter.result({ agentId: lease.agentId, dispatchId: lease.dispatchId, visibility: structuredClone(lease.runtimeReceipt.visibility), runtimeReceipt: structuredClone(lease.runtimeReceipt) });
+      const transported = await api.recoverExecutionAction({name:'host.result',mode:'read',target:lease.featureId},
+        ()=>trustedAgentAdapter.result({ agentId: lease.agentId, dispatchId: lease.dispatchId, visibility: structuredClone(lease.runtimeReceipt.visibility), runtimeReceipt: structuredClone(lease.runtimeReceipt) }));
       timing.resultMs += performance.now() - resultStarted;
       assert(transported?.result, 'VISIBLE_AGENT_STRUCTURED_RESULT_REQUIRED', 'Host result transport must return a structured Agent result.');
       // Native result observation can outlast the Lease heartbeat window. Renew
@@ -614,16 +619,23 @@ const withPlanArtifact = async (context, result) => result?.state
   ? { ...result, planApprovalArtifact: await ensurePlanApprovalArtifact(context.authorityStore.root, result.state) }
   : result;
 
-const executeWithInterruptionPolicy = async (context, api, plan, operation) => {
+const executeWithInterruptionPolicy = async (context, api, plan, options, operation) => {
+  const recovery=createActionRecovery({context,api,plan,onProgress:options?.onGateProgress});
+  const recoveredApi=recoveryAwareApi(api,recovery,context.authorityStore);
   try {
-    const result = await operation();
-    return withPlanArtifact(context, await sealInterruptionOutcome(context, api, plan, result));
+    const result = await operation(recoveredApi);
+    return withPlanArtifact(context, await sealInterruptionOutcome(context, recoveredApi, plan, result));
   } catch (error) {
+    // Unknown failures receive a real bounded read-only inspection, not static "attempted" prose.
+    if(!error.details?.actionRecovery){
+      const {body}=await recovery.diagnose(error,{name:'lifecycle-boundary',mode:'observe'});
+      error.details={...error.details,actionRecovery:body};
+    }
     error.details = { ...error.details, interruption: describeInterruptionError(error, { plan }) };
     throw error;
   }
 };
-export const executeHeadlessLifecyclePlan = async (context, api, planInput, options = {}) => executeWithInterruptionPolicy(context, api, planInput,
-  () => runHeadlessLifecyclePlan(context, api, planInput, options));
-export const executeVisibleLifecyclePlan = async (context, api, planInput, options = {}) => executeWithInterruptionPolicy(context, api, planInput,
-  () => continueVisibleLifecyclePlan(context, api, planInput, { ...options, continuedStart: null, gateDiagnosticAttempts: 0 }));
+export const executeHeadlessLifecyclePlan = async (context, api, planInput, options = {}) => executeWithInterruptionPolicy(context, api, planInput,options,
+  recoveredApi => runHeadlessLifecyclePlan(context, recoveredApi, planInput, options));
+export const executeVisibleLifecyclePlan = async (context, api, planInput, options = {}) => executeWithInterruptionPolicy(context, api, planInput,options,
+  recoveredApi => continueVisibleLifecyclePlan(context, recoveredApi, planInput, { ...options, continuedStart: null, gateDiagnosticAttempts: 0 }));

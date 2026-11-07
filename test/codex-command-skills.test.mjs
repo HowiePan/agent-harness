@@ -107,7 +107,9 @@ test('Codex plugin exposes one explicit-project pseudo-command router', async ()
   assert.match(skill, /deduplicate by the exact `requestId` plus `requestDigest`/);
   assert.match(skill, /retry\.mode=same-intent-once/);
   assert.match(skill, /exact same intent once under narrowly scoped sandbox escalation/);
-  assert.match(skill, /original authorization covers H0–H3 `dev sync`/);
+  assert.match(skill, /Only the user initiates lifecycle commands/);
+  assert.match(skill, /native-current-command\/1/);
+  assert.match(skill, /maintenance never start business work/);
   assert.match(skill, /Never inspect the pending directory as a substitute/);
   assert.match(operatorSkill, /所有面向用户的控制对话必须使用中文/);
   assert.match(metadata, /allow_implicit_invocation: true/);

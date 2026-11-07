@@ -4,6 +4,7 @@ import { assert } from '../common/errors.mjs';
 import { assertNoLinkPath, safeSegment } from '../common/paths.mjs';
 import { atomicWrite } from '../kernel/atomic-io.mjs';
 import { readVerifiedRunRecord } from './authority-history-reader.mjs';
+import { assessInputDiscovery } from './diagnostic-input-discovery.mjs';
 
 /** Follow declared Authority ancestry only, one Run at a time; never scan a data root. */
 export const collectImplementationDraftInputs = async ({ state, feature, authorityStore, evidenceStore }) => {
@@ -60,6 +61,32 @@ export const collectImplementationDraftInputs = async ({ state, feature, authori
 export const prepareImplementationEvidenceInputs = async options => {
   const { state, evidenceStore } = options;
   const values = await collectImplementationDraftInputs(options);
+  const accepted=state.decisions.findLast(d=>d.kind==='execution-intervention'&&d.featureId===options.feature.id
+    &&d.sourceDigest===state.sourceDigest&&d.assessmentRef);
+  if(accepted){
+    const proof=await evidenceStore.read(accepted.assessmentRef),assessment=JSON.parse(proof.bytes.toString('utf8'));
+    assert(proof.metadata.projectId===state.projectId&&proof.metadata.sourceDigest===state.sourceDigest
+      &&assessment.disposition==='accepted'&&assessment.sourceSubmissionId===accepted.sourceSubmissionId,
+    'INPUT_DISCOVERY_EVIDENCE_INVALID','Input discovery requires the current accepted Host assessment.');
+    const found=assessment.inputDiscoveries?.filter(d=>d.status==='found')??[];
+    const admissions=assessment.inputAdmissions??[];
+    if(admissions.length){
+      const {captureWorkspace}=await import('../common/workspace-snapshot.mjs');
+      const snapshot=await captureWorkspace(state.metadata.workspace.root,{excluded:state.metadata.workspace.excluded??[]});
+      for(const a of admissions)assert(a.candidates.every(c=>snapshot.files.some(f=>f.path===c.path&&f.sha256===c.sha256)),
+        'INPUT_ADMISSION_SOURCE_DRIFT','Input preparation must retain its current source candidates.');
+      values.push({kind:'input-admission-work',version:'1.0',projectId:state.projectId,originRunId:state.runId,
+        evidenceRef:accepted.assessmentRef,completionCredit:false,status:'unaccepted',inputAdmissions:admissions,
+        instructions:'Evaluate the existing candidates against every original historical obligation. Bind truthful purpose/version/hash and independent expectations only when provenance and applicability are demonstrated. Implement project-local catalog/admission/receiver integration under the unchanged full batch and checks. If materials are genuinely missing or mapping fails, retain failed admission and return exact attempted actions and missing inputs. Never manufacture history, derive independent expectations from the implementation under test, add a new historical producer or waive acceptance.'});
+    }
+    for(const discovery of found){
+      const current=await assessInputDiscovery({action:{id:discovery.actionId,discovery},snapshot:{files:discovery.catalogs},
+        workspaceRoot:state.metadata.workspace.root,projectFilePolicy:state.metadata.projectFilePolicy});
+      assert(!current.issue&&current.discovery.status==='found','INPUT_DISCOVERY_EVIDENCE_INVALID','Discovered inputs changed before consumer Dispatch.');
+    }
+    if(found.length)values.push({kind:'verified-input-discovery',version:'1.0',projectId:state.projectId,originRunId:state.runId,
+      evidenceRef:accepted.assessmentRef,completionCredit:false,status:'unaccepted',inputDiscoveries:found});
+  }
   for(const repair of state.metadata?.dependencyRepairs??[])if(repair.status==='pending'&&repair.ownerFeatureId===options.feature.id){
     const review=state.submissions.find(s=>s.submissionId===repair.reviewSubmissionId);
     const source=state.submissions.find(s=>s.submissionId===repair.sourceSubmissionId);

@@ -4,16 +4,17 @@ import {featureContractDigest} from '../common/interruption-contract.mjs';
 import {continuousPolicy,executionBudgetBlocked,executionProblemId,problemCycle,stagnantExecutionCycles} from '../common/continuous-execution.mjs';
 import {assertFeatureFileAccess} from '../common/project-file-policy.mjs';
 import {diffWorkspaceSnapshots} from '../common/workspace-snapshot.mjs';
+import {diagnosticRepairActions,actionOwns,remainingPrerequisites} from './diagnostic-repair-actions.mjs';
+import {taskFailureStreak} from '../common/task-repetition.mjs';
 
-const inside=(root,path)=>path===root||path.startsWith(`${root}/`);
 const latest=(state,id)=>state.submissions.findLast(s=>s.featureId===id&&!s.supersededAt);
+const accepted=(state,feature)=>state.submissions.find(s=>s.submissionId===feature.submissionId&&s.featureId===feature.id&&!s.supersededAt);
 const idle=state=>!state.metadata?.operatorStop?.requested
   &&!state.decisions.some(d=>d.action==='freeze-execution'&&d.decision==='approved')
   &&!state.leases.some(l=>['requested','active'].includes(l.status))
   &&!state.dispatches.some(d=>['requested','assigned'].includes(d.status));
 const owns=(state,feature,path)=>{
   if(typeof path!=='string'||/[\\:*?]/.test(path)||path.startsWith('/')||path.split('/').some(p=>!p||p==='.'||p==='..'))return false;
-  if(!feature.allowedPaths.some(root=>inside(root,path))||feature.forbiddenPaths.some(root=>inside(root,path)))return false;
   try{assertFeatureFileAccess({feature,policy:state.metadata.projectFilePolicy,path});return true;}catch{return false;}
 };
 
@@ -22,45 +23,58 @@ export const inspectDependencyRepair = (state,reviewFeatureId) => {
   const policy=continuousPolicy(state),review=state.features.find(f=>f.id===reviewFeatureId);
   const result=review&&latest(state,review.id),spec=review?.metadata?.intervention;
   const source=state.features.find(f=>f.id===spec?.sourceFeatureId),submission=source&&latest(state,source.id);
-  const diagnosis=result?.result?.outputs?.diagnosis?.value,paths=diagnosis?.repairPaths;
+  const diagnosis=result?.result?.outputs?.diagnosis?.value;
   if(!policy||!idle(state)||state.metadata?.projectFilePolicy?.mode!=='project-owned'
     ||review?.kind!=='execution-diagnostic'||review.state!=='completed'||review.allowedPaths.length
     ||source?.state!=='blocked'||source.metadata?.stage!=='implementation'
-    ||submission?.submissionId!==spec.sourceSubmissionId||submission.result.failureClass!=='scope-blocker'
-    ||submission.result.blocker?.kind!=='scope'||diagnosis?.conclusion!=='external-prerequisite'
+    ||submission?.submissionId!==spec.sourceSubmissionId||!['blocked','failed'].includes(submission.result.status)
+    ||!['external-prerequisite','in-scope'].includes(diagnosis?.conclusion)
     ||diagnosis.sourceSubmissionId!==submission.submissionId||diagnosis.contractDigest!==featureContractDigest(source)
     ||spec.sourceDigest!==state.sourceDigest||spec.contractDigest!==featureContractDigest(source)
     ||result.result.status!=='completed'||result.changedFiles.length||result.inputSourceDigest!==state.sourceDigest
-    ||result.outputSourceDigest!==state.sourceDigest||!result.evidenceRefs.length
-    ||!Array.isArray(paths)||!paths.length||paths.length>64||new Set(paths).size!==paths.length
-    ||!paths.every(p=>submission.result.blocker.repairCandidatePaths?.includes(p)))return null;
-  const owners=source.dependsOn.map(id=>state.features.find(f=>f.id===id)).filter(f=>
+    ||result.outputSourceDigest!==state.sourceDigest||!result.evidenceRefs.length)return null;
+  if(diagnosis.remainingWork?.some(w=>w.unknowns?.some(q=>typeof q==='object'&&['contract-change','unresolved'].includes(q.classification))))return null;
+  const capacity=source.metadata?.deliveryBatch?.sizing?.capacityUnits;
+  if(Number.isFinite(capacity)&&diagnosis.remainingWork.reduce((sum,w)=>sum+w.units,0)>capacity)return null;
+  const actions=diagnosticRepairActions(state,source,submission,result.result);
+  let selected=null;
+  for(const action of actions){
+   const paths=action.paths;
+   if(!Array.isArray(paths)||!paths.length||paths.length>64||new Set(paths).size!==paths.length
+     ||!paths.every(p=>diagnosis.evidence.some(e=>e.path===p))
+     ||action.legacyScope&&!paths.every(p=>submission.result.blocker.repairCandidatePaths?.includes(p)))continue;
+   const owners=source.dependsOn.map(id=>state.features.find(f=>f.id===id)).filter(f=>
     f?.state==='completed'&&f.metadata?.stage==='implementation'&&f.task
-    &&paths.every(p=>owns(state,f,p)));
-  if(owners.length!==1)return null;
-  const owner=owners[0],completion=latest(state,owner.id);
+    &&actionOwns(f,action)&&paths.every(p=>owns(state,f,p)));
+   if(owners.length!==1)continue;
+   selected={action,paths,owner:owners[0]};break;
+  }
+  if(!selected)return null;
+  const {action,paths,owner}=selected,completion=accepted(state,owner);
   if(completion?.result.status!=='completed'||completion.submissionId!==owner.submissionId||!completion.evidenceRefs.length
-    ||executionBudgetBlocked(state,owner)||executionBudgetBlocked(state,source)
-    ||stagnantExecutionCycles(state,source)>=policy.recovery.stagnantCycles)return null;
+    ||executionBudgetBlocked(state,owner)||executionBudgetBlocked(state,source))return null;
   // Reopening invalidates only actual completed transitive consumers; their
   // original contracts and completion evidence remain audit history.
   const downstream=new Set([owner.id]);let changed=true;
   while(changed){changed=false;for(const f of state.features)if(!downstream.has(f.id)&&f.dependsOn.some(id=>downstream.has(id))){downstream.add(f.id);changed=true;}}
   const revalidation=state.features.filter(f=>f.id!==owner.id&&downstream.has(f.id)&&f.state==='completed').map(f=>{
-    const accepted=latest(state,f.id);
-    return {featureId:f.id,contractDigest:featureContractDigest(f),submissionId:accepted?.submissionId};
+    const completion=accepted(state,f);
+    return {featureId:f.id,contractDigest:featureContractDigest(f),submissionId:completion?.submissionId};
   });
-  if(revalidation.some(item=>{const f=state.features.find(f=>f.id===item.featureId),s=latest(state,item.featureId);
+  if(revalidation.some(item=>{const f=state.features.find(f=>f.id===item.featureId),s=accepted(state,f);
     return f.metadata?.stage!=='implementation'||s?.result.status!=='completed'||s.submissionId!==f.submissionId||!s.evidenceRefs.length;
   }))return null;
   const problemId=executionProblemId(source),cycleGeneration=problemCycle(state,source),history=state.metadata.dependencyRepairs??[];
-  if(history.some(r=>r.reviewSubmissionId===result.submissionId||r.status==='pending')
-    ||history.filter(r=>r.problemId===problemId&&r.cycleGeneration===cycleGeneration).length>=policy.recovery.cyclesPerProblem)return null;
+  if(history.some(r=>r.reviewSubmissionId===result.submissionId||r.status==='pending'))return null;
+  const same=history.filter(r=>r.problemId===problemId&&r.ownerFeatureId===owner.id
+    &&digestJson(r.repairPaths)===digestJson(paths)&&r.sourceDigest===state.sourceDigest);
+  if(same.length>=policy.recovery.sameStrategyFailures&&taskFailureStreak(state,source)>=policy.recovery.sameStrategyFailures)return null;
   return {version:'dependency-repair/1',id:`dependency-repair/${digestJson({sourceSubmissionId:submission.submissionId,reviewSubmissionId:result.submissionId,owner:owner.id})}`,
     sourceFeatureId:source.id,sourceSubmissionId:submission.submissionId,sourceContractDigest:featureContractDigest(source),
     ownerFeatureId:owner.id,ownerSubmissionId:completion.submissionId,ownerContractDigest:featureContractDigest(owner),
     reviewFeatureId:review.id,reviewSubmissionId:result.submissionId,sourceDigest:state.sourceDigest,
-    problemId,cycleGeneration,repairPaths:[...paths],...(revalidation.length?{revalidation}: {})};
+    problemId,cycleGeneration,repairPaths:[...paths],...(revalidation.length?{revalidation}: {}),
+    ...(!action.legacyScope?{actionId:action.id,unresolvedPrerequisites:remainingPrerequisites(diagnosis,result.result,action)}:{})};
 };
 
 export const reserveDependencyRepair = async (state,input,evidenceStore,now) => {
@@ -155,9 +169,10 @@ export const completeDependencyRepairs = async (state,submission,now,evidenceSto
       :await priorRepairImplementation(state,r,submission,evidenceStore);
     r.status='completed';r.repairSubmissionId=submission.submissionId;r.completedAt=now();
     r.implementationSubmissionIds=implementationSubmissionIds;
-    source.state='pending';source.reopenedAt=now();
+    source.state=r.unresolvedPrerequisites?.length?'blocked':'pending';source.reopenedAt=now();
     source.reopenReason=`Dependency repair ${r.id} completed in ${submission.submissionId}. Recheck the current source and finish the entire original task. All previous consumer proof is stale; request fresh original verification. Remaining external inputs are unresolved until independently verified.`;
-    delete source.blocker;completed.push(r.id);
+    if(source.state==='pending')delete source.blocker;
+    completed.push(r.id);
   }
   return completed;
 };

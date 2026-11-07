@@ -148,3 +148,13 @@ test('a repeated implement command selects the sealed replacement Plan after mig
   assert.notEqual(progressed.planDigest, plan.planDigest);
   assert.notEqual(progressed.run.runId, plan.run.runId);
 });
+
+test('one unresolved consumer cannot block an independent runnable task or renew its own allowance',()=>{
+ const blocked={id:'consumer',logicalRoot:'consumer',state:'blocked',dependsOn:[],metadata:{stage:'implementation'}};
+ const independent={id:'independent',logicalRoot:'independent',state:'pending',dependsOn:[],metadata:{stage:'implementation'}};
+ const s={features:[blocked,independent],submissions:[{featureId:'consumer',result:{status:'blocked',failureClass:'external-prerequisite',blocker:{kind:'external'}}}],attempts:{}};
+ const before=JSON.stringify(s);assert.equal(selectBlockedResumeFeature(s),null);assert.equal(JSON.stringify(s),before);
+ assert.throws(()=>selectBlockedResumeFeature({...s,metadata:{operatorStop:{requested:true}}}),{code:'OPERATOR_EXECUTION_STOPPED'});
+ assert.throws(()=>selectBlockedResumeFeature({...s,features:[blocked,{...independent,dependsOn:['consumer']}]}),{code:'LIFECYCLE_RESUME_BLOCKER_REQUIRES_REVIEW'});
+ assert.equal(selectBlockedResumeFeature({...s,attempts:{denied:{logicalRoot:'consumer',exhausted:true}}}),null);
+});

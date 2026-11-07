@@ -97,7 +97,14 @@ export const selectBlockedResumeFeature = (state, { inputBindingRepairs = [], in
   // A waiting consumer is not the executable frontier while an authorized
   // prerequisite or independent task is already runnable. Keep its blocker.
   if(!blocked.some(dependenciesComplete)&&pendingWork)return null;
-  if (blocked.length === 1) return assertResumableFeature(state, blocked[0], inputBindingRepairs, interruptionReviews, hostCheckReviews);
+  if (blocked.length === 1) {
+    try { return assertResumableFeature(state, blocked[0], inputBindingRepairs, interruptionReviews, hostCheckReviews); }
+    catch(error) {
+      if(pendingWork&&['LIFECYCLE_RESUME_BLOCKER_REQUIRES_REVIEW','LIFECYCLE_RESUME_BLOCKED_STAGE',
+        'DELIVERY_BATCH_SIZING_REVIEW_REQUIRED','LIFECYCLE_RESUME_BUDGET_EXHAUSTED'].includes(error.code))return null;
+      throw error;
+    }
+  }
   const eligible = blocked.filter(feature => {
     if (!(feature.dependsOn ?? []).every(id => state.features.some(item => item.id === id && item.state === 'completed'))) return false;
     try { assertResumableFeature(state, feature, inputBindingRepairs, interruptionReviews, hostCheckReviews); return true; } catch { return false; }

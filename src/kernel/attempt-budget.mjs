@@ -24,8 +24,8 @@ export const selectAttemptBudget = ({ state, feature, submission, profile }) => 
   const budgetKind = progress ? 'progress' : 'failure';
   if (continuousPolicy(state) && feature.kind !== 'execution-diagnostic') {
     const problemId=executionProblemId(feature);
-    return {key:`${feature.logicalRoot}:problem:${problemId}:${budgetKind}`,problemId,budgetKind,
-      limit:progress ? null : continuousPolicy(state).recovery.cyclesPerProblem};
+    return {key:`${feature.logicalRoot}:task:${problemId}:${budgetKind}`,problemId,budgetKind,
+      limit:null}; // history is accounting, not a lifetime or window allowance
   }
   const key = progress ? `${feature.logicalRoot}:progress` : `${feature.logicalRoot}:${result.failureClass ?? result.status}`;
   const limit = progress ? policy.limit : policy?.failureLimit ?? feature.attemptLimit;
@@ -34,7 +34,8 @@ export const selectAttemptBudget = ({ state, feature, submission, profile }) => 
 };
 
 export const submissionAttempt = (state, feature, submission) => continuousPolicy(state) && feature.kind!=='execution-diagnostic'
-  ? state.attempts?.[`${feature.logicalRoot}:problem:${executionProblemId(feature)}:${state.attempts?.[submission?.attemptBudgetKey]?.budgetKind==='progress'?'progress':'failure'}`]
+  ? state.attempts?.[`${feature.logicalRoot}:task:${executionProblemId(feature)}:${state.attempts?.[submission?.attemptBudgetKey]?.budgetKind==='progress'?'progress':'failure'}`]
+    ?? state.attempts?.[submission?.attemptBudgetKey]
   : state.attempts?.[
   submission?.attemptBudgetKey ?? `${feature.logicalRoot}:${submission?.result?.failureClass ?? submission?.result?.status}`
 ];

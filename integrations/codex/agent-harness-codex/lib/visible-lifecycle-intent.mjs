@@ -23,8 +23,9 @@ export const visibleLifecycleIntentDigest = intent => {
   return digestJson(copy);
 };
 
-export const createVisibleLifecycleIntent = ({ harness, project, command, executionWorkspaceRoot, coordinatorEntrypoint, codexSessionId = null, releaseCandidate = null, now = () => new Date().toISOString(), ttlMs = 300000 }) => {
+export const createVisibleLifecycleIntent = ({ harness, project, command, executionWorkspaceRoot, coordinatorEntrypoint, codexSessionId = null, releaseCandidate = null, admissionPolicy = null, now = () => new Date().toISOString(), ttlMs = 300000 }) => {
   if (!Number.isInteger(ttlMs) || ttlMs < 1000 || ttlMs > 600000) throw Object.assign(new Error('Visible lifecycle intent TTL must be between 1 second and 10 minutes.'), { code: 'VISIBLE_LIFECYCLE_INTENT_TTL_INVALID' });
+  if (admissionPolicy !== null && (admissionPolicy !== 'native-current-command/1' || !codexSessionId)) throw Object.assign(new Error('Native command admission requires a bound Codex session.'), { code: 'VISIBLE_LIFECYCLE_ADMISSION_POLICY_INVALID' });
   if (command?.action === 'release' && (!releaseCandidate || !sha256Pattern.test(releaseCandidate.candidateDigest ?? '') || !Number.isInteger(releaseCandidate.revision) || releaseCandidate.revision < 1)) throw Object.assign(new Error('Formal release intent must pin an exact candidate digest and revision.'), { code: 'VISIBLE_RELEASE_CANDIDATE_REQUIRED' });
   if (command?.action !== 'release' && releaseCandidate) throw Object.assign(new Error('Only formal release may pin a release candidate.'), { code: 'VISIBLE_RELEASE_CANDIDATE_UNEXPECTED' });
   const createdAt = now();
@@ -57,14 +58,14 @@ export const createVisibleLifecycleIntent = ({ harness, project, command, execut
       ...(releaseCandidate.namespace ? { namespace: releaseCandidate.namespace } : {}) } } : {}),
     executionWorkspaceRoot: nonEmpty(executionWorkspaceRoot, 'VISIBLE_LIFECYCLE_WORKSPACE_REQUIRED', 'Visible lifecycle intent requires a verified execution workspace.'),
     createdAt,
-    expiresAt: new Date(Date.parse(createdAt) + ttlMs).toISOString(),
+    ...(admissionPolicy ? { admissionPolicy } : { expiresAt: new Date(Date.parse(createdAt) + ttlMs).toISOString() }),
   };
   return Object.freeze({ ...body, intentDigest: visibleLifecycleIntentDigest(body) });
 };
 
 export const validateVisibleLifecycleIntent = (input, { now = () => new Date().toISOString() } = {}) => {
   const intent = structuredClone(input);
-  const allowed = ['protocolVersion', 'kind', 'commandId', 'codexSessionId', 'harness', 'project', 'command', 'releaseCandidate', 'executionWorkspaceRoot', 'createdAt', 'expiresAt', 'intentDigest'];
+  const allowed = ['protocolVersion', 'kind', 'commandId', 'codexSessionId', 'harness', 'project', 'command', 'releaseCandidate', 'executionWorkspaceRoot', 'createdAt', 'expiresAt', 'admissionPolicy', 'intentDigest'];
   if (!intent || typeof intent !== 'object' || Array.isArray(intent) || Object.keys(intent).some(key => !allowed.includes(key))) throw Object.assign(new Error('Visible lifecycle intent has an invalid envelope.'), { code: 'VISIBLE_LIFECYCLE_INTENT_INVALID' });
   if (intent.protocolVersion !== '1.0' || intent.kind !== 'codex-visible-lifecycle-intent') throw Object.assign(new Error('Visible lifecycle intent protocol is unsupported.'), { code: 'VISIBLE_LIFECYCLE_INTENT_PROTOCOL_UNSUPPORTED' });
   nonEmpty(intent.commandId, 'VISIBLE_LIFECYCLE_COMMAND_ID_REQUIRED', 'Visible lifecycle intent requires a command ID.');
@@ -100,7 +101,12 @@ export const validateVisibleLifecycleIntent = (input, { now = () => new Date().t
   const createdAt = Date.parse(intent.createdAt ?? '');
   const expiresAt = Date.parse(intent.expiresAt ?? '');
   const current = Date.parse(now());
-  if (![createdAt, expiresAt, current].every(Number.isFinite) || expiresAt <= createdAt || current < createdAt - 5000 || current >= expiresAt) throw Object.assign(new Error('Visible lifecycle intent is expired or has invalid timestamps.'), { code: 'VISIBLE_LIFECYCLE_INTENT_EXPIRED' });
+  const nativeAdmission = intent.admissionPolicy === 'native-current-command/1';
+  if (intent.admissionPolicy !== undefined && (!nativeAdmission || !intent.codexSessionId || Object.hasOwn(intent, 'expiresAt'))) throw Object.assign(new Error('Native command admission requires a session and cannot carry a wall-clock expiry.'), { code: 'VISIBLE_LIFECYCLE_ADMISSION_POLICY_INVALID' });
+  // This envelope is routing data, not execution authority. Native admission must
+  // independently verify the current user event and consume it exactly once.
+  if (![createdAt, current].every(Number.isFinite) || current < createdAt - 5000
+    || !nativeAdmission && (!Number.isFinite(expiresAt) || expiresAt <= createdAt || current >= expiresAt)) throw Object.assign(new Error('Visible lifecycle intent is expired or has invalid timestamps.'), { code: 'VISIBLE_LIFECYCLE_INTENT_EXPIRED' });
   if (!sha256Pattern.test(intent.intentDigest ?? '') || intent.intentDigest !== visibleLifecycleIntentDigest(intent)) throw Object.assign(new Error('Visible lifecycle intent digest does not match its contents.'), { code: 'VISIBLE_LIFECYCLE_INTENT_DIGEST_MISMATCH' });
   return Object.freeze(intent);
 };

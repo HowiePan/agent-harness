@@ -11,6 +11,7 @@ import { uniqueProposalIds } from '../proposal-id.mjs';
 import { implementationAttemptBudget } from './implementation-progress.mjs';
 import { validateDeliveryBatches, DELIVERY_BATCH_POLICY } from '../delivery-batches.mjs';
 import { assertInheritedBudgetAvailable } from '../compile-delivery-batches.mjs';
+import {executionBudgetBlocked} from '../../../common/continuous-execution.mjs';
 
 export const DELIVERY_STAGES = Object.freeze([
   'requirement-intake', 'requirement-expansion', 'canonical-requirement', 'version-planning', 'plan-review', 'implementation',
@@ -155,7 +156,7 @@ export const createDeliveryLifecycleProfile = (id = 'delivery-lifecycle') => Obj
 
   canDispatch(feature, state) {
     if (feature.metadata?.deliveryBatch) assertInheritedBudgetAvailable(state, feature);
-    if (feature.metadata?.deliveryBatch && Object.values(state.attempts ?? {}).some(item => item.logicalRoot === feature.logicalRoot && item.exhausted)) {
+    if (feature.metadata?.deliveryBatch && executionBudgetBlocked(state,feature)) {
       return { ok: false, reason: 'shared-attempt-budget-exhausted' };
     }
     const stage = feature.metadata.stage;

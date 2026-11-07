@@ -44,4 +44,4 @@ export * from './platform/workflow/index.mjs';
 export * from './platform/resources/memory/index.mjs';
 export * from './platform/workspace/index.mjs';
 export { assertHarnessWritePath, harnessControlRoot, harnessProjectRoot, harnessTemporaryRoot, installationMarkerName, temporaryEnvironment } from './common/write-boundary.mjs';
-export { createLifecycleCommandHost } from './application/lifecycle-command-context.mjs';
+export { createLifecycleCommandHost, createLifecycleCommandBoundary } from './application/lifecycle-command-context.mjs';

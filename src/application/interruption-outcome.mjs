@@ -29,10 +29,17 @@ export const sealInterruptionOutcome = async (context, api, plan, result) => {
     authorizationRequired: approvalReasons.has(result.reason) || Boolean(state?.features.every(isExecutionComplete)
       && state.profile.config.requiredDecisions?.some(id => !state.decisions.some(item => item.id === id && item.decision === 'approved'))),
     budgetExhausted: input.facts.budgetExhausted || budgetReasons.has(result.reason) } });
+  const assessment=state?.decisions.findLast(d=>d.kind==='execution-intervention-assessment'&&d.featureId===feature?.id);
   const diagnosis = { phase: 'terminal-control-review', policy: decision.policy,
     observedReason: result.reason ?? result.execution?.reason ?? result.status,
-    attempted: input.history.map(item => ({ action: item.action, id: item.id, evidenceRefs: item.evidenceRefs })),
-    remainingCapability: 'No admissible scheduled repair or source-bound review remains at this exit.',
+    attempted: [...input.history.map(item => ({ action: item.action, id: item.id, evidenceRefs: item.evidenceRefs })),
+      ...(state?.submissions??[]).filter(s=>s.featureId===feature?.id).map(s=>({action:s.changedFiles?.length?'implementation':'execution-observation',
+        id:s.submissionId,changedFiles:s.changedFiles??[],status:s.result.status,evidenceRefs:s.evidenceRefs})),
+      ...(state?.metadata?.dependencyRepairs??[]).filter(r=>r.sourceFeatureId===feature?.id).map(r=>({action:'dependency-return',
+        id:r.id,status:r.status,ownerFeatureId:r.ownerFeatureId,evidenceRefs:[r.assessmentRef]}))],
+    remainingCapability: assessment?.disposition==='correction-required'?'Diagnostic validation remains unresolved; business repair is not represented as attempted.':
+      assessment?.disposition==='blocked'?'The current source-bound assessment retains the listed prerequisites.':'No verified next action is scheduled in the current state.',
+    validationIssues:assessment?.assessment.issues??[],unresolvedBoundaries:assessment?.assessment.boundaries??[],
     preserved: { sourceDigest: state?.sourceDigest ?? null, featureId: feature?.id ?? null,
       submissionIds: state?.submissions.filter(item => item.featureId === feature?.id).map(item => item.submissionId) ?? [] },
     requiredDecision: decision.requiredDecision };
@@ -51,16 +58,22 @@ export const sealInterruptionOutcome = async (context, api, plan, result) => {
 
 export const describeInterruptionError = (error, { phase = 'transport', plan = null } = {}) => {
   const fault=executionFault(error,{phase});
+  const recovery=error.details?.actionRecovery;
   const decision = decideInterruption({ problem: { logicalRoot: plan?.logicalTaskKey ?? null,
-    sourceDigest: plan?.run?.sourceDigest ?? null, contractDigest: plan?.planDigest ?? null,
-    summary: error?.message ?? String(error) }, facts: { identityTrusted: ['identity','integrity'].includes(fault.category)?false:undefined,
-    userStopped: error?.code === 'OPERATOR_EXECUTION_STOPPED', authorizationRequired:fault.category==='authorization',
-    budgetExhausted:fault.category==='recovery-budget' }, capabilities: [] });
+    sourceDigest: recovery?.sourceDigest ?? plan?.run?.sourceDigest ?? null, contractDigest: plan?.planDigest ?? null,
+    summary: error?.message ?? String(error) }, facts: { identityTrusted: ['identity','integrity'].includes(fault.category)
+      ||recovery?.reason==='trusted-state-unresolved'?false:undefined,
+    userStopped: error?.code === 'OPERATOR_EXECUTION_STOPPED'||recovery?.reason==='user-stop',
+    authorizationRequired:fault.category==='authorization'||['authorization','current-command-unavailable'].includes(recovery?.reason),
+    stagnant:recovery?.reason==='no-progress',
+    budgetExhausted:fault.category==='recovery-budget'||recovery?.reason==='recovery-budget' }, capabilities: [] });
   return { ...decision, coordination: coordinationRecoveryDirective({ interruption: decision, planDigest: plan?.planDigest, runId: plan?.run?.runId }),
     diagnosis: { phase, fault, observedCode: error?.code ?? 'UNKNOWN_ERROR',
     isolatedAction: 'Dependent writes and unverified submissions remain stopped.',
-    attempted: ['Inspect the trusted exception and available execution identity; do not reinterpret worker labels as authority.'],
-    missingCapability: 'No verified in-process repair may replace missing Host, source or Authority evidence.' } };
+    attempted: recovery?[{action:'inspect',inspected:recovery.inspected,evidenceRef:recovery.evidenceRef??null,
+      outcome:recovery.action,reason:recovery.reason}]:[],
+    ...(recovery?{recovery}:{}),
+    missingCapability: recovery?.reason??'Failure has not yet received a verified recovery inspection.' } };
 };
 
 export const describeReadinessInterruption = report => {

@@ -276,6 +276,7 @@ export const hookResponse = async (input, options = {}) => {
     executionWorkspaceRoot: workspace.executionWorkspaceRoot,
     coordinatorEntrypoint: bindings.harness.coordinatorEntrypoint,
     codexSessionId: input?.session_id ?? null,
+    admissionPolicy: input?.session_id ? 'native-current-command/1' : null,
     releaseCandidate,
   });
   const intent = { ...parsed, project: selectedProject, harness: bindings.harness, workspaceRoot: project.workspaceRoot, workspaceIdentity: project.workspaceIdentity, executionWorkspaceRoot: workspace.executionWorkspaceRoot, workspaceMatch: workspace.kind, cwd, commandId: coordinationIntent.commandId, coordinationIntent: encodeVisibleLifecycleIntent(coordinationIntent), coordinationIntentDigest: coordinationIntent.intentDigest };

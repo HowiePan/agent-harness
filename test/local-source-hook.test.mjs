@@ -6,6 +6,9 @@ import { promisify } from 'node:util';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { PassThrough } from 'node:stream';
+import { DatabaseSync } from 'node:sqlite';
+import { createCodexUserCommandHost } from '../integrations/codex/agent-harness-codex/lib/codex-user-command.mjs';
+import { createLifecycleCommandBoundary, createHarness } from '../src/index.mjs';
 import { harnessProjectRoot, harnessTemporaryRoot, writeDevelopmentSourceManifest } from '../src/index.mjs';
 import { digestJson } from '../src/common/canonical.mjs';
 import { resolveCommandIntent } from '../src/platform/extensions/command-contract.mjs';
@@ -88,6 +91,34 @@ test('source-linked project hooks route native tool evidence without a packaged 
   const routedIntent = JSON.parse(routed.hookSpecificOutput.additionalContext.split('解析结果：').at(-1));
   assert.match(routedIntent.coordinationIntent, /^ref\./);
   assert.ok(routedIntent.coordinationIntent.length < 512);
+  const routedEnvelope = await resolveVisibleLifecycleIntentArgument(routedIntent.coordinationIntent);
+  assert.equal(routedEnvelope.admissionPolicy, 'native-current-command/1');
+  assert.equal(routedEnvelope.expiresAt, undefined);
+  // Real Hook -> reference -> native SQLite/rollout proof -> early admission ->
+  // prepared Harness. No test binding callback and no business Run or Agent.
+  const codexHome = resolve(root, 'native-host'), sessionId = routedEnvelope.codexSessionId;
+  await mkdir(resolve(codexHome, 'sessions'), { recursive: true });
+  const rollout = resolve(codexHome, 'sessions', `rollout-${sessionId}.jsonl`);
+  await writeFile(rollout, JSON.stringify({ timestamp: routedEnvelope.createdAt, ordinal: 1,
+    type: 'event_msg', payload: { type: 'user_message', message: 'h:local local-debug quality fixture-v1' } }) + '\n');
+  const db = new DatabaseSync(resolve(codexHome, 'state_5.sqlite'));
+  db.exec('CREATE TABLE threads (id TEXT PRIMARY KEY, rollout_path TEXT NOT NULL, cwd TEXT NOT NULL, cli_version TEXT NOT NULL)');
+  db.prepare('INSERT INTO threads VALUES (?, ?, ?, ?)').run(sessionId, rollout, projectRoot, 'fixture'); db.close();
+  const host = createCodexUserCommandHost({ intent: routedEnvelope, codexHome });
+  const boundary = createLifecycleCommandBoundary({ root: dataRoot, host }), oldClock = Date.now;
+  Date.now = () => oldClock() + 2 * 60 * 60 * 1000;
+  try {
+    await boundary.run({ commandId: routedEnvelope.commandId }, async () => {
+      const prepared = await createHarness({ controlRoot, dataRoot, initializeStorage: false, strictProjectIdentity: false,
+        releaseIdentity: { ...source.manifest.release, verified: true, development: true }, lifecycleCommandBoundary: boundary });
+      await prepared.assertCurrentCommandPlan({ project: { id: routedEnvelope.project.projectId }, intent: routedEnvelope.command,
+        extension: { id: routedEnvelope.project.extensionId }, workflow: { id: routedEnvelope.project.workflowId }, harness: {},
+        planDigest: 'isolated-native-admission', run: { runId: 'isolated-native-admission', profileId: routedEnvelope.project.profileId,
+          executionWorkspaceRoot: projectRoot, features: [] } });
+      assert.deepEqual(await prepared.authorityStore.list(routedEnvelope.project.projectId), []);
+    });
+    await assert.rejects(boundary.run({ commandId: routedEnvelope.commandId }, async () => {}), { code: 'USER_COMMAND_ALREADY_CONSUMED' });
+  } finally { Date.now = oldClock; }
   const qualityCommand = (await resolveVisibleLifecycleIntentArgument(routedIntent.coordinationIntent)).command;
   assert.equal(qualityCommand.target, 'fixture-v1');
   assert.equal(resolveCommandIntent(deliveryLifecycleCommandManifest, qualityCommand).sourcePolicy, 'review-and-repair');

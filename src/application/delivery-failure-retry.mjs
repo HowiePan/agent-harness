@@ -1,6 +1,7 @@
 import {digestJson} from '../common/canonical.mjs';
 import {submissionAttempt} from '../kernel/attempt-budget.mjs';
-import {executionBudgetBlocked} from '../common/continuous-execution.mjs';
+import {executionBudgetBlocked,continuousPolicy} from '../common/continuous-execution.mjs';
+import {taskFailureStreak} from '../common/task-repetition.mjs';
 import {processFailureRecovery} from './execution-fault.mjs';
 
 // A failed deterministic check is work for its existing owner. This grants no
@@ -11,6 +12,7 @@ export const inspectDeliveryFailureRetries = async (state,evidenceStore) => {
   for(const feature of state.features.filter(f=>f.state==='blocked'&&f.metadata?.stage==='implementation'&&f.metadata?.deliveryBatch)){
     const submission=state.submissions.findLast(s=>s.featureId===feature.id&&!s.supersededAt);
     const attempt=submission&&submissionAttempt(state,feature,submission);
+    if(continuousPolicy(state)&&taskFailureStreak(state,feature)>=continuousPolicy(state).recovery.sameStrategyFailures)continue;
     if(!attempt||attempt.exhausted||executionBudgetBlocked(state,feature)
       ||submission.result.status!=='blocked'||submission.result.failureClass!=='environment'||submission.result.blocker?.kind!=='environment')continue;
     let ref=null;

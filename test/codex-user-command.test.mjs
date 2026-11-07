@@ -22,6 +22,7 @@ const setup = async t => {
   db.prepare('INSERT INTO threads VALUES (?, ?, ?, ?)').run(sessionId, rollout, workspace, 'fixture-host'); db.close();
   const project = { projectId: 'isolated-engine', profileId: 'fixture-profile', extensionId: 'fixture-extension' };
   const intent = { commandId: 'user-command', codexSessionId: sessionId, createdAt: new Date().toISOString(),
+    admissionPolicy: 'native-current-command/1',
     harness: { release: { mode: 'source-link' } }, project, executionWorkspaceRoot: workspace,
     command: { action: 'implement', target: 'V-next', arguments: [] } };
   const create = (overrides = {}) => {
@@ -130,4 +131,41 @@ test('native command matches the selected Workflow and exact Workspace member sc
     await boundary.assertPlan(plan);
     await assert.rejects(boundary.assertPlan({...plan,workspaceRef:{projectIds:['member','neighbor']}}),{code:'CURRENT_USER_COMMAND_SCOPE_MISMATCH'});
   });
+});
+
+test('native admission survives preparation beyond both old clocks; legacy admission still expires', async t => {
+  const f = await setup(t), oldClock = Date.now;
+  Date.now = () => oldClock() + 2 * 60 * 60 * 1000;
+  try {
+    await assert.rejects(f.create({ admissionPolicy: undefined }).run({ commandId: f.intent.commandId }, async () => {
+      assert.fail('legacy admission must retain its original limit');
+    }), { code: 'CURRENT_USER_COMMAND_REQUIRED' });
+    const boundary = f.create();
+    await boundary.run({ commandId: f.intent.commandId }, async () => { await boundary.assertPlan(f.plan); });
+    await assert.rejects(f.create().run({ commandId: f.intent.commandId }, async () => {}), { code: 'USER_COMMAND_ALREADY_CONSUMED' });
+  } finally { Date.now = oldClock; }
+});
+
+test('long preparation cannot revive a stop, maintenance message, or later identical user command', async t => {
+  for (const prompt of ['先停止', '继续推进整改，直到能再次实施', 'h:local engine implement V-next']) {
+    const f = await setup(t), oldClock = Date.now, later = oldClock() + 2 * 60 * 60 * 1000;
+    await appendFile(f.rollout, JSON.stringify({ timestamp: new Date(later).toISOString(), ordinal: 2,
+      type: 'event_msg', payload: { type: 'user_message', message: prompt } }) + '\n');
+    Date.now = () => later;
+    try {
+      await assert.rejects(f.create().run({ commandId: f.intent.commandId }, async () => {
+        assert.fail('an old envelope cannot adopt a later native command');
+      }), { code: 'CURRENT_USER_COMMAND_REQUIRED' });
+    } finally { Date.now = oldClock; }
+  }
+});
+
+test('stop arriving during binding verification prevents admission before any preparation effects', async t => {
+  const f = await setup(t);
+  const host = createCodexUserCommandHost({ intent: f.intent, codexHome: resolve(f.root, '.codex'),
+    resolveProject: async () => { await appendFile(f.rollout, nativeUser('先停止', 2)); return f.intent.project; } });
+  const boundary = createLifecycleCommandBoundary({ root: f.root, host });
+  await assert.rejects(boundary.run({ commandId: f.intent.commandId }, async () => {
+    assert.fail('stop must be checked after slow binding verification');
+  }), { code: 'CURRENT_USER_COMMAND_REQUIRED' });
 });

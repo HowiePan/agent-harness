@@ -1,10 +1,13 @@
 import { digestJson } from '../common/canonical.mjs';
+import {diagnosticIdentity} from '../common/diagnostic-identity.mjs';
 import { assert } from '../common/errors.mjs';
 import { submissionAttempt } from './attempt-budget.mjs';
 import { validateWorkGraph } from './work-graph.mjs';
 import { INTERRUPTION_POLICY, MAX_INTERVENTIONS_PER_ROOT, featureContractDigest, interventionAllowance } from '../common/interruption-contract.mjs';
 import { continuousPolicy, executionProblemId, executionBudgetBlocked, problemHistory, problemCycle } from '../common/continuous-execution.mjs';
 import {inspectDependencyRepair} from './dependency-repair.mjs';
+import {hasMixedPrerequisiteDiagnosis} from './diagnostic-repair-actions.mjs';
+import {correctionStreak} from '../common/task-repetition.mjs';
 
 export const INTERVENTION_LIMIT = MAX_INTERVENTIONS_PER_ROOT;
 export const isIntervention = feature => feature?.kind === 'execution-diagnostic';
@@ -13,8 +16,22 @@ export const isExecutionComplete = feature => feature.state === 'completed'
 export const profileState = state => ({ ...state, features: state.features.filter(feature => !isIntervention(feature)) });
 
 export const carryInterventions = async ({ state, prior, roots, evidenceStore }) => {
+  // Recovery accounting belongs to the original goal, not an error label or Run ID.
+  for(const d of prior.decisions.filter(d=>d.kind==='execution-action-recovery')){
+    const proof=await evidenceStore.read(d.evidenceRef),body=JSON.parse(proof.bytes.toString('utf8'));
+    assert(digestJson(body)===digestJson(d.recovery)&&proof.metadata.projectId===prior.projectId
+      &&body.originProjectId===prior.projectId&&proof.metadata.runId===body.originRunId,
+    'ACTION_RECOVERY_CARRYOVER_INVALID','Recovery accounting requires original evidence, never a caller label.');
+    const existing=state.decisions.find(x=>x.id===d.id);
+    assert(!existing||digestJson(existing)===digestJson(d),'ACTION_RECOVERY_CARRYOVER_CONFLICT','Recovery history cannot be reset or rewritten.');
+    if(!existing)state.decisions.push(structuredClone(d));
+    state.evidenceRefs=[...new Set([...state.evidenceRefs,d.evidenceRef])];
+  }
   for (const feature of prior.features.filter(item => isIntervention(item))) {
     const binding = feature.metadata?.intervention;
+    // H4 installs new diagnostic semantics. Old results remain audit history,
+    // not executable assessments or a blocker on a current-policy observation.
+    if(continuousPolicy(state)&&binding?.identityVersion!==3)continue;
     const parent = state.features.find(item => item.id === binding?.sourceFeatureId && roots.has(item.logicalRoot));
     if (!parent || binding.sourceDigest !== state.sourceDigest || state.features.some(item => item.id === feature.id)) continue;
     assert(feature.allowedPaths.length === 0 && binding.contractDigest === featureContractDigest(parent)
@@ -39,7 +56,12 @@ export const carryInterventions = async ({ state, prior, roots, evidenceStore })
       'INTERVENTION_CARRYOVER_ACTIVE', 'Active diagnostic transport cannot transfer.');
     state.features.push(structuredClone(feature));
     const originalParent=prior.features.find(f=>f.id===parent.id);
-    if(originalParent.state==='blocked'&&inspectDependencyRepair(prior,feature.id)){
+    const mixed=continuousPolicy(prior)&&prior.metadata.projectFilePolicy?.mode==='project-owned'&&hasMixedPrerequisiteDiagnosis(result?.result)
+      &&prior.decisions.some(d=>d.kind==='execution-intervention-assessment'&&d.reviewSubmissionId===result.submissionId
+        &&d.sourceSubmissionId===binding.sourceSubmissionId&&d.sourceDigest===state.sourceDigest
+        &&(d.disposition==='blocked'&&!d.assessment.issues.length||d.disposition==='correction-required'
+          &&d.assessment.issues.some(i=>i.code==='STRUCTURED_RESOLUTION_ACTIONS_REQUIRED')));
+    if(originalParent.state==='blocked'&&(inspectDependencyRepair(prior,feature.id)||mixed)){
       parent.state='blocked';parent.blocker=structuredClone(originalParent.blocker);
       parent.submissionId=originalParent.submissionId;
     }
@@ -70,6 +92,15 @@ export const carryInterventions = async ({ state, prior, roots, evidenceStore })
       assert(!['running','dispatched'].includes(old.state),'DEPENDENCY_REPAIR_CARRYOVER_INVALID','Active repair cannot transfer.');
       for(const key of ['state','submissionId','blocker','reopenedAt','reopenReason'])if(old[key]!==undefined)current[key]=structuredClone(old[key]);
     }
+    // Repair completion does not clear a different, still-recorded prerequisite.
+    // Preserve that consumer frontier even when old-source diagnostics cannot transfer.
+    if(repair.status==='completed'&&repair.unresolvedPrerequisites?.length){
+      const old=prior.features.find(f=>f.id===source.id);
+      const submission=prior.submissions.findLast(s=>s.featureId===source.id&&!s.supersededAt);
+      if(old.state==='blocked'&&submission?.submissionId===repair.sourceSubmissionId)
+        for(const key of ['state','submissionId','blocker','reopenedAt','reopenReason'])
+          if(old[key]!==undefined)source[key]=structuredClone(old[key]);
+    }
     for(const item of repair.revalidation??[]){
       const current=state.features.find(f=>f.id===item.featureId),old=prior.features.find(f=>f.id===item.featureId);
       assert(current&&featureContractDigest(current)===item.contractDigest,'DEPENDENCY_REPAIR_CARRYOVER_INVALID','Revalidation requires its unchanged dependent contract.');
@@ -91,7 +122,7 @@ export const reserveIntervention = (state, input, evidence, now) => {
     && !state.decisions.some(item => item.action === 'freeze-execution' && item.decision === 'approved'),
   'INTERVENTION_NOT_IDLE', 'Diagnostic reservation requires idle unfrozen execution.');
   const attempt = submissionAttempt(state, source, submission);
-  assert(attempt && !attempt.exhausted && !executionBudgetBlocked(state,source),
+  assert(attempt && (continuousPolicy(state)||!attempt.exhausted) && !executionBudgetBlocked(state,source),
     'INTERVENTION_BUDGET_EXHAUSTED', 'Diagnostics cannot evade exhausted execution budgets.');
   const body = JSON.parse(evidence.bytes.toString('utf8'));
   assert(evidence.metadata.projectId === state.projectId && evidence.metadata.runId === state.runId
@@ -123,12 +154,14 @@ export const reserveIntervention = (state, input, evidence, now) => {
   const history=problemHistory(state,source);
   assert(!continuousPolicy(state) || body.problem.problemId===executionProblemId(source),'INTERVENTION_PROBLEM_MISMATCH','Problem identity must bind the current contract.');
   assert(body.budget.limit === interventionAllowance(source,state)
-    && history.length < interventionAllowance(source,state)
+    && (continuousPolicy(state) ? !validCorrection||correctionStreak(state,source,assessment.assessment)<continuousPolicy(state).recovery.sameStrategyFailures : history.length < interventionAllowance(source,state))
     && (validCorrection || !history.some(item => item.fingerprint === body.fingerprint)),
   'INTERVENTION_LIMIT_REACHED', 'Repeated unchanged evidence or exhausted recovery allowance cannot create more diagnostics.');
   const candidate = validateWorkGraph([...state.features, input.feature]).at(-1);
-  assert(isIntervention(candidate) && candidate.id === `diagnostic/${digestJson({ root: source.logicalRoot, submissionId: submission.submissionId,
-    ...(correctionOf ? { correctionOf } : {}) })}`
+  const expectedId=candidate.metadata.intervention?.identityVersion>=2
+    ? diagnosticIdentity({root:source.logicalRoot,submissionId:submission.submissionId,sourceDigest:state.sourceDigest,correctionOf})
+    : `diagnostic/${digestJson({root:source.logicalRoot,submissionId:submission.submissionId,...(correctionOf?{correctionOf}:{})})}`;
+  assert(isIntervention(candidate) && candidate.id === expectedId
     && candidate.allowedPaths.length === 0 && candidate.dependsOn.length === 0 && candidate.gatePlan.length === 0
     && candidate.attemptLimit === 1 && candidate.logicalRoot === `diagnostic:${source.logicalRoot}`
     && candidate.metadata.intervention?.sourceFeatureId === source.id

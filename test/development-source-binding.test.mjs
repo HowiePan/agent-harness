@@ -29,7 +29,7 @@ test('development source manifest lets Codex bind exact source and rejects stale
   await assert.rejects(() => validateActiveReleaseBinding({ controlRoot, dataRoot, entrypoint: output.manifest.entrypoint, declaredRelease: { ...output.manifest.release, artifactDigest: '0'.repeat(64), developmentManifest: output.file } }), /已过期/);
 });
 
-test('development manifest enables read-only workflow planning and fails closed without a visible host', async t => {
+test('development manifest enables read-only workflow planning and refuses business entry without a current user command', async t => {
   const controlRoot = harnessProjectRoot();
   const parent = resolve(harnessTemporaryRoot(), 'development-binding-tests');
   await mkdir(parent, { recursive: true });
@@ -74,7 +74,7 @@ test('development manifest enables read-only workflow planning and fails closed 
       '--project', 'local-debug-fixture', '--target', 'synthetic-v1', '--candidate-digest', 'a'.repeat(64),
       '--expected-revision', '0', '--command-id', 'synthetic-promotion', '--approval', approvalFile,
       '--development-manifest', source.file], { cwd: projectRoot }),
-    error => error.stderr.includes('RELEASE_PROMOTION_DECISION_REQUIRED'),
+    error => error.stderr.includes('CURRENT_USER_COMMAND_REQUIRED'),
   );
   const inputFile = resolve(root, 'quality-input.json');
   await writeFile(inputFile, JSON.stringify({ projectId: 'local-debug-fixture', action: 'quality', target: 'synthetic-v1', arguments: ['review-only'], extensionId: 'delivery-lifecycle-profile', executionWorkspaceRoot: projectRoot }));
@@ -82,9 +82,9 @@ test('development manifest enables read-only workflow planning and fails closed 
   assert.equal(planned.plan.run.agentExecutionMode, 'conversation-visible');
   const planFile = resolve(root, 'quality-plan.json');
   await writeFile(planFile, JSON.stringify(planned.plan));
-  const preflight = await cli(['lifecycle', 'preflight', '--plan', planFile]);
-  assert.equal(preflight.report.executionReady, false);
-  assert.equal(preflight.report.checks.find(check => check.id === 'visible-host').issues[0].code, 'VISIBLE_AGENT_HOST_COORDINATOR_UNAVAILABLE');
+  await assert.rejects(() => cli(['lifecycle', 'preflight', '--plan', planFile]),
+    error => error.stderr.includes('CURRENT_USER_COMMAND_REQUIRED'));
+  assert.equal((await cli(['version-release', 'status', '--project', 'local-debug-fixture', '--target', 'synthetic-v1'])).state.status, 'none');
   await assert.rejects(
     () => execFileAsync(process.execPath, [resolve(controlRoot, 'bin', 'agent-harness.mjs'), 'lifecycle', 'start', '--plan', planFile, '--development-manifest', source.file], { cwd: controlRoot }),
     error => error.stderr.includes('DEVELOPMENT_MANIFEST_COMMAND_UNSUPPORTED'),

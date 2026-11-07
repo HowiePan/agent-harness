@@ -16,6 +16,8 @@ const isStop = prompt => /^(?:请)?(?:先停止|停止(?:执行|实施|运行)?(
 const userText = record => record.type === 'event_msg' && record.payload?.type === 'user_message'
   ? record.payload.message : record.type === 'response_item' && record.payload?.type === 'message' && record.payload.role === 'user'
     ? record.payload.content?.filter(p => p.type === 'input_text').map(p => p.text).join('\n') : null;
+const samePath = (left, right) => typeof left === 'string' && typeof right === 'string'
+  && (process.platform === 'win32' ? resolve(left).toLowerCase() === resolve(right).toLowerCase() : resolve(left) === resolve(right));
 
 /** Reads native user frames only. Tool output, quoted histories and worker claims cannot initiate. */
 export const createCodexUserCommandHost = ({ intent, codexHome, stateDbPath, locate = locateCodexRollout,
@@ -71,6 +73,10 @@ export const createCodexUserCommandHost = ({ intent, codexHome, stateDbPath, loc
       if (config.binding.alias !== parsed.projectAlias || config.binding.projectId !== intent.project.projectId) return null;
       bindings = await loadBindings({pluginData:resolve(manifest.dataRoot,'development','local-codex','.plugin-data'),pluginRoot:null,fallbackPluginRoot:null});
     } else bindings = await loadBindings();
+    // Admission precedes Coordinator preparation. Bind its ledger destination
+    // to the verified installation, never an envelope-selected arbitrary root.
+    if (!['controlRoot', 'dataRoot', 'entrypoint', 'coordinatorEntrypoint'].every(key => samePath(bindings.harness[key], intent.harness[key]))
+      || digestJson(bindings.harness.release) !== digestJson(intent.harness.release)) return null;
     return bindings.projects?.[parsed.projectAlias] ?? bindings.workspaces?.[parsed.projectAlias] ?? null;
   };
   return createLifecycleCommandHost({ provider: 'codex-native-user-command',
@@ -91,9 +97,14 @@ export const createCodexUserCommandHost = ({ intent, codexHome, stateDbPath, loc
         && (!parsed.projectIds || bound.workspaceId && bound.workspaceId===intent.project.workspaceId)
         && (!bound.workflows?.length || Boolean(workflow) && workflow.id === intent.project.workflowId)
         && (!parsed.workflowId || parsed.workflowId === intent.project.workflowId)
-        && age >= -5000 && age <= 600000 && admissionAge >= -5000 && admissionAge <= 600000,
+        && age >= -5000 && age <= 600000 && admissionAge >= -5000
+        && (intent.admissionPolicy === 'native-current-command/1' || admissionAge <= 600000),
       'CURRENT_USER_COMMAND_REQUIRED', 'The latest native user message does not initiate this exact bound command.',
       {nativeUserObserved:Boolean(observed),commandFrameMatched:parsed?.kind==='command',userMessageDigest:observed?sha256(observed.prompt):null});
+      // Binding verification may take time. A stop or replacement during that
+      // preparation cannot be hidden by a previously read native event.
+      assert((await observe())?.reference === observed.reference, 'CURRENT_USER_COMMAND_REQUIRED',
+        'The native user command changed during admission.');
       activeReference = observed.reference;
       return { verified: true, purpose: 'business', commandId: intent.commandId, reference: activeReference, userIssuedAt:observed.timestamp, dataRoot: intent.harness.dataRoot,
         command: { arguments: parsed.arguments, workflowId: intent.project.workflowId ?? null,

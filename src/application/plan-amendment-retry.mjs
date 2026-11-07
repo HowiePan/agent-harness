@@ -3,6 +3,7 @@ import { digestJson, withoutKeys } from '../common/canonical.mjs';
 import { validateFinding } from '../kernel/quality.mjs';
 import { isBoundIntervention } from './interruption-review.mjs';
 import { featureContractDigest } from '../common/interruption-contract.mjs';
+import {continuousPolicy} from '../common/continuous-execution.mjs';
 
 const idle = state => !state.leases.some(row => row.status === 'active')
   && !state.dispatches.some(row => ['requested', 'assigned'].includes(row.status));
@@ -108,7 +109,7 @@ export const diagnosedAmendmentScopeEvidence = state => {
     || !review.evidenceRefs?.length || review.changedFiles?.length !== 0
     || review.inputSourceDigest !== review.outputSourceDigest
     || !Number.isInteger(saved.reviewRoundsUsed) || saved.reviewRoundsUsed < 1
-    || saved.reviewRoundsUsed >= state.profile?.config?.planReviewLimit
+    || !continuousPolicy(state)&&saved.reviewRoundsUsed >= state.profile?.config?.planReviewLimit
     || submissions.length !== 1 || blocked.result?.status !== 'blocked'
     || blocked.result.failureClass !== 'scope-blocker' || blocked.result.blocker?.kind !== 'scope'
     || feature?.metadata?.stage !== 'version-planning' || feature.state !== 'blocked'

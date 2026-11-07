@@ -7,7 +7,11 @@ import { atomicWriteJson, readJson, withDirectoryLock } from '../kernel/atomic-i
 
 const hosts = new WeakSet();
 const boundaries = new WeakSet();
-export const assertLifecycleCommandBoundary = value => assert(boundaries.has(value), 'CURRENT_USER_COMMAND_REQUIRED', 'Only a trusted current-command boundary can continue execution.');
+const boundaryRoots = new WeakMap();
+export const assertLifecycleCommandBoundary = (value, root = null) => {
+  assert(boundaries.has(value), 'CURRENT_USER_COMMAND_REQUIRED', 'Only a trusted current-command boundary can continue execution.');
+  assert(root === null || samePath(boundaryRoots.get(value), root), 'LIFECYCLE_COMMAND_ROOT_MISMATCH', 'Command admission belongs to another Authority root.');
+};
 const samePath = (a, b) => typeof a === 'string' && typeof b === 'string'
   && (process.platform === 'win32' ? resolve(a).toLowerCase() === resolve(b).toLowerCase() : resolve(a) === resolve(b));
 const scopeOf = plan => ({ projectId: plan.project.id, action: plan.intent.requestedAction ?? plan.intent.action, target: plan.intent.target,
@@ -46,9 +50,16 @@ export const createLifecycleCommandBoundary = ({ root, host = null }) => {
     context.record = { ...body, recordDigest: digestJson(body) };
     await atomicWriteJson(context.file, context.record, { root });
   };
-  const reserve = async context => {
-    if (context.record.recoveries >= context.record.recoveryLimit) { context.active = false; context.record.status = 'exhausted'; await save(context); }
-    assert(context.active, 'COMMAND_RECOVERY_EXHAUSTED', 'Current command recovery allowance is exhausted; another Run does not renew it.');
+  const progress = state => digestJson({
+    completed:state?.features?.filter(f=>f.state==='completed'&&f.kind!=='execution-diagnostic').map(f=>[f.id,f.submissionId??null])??[],
+    implementation:[...new Set((state?.submissions??[]).filter(s=>state?.attempts?.[s.attemptBudgetKey]?.budgetKind==='progress'
+      &&s.evidenceRefs?.length&&s.changedFiles?.length&&s.inputSourceDigest!==s.outputSourceDigest).map(s=>digestJson([s.featureId,s.outputSourceDigest])))].sort(),
+    gates:[...new Set((state?.gates??[]).filter(g=>g.status==='passed').map(g=>digestJson([g.id,g.sourceDigest])))].sort()});
+  const reserve = async (context,task,input) => {
+    const rows=context.record.repetitions??[],last=rows.findLast(r=>r.task===task);
+    const repeated=last?.input===input?last.repeated+1:1;
+    assert(repeated<=2,'COMMAND_ACTION_NO_PROGRESS','The same command action repeated without verified progress; no cumulative command quota applies.');
+    context.record.repetitions=[...rows,{task,input,repeated}];
     context.record.recoveries += 1; await save(context);
     return { commandId: context.record.commandId, recovery: context.record.recoveries };
   };
@@ -72,7 +83,7 @@ export const createLifecycleCommandBoundary = ({ root, host = null }) => {
       await boundary.userRestartProof(plan,state,{allowActive:true});
       const context=storage.getStore();
       assert(!context.activeRunId||context.activeRunId===state.runId,'CURRENT_USER_COMMAND_RUN_CHANGED','Restart transport belongs to another pinned Run.');
-      context.effectsStarted=true;return reserve(context);
+      context.effectsStarted=true;return reserve(context,'stopped-transport',progress(state));
     },
     async assertAction(scope) {
       const context=await current(scope);context.effectsStarted=true;
@@ -99,20 +110,25 @@ export const createLifecycleCommandBoundary = ({ root, host = null }) => {
         const previous = await readJson(file, null);
         const retry = previous?.status === 'prestart-retry' && previous.recordDigest === digestJson(withoutKeys(previous,['recordDigest']))
           && previous.commandId === request.commandId && digestJson(previous.scope) === digestJson(attestation.scope)
-          && previous.prestartRestarts === 0 && previous.recoveries < previous.recoveryLimit;
+          && previous.prestartRestarts === 0;
         assert(!previous || retry, 'USER_COMMAND_ALREADY_CONSUMED',
           'This user command was already admitted. An exited process cannot replay it or reset its recovery allowance.');
         const context = { active: true, purpose: attestation.purpose, scope: structuredClone(attestation.scope),
           attestation: structuredClone(attestation), file,
           record: { version: 'lifecycle-command/1', provider: host.provider, reference: attestation.reference,
-            commandId: request.commandId, scope: attestation.scope, status: 'running', recoveries: 0, recoveryLimit: 2, prestartRestarts: 0, plans: [] } };
+            commandId: request.commandId, scope: attestation.scope, status: 'running', recoveries: 0, recoveryLimit: null, repetitions:[], prestartRestarts: 0, plans: [] } };
         if (retry) {
           context.record = { ...previous, status: 'running', recoveries: previous.recoveries + 1, prestartRestarts: 1 };
           context.binding = previous.contractBinding; context.activeRunId = previous.activeRunId;
         }
         await save(context);
         return storage.run(context, async () => {
-          try { const result = await operation(); if (context.active) context.record.status = 'settled'; return result; }
+          try {
+            const observation = await host.verifyActive(structuredClone(context.attestation));
+            if (observation?.active !== true) { context.active = false; context.record.status = 'revoked'; }
+            assert(context.active, 'CURRENT_USER_COMMAND_INACTIVE', 'The user command changed before preparation began.');
+            const result = await operation(); if (context.active) context.record.status = 'settled'; return result;
+          }
           catch (error) {
             if (context.active) context.record.status = !context.effectsStarted && context.record.plans.length
               && context.record.prestartRestarts === 0 && await host.verifyPrestartRetry(error)
@@ -176,7 +192,7 @@ export const createLifecycleCommandBoundary = ({ root, host = null }) => {
       const context = await current(scopeOf(plan));
       assert(!stopped(prior) && (prior.metadata?.lifecycleUserCommandId ?? prior.metadata?.lifecycleInvocationId) === context.record.commandId,
         'CURRENT_USER_COMMAND_LINEAGE_MISMATCH', 'Old command metadata is evidence, not authority for the current command.');
-      return reserve(context);
+      return reserve(context,'sealed-continuation',progress(prior));
     },
     async acceptSealedReplacement(plan, prior) {
       const context = await current(scopeOf(plan));
@@ -190,10 +206,10 @@ export const createLifecycleCommandBoundary = ({ root, host = null }) => {
       await boundary.assertPlan(plan, commandId);
       const context = storage.getStore();
       assert(!context.executionActive, 'LIFECYCLE_EXECUTION_REENTRY_DENIED', 'A running lifecycle cannot recursively start another lifecycle.');
-      if (context.executions) await reserve(context);
+      if (context.executions) await reserve(context,'lifecycle-checkpoint',context.lastProgress??progress(null));
       context.executions = (context.executions ?? 0) + 1; context.executionActive = true;
-      try { return await operation(); } finally { context.executionActive = false; }
+      try { const result=await operation();context.lastProgress=progress(result?.state);return result; } finally { context.executionActive = false; }
     },
   };
-  boundaries.add(boundary); return Object.freeze(boundary);
+  boundaries.add(boundary); boundaryRoots.set(boundary, resolve(root)); return Object.freeze(boundary);
 };

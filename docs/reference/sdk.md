@@ -8,7 +8,7 @@ Flow Author 使用 `defineNodeTaskContract()` 创建版本化节点任务。Work
 
 可安装 Extension 制品提供 `agent-harness-extension.json`，列出入口和全部运行时文件。Registry 在执行代码前验证内容摘要，安装/升级/移除需要预期修订、命令 ID 与 Authority Decision。Workspace 以精确 ID、版本、摘要绑定 Workflow；新的制品需要新的绑定修订。自定义 Flow 应按整体设计的统一包结构建立，并提供自己的设计页、结果端口合同、Conformance 和命令级 `closed` 验收。
 
-执行宿主须以 `createLifecycleCommandHost({ provider, verifyCommand, verifyActive })` 核验本次用户原始命令及持续有效性，再传入 `createHarness({ lifecycleCommandHost, ... })`。在 `harness.withUserLifecycleCommand(request, operation)` 回调内完成预检及执行。回调之外、已结束回调的异步任务和普通 JSON 授权字段都不能启动 Run、预检、派发或业务 Gate。默认不配置宿主时拒绝执行；规划、只读状态和独立维护能力仍可使用。宿主适配器属于可信嵌入层，不能从 Agent 结果反序列化，也不是对能改写宿主代码的本机进程的隔离沙箱。
+执行宿主须以 `createLifecycleCommandHost({ provider, verifyCommand, verifyActive })` 核验本次用户原始命令及持续有效性，再传入 `createHarness({ lifecycleCommandHost, ... })`。在 `harness.withUserLifecycleCommand(request, operation)` 回调内完成预检及执行。需要先登记再准备 Harness 的可信宿主，可先创建 `createLifecycleCommandBoundary({root, host})`，在其 `run` 回调中把同一对象传入 `createHarness({lifecycleCommandBoundary, ...})`；根必须等于实际 Authority 根，不能同时传另一 host。回调之外、已结束回调的异步任务和普通 JSON 授权字段都不能启动 Run、预检、派发或业务 Gate。默认不配置宿主时拒绝执行；规划、只读状态和独立维护能力仍可使用。宿主适配器属于可信嵌入层，不能从 Agent 结果反序列化，也不是对能改写宿主代码的本机进程的隔离沙箱。
 
 `harness.continueVisibleLifecyclePlan` 仅接受当前命令内、已核验的封存替代计划；原命令 ID、合同及恢复次数必须连续。独立恢复脚本只支持准备/退休，不再执行生命周期或预检。命令上下文在回调结束后失效；普通进程中断后等待用户命令。唯一跨进程例外是可信宿主确认的 Run 创建前 EPERM 探测失败：同一原生用户事件、同一意图只重试一次，额度持久登记。历史状态、回执和新 Run 都不授予新命令权限，详见[协调闭环合同](../guides/coordination-continuity.md)。
 

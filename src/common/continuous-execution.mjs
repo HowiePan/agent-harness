@@ -50,11 +50,11 @@ export const interventionProblemId = (state, item) => item.problemId ?? (() => {
   const feature=state.features?.find(f=>f.id===submission?.featureId);
   return feature ? executionProblemId(feature) : null;
 })();
-export const problemCycle = (state,feature) => state.attempts?.[`${feature.logicalRoot}:problem:${executionProblemId(feature)}:failure`]?.cycleGeneration ?? 0;
+export const problemCycle = (state,feature) => state.attempts?.[`${feature.logicalRoot}:task:${executionProblemId(feature)}:failure`]?.cycleGeneration ?? 0;
 export const problemHistory = (state, feature) => (state.metadata?.interruptionLedger ?? [])
   .filter(item=>continuousPolicy(state) ? interventionProblemId(state,item)===executionProblemId(feature)
     && (item.cycleGeneration??0)===problemCycle(state,feature) : item.logicalRoot===feature.logicalRoot);
-export const executionBudgetBlocked = (state, feature) => Object.values(state.attempts ?? {}).some(item =>
+export const executionBudgetBlocked = (state, feature) => !continuousPolicy(state) && Object.values(state.attempts ?? {}).some(item =>
   item.logicalRoot===feature.logicalRoot && item.exhausted && (!continuousPolicy(state)
     || item.problemId===executionProblemId(feature)));
 

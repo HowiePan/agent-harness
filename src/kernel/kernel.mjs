@@ -462,7 +462,7 @@ export class HarnessKernel {
         if (attempt.budgetKind === 'progress') {
           attempt.used += 1;
           if(continuousPolicy(state)) {
-            const failed=state.attempts[`${feature.logicalRoot}:problem:${budget.problemId}:failure`];
+            const failed=state.attempts[`${feature.logicalRoot}:task:${budget.problemId}:failure`];
             if(failed) {failed.cycleFailures=0;failed.cycleGeneration=(failed.cycleGeneration??0)+1;failed.exhausted=false;}
           }
         } else {

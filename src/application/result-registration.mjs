@@ -50,8 +50,13 @@ export class ResultRegistration {
    return this.exclusive(async()=>{
      const current=await this.read(),fault=executionFault(error,{phase:'registration'});
      if(!current||!['verified','submitted'].includes(current.stage)
-       ||!['unclassified','revision'].includes(fault.category)||(current.recoveries??[]).length>=limit)return null;
-     const body={...withoutKeys(current,['journalDigest']),recoveries:[...(current.recoveries??[]),fault]};
+       ||!['unclassified','revision'].includes(fault.category))return null;
+     const outcome=digestJson({category:fault.category,message:error.message,stage:current.stage});
+     let repeated=0;for(const r of [...(current.recoveries??[])].reverse()){
+       if(r.outcome!==outcome)break;repeated++;
+     }
+     if(repeated>=limit)return null;
+     const body={...withoutKeys(current,['journalDigest']),recoveries:[...(current.recoveries??[]),{...fault,outcome}]};
      await atomicWriteJson(this.file,{...body,journalDigest:digestJson(body)},{root:this.root});return fault;
    });
  }

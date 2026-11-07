@@ -634,13 +634,24 @@ test('review-only quality records findings without scheduling repairs or changin
   assert.equal(await readFile(resolve(fixture.workspace, 'README.md'), 'utf8'), before);
 });
 
-test('visible quality lifecycle resumes an attested active Lease after coordinator restart', async t => {
+test('transient Host wait failure is recovered inside the same command without duplicate Agents',async t=>{
   const fixture = await setup({ failFirstWait: true });
+  t.after(() => rm(fixture.root, { recursive: true, force: true }));
+  const preflight=await fixture.harness.createExecutionReadinessReport(fixture.plan);
+  const completed=await fixture.harness.executeVisibleLifecyclePlan(fixture.plan,{commandId:'quality-internal-wait-recovery',preflightReport:preflight,maxConcurrency:1});
+  assertClosedQualityLoop(completed.state);
+  assert(completed.state.decisions.some(d=>d.recovery?.operation==='host.wait'&&d.recovery.status==='recovered'));
+  assert.equal(fixture.host.stats.spawnCount,3);
+  assert.equal((await fixture.harness.authorityStore.list(fixture.plan.project.id)).length,1);
+});
+
+test('visible quality lifecycle resumes an attested active Lease after coordinator restart', async t => {
+  const fixture = await setup({ failFirstConfirm: true });
   t.after(() => rm(fixture.root, { recursive: true, force: true }));
   const firstPreflight = await fixture.harness.createExecutionReadinessReport(fixture.plan);
   await assert.rejects(
     () => fixture.harness.executeVisibleLifecyclePlan(fixture.plan, { commandId: 'quality-before-restart', preflightReport: firstPreflight, maxConcurrency: 1 }),
-    error => error.code === 'SIMULATED_HOST_RESTART',
+    error => error.code === 'SIMULATED_CONFIRMATION_FAILURE',
   );
   const interrupted = await fixture.harness.authorityStore.read(fixture.plan.project.id, fixture.plan.run.runId);
   assert.equal(interrupted.leases.filter(lease => lease.status === 'active').length, 1);
@@ -654,10 +665,10 @@ test('visible quality lifecycle resumes an attested active Lease after coordinat
 });
 
 test('blocked lineage does not reconcile or contain a live visible Agent', async t => {
-  const fixture = await setup({ failFirstWait: true });
+  const fixture = await setup({ failFirstConfirm: true });
   t.after(() => rm(fixture.root, { recursive: true, force: true }));
   const firstPreflight = await fixture.harness.createExecutionReadinessReport(fixture.plan);
-  await assert.rejects(() => fixture.harness.executeVisibleLifecyclePlan(fixture.plan, { commandId: 'blocked-lineage-first', preflightReport: firstPreflight, maxConcurrency: 1 }), error => error.code === 'SIMULATED_HOST_RESTART');
+  await assert.rejects(() => fixture.harness.executeVisibleLifecyclePlan(fixture.plan, { commandId: 'blocked-lineage-first', preflightReport: firstPreflight, maxConcurrency: 1 }), error => error.code === 'SIMULATED_CONFIRMATION_FAILURE');
   const before = fixture.host.stats.reconcileCount;
   await writeFile(resolve(fixture.workspace, 'OTHER.md'), '# Different source\n', 'utf8');
   const nextPlan = await fixture.harness.createLifecyclePlan({ projectId: fixture.plan.project.id, action: 'quality', target: 'V3.8.4', arguments: ['full'], extensionId: fixture.plan.extension.id, executionWorkspaceRoot: fixture.workspace });

@@ -1,6 +1,8 @@
 import { assert } from '../../common/errors.mjs';
 import { defineNodeTaskContract, taskFeatureProjection } from '../../common/task-contract.mjs';
 import { reviewedPlanProposal } from './plan-approval.mjs';
+import {continuousPolicy} from '../../common/continuous-execution.mjs';
+import {digestJson} from '../../common/canonical.mjs';
 
 export const DEFAULT_PLAN_REVIEW_LIMIT = 6;
 
@@ -21,7 +23,19 @@ export const createPlanReviewFollowUps = ({ state, feature, result }) => {
   if (review?.approved !== false) return [];
   const priorRounds = state.metadata?.planRevision?.replacesAmendment?.preservedDraft?.reviewRoundsUsed ?? 0;
   const round = (feature.metadata.planReviewRound ?? 1) + priorRounds;
-  if (round >= state.profile.config.planReviewLimit) return [];
+  if (!continuousPolicy(state)&&round >= state.profile.config.planReviewLimit) return [];
+  if(continuousPolicy(state)){
+    const signature=r=>digestJson(r.findings.map(f=>({summary:f.summary,paths:[...(f.affectedPaths??[])].sort()}))
+      .sort((a,b)=>digestJson(a).localeCompare(digestJson(b))));
+    const wanted=signature(review);let repeated=0;
+    for(const s of [...state.submissions].reverse()){
+      if(!state.features.some(f=>f.id===s.featureId&&f.metadata?.stage==='plan-review'))continue;
+      const r=s.result.outputs?.['plan-review']?.value;
+      if(!r||r.approved!==false||signature(r)!==wanted)break;
+      repeated++;
+    }
+    if(repeated>=continuousPolicy(state).recovery.sameStrategyFailures)return [];
+  }
   const plan = reviewedPlanProposal(state);
   const amendment = state.metadata?.commandIntent?.action === 'amend';
   assert(plan && Array.isArray(review.findings) && review.findings.length > 0,

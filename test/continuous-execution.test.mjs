@@ -29,14 +29,14 @@ test('problem identity ignores Run, source and labels; distinct contracts have s
  const s={features:[a,b],submissions:[],metadata:{continuousExecution:policy,interruptionLedger:[{logicalRoot:'root',problemId:executionProblemId(a)}]}};
  assert.equal(problemHistory(s,a).length,1);assert.equal(problemHistory(s,b).length,0);
 });
-test('progress has no lifetime cap; all failure labels share one finite problem ledger',()=>{
+test('progress and failures have no cumulative cap; labels cannot mint task identities',()=>{
  const f=feature('owner',{}, {logicalRoot:'root'}),s={features:[f],metadata:{continuousExecution:policy},submissions:[]};
  const sub={result:{...blocked,status:'blocked'},inputSourceDigest:'before',outputSourceDigest:'after',changedFiles:['work/owner/x'],evidenceRefs:['sealed']};
  const progress=selectAttemptBudget({state:s,feature:f,submission:sub,profile:{attemptBudget:()=>({kind:'progress',limit:21})}});
  assert.equal(progress.limit,null);
  const select=result=>selectAttemptBudget({state:s,feature:f,submission:{...sub,result},profile:{}});
  assert.equal(select(blocked).key,select({...blocked,failureClass:'different',blocker:{kind:'another'}}).key);
- assert.equal(select(blocked).limit,3);
+ assert.equal(select(blocked).limit,null);
 });
 test('migration keeps original counts and includes previous failed submissions in the new view',()=>{
  const f={...feature('owner',{}, {logicalRoot:'root'}),state:'failed-budget'};
@@ -51,19 +51,20 @@ test('native diagnosis reservations can serve a new problem after another proble
  await startRun(f,{features:[feature('owner',{stage:'implementation'},{logicalRoot:'root'})]});
  const d=await dispatchAndBind(f,'run');const s=(await recordResult(f,'run',d.dispatch,blocked)).state;
  assert.equal(s.metadata.continuousExecution.version,policy.version);
- const context=interruptionContext(s,s.features[0]);assert.equal(context.facts.recoveryLimit,6);
+ const context=interruptionContext(s,s.features[0]);assert.equal(context.facts.recoveryLimit,null);
  const decision=decideInterruption({...context,capabilities:[{id:'diagnose',operation:'diagnose',authorized:true,available:true,evidenceBound:true,readOnly:true}]});
  assert.equal(decision.action,'diagnose');
  const r=await f.harness.scheduleInterruptionReview(f.projectId,'run','owner','review');assert.equal(r.state.metadata.interruptionLedger.length,1);
 });
-test('three actual failed cycles stop and no category rename grants another dispatch',async t=>{
+test('three failures retain history without exhausting a task; retries still require an explicit reopen',async t=>{
  const f=await makeFixture({policy:{continuousExecution:policy}});t.after(f.cleanup);
  await startRun(f,{features:[feature('owner',{stage:'implementation'},{logicalRoot:'root'})]});
  let s;for(let i=0;i<3;i++){
   const d=await dispatchAndBind(f,'run');s=(await recordResult(f,'run',d.dispatch,{...blocked,failureClass:`label-${i}`})).state;
   if(i<2)s=(await f.harness.kernel.reopenFeature(f.projectId,'run',{featureId:'owner',reason:'test reviewed strategy'},command(s))).state;
  }
- assert.equal(s.features[0].state,'failed-budget');assert.equal(Object.keys(s.attempts).length,1);
+ assert.equal(s.features[0].state,'blocked');assert.equal(Object.keys(s.attempts).length,1);
+ assert.equal(Object.values(s.attempts)[0].limit,null);
  assert.equal((await dispatchAndBind(f,'run')).dispatch,null);
 });
 test('verified unique progress opens new windows without deleting lifetime failures',async t=>{

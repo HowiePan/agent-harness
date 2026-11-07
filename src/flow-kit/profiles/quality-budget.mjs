@@ -1,4 +1,5 @@
 import { assert } from '../../common/errors.mjs';
+import {continuousPolicy} from '../../common/continuous-execution.mjs';
 
 export const normalizeQualityReviewLimit = input => {
   const limit = input ?? { mode: 'bounded', maxRechecks: 2 };
@@ -21,6 +22,7 @@ export const qualityReviewCount = (state, qualityRoot = null) => {
 };
 
 export const qualityReviewBudgetExhausted = (state, qualityRoot = null) => {
+  if(continuousPolicy(state))return false;
   const limit = normalizeQualityReviewLimit(state?.profile?.config?.qualityReviewLimit);
   return limit.mode === 'bounded' && qualityReviewCount(state, qualityRoot) >= 1 + limit.maxRechecks;
 };

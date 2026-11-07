@@ -3,6 +3,7 @@ import { assert } from '../../common/errors.mjs';
 import { defineNodeTaskContract, taskFeatureProjection } from '../../common/task-contract.mjs';
 import { slash } from '../../common/paths.mjs';
 import { qualityReviewBudgetExhausted } from './quality-budget.mjs';
+import {continuousPolicy} from '../../common/continuous-execution.mjs';
 import { currentFeatureSubmission } from '../../common/feature-submission.mjs';
 
 const unique = values => [...new Set(values ?? [])];
@@ -27,7 +28,7 @@ export const hasCurrentCleanQualityReview = (state, qualityRoot = null) => state
   .some(feature => feature.state === 'completed' && cleanReviewSubmission(state, feature));
 
 export const qualityReviewNoProgress = (state, qualityRoot = null) => {
-  if (state.profile?.config?.qualityReviewLimit?.mode !== 'unbounded') return false;
+  if (!continuousPolicy(state) && state.profile?.config?.qualityReviewLimit?.mode !== 'unbounded') return false;
   const latestReview = [...state.features].reverse().find(feature => feature.metadata?.qualityReview === true && feature.state === 'completed' && (!qualityRoot || feature.metadata.qualityRoot === qualityRoot));
   if (!latestReview) return false;
   const submission = currentFeatureSubmission(state, latestReview);

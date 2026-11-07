@@ -41,6 +41,11 @@
       "size": 3206
     },
     {
+      "path": "docs/guides/action-recovery.md",
+      "sha256": "91a3ca265e2bf0deb055aa250c4d79039f05f66f0739788301892bab05e39a0b",
+      "size": 4449
+    },
+    {
       "path": "docs/guides/bounded-delivery.md",
       "sha256": "d261e6021790599d84bb1160983c6e225a237bac4c840a5c5305ee07194b046a",
       "size": 25320
@@ -52,8 +57,8 @@
     },
     {
       "path": "docs/guides/continuous-execution.md",
-      "sha256": "ff4c913f692bb3934d532e930b2197de63fd059d3b783fe8c22712418e125c2b",
-      "size": 7088
+      "sha256": "c4d4c99d598c1a54438ee7a2319ab016531b2c4f0192f7d97989756acc0f4e53",
+      "size": 8161
     },
     {
       "path": "docs/guides/control-flow.md",
@@ -62,8 +67,8 @@
     },
     {
       "path": "docs/guides/coordination-continuity.md",
-      "sha256": "8bf6b7142c13d708483c4f8d90bf2d72ec5d539a345e1c2ec9dda9d431d29c96",
-      "size": 14247
+      "sha256": "209d26ea6ba0820088c7314ba24ce270ec54e37d1f69b8adc02484333038ef03",
+      "size": 18911
     },
     {
       "path": "docs/guides/flow-authoring.md",
@@ -82,8 +87,8 @@
     },
     {
       "path": "docs/guides/implementation-budget.md",
-      "sha256": "0f526a378b6d91d0db1c101ef29f03a777bfdc297b50a603125266a33b47e93c",
-      "size": 8310
+      "sha256": "79aa8bec2a0bcad5dfd2a0429e30c9619d8145450d91d7d2ad17374addd08242",
+      "size": 8422
     },
     {
       "path": "docs/guides/local-debugging.md",
@@ -372,8 +377,8 @@
     },
     {
       "path": "docs/reference/sdk.md",
-      "sha256": "f54526a6e63582c747044679b054ee18d59b4a9afa10aa9011dc9fafd0e1ca60",
-      "size": 4029
+      "sha256": "4bdd955d21cc1c15c376bc5f21806437d48451920733c754744a65cbf04e80d8",
+      "size": 4304
     },
     {
       "path": "examples/delivery-project-input.json",
@@ -836,6 +841,11 @@
       "size": 812
     },
     {
+      "path": "src/application/action-recovery.mjs",
+      "sha256": "85fcb4f3ad375ffc39975f49c0c0c58e9e0b264a213c5097e0e60144e6199550",
+      "size": 13023
+    },
+    {
       "path": "src/application/authority-history-reader.mjs",
       "sha256": "1a2656389bcdbc39c595a63383251e5aa0b8d6af33047c477ec2442570dfbb7f",
       "size": 2708
@@ -872,8 +882,8 @@
     },
     {
       "path": "src/application/delivery-failure-retry.mjs",
-      "sha256": "4c4c3b03520bcc86d26ee6962f990d615b6ad3861bf3323ba87e3df39555d4bc",
-      "size": 2925
+      "sha256": "3eeb6d10ed215a307e608aa3d510f2e497f5140a75a7041371a57a07c77c9a23",
+      "size": 3137
     },
     {
       "path": "src/application/delivery-output-rejection.mjs",
@@ -986,9 +996,14 @@
       "size": 2758
     },
     {
+      "path": "src/application/diagnostic-input-discovery.mjs",
+      "sha256": "76669522b036b37dc923aaceca1cc830b64faa8847023910ecd2e5ac48167be8",
+      "size": 5318
+    },
+    {
       "path": "src/application/execution-fault.mjs",
-      "sha256": "774e7d51d399d9fcd8975e6f8b435f0ce51012c97e039afb7f2a45b347c7a83c",
-      "size": 2988
+      "sha256": "125a83e0cc185d18a28bed5403adba04e40da4901a8c866bddd37cd7e4e9d88e",
+      "size": 3287
     },
     {
       "path": "src/application/execution-history-inputs.mjs",
@@ -1007,8 +1022,8 @@
     },
     {
       "path": "src/application/harness.mjs",
-      "sha256": "a722364f84389ef0ae27fbe4ae4ac9018490e9ed674eca4a06455111b6aade2b",
-      "size": 130468
+      "sha256": "5ba1228a7d277f2a0d88ce1e1a735e49c4a415c13ef766c3672a84c0e7de660c",
+      "size": 130824
     },
     {
       "path": "src/application/implementation-budget.mjs",
@@ -1027,8 +1042,8 @@
     },
     {
       "path": "src/application/implementation-evidence-inputs.mjs",
-      "sha256": "1cadb82d572b6c574cf770beee4bbac145efa54131d86e5a64d9444b437f34bb",
-      "size": 5907
+      "sha256": "7aa31ac0a34edc8362fc2c69de93274014c876892b27a95328fb4bce76dbc5dd",
+      "size": 8712
     },
     {
       "path": "src/application/implementation-handoff.mjs",
@@ -1057,28 +1072,28 @@
     },
     {
       "path": "src/application/interruption-diagnosis.mjs",
-      "sha256": "8290246a87e4194630567ce17ed77b346be83cc68bd56570367fe5c82b02c780",
-      "size": 6359
+      "sha256": "e7ebfde2316fe4ebe6e54656408252a75dc2fc289403d0475628520b38b2002e",
+      "size": 10297
     },
     {
       "path": "src/application/interruption-outcome.mjs",
-      "sha256": "aad8c86c79c6aed8b47b8ab0b41688228a6fec6682f82a47212034a79374837a",
-      "size": 6214
+      "sha256": "acc87d49dd51ca53bf06f0f9c2ddffb0e940d3f8757d73768ac94749d7b87131",
+      "size": 7580
     },
     {
       "path": "src/application/interruption-policy.mjs",
-      "sha256": "09e42cd9ef2755be185125a3c38f7829d8d88d0894c424944dd47719bc3e5c36",
-      "size": 5096
+      "sha256": "6a43824073d822efb90fd4428b2b565b857a2eab0721f28d93cec648538ff051",
+      "size": 5680
     },
     {
       "path": "src/application/interruption-review.mjs",
-      "sha256": "ab47c11cda1d09d31e35710f5aa5f29b6796904c8998c45a62d94cb989a20262",
-      "size": 20275
+      "sha256": "16c83e5d652556916099c5d331d170b1d4d114947403215c1e0261b033b610a6",
+      "size": 25647
     },
     {
       "path": "src/application/lifecycle-command-context.mjs",
-      "sha256": "00faaa6634f2ca14de49ceebd0ccd473f6dfa6f827c634b9e3d4713acae81acf",
-      "size": 15373
+      "sha256": "42a7be6d15a839b69a1add1864197067abeb23eff4a3bf8728ad8eefb8c4aece",
+      "size": 16832
     },
     {
       "path": "src/application/lifecycle-command-plan.mjs",
@@ -1092,8 +1107,8 @@
     },
     {
       "path": "src/application/lifecycle-execution-service.mjs",
-      "sha256": "b03ffe8d52d2173283be138206a83852341a295fe98214056a145c7fed3fafdd",
-      "size": 52981
+      "sha256": "7a77ed7af82a18f27c8bada62ffdce9638a97da09886c5893975f4e48144049c",
+      "size": 54125
     },
     {
       "path": "src/application/lifecycle-interruption.mjs",
@@ -1102,8 +1117,8 @@
     },
     {
       "path": "src/application/lifecycle-resume.mjs",
-      "sha256": "e600b7adab86268153a4d39556515d7718c262249b96a014b228c2c6c8b104ea",
-      "size": 8479
+      "sha256": "a27daf4f1a5b54b660191726c3b25ab41a4db200129036c0df8b9c2d7fe8d82d",
+      "size": 8760
     },
     {
       "path": "src/application/lineage.mjs",
@@ -1147,8 +1162,8 @@
     },
     {
       "path": "src/application/plan-amendment-retry.mjs",
-      "sha256": "e2fab6e30abb3100a76b21dcb35bd1a1b7beef780b2465c0a8af53ca8986162c",
-      "size": 21153
+      "sha256": "06b7c121abb3687681aeac4726e721b3fb68a239649edd81917fd4cad5bfbd49",
+      "size": 21248
     },
     {
       "path": "src/application/plan-amendment-unaccepted-baseline.mjs",
@@ -1222,8 +1237,8 @@
     },
     {
       "path": "src/application/result-registration.mjs",
-      "sha256": "6cf5608385d932931f64eeae1ed67643e84f499a1fe1bc5652b6cf73960836aa",
-      "size": 5820
+      "sha256": "3e026ced338ff7c8d956a07d3eeea112eb702e1a08fa73825a013531446fea58",
+      "size": 6062
     },
     {
       "path": "src/application/script-policy-binding.mjs",
@@ -1287,13 +1302,18 @@
     },
     {
       "path": "src/common/continuous-execution.mjs",
-      "sha256": "f21842361c4b667d87f1a516b0ffbf71ab0e71f792fb185b790f479eb7131792",
-      "size": 4540
+      "sha256": "db6c102036cd2628c766434a486fe22259906fa189a7575eed541d5a0fcc660f",
+      "size": 4565
     },
     {
       "path": "src/common/coordination-stage.mjs",
       "sha256": "4826845c09be1c615b8a094c31f06808222327257a6536dfeb120f4b598edd68",
       "size": 1076
+    },
+    {
+      "path": "src/common/diagnostic-identity.mjs",
+      "sha256": "81c234608b45e38c495261141e56bc2a51612cfc3380e002c2172a8201935ae5",
+      "size": 345
     },
     {
       "path": "src/common/errors.mjs",
@@ -1317,8 +1337,8 @@
     },
     {
       "path": "src/common/interruption-contract.mjs",
-      "sha256": "18b2be86dcb4173a6083ffc43c10d7f6cb71c4996d924ba60b6372a26aa5ce93",
-      "size": 1046
+      "sha256": "2a15436a346bac14c5a4155168324689239590bb7535a0d50f04780ff2d7c7df",
+      "size": 1008
     },
     {
       "path": "src/common/json-schema.mjs",
@@ -1339,6 +1359,11 @@
       "path": "src/common/task-contract.mjs",
       "sha256": "60c2b0d46c8be5df85fa1e0bfca5b6e69a8ed73955f23d62821bec925bff44d5",
       "size": 6379
+    },
+    {
+      "path": "src/common/task-repetition.mjs",
+      "sha256": "7cc4e64dd4db84344e0513a31cef3d7d820c2a29446f4232364d1fa954fa8763",
+      "size": 2175
     },
     {
       "path": "src/common/workspace-identity.mjs",
@@ -1367,13 +1392,13 @@
     },
     {
       "path": "src/flow-kit/profiles/quality-budget.mjs",
-      "sha256": "8f0c38e62151da5751fd0dd43990197d43f7ccc2e195d338d14aa116fd7374c0",
-      "size": 1888
+      "sha256": "24c8949019accf0796443e8b27cf7c220e513310fb2b01ab6b17fa99bb228056",
+      "size": 2003
     },
     {
       "path": "src/flow-kit/profiles/quality-loop.mjs",
-      "sha256": "e14e41cd2c2a22c4b0cc3e5606954a1ee06cd705479821f91d499d9df8a20c5c",
-      "size": 18961
+      "sha256": "ae9a4b19cd3a2678989ddd4bb8acb7c2b4b4a3d1702be9050c6039d25aef28a5",
+      "size": 19061
     },
     {
       "path": "src/flow-kit/profiles/quality-planning.mjs",
@@ -1642,8 +1667,8 @@
     },
     {
       "path": "src/flows/delivery-lifecycle/plan-review-loop.mjs",
-      "sha256": "5bf4e821de75c99390b11d2b5dc0d7d5987f3eaae650adf24c5d7a93d6cf97b1",
-      "size": 4758
+      "sha256": "c0d67412d3d70ec3a0392af94fa21d24d9b4e2fb708ae1e40765f2a7233a9c63",
+      "size": 5553
     },
     {
       "path": "src/flows/delivery-lifecycle/plan-source-exits.mjs",
@@ -1657,8 +1682,8 @@
     },
     {
       "path": "src/flows/delivery-lifecycle/policy/delivery-lifecycle.mjs",
-      "sha256": "14a7970ca001e7d30f98edec654c2d770f4b7cc7157cba5af362fee13252cc84",
-      "size": 19099
+      "sha256": "d279fbc375a9b5a283af1ec3cf3345d176922fc468e0a5fa5f3fceb31caf7ba6",
+      "size": 19109
     },
     {
       "path": "src/flows/delivery-lifecycle/policy/implementation-progress.mjs",
@@ -1807,8 +1832,8 @@
     },
     {
       "path": "src/index.mjs",
-      "sha256": "e50733d544fe271c012c62a28a84c2d829d50383df4ec3cd14d007848dd99a0e",
-      "size": 4822
+      "sha256": "a7fdb7f0adad913ce438b9ecdd7c8ae909911fed0b092f656b87f0de1707d69c",
+      "size": 4854
     },
     {
       "path": "src/interfaces/cli/commands/memory.mjs",
@@ -1852,8 +1877,8 @@
     },
     {
       "path": "src/kernel/attempt-budget.mjs",
-      "sha256": "8a81ee15fc36b4e47304b5b96ae2255af26597d47466c9ca84438ecb921aeca9",
-      "size": 5862
+      "sha256": "26dad319c82aa1cb411543192200bf198858c6ddf47667aa2c0ce120d5a20104",
+      "size": 5908
     },
     {
       "path": "src/kernel/attempt-carryover.mjs",
@@ -1872,13 +1897,18 @@
     },
     {
       "path": "src/kernel/continuous-accounting.mjs",
-      "sha256": "2d677c5dd887b7b85954ea93b0aa04b0b2c4a6bbfab80afc9c69b36ba6d75bc4",
-      "size": 1848
+      "sha256": "cdcd94ed88ace1b0978d5c6ee5997288eb52ec0fb71e794d23cca3a777ee7129",
+      "size": 1810
     },
     {
       "path": "src/kernel/dependency-repair.mjs",
-      "sha256": "b0694a02e9701f4c2dd0d9a9211a42e01c2277d0016efcdc2314f29ce2d29f1b",
-      "size": 13944
+      "sha256": "fded17ef0cc7f060cbc09426840115441184f3f9871b94db810e08abea0bd271",
+      "size": 15042
+    },
+    {
+      "path": "src/kernel/diagnostic-repair-actions.mjs",
+      "sha256": "9b173382a3e565e88c8a527835473d606d4547c2310501b543fd46eeee79f22e",
+      "size": 2243
     },
     {
       "path": "src/kernel/evidence-store.mjs",
@@ -1897,13 +1927,13 @@
     },
     {
       "path": "src/kernel/intervention.mjs",
-      "sha256": "0bddf802d74af1ddc7c271b3c0d2f73f953b353fa64b8c6015e7f1ede68e450d",
-      "size": 12967
+      "sha256": "ce30e42c73afd8ea8a54b529e06d5753d24e37b0dcc67df17d0e16adb75dabc1",
+      "size": 15940
     },
     {
       "path": "src/kernel/kernel.mjs",
-      "sha256": "aa53d102c3ec9f22a72c644c734d6dc4e76db88749d4574b0028c01f4de957df",
-      "size": 82621
+      "sha256": "08ebed9ad517e098654c4d6a6dc9b76fa96e8e361a072921d5879c89383e5f12",
+      "size": 82618
     },
     {
       "path": "src/kernel/quality.mjs",
@@ -2032,8 +2062,8 @@
     },
     {
       "path": "src/platform/plugins/codec/agent-prompt-codec.mjs",
-      "sha256": "59afb7657aabaca074ce1b72e8bb381720d52bed43a77bb99d22cdea9b06f7ce",
-      "size": 30166
+      "sha256": "2281b83d3e427dba1f41687ef9952fd856589dd41895cbf826749b1bbfa0e1fa",
+      "size": 30699
     },
     {
       "path": "src/platform/plugins/codec/json-codec.mjs",
@@ -2316,7 +2346,7 @@
       "size": 19877
     }
   ],
-  "packageDigest": "a7dbb363e9f8a0569c25aa97c7576e90c989ed6cc7f9900df1b7a459badc995d",
+  "packageDigest": "107eaa8b4e9c1c0ae93df97064dd8541c41e480dcf67260765f93fc2b7081ba1",
   "metadataFiles": [
     "release-manifest.json",
     "sbom.spdx.json"

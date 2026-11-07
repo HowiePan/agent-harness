@@ -36,7 +36,7 @@ import { withVerificationLease } from './delivery-verification-lease.mjs';
 import {ResultRegistration,registrationBinding,readVerifiedRegistration} from './result-registration.mjs';
 import {previewDependencyRepairs} from '../kernel/dependency-repair.mjs';
 import {withLifecycleContinuation} from './lifecycle-continuation.mjs';
-import {createLifecycleCommandBoundary} from './lifecycle-command-context.mjs';
+import {createLifecycleCommandBoundary,assertLifecycleCommandBoundary} from './lifecycle-command-context.mjs';
 import {resumeForCurrentUserCommand,prepareStoppedUserTransport} from './user-requested-restart.mjs';
 import { resolveCarryoverApproval, readCarryoverApprovalSnapshot } from './implementation-carryover-approval.mjs';
 import { recoverInterruptedWorkspace } from './interrupted-workspace-recovery.mjs';
@@ -97,13 +97,17 @@ const manifests = Object.freeze({
   storage: { id: 'reference-file-storage', kind: 'storage-provider', version: '1.0.0', capabilities: ['expected-revision', 'idempotency', 'atomic-write', 'recovery'], permissions: ['state.write'] },
 });
 
-export const createHarness = async ({ controlRoot: controlRootInput, dataRoot: dataRootInput, workspaceId = null, memoryRoot = null, now, id, releaseIdentity, strictProjectIdentity = true, initializeStorage = true, allowedPluginPermissions = ['state.write', 'agent.conversation', 'workspace.read', 'workspace.write', 'gate.execute', 'artifact.read'], extraProfiles = [], extensions = [], agentAdapter = null, agentAdapters = {}, executionAuthorizationAdapter = null, lifecycleCommandHost = null } = {}) => {
+export const createHarness = async ({ controlRoot: controlRootInput, dataRoot: dataRootInput, workspaceId = null, memoryRoot = null, now, id, releaseIdentity, strictProjectIdentity = true, initializeStorage = true, allowedPluginPermissions = ['state.write', 'agent.conversation', 'workspace.read', 'workspace.write', 'gate.execute', 'artifact.read'], extraProfiles = [], extensions = [], agentAdapter = null, agentAdapters = {}, executionAuthorizationAdapter = null, lifecycleCommandHost = null, lifecycleCommandBoundary = null } = {}) => {
   const controlRoot = harnessControlRoot(controlRootInput);
   const globalDataRoot = assertHarnessWritePath(dataRootInput ?? defaultDataRoot(controlRoot), 'Harness global dataRoot', controlRoot);
   const workspaceRegistry = new WorkspaceRegistry({ root: globalDataRoot, controlRoot, now });
   if (workspaceId) assert(/^[a-z][a-z0-9-]{0,31}$/.test(workspaceId), 'WORKSPACE_ID_INVALID', 'Workspace ID is invalid.');
   const dataRoot = workspaceId ? resolve(globalDataRoot, 'workspaces', workspaceId) : globalDataRoot;
   const controlledDataRoot = assertHarnessWritePath(dataRoot, 'Harness dataRoot', controlRoot);
+  if (lifecycleCommandBoundary !== null) {
+    assert(lifecycleCommandHost === null, 'LIFECYCLE_COMMAND_HOST_INVALID', 'Supply one trusted command admission boundary or host.');
+    assertLifecycleCommandBoundary(lifecycleCommandBoundary, controlledDataRoot);
+  }
   const activeRelease = await readActiveRelease(globalDataRoot, controlRoot);
   const activeRuntimeRoot = activeRelease ? await resolveActiveRuntimeRoot(globalDataRoot, controlRoot) : null;
   releaseIdentity ??= await loadReleaseIdentity();
@@ -118,7 +122,7 @@ export const createHarness = async ({ controlRoot: controlRootInput, dataRoot: d
   const resourceProviders = new ResourceProviderRegistry({ memoryStore });
   const workspaceMemoryBroker = workspaceId ? createWorkspaceMemoryBroker({ workspaceId, workspaceRegistry, providerRegistry: resourceProviders, memoryStore, authorityStore }) : null;
   const lineageStore = new RunLineageStore({ root: authorityStore.root, controlRoot, now });
-  const commandBoundary = createLifecycleCommandBoundary({root: authorityStore.root, host: lifecycleCommandHost});
+  const commandBoundary = lifecycleCommandBoundary ?? createLifecycleCommandBoundary({root: authorityStore.root, host: lifecycleCommandHost});
   const visibleHostBindings = createVisibleHostBindings({ agentAdapter, agentAdapters });
   const resolveVisibleHostAdapter = runtimePluginId => visibleHostBindings.resolve(runtimePluginId);
   const trustedExecutionAuthorizationAdapter = executionAuthorizationAdapter === null || executionAuthorizationAdapter === undefined

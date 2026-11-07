@@ -6,12 +6,12 @@ export { INTERRUPTION_POLICY, MAX_INTERVENTIONS_PER_ROOT, featureContractDigest 
 /** Facts and capabilities come from the Host, never from the worker's labels. */
 export const decideInterruption = ({ problem, facts = {}, capabilities = [], history = [] }) => {
   const fingerprint = digestJson({ root: problem.logicalRoot ?? null, source: problem.sourceDigest ?? null,
-    ...(facts.continuous ? {problemId:problem.problemId,submissionId:problem.submissionId} : {}),
+    ...(facts.continuous ? {problemId:problem.problemId??null,submissionId:problem.submissionId??null,resolutionPolicy:'task-repetition/1'} : {}),
     contract: problem.contractDigest ?? null });
   const used = history.filter(item => item.logicalRoot === problem.logicalRoot);
-  const limit = Number.isSafeInteger(facts.recoveryLimit) ? Math.max(0, Math.min(facts.continuous ? 30 : MAX_INTERVENTIONS_PER_ROOT, facts.recoveryLimit)) : MAX_INTERVENTIONS_PER_ROOT;
+  const limit = facts.continuous ? null : Number.isSafeInteger(facts.recoveryLimit) ? Math.max(0, Math.min(MAX_INTERVENTIONS_PER_ROOT, facts.recoveryLimit)) : MAX_INTERVENTIONS_PER_ROOT;
   const body = { policy: INTERRUPTION_POLICY, boundary: 'action', fingerprint,
-    problem: structuredClone(problem), attempts: used.map(item => ({ id: item.id, action: item.action ?? null,
+    problem: structuredClone(problem), attempts: used.map(item => ({ id: item.id ?? null, action: item.action ?? null,
       sourceDigest: item.sourceDigest ?? null, evidenceRefs: item.evidenceRefs ?? [] })),
     evidenceRefs: [...new Set(facts.evidenceRefs ?? [])],
     budget: { used: used.length, limit, executionRemaining: facts.executionRemaining ?? null } };
@@ -21,8 +21,8 @@ export const decideInterruption = ({ problem, facts = {}, capabilities = [], his
     return { ...value, decisionDigest: digestJson(value) };
   };
   if (facts.userStopped) return decision('stop', 'user-stop', 'The user explicitly stopped this work.', 'resume-or-change-goal');
-  if (facts.stagnant) return decision('stop','no-progress','Several processing cycles made no verified overall progress. Review the combined root causes.','review-stagnant-strategy');
-  if (facts.budgetExhausted) return decision('stop', 'budget', 'The next required execution has no approved allowance.', 'exact-budget-or-strategy-decision');
+  if (!facts.continuous && facts.stagnant) return decision('stop','no-progress','Several processing cycles made no verified overall progress. Review the combined root causes.','review-stagnant-strategy');
+  if (!facts.continuous && facts.budgetExhausted) return decision('stop', 'budget', 'The next required execution has no approved allowance.', 'exact-budget-or-strategy-decision');
   // A known hard boundary stops dependent writes. Diagnostics may still run if
   // they have independent, verified read-only authority and a finite allowance.
   const hard = facts.authorizationRequired ? 'authorization' : facts.contractChangeVerified ? 'contract'
@@ -31,7 +31,7 @@ export const decideInterruption = ({ problem, facts = {}, capabilities = [], his
     && item.evidenceBound === true && (!hard || item.readOnly === true));
   if (hard) {
     const diagnostic = admissible.find(item => item.operation === 'diagnose');
-    if (diagnostic && used.length < limit && !used.some(item => item.fingerprint === fingerprint)) {
+    if (diagnostic && (limit===null||used.length < limit) && !used.some(item => item.fingerprint === fingerprint)) {
       return decision('diagnose', hard, 'Isolate the dependent action and verify the boundary without source writes.', null, diagnostic.id);
     }
     return decision('stop', hard, 'The required action crosses a verified boundary and no admissible diagnostic remains.',
@@ -43,12 +43,17 @@ export const decideInterruption = ({ problem, facts = {}, capabilities = [], his
     const waiting = admissible.find(item => item.operation === 'wait');
     if (waiting) return decision('wait', 'external-wait', 'Wait for the exact bounded external signal; independent work may continue.', null, waiting.id);
   }
-  if (used.length >= limit) return decision('stop', 'recovery-budget',
+  if (limit!==null && used.length >= limit) return decision('stop', 'recovery-budget',
     'The finite recovery allowance for this logical root is exhausted.', 'bounded-recovery-or-contract-decision');
   const clarification = admissible.find(item => item.operation === 'diagnose' && item.readOnly === true);
+  if(facts.continuous && facts.correctionRepeated)return decision('stop','no-progress',
+    'The same diagnostic validation failure repeated without correction.','resolve-repeated-diagnostic-defect');
   if (clarification && facts.diagnosticCorrectionVerified && problem.correctionOf && problem.assessmentId) {
     return decision('diagnose', 'recommendation-correction', 'Clarify the exact rejected recommendation under the existing finite allowance.', null, clarification.id);
   }
+  if(facts.recordedPrerequisite)return decision('stop','prerequisite',
+    'Verified unresolved prerequisites remain after admissible local and dependency actions; retain work and resolve the recorded inputs.',
+    'resolve-recorded-prerequisites');
   if (used.some(item => item.fingerprint === fingerprint)) return decision('stop', 'no-progress',
     'This source and contract already had a diagnostic; repeating it has no new basis.', 'resolve-recorded-diagnostic');
   const review = admissible.find(item => item.operation === 'diagnose');

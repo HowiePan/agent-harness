@@ -12,23 +12,29 @@ import {prepareImplementationEvidenceInputs} from '../src/application/implementa
 import {createCompletionCarryoverPlan} from '../src/kernel/completion-carryover.mjs';
 import {captureWorkspace} from '../src/common/workspace-snapshot.mjs';
 import {selectBlockedResumeFeature} from '../src/application/lifecycle-resume.mjs';
+import {applyPendingInterruptionReviews,hasPendingIntervention,reviewableInterruptions} from '../src/application/interruption-review.mjs';
 
-const setup=async (t,{sibling=false}={})=>{
+const setup=async (t,{sibling=false,mixed=false,explicit=false}={})=>{
  const f=await makeFixture({policy:{continuousExecution:validateContinuousExecution({version:'continuous-execution/1'}),
    projectFilePolicy:{version:'project-files/1',mode:'project-owned',roots:['src','tests'],protectedPaths:['.git']}}});t.after(f.cleanup);
  await mkdir(resolve(f.workspace,'src'));await writeFile(resolve(f.workspace,'src/owner.mjs'),'export const leak=true;');
- await startRun(f,{features:[feature('owner',{stage:'implementation'},{allowedPaths:['src']}),
+ await startRun(f,{features:[feature('owner',{stage:'implementation'},{allowedPaths:explicit?['tests']:['src']}),
    ...(sibling?[feature('sibling',{stage:'implementation'},{dependsOn:['owner'],allowedPaths:['tests']})]:[]),
    feature('consumer',{stage:'implementation'},{dependsOn:['owner'],allowedPaths:['tests']})]});
  let d=await dispatchAndBind(f,'run');await recordResult(f,'run',d.dispatch);
  if(sibling){d=await dispatchAndBind(f,'run');await recordResult(f,'run',d.dispatch);}
  d=await dispatchAndBind(f,'run');await recordResult(f,'run',d.dispatch,{status:'blocked',summary:'Public consumer reproduces defect.',changedFiles:[],
-   failureClass:'scope-blocker',blocker:{kind:'scope',summary:'Production repair belongs to declared dependency.',repairCandidatePaths:['src/owner.mjs']}});
+   failureClass:mixed?'external-prerequisite':'scope-blocker',blocker:mixed?{kind:'external',summary:'Historical input absent; owner script also broken.'}:{kind:'scope',summary:'Production repair belongs to declared dependency.',repairCandidatePaths:['src/owner.mjs']}});
  await f.harness.scheduleInterruptionReview(f.projectId,'run','consumer','review');d=await dispatchAndBind(f,'run');
  const spec=d.dispatch.featureSnapshot.metadata.intervention;
- await recordResult(f,'run',d.dispatch,{status:'completed',summary:'Current source-bound diagnosis.',changedFiles:[],outputs:{diagnosis:{schemaId:'execution-diagnosis-v1',evidenceRefs:['src/owner.mjs'],value:{
+ const owner=(await f.harness.authorityStore.read(f.projectId,'run')).features.find(f=>f.id==='owner');
+ await recordResult(f,'run',d.dispatch,{status:'completed',summary:'Current source-bound diagnosis.',changedFiles:[],
+   ...(mixed?{deliveryPrerequisites:[{id:'owner-route',summary:'Repair proof selector.',affectedPaths:['src/owner.mjs'],evidence:['src/owner.mjs'],classification:'delivery-prerequisite',reason:'Existing dependency defect.'},
+     {id:'historical',summary:'Bind exact historical input.',affectedPaths:['tests/historical.json'],evidence:['src/owner.mjs'],classification:'delivery-prerequisite',reason:'Missing certified inputs.'}]}:{}),outputs:{diagnosis:{schemaId:'execution-diagnosis-v1',evidenceRefs:['src/owner.mjs'],value:{
    sourceSubmissionId:spec.sourceSubmissionId,contractDigest:spec.contractDigest,conclusion:'external-prerequisite',reason:'Existing dependency must repair the public defect; original contract retained.',
-   evidence:[{path:'src/owner.mjs',sha256:sha256(await readFile(resolve(f.workspace,'src/owner.mjs')))}],repairPaths:['src/owner.mjs'],
+   evidence:[{path:'src/owner.mjs',sha256:sha256(await readFile(resolve(f.workspace,'src/owner.mjs')))}],repairPaths:mixed?[]:['src/owner.mjs'],
+   ...(explicit?{resolutionActions:[{id:'owner-route',kind:'dependency-repair',summary:'Repair existing dependency.',paths:['src/owner.mjs'],ownerFeatureId:owner.id,ownerContractDigest:featureContractDigest(owner)},
+     {id:'historical',kind:'input-discovery',summary:'Find historical input.',paths:[],discovery:{status:'pending',catalogs:[],inputs:[]}}]}:{}),
    remainingWork:[{work:'Dependency and receiver revalidation',existingImplementation:'Independent receiver reproduces defect.',remainingDevelopment:'Repair dependency then rerun original receiver.',verification:'Fresh complete original checks.',unknowns:[{question:'Dependency correction?',classification:'external-prerequisite',action:'Return to existing dependency.',verification:'Fresh dependency and receiver checks.',unitsIncluded:false}],units:3}]}}}});
  return {...f,reviewId:d.dispatch.featureId,state:await f.harness.authorityStore.read(f.projectId,'run')};
 };
@@ -55,6 +61,51 @@ test('source-bound dependency return preserves contracts/history/budgets and req
  assert.equal((await dispatchAndBind(f,'run')).dispatch.featureId,'consumer');
 });
 
+for(const explicit of [false,true])test(`mixed blockers repair the existing dependency before unavailable input; explicit identity=${explicit}`,async t=>{
+ const f=await setup(t,{mixed:true,explicit});let reviewId=f.reviewId;
+ if(!explicit){
+  assert.equal(inspectDependencyRepair(f.state,reviewId),null,'Legacy mixed prose does not grant owner authority.');
+  const clarified=(await f.harness.applyInterruptionReview(f.projectId,'run',reviewId,'clarify-mixed')).state;
+  assert.equal(clarified.features.find(f=>f.id==='owner').state,'completed');
+  const d=await dispatchAndBind(f,'run'),old=f.state.submissions.at(-1).result;
+  const result=structuredClone(old),owner=clarified.features.find(f=>f.id==='owner');
+  result.outputs.diagnosis.value.resolutionActions=[{id:'owner-route',kind:'dependency-repair',summary:'Repair existing owner.',paths:['src/owner.mjs'],ownerFeatureId:'owner',ownerContractDigest:featureContractDigest(owner)},
+   {id:'historical',kind:'input-discovery',summary:'Find exact historical input.',paths:[],discovery:{status:'pending',catalogs:[],inputs:[]}}];
+  await recordResult(f,'run',d.dispatch,result);reviewId=d.dispatch.featureId;
+ }
+ const before=await f.harness.authorityStore.read(f.projectId,'run');
+ const candidate=inspectDependencyRepair(before,reviewId);assert.equal(candidate.ownerFeatureId,'owner');
+ assert(candidate.unresolvedPrerequisites.some(p=>p.id==='historical'));
+ const s=(await f.harness.applyInterruptionReview(f.projectId,'run',reviewId,'mixed-return')).state;
+ assert.equal(s.features.find(f=>f.id==='owner').state,'pending');assert.equal(s.features.find(f=>f.id==='consumer').state,'blocked');
+ assert.deepEqual(s.attempts,before.attempts);assert.deepEqual(s.features.map(featureContractDigest),before.features.map(featureContractDigest));
+ const d=await dispatchAndBind(f,'run');assert.equal(d.dispatch.featureId,'owner');
+ await writeFile(resolve(f.workspace,'src/owner.mjs'),'export const leak=false;');
+ const completed=(await recordResult(f,'run',d.dispatch,{status:'completed',summary:'Repaired proof selector.',changedFiles:['src/owner.mjs']})).state;
+ assert.equal(completed.metadata.dependencyRepairs[0].status,'completed');
+ assert.equal(completed.features.find(f=>f.id==='consumer').state,'blocked','Missing historical evidence must not gain a retry or completion credit.');
+ assert.equal(completed.features.find(f=>f.id==='owner').state,'completed');
+ const carried={...structuredClone(completed),runId:'replacement',decisions:[],
+  features:completed.features.filter(f=>f.kind!=='execution-diagnostic').map(f=>({...structuredClone(f),state:f.id==='consumer'?'pending':f.state})),
+  metadata:{...structuredClone(completed.metadata),dependencyRepairs:[]}};
+ await carryInterventions({state:carried,prior:completed,roots:new Set(completed.features.map(f=>f.logicalRoot)),evidenceStore:f.harness.evidenceStore});
+ assert.equal(carried.features.find(f=>f.id==='consumer').state,'blocked','Formal replacement must preserve unresolved inputs after a completed repair.');
+ assert.equal(carried.features.find(f=>f.id==='owner').state,'completed');
+ assert.equal(reviewableInterruptions(carried)[0].feature.id,'consumer');
+ const attemptsAfter=digestJson(completed.attempts),ledgerBefore=completed.metadata.interruptionLedger.length;
+ assert.equal(hasPendingIntervention(completed),false,'Old-source completed diagnoses are audit history, not current work.');
+ const settled=await applyPendingInterruptionReviews(f.harness,completed,'skip-stale-diagnoses');
+ assert.equal(settled.revision,completed.revision);
+ assert.equal(reviewableInterruptions(settled)[0].feature.id,'consumer');
+ const fresh=await f.harness.scheduleInterruptionReview(f.projectId,'run','consumer','after-source-repair');
+ assert.notEqual(fresh.result.featureId,reviewId,'Changed source must not collide with the old Submission diagnostic ID.');
+ assert.equal(fresh.state.metadata.interruptionLedger.length,ledgerBefore+1);
+ assert.equal(digestJson(fresh.state.attempts),attemptsAfter);
+ const again=await f.harness.scheduleInterruptionReview(f.projectId,'run','consumer','same-source-observation');
+ assert(!again||again.state.features.filter(x=>x.id===fresh.result.featureId).length===1);
+ assert.equal((await f.harness.authorityStore.read(f.projectId,'run')).metadata.interruptionLedger.length,ledgerBefore+1);
+});
+
 test('dependency return invalidates exactly its completed consumers and preserves their full contracts and old evidence',async t=>{
  const f=await setup(t,{sibling:true}),old=f.state.features.find(x=>x.id==='sibling');
  const contract=featureContractDigest(old),oldSubmission=old.submissionId;
@@ -64,6 +115,35 @@ test('dependency return invalidates exactly its completed consumers and preserve
  assert(s.submissions.some(x=>x.submissionId===oldSubmission&&x.result.status==='completed'));
  assert.deepEqual(s.metadata.dependencyRepairs[0].revalidation,[{featureId:'sibling',contractDigest:contract,submissionId:oldSubmission}]);
  assert.equal(s.features.find(x=>x.id==='consumer').state,'blocked');
+});
+
+test('mixed legacy diagnosis survives formal replacement as blocked work needing one structured clarification',async t=>{
+ const f=await setup(t,{mixed:true});const prior=(await f.harness.applyInterruptionReview(f.projectId,'run',f.reviewId,'mixed-assess')).state;
+ // Simulate a crash before the newly reserved clarification runs. Both original
+ // and pending clarification remain bound to the same source and ledger.
+ const next={...structuredClone(prior),runId:'replacement',features:prior.features.filter(f=>f.kind!=='execution-diagnostic').map(f=>({...f,state:f.id==='consumer'?'pending':f.state})),
+  decisions:[],metadata:{...structuredClone(prior.metadata)}};
+ await carryInterventions({state:next,prior,roots:new Set(prior.features.map(f=>f.logicalRoot)),evidenceStore:f.harness.evidenceStore});
+ assert.equal(next.features.find(f=>f.id==='consumer').state,'blocked');
+ assert.equal(next.features.filter(f=>f.kind==='execution-diagnostic'&&f.state==='pending').length,1);
+ assert.deepEqual(next.metadata.interruptionLedger,prior.metadata.interruptionLedger);assert.deepEqual(next.attempts,prior.attempts);
+});
+
+test('dependency selection uses the Authority accepted completion rather than the last historical array item',async t=>{
+ const f=await setup(t),s=structuredClone(f.state),owner=s.features.find(f=>f.id==='owner');
+ const accepted=s.submissions.find(x=>x.submissionId===owner.submissionId);
+ s.submissions.push({...structuredClone(accepted),submissionId:'later-historical-copy'});
+ assert.equal(inspectDependencyRepair(s,f.reviewId).ownerSubmissionId,owner.submissionId);
+ const invalid=structuredClone(s);invalid.submissions.find(x=>x.submissionId===owner.submissionId).featureId='foreign';
+ assert.equal(inspectDependencyRepair(invalid,f.reviewId),null);
+});
+
+test('explicit dependency identities cannot target a consumer, another contract or protected project paths',async t=>{
+ const f=await setup(t,{mixed:true,explicit:true});
+ for(const mutate of [a=>a.ownerFeatureId='consumer',a=>a.ownerContractDigest='0'.repeat(64),a=>a.paths=['../outside'],a=>a.paths=['.git/config']]){
+  const s=structuredClone(f.state);mutate(s.submissions.at(-1).result.outputs.diagnosis.value.resolutionActions[0]);
+  assert.equal(inspectDependencyRepair(s,f.reviewId),null);
+ }
 });
 
 test('Kernel replacement restores the reviewed blocker and directly schedules its existing dependency without another diagnosis',async t=>{
@@ -92,12 +172,9 @@ test('dependency return refuses ambiguity, foreign paths, stale source, active w
    s=>s.sourceDigest='f'.repeat(64),
    s=>s.leases.push({status:'active'}),
    s=>s.metadata.operatorStop={requested:true},
-   s=>s.attempts.denied={logicalRoot:s.features[0].logicalRoot,exhausted:true,problemId:executionProblemId(s.features[0])},
    s=>s.features.push({...structuredClone(s.features[1]),id:'accepted-consumer',state:'completed'}),
    s=>s.submissions.at(-1).result.outputs.diagnosis.value.conclusion='contract-change',
    s=>s.submissions.at(-1).result.outputs.diagnosis.value.repairPaths=['../escape'],
-   s=>s.metadata.dependencyRepairs=Array.from({length:3},(_,i)=>({id:`old-${i}`,reviewSubmissionId:`prior-${i}`,status:'completed',
-     problemId:inspectDependencyRepair(s,f.reviewId).problemId,cycleGeneration:inspectDependencyRepair(s,f.reviewId).cycleGeneration})),
  ]){const s=structuredClone(f.state);mutate(s);assert.equal(inspectDependencyRepair(s,f.reviewId),null);}
  const candidate=inspectDependencyRepair(f.state,f.reviewId);
  await assert.rejects(f.harness.kernel.requestDependencyRepair(f.projectId,'run',{reviewFeatureId:f.reviewId,candidate},command(f.state)),{code:'DEPENDENCY_REPAIR_ASSESSMENT_REQUIRED'});

@@ -9,13 +9,20 @@ import { reviewableInterruptions, hasPendingIntervention, applyPendingInterrupti
 import { decideInterruption } from '../src/application/interruption-policy.mjs';
 import { resolveAttemptCarryover } from '../src/kernel/attempt-carryover.mjs';
 import { validateContinuousExecution } from '../src/common/continuous-execution.mjs';
+import {prepareImplementationEvidenceInputs} from '../src/application/implementation-evidence-inputs.mjs';
 
 const blocked = { status: 'blocked', summary: 'Worker estimates too much remaining work.', changedFiles: [],
   failureClass: 'capacity-mismatch', blocker: { kind: 'capacity', summary: '44 estimated versus 36 capacity.' } };
-const fixture = async (t, { reserve = null, continuous = false } = {}) => {
-  const f = await makeFixture(continuous ? {policy:{continuousExecution:validateContinuousExecution({version:'continuous-execution/1',recovery:{cyclesPerProblem:4,stagnantCycles:4}})}} : {}); t.after(f.cleanup);
+const fixture = async (t, { reserve = null, continuous = false, projectOwned=false,inputCatalog=false } = {}) => {
+  const f = await makeFixture(continuous ? {policy:{continuousExecution:validateContinuousExecution({version:'continuous-execution/1',recovery:{cyclesPerProblem:4,stagnantCycles:4}}),
+    ...(projectOwned?{projectFilePolicy:{version:'project-files/1',mode:'project-owned',roots:['src'],protectedPaths:['.git']}}:{})}} : {}); t.after(f.cleanup);
   await mkdir(resolve(f.workspace, 'src'));
   await writeFile(resolve(f.workspace, 'src/owner.mjs'), 'export const existing = true;');
+  if(inputCatalog){
+    const input={path:'src/historical.json',sha256:sha256('independent historical input')};
+    await writeFile(resolve(f.workspace,input.path),'independent historical input');
+    await writeFile(resolve(f.workspace,'src/catalog.json'),JSON.stringify({version:'verification-input-catalog/1',inputs:[{...input,version:'prior',purpose:'historical-replay'}]}));
+  }
   await startRun(f, { features: [feature('owner', { stage: 'implementation', ...(reserve === null ? {} : { deliveryOwnerProposal: { id: 'owner', contracts: [], deliveryBatchReserve: reserve } }) }, { logicalRoot: 'owner', allowedPaths: ['src'] })] });
   const dispatched = await dispatchAndBind(f, 'run');
   const state = (await recordResult(f, 'run', dispatched.dispatch, blocked)).state;
@@ -32,6 +39,78 @@ const reviewResult = async (f, dispatched, overrides = {}) => {
       repairPaths: ['src/owner.mjs'], remainingWork: [{ work: 'Finish behavior', existingImplementation: 'Owner already exists.',
         remainingDevelopment: 'Wire one consumer.', verification: 'Run all approved checks.', unknowns: [], units: 4 }], ...overrides } } } };
 };
+
+test('more than six different diagnostic corrections do not exhaust business repair or alter its contract',async t=>{
+ const f=await fixture(t,{continuous:true,projectOwned:true});await schedule(f);
+ let s;
+ for(let i=0;i<8;i++){
+   const d=await dispatchAndBind(f,'run');
+   await recordResult(f,'run',d.dispatch,await reviewResult(f,d,{repairPaths:i<7?[`../rejected-${i}`]:['src/owner.mjs']}));
+   s=(await f.harness.applyInterruptionReview(f.projectId,'run',d.dispatch.featureId,`correction-${i}`)).state;
+ }
+ assert.equal(s.metadata.interruptionLedger.length,8);
+ assert.equal(s.features.find(x=>x.id==='owner').state,'pending');
+ assert.equal(s.submissions.filter(x=>x.featureId==='owner').length,1);
+ assert.equal(Object.values(s.attempts).find(a=>a.logicalRoot==='owner').failures,1);
+});
+
+test('input preparation reopens the original moderate batch without certifying candidates, and drift is rejected',async t=>{
+ const f=await fixture(t,{continuous:true,projectOwned:true});await schedule(f);const d=await dispatchAndBind(f,'run');
+ const candidate={path:'src/owner.mjs',sha256:sha256(await readFile(resolve(f.workspace,'src/owner.mjs')))};
+ const original=f.state.features.find(x=>x.id==='owner');
+ const result=await reviewResult(f,d,{conclusion:'external-prerequisite',repairPaths:[],
+   resolutionActions:[{id:'admit',kind:'input-admission',summary:'Evaluate and register existing candidates.',paths:['src/catalog.json','src/owner.mjs'],
+     admission:{candidates:[candidate],work:'Check independent provenance and exact original obligation mapping before writing a truthful catalog.',verification:'Run the full original check, keep failure if inputs are missing.'}}],
+   remainingWork:[{work:'Evaluate and integrate input',existingImplementation:'Concrete candidate exists.',remainingDevelopment:'Authenticate, map, register and consume only if appropriate.',verification:'Original full semantic check.',units:4,
+     unknowns:[{question:'Can this candidate satisfy the original historical acceptance?',classification:'external-prerequisite',action:'Evaluate existing material.',verification:'Authenticate and run original checks.',unitsIncluded:true,actionId:'admit'}]}]});
+ await recordResult(f,'run',d.dispatch,result);
+ const s=(await f.harness.applyInterruptionReview(f.projectId,'run',d.dispatch.featureId,'prepare-input')).state;
+ const owner=s.features.find(x=>x.id==='owner');assert.equal(owner.state,'pending');
+ assert.equal(featureContractDigest(owner),featureContractDigest(original));
+ const assessment=s.decisions.findLast(x=>x.kind==='execution-intervention-assessment').assessment;
+ assert.equal(assessment.acceptanceCredit,false);assert.equal(assessment.inputAdmissions[0].status,'preparation-required');
+ const args={state:s,feature:owner,authorityStore:f.harness.authorityStore,evidenceStore:f.harness.evidenceStore};
+ const refs=await prepareImplementationEvidenceInputs(args);assert.equal(refs[0].kind,'input-admission-work');
+ const context=JSON.parse(await readFile(refs[0].path,'utf8'));assert.equal(context.completionCredit,false);
+ assert.match(context.instructions,/Never manufacture history/);
+ await writeFile(resolve(f.workspace,candidate.path),'changed');
+ await assert.rejects(prepareImplementationEvidenceInputs(args),{code:'INPUT_ADMISSION_SOURCE_DRIFT'});
+});
+
+test('pending input discovery receives a read-only, accounted investigation; unavailable results do not reopen execution',async t=>{
+ const f=await fixture(t,{continuous:true,projectOwned:true});await schedule(f);let d=await dispatchAndBind(f,'run');
+ const actions=[{id:'history',kind:'input-discovery',summary:'Locate exact historic inputs.',paths:[],discovery:{status:'pending',catalogs:[],inputs:[]}}];
+ await recordResult(f,'run',d.dispatch,await reviewResult(f,d,{conclusion:'external-prerequisite',repairPaths:[],resolutionActions:actions}));
+ let s=(await f.harness.applyInterruptionReview(f.projectId,'run',d.dispatch.featureId,'discover-input')).state;
+ assert.equal(s.features.find(f=>f.id==='owner').state,'blocked');
+ assert.equal(s.features.filter(f=>f.kind==='execution-diagnostic'&&f.state==='pending').length,1);
+ const before=digestJson(s.attempts);d=await dispatchAndBind(f,'run');assert.equal(d.dispatch.featureSnapshot.allowedPaths.length,0);
+ const ref={path:'src/owner.mjs',sha256:sha256(await readFile(resolve(f.workspace,'src/owner.mjs')))};
+ actions[0].discovery={status:'unavailable',catalogs:[ref],inputs:[]};
+ await recordResult(f,'run',d.dispatch,await reviewResult(f,d,{conclusion:'external-prerequisite',repairPaths:[],resolutionActions:actions}));
+ s=(await f.harness.applyInterruptionReview(f.projectId,'run',d.dispatch.featureId,'unavailable')).state;
+ assert.equal(s.features.find(f=>f.id==='owner').state,'blocked');assert.equal(hasPendingIntervention(s),false);
+ const decision=decideInterruption({...interruptionContext(s,s.features.find(f=>f.id==='owner')),capabilities:[]});
+ assert.equal(decision.category,'prerequisite');assert.equal(digestJson(s.attempts),before);
+});
+
+test('verified discovered inputs reach the original consumer without acceptance credit and are rechecked before handoff',async t=>{
+ const f=await fixture(t,{continuous:true,projectOwned:true,inputCatalog:true});await schedule(f);const d=await dispatchAndBind(f,'run');
+ const ref=async path=>({path,sha256:sha256(await readFile(resolve(f.workspace,path)))});
+ const catalog=await ref('src/catalog.json'),input=await ref('src/historical.json');
+ const result=await reviewResult(f,d,{conclusion:'external-prerequisite',repairPaths:[],
+   resolutionActions:[{id:'historic',kind:'input-discovery',summary:'Found exact catalog input.',paths:[],discovery:{status:'found',catalogs:[catalog],inputs:[input]}}],
+   remainingWork:[{work:'Verify historical input',existingImplementation:'Receiver exists.',remainingDevelopment:'Consume discovered input.',verification:'Full unchanged check.',units:2,
+     unknowns:[{question:'Which historical input?',classification:'external-prerequisite',action:'Read pinned catalog.',verification:'Original historical semantic checks.',unitsIncluded:true,actionId:'historic'}]}]});
+ await recordResult(f,'run',d.dispatch,result);
+ const s=(await f.harness.applyInterruptionReview(f.projectId,'run',d.dispatch.featureId,'found')).state;
+ assert.equal(s.features.find(f=>f.id==='owner').state,'pending');
+ const args={state:s,feature:s.features.find(f=>f.id==='owner'),authorityStore:f.harness.authorityStore,evidenceStore:f.harness.evidenceStore};
+ const inputs=await prepareImplementationEvidenceInputs(args);assert.equal(inputs.length,1);assert.equal(inputs[0].kind,'verified-input-discovery');
+ const context=JSON.parse(await readFile(inputs[0].path,'utf8'));assert.equal(context.completionCredit,false);assert.deepEqual(context.inputDiscoveries[0].inputs,[input]);
+ await writeFile(resolve(f.workspace,input.path),'drift');
+ await assert.rejects(prepareImplementationEvidenceInputs(args),{code:'INPUT_DISCOVERY_EVIDENCE_INVALID'});
+});
 
 test('a repeatedly failed strategy is sealed as rejected and cannot create a pending-review spin',async t=>{
  const f=await fixture(t,{continuous:true});await schedule(f);

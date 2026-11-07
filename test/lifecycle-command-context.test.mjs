@@ -41,12 +41,12 @@ test('same live command retains contract and finite recovery across replacement 
       assert.equal(reservation.commandId, 'user-command');
     }
     await assert.rejects(f.boundary.reserveContinuation({ ...f.plan, run: { ...f.plan.run, runId: 'fourth' } },
-      { metadata: { lifecycleInvocationId: 'user-command', failureClass: 'different-error-name' } }), { code: 'COMMAND_RECOVERY_EXHAUSTED' });
-    await assert.rejects(f.boundary.assertPlan(f.plan), { code: 'CURRENT_USER_COMMAND_REQUIRED' });
+      { metadata: { lifecycleInvocationId: 'user-command', failureClass: 'different-error-name' } }), { code: 'COMMAND_ACTION_NO_PROGRESS' });
+    await f.boundary.assertPlan(f.plan); // one stopped strategy does not revoke the user's entire command
   });
   const [file] = await readdir(resolve(f.root, 'lifecycle-commands'));
   const record = JSON.parse(await readFile(resolve(f.root, 'lifecycle-commands', file), 'utf8'));
-  assert.equal(record.recoveries, 2); assert.equal(record.status, 'exhausted');
+  assert.equal(record.recoveries, 2); assert.equal(record.recoveryLimit,null);assert.equal(record.status, 'settled');
   const restarted = createLifecycleCommandBoundary({ root: f.root, host: f.host });
   await assert.rejects(restarted.run({ commandId: 'new-id-same-event' }, async () => {}), { code: 'USER_COMMAND_ALREADY_CONSUMED' });
 });
@@ -103,7 +103,37 @@ test('reentering one lifecycle uses the same bounded recovery and cannot reset i
   const f = await setup(t); let executed = 0;
   await f.boundary.run({ commandId: 'user-command' }, async () => {
     for (let attempt = 0; attempt < 3; attempt++) await f.boundary.execute(f.plan, `user-command.retry-${attempt}`, async () => { executed++; });
-    await assert.rejects(f.boundary.execute(f.plan, 'user-command.new-suffix', async () => { executed++; }), { code: 'COMMAND_RECOVERY_EXHAUSTED' });
+    await assert.rejects(f.boundary.execute(f.plan, 'user-command.new-suffix', async () => { executed++; }), { code: 'COMMAND_ACTION_NO_PROGRESS' });
   });
   assert.equal(executed, 3);
+});
+
+test('early admission remains the same branded boundary through Harness preparation and cannot replay a preparation failure', async t => {
+  const f = await setup(t);
+  const create = boundary => createHarness({ controlRoot: undefined, dataRoot: f.root, strictProjectIdentity: false,
+    initializeStorage: false, releaseIdentity: { version: '1.0.0', artifactDigest: null }, lifecycleCommandBoundary: boundary });
+  await assert.rejects(create({ ...f.boundary }), { code: 'CURRENT_USER_COMMAND_REQUIRED' });
+  const other = createLifecycleCommandBoundary({ root: resolve(f.root, 'other'), host: f.host });
+  await assert.rejects(create(other), { code: 'LIFECYCLE_COMMAND_ROOT_MISMATCH' });
+  await assert.rejects(f.boundary.run({ commandId: 'user-command' }, async () => {
+    const harness = await create(f.boundary);
+    await harness.assertCurrentCommandPlan(f.plan);
+    throw Object.assign(Error('binding/preparation failed before Run creation'), { code: 'FIXTURE_PREPARATION_FAILED' });
+  }), { code: 'FIXTURE_PREPARATION_FAILED' });
+  await assert.rejects(f.boundary.run({ commandId: 'relaunch' }, async () => {}), { code: 'USER_COMMAND_ALREADY_CONSUMED' });
+});
+
+test('a revoked user event cannot begin preparation even if initial command verification succeeded', async t => {
+  const f = await setup(t); f.revoke();
+  await assert.rejects(f.boundary.run({ commandId: 'user-command' }, async () => {
+    assert.fail('a stop while waiting for admission must prevent preparation');
+  }), { code: 'CURRENT_USER_COMMAND_INACTIVE' });
+});
+
+test('one user command may cross many verified checkpoints without a cumulative recovery ceiling',async t=>{
+ const f=await setup(t);
+ await f.boundary.run({commandId:'user-command'},async()=>{
+   for(let i=0;i<12;i++)await f.boundary.execute(f.plan,`user-command.checkpoint-${i}`,async()=>({state:{features:[{id:`task-${i}`,state:'completed',submissionId:`sealed-${i}`} ]}}));
+   f.revoke();await assert.rejects(f.boundary.execute(f.plan,'user-command.stopped',async()=>{}),{code:'CURRENT_USER_COMMAND_INACTIVE'});
+ });
 });

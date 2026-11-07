@@ -47,7 +47,7 @@ test('sealed continuation survives an interrupted reservation and retains one ex
  });
  assert.equal(output.originalGoal,'original-goal');assert.equal((await createLifecycleContinuation(f)).commandId,first.commandId);
  assert.equal(await f.authorityStore.read(f.projectId,'replacement',{required:false}),null);
- await assert.rejects(withLifecycleContinuation(f,async()=>({status:'completed'})),{code:'COMMAND_RECOVERY_EXHAUSTED'});
+ await assert.rejects(withLifecycleContinuation(f,async()=>({status:'completed'})),{code:'COMMAND_ACTION_NO_PROGRESS'});
  });
  await assert.rejects(f.commandBoundary.run({commandId:'original-command'},async()=>{}),{code:'USER_COMMAND_ALREADY_CONSUMED'});
 });

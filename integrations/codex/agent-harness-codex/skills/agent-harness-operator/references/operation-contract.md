@@ -2,6 +2,8 @@
 
 ## Normal lifecycle
 
+Explicit continuous-execution/1 uses task-repetition/1 rather than cumulative review/recovery quotas: retain audit history, stop consecutive identical ineffective strategies, separately correct diagnostic output defects, and permit evidence-bound input-admission work under original project scope and checks. The numeric legacy review/allowance instructions below do not apply to that policy. This does not permit another lifecycle command, waiver, fabricated evidence or cross-project writes.
+
 1. `doctor` must be read-only.
 2. Resolve the initialized standalone control root and verify its release manifest.
 3. Load registered Extension Packs from installation receipts before reading or creating a run.
@@ -21,6 +23,8 @@ Feature Steps remain serial within one Feature. Separate Features may run concur
 Interactive execution must not become opaque: a conversation-visible Runtime must be host-orchestrated and cannot hold `process.spawn`; it cannot be driven by the headless `RunCoordinator`; and failure to create, attest, observe, heartbeat or reattach a visible child Agent is attention-required with no CLI/process/standalone-task fallback. Record at least one fresh heartbeat before submission and keep the current conversation updated with its inspectable reference and meaningful status changes. Headless mode is never inferred: Descriptor allow-policy, trusted deny-wins user constraints, and a host-verified command-scoped Grant derived from the original explicit CI/unattended request must all agree.
 
 ## Attention conditions
+
+Before escalating an exception, apply [action-recovery/1](../../../../../../docs/guides/action-recovery.md) within the existing command. Use actual current facts, receipt reconciliation and bounded operation recovery; an unknown or broad error code is not by itself a stop condition. Record real attempts and outcomes. Unverified external effects cannot be replayed, and this rule never initiates a new lifecycle.
 
 Stop and report the exact Authority state when a protected effect requires user authority, a required Extension is absent or identity-mismatched, a required sandbox cannot be applied, source drift cannot be safely rebased, a write path leaves the standalone control root, a budget is exceeded, or retries are exhausted. A revision conflict invalidates the short-lived lineage resolution and triggers an internal reread/re-resolution; it is not a user decision. A blocked resolver reports the missing Evidence or capability, never a menu of recovery mechanisms.
 
